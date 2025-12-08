@@ -1,0 +1,44 @@
+<svg width="240" height="280" viewBox="0 0 240 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="OpensDoors logo">
+  <defs>
+    <style>
+      .circle-outline {
+        fill: #4a4a4a;
+        stroke: #4a4a4a;
+        stroke-width: 2;
+      }
+      .circle-fill {
+        fill: #6a6a6a;
+      }
+      .monogram {
+        fill: none;
+        stroke: #ffffff;
+        stroke-width: 8;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wordmark {
+        fill: #4a4a4a;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        font-weight: 600;
+        font-size: 24px;
+        letter-spacing: 2px;
+      }
+      .wordmark-o {
+        font-size: 28px;
+      }
+    </style>
+  </defs>
+  
+  <!-- Circular Emblem -->
+  <g transform="translate(120, 100)">
+    <circle class="circle-fill" cx="0" cy="0" r="90"/>
+    <circle class="circle-outline" cx="0" cy="0" r="90"/>
+    <!-- OD Monogram Script -->
+    <path class="monogram" d="M-45 20c-8-12-5-35 9-46 14-11 33-4 36 13 5 21-17 42-30 34-7-4-8-18 1-25 10-9 26-8 37-2 9 5 16 14 23 22 6 6 16 10 22 6 6-4 6-13 4-19-3-7-10-13-18-12-6 0-11 3-14 8-5 6-7 15-6 23 1 10 6 18 12 25" transform="scale(0.8)"/>
+  </g>
+  
+  <!-- OPENS DOORS Wordmark -->
+  <text x="120" y="240" text-anchor="middle" class="wordmark">
+    <tspan class="wordmark-o">O</tspan>PENS <tspan class="wordmark-o">D</tspan>OORS
+  </text>
+</svg>
