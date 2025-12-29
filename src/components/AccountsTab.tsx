@@ -34,7 +34,6 @@ import {
   NumberDecrementStepper,
   IconButton,
   useToast,
-  Checkbox,
   Alert,
   AlertIcon,
   AlertTitle,
@@ -53,10 +52,9 @@ import {
   FormLabel,
   Icon,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon, RepeatIcon } from '@chakra-ui/icons'
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
 import { contacts } from './ContactsTab'
-import { ExportImportButtons } from './ExportImportButtons'
 
 type Contact = {
   name: string
@@ -101,7 +99,7 @@ type AgreementFile = {
   uploadedAt: string
 }
 
-type Account = {
+export type Account = {
   name: string
   website: string
   aboutSections: AboutSections
@@ -142,9 +140,120 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
 
 // localStorage keys
 const STORAGE_KEY_ACCOUNTS = 'odcrm_accounts'
+const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = 'odcrm_accounts_last_updated'
 const STORAGE_KEY_ABOUT_SECTIONS = 'odcrm_about_sections'
 const STORAGE_KEY_SECTORS = 'odcrm_sectors'
 const STORAGE_KEY_TARGET_LOCATIONS = 'odcrm_target_locations'
+const STORAGE_KEY_MARKETING_LEADS = 'odcrm_marketing_leads'
+const STORAGE_KEY_DELETED_ACCOUNTS = 'odcrm_deleted_accounts'
+
+// Lead type for marketing leads
+type Lead = {
+  [key: string]: string
+  accountName: string
+}
+
+// Load leads from localStorage
+function loadLeadsFromStorage(): Lead[] {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_MARKETING_LEADS)
+    if (stored) {
+      return JSON.parse(stored) as Lead[]
+    }
+  } catch (error) {
+    console.warn('Failed to load leads from localStorage:', error)
+  }
+  return []
+}
+
+// Helper to parse dates in various formats (same as MarketingLeadsTab)
+function parseDate(dateStr: string): Date | null {
+  if (!dateStr || dateStr.trim() === '') return null
+  
+  // Try DD.MM.YY or DD.MM.YYYY format (from the Google Sheet)
+  const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
+  if (ddmmyy) {
+    const day = parseInt(ddmmyy[1], 10)
+    const month = parseInt(ddmmyy[2], 10) - 1
+    const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
+    return new Date(year, month, day)
+  }
+  
+  // Try standard date parsing
+  const parsed = new Date(dateStr)
+  return isNaN(parsed.getTime()) ? null : parsed
+}
+
+// Calculate weekly and monthly actuals from leads for an account
+function calculateActualsFromLeads(accountName: string, leads: Lead[]): { weeklyActual: number; monthlyActual: number } {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const endOfToday = new Date(startOfToday)
+  endOfToday.setDate(endOfToday.getDate() + 1)
+
+  // Past week: 7 days ago to today
+  const pastWeekStart = new Date(startOfToday)
+  pastWeekStart.setDate(pastWeekStart.getDate() - 6)
+
+  // Current month: first day of month to today
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+
+  // Filter leads for this account
+  const accountLeads = leads.filter(lead => lead.accountName === accountName)
+
+  let weeklyActual = 0
+  let monthlyActual = 0
+
+  accountLeads.forEach(lead => {
+    // Try to find a date field
+    const dateValue =
+      lead['Date'] ||
+      lead['date'] ||
+      lead['Week'] ||
+      lead['week'] ||
+      lead['First Meeting Date'] ||
+      lead['first meeting date'] ||
+      ''
+
+    const parsedDate = parseDate(dateValue)
+    if (!parsedDate) return
+
+    // Check if within past week
+    if (parsedDate >= pastWeekStart && parsedDate < endOfToday) {
+      weeklyActual++
+    }
+
+    // Check if within current month
+    if (parsedDate >= monthStart && parsedDate < endOfToday) {
+      monthlyActual++
+    }
+  })
+
+  return { weeklyActual, monthlyActual }
+}
+
+// Load deleted account names from localStorage
+function loadDeletedAccountsFromStorage(): Set<string> {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_DELETED_ACCOUNTS)
+    if (stored) {
+      const parsed = JSON.parse(stored) as string[]
+      return new Set(parsed)
+    }
+  } catch (error) {
+    console.warn('Failed to load deleted accounts from localStorage:', error)
+  }
+  return new Set<string>()
+}
+
+// Save deleted account names to localStorage
+function saveDeletedAccountsToStorage(deletedAccounts: Set<string>) {
+  try {
+    localStorage.setItem(STORAGE_KEY_DELETED_ACCOUNTS, JSON.stringify(Array.from(deletedAccounts)))
+  } catch (error) {
+    console.warn('Failed to save deleted accounts to localStorage:', error)
+  }
+}
 
 // Load accounts from localStorage or use default
 function loadAccountsFromStorage(): Account[] {
@@ -165,6 +274,7 @@ function loadAccountsFromStorage(): Account[] {
 function saveAccountsToStorage(accountsData: Account[]) {
   try {
     localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accountsData))
+    localStorage.setItem(STORAGE_KEY_ACCOUNTS_LAST_UPDATED, new Date().toISOString())
     console.log('💾 Saved accounts to localStorage')
   } catch (error) {
     console.warn('Failed to save accounts to localStorage:', error)
@@ -2081,16 +2191,6 @@ const renderAboutField = (
   )
 }
 
-const statusColumns: Array<{
-  id: Account['status']
-  title: string
-  colorScheme: string
-}> = [
-  { id: 'Active', title: 'Active', colorScheme: 'green' },
-  { id: 'Inactive', title: 'Inactive', colorScheme: 'red' },
-  { id: 'On Hold', title: 'On Hold', colorScheme: 'orange' },
-]
-
 type FieldConfig = {
   label: string
   render: (account: Account, onContactClick?: (contact: Contact) => void) => ReactNode
@@ -2193,33 +2293,44 @@ const fieldConfig: FieldConfig[] = [
     },
   },
   {
-    label: 'Leads',
-    render: (account) => account.leads,
-  },
-  {
     label: 'Weekly Target',
     render: (account) => account.weeklyTarget,
-  },
-  {
-    label: 'Weekly Actual',
-    render: (account) => account.weeklyActual,
   },
   {
     label: 'Monthly Target',
     render: (account) => account.monthlyTarget,
   },
   {
-    label: 'Monthly Actual',
-    render: (account) => account.monthlyActual,
-  },
-  {
-    label: 'Weekly perform report',
-    render: (account) => (
-      <Link href={account.weeklyReport} color="teal.600" isExternal display="inline-flex" alignItems="center" gap={1}>
-        View report
-        <ExternalLinkIcon />
-      </Link>
-    ),
+    label: 'Leads Generated This Month',
+    render: (account) => {
+      const leads = loadLeadsFromStorage()
+      const accountLeads = leads.filter(lead => lead.accountName === account.name)
+      const now = new Date()
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      
+      let monthlyLeads = 0
+      accountLeads.forEach(lead => {
+        const dateValue =
+          lead['Date'] ||
+          lead['date'] ||
+          lead['Week'] ||
+          lead['week'] ||
+          lead['First Meeting Date'] ||
+          lead['first meeting date'] ||
+          ''
+        const parsedDate = parseDate(dateValue)
+        if (parsedDate && parsedDate >= monthStart && parsedDate < endOfToday) {
+          monthlyLeads++
+        }
+      })
+      
+      return (
+        <Badge colorScheme={monthlyLeads > 0 ? 'teal' : 'gray'} fontSize="sm" px={2} py={1}>
+          {monthlyLeads}
+        </Badge>
+      )
+    },
   },
   {
     label: 'Client Leads',
@@ -2550,6 +2661,121 @@ type CalendarSectionProps = {
   account: Account
 }
 
+type UpcomingEventsSectionProps = {
+  account: Account
+}
+
+function UpcomingEventsSection({ account }: UpcomingEventsSectionProps) {
+  const [events, setEvents] = useState<CalendarEvent[]>([])
+
+  // Initialize with some sample events for demo
+  useEffect(() => {
+    const today = new Date()
+    const sampleEvents: CalendarEvent[] = [
+      {
+        id: '1',
+        title: 'Quarterly Review Meeting',
+        date: today.toISOString().split('T')[0],
+        time: '10:00',
+        account: account.name,
+        type: 'meeting',
+      },
+      {
+        id: '2',
+        title: 'Follow-up Call',
+        date: new Date(today.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        time: '14:30',
+        account: account.name,
+        type: 'call',
+      },
+      {
+        id: '3',
+        title: 'Contract Renewal Deadline',
+        date: new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        time: '17:00',
+        account: account.name,
+        type: 'deadline',
+      },
+    ]
+    setEvents(sampleEvents)
+  }, [account.name])
+
+  const getEventTypeColor = (type: CalendarEvent['type']) => {
+    switch (type) {
+      case 'meeting':
+        return 'blue'
+      case 'call':
+        return 'green'
+      case 'follow-up':
+        return 'orange'
+      case 'deadline':
+        return 'red'
+      default:
+        return 'gray'
+    }
+  }
+
+  return (
+    <Box
+      p={4}
+      border="1px solid"
+      borderColor="gray.200"
+      borderRadius="lg"
+      bg="white"
+    >
+      <Heading size="sm" mb={3}>
+        Upcoming Events
+      </Heading>
+      {events.length === 0 ? (
+        <Text fontSize="sm" color="gray.500" fontStyle="italic">
+          No upcoming events. Events will sync from Outlook calendar.
+        </Text>
+      ) : (
+        <Stack spacing={2}>
+          {events
+            .sort((a, b) => {
+              const dateA = new Date(`${a.date}T${a.time}`)
+              const dateB = new Date(`${b.date}T${b.time}`)
+              return dateA.getTime() - dateB.getTime()
+            })
+            .map((event) => (
+              <HStack
+                key={event.id}
+                p={2}
+                border="1px solid"
+                borderColor="gray.200"
+                borderRadius="md"
+                _hover={{ bg: 'gray.50' }}
+              >
+                <Box
+                  w={2}
+                  h={8}
+                  bg={`${getEventTypeColor(event.type)}.400`}
+                  borderRadius="sm"
+                />
+                <Stack spacing={0} flex={1}>
+                  <Text fontSize="sm" fontWeight="medium">
+                    {event.title}
+                  </Text>
+                  <Text fontSize="xs" color="gray.600">
+                    {new Date(event.date).toLocaleDateString('en-GB', {
+                      day: 'numeric',
+                      month: 'short',
+                    })}{' '}
+                    at {event.time}
+                  </Text>
+                </Stack>
+                <Badge colorScheme={getEventTypeColor(event.type)} size="sm">
+                  {event.type}
+                </Badge>
+              </HStack>
+            ))}
+        </Stack>
+      )}
+    </Box>
+  )
+}
+
 function CalendarSection({ account }: CalendarSectionProps) {
   const [currentDate, setCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
@@ -2857,65 +3083,6 @@ function CalendarSection({ account }: CalendarSectionProps) {
           )}
         </Box>
       )}
-
-      {/* Upcoming Events List */}
-      <Box
-        p={4}
-        border="1px solid"
-        borderColor="gray.200"
-        borderRadius="lg"
-        bg="white"
-      >
-        <Heading size="sm" mb={3}>
-          Upcoming Events
-        </Heading>
-        {events.length === 0 ? (
-          <Text fontSize="sm" color="gray.500" fontStyle="italic">
-            No upcoming events. Events will sync from Outlook calendar.
-          </Text>
-        ) : (
-          <Stack spacing={2}>
-            {events
-              .sort((a, b) => {
-                const dateA = new Date(`${a.date}T${a.time}`)
-                const dateB = new Date(`${b.date}T${b.time}`)
-                return dateA.getTime() - dateB.getTime()
-              })
-              .map((event) => (
-                <HStack
-                  key={event.id}
-                  p={2}
-                  border="1px solid"
-                  borderColor="gray.200"
-                  borderRadius="md"
-                  _hover={{ bg: 'gray.50' }}
-                >
-                  <Box
-                    w={2}
-                    h={8}
-                    bg={`${getEventTypeColor(event.type)}.400`}
-                    borderRadius="sm"
-                  />
-                  <Stack spacing={0} flex={1}>
-                    <Text fontSize="sm" fontWeight="medium">
-                      {event.title}
-                    </Text>
-                    <Text fontSize="xs" color="gray.600">
-                      {new Date(event.date).toLocaleDateString('en-GB', {
-                        day: 'numeric',
-                        month: 'short',
-                      })}{' '}
-                      at {event.time}
-                    </Text>
-                  </Stack>
-                  <Badge colorScheme={getEventTypeColor(event.type)} size="sm">
-                    {event.type}
-                  </Badge>
-                </HStack>
-              ))}
-          </Stack>
-        )}
-      </Box>
     </Stack>
   )
 }
@@ -3047,7 +3214,29 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
                   />
                 </HStack>
                 <HStack spacing={2} fontSize="xs" color="gray.500">
-                  <Text fontWeight="medium">{note.user}</Text>
+                  {account.users.some(u => u.name === note.user) ? (
+                    <Link
+                      fontWeight="medium"
+                      color="teal.600"
+                      _hover={{ textDecoration: 'underline' }}
+                      onClick={() => {
+                        const user = account.users.find(u => u.name === note.user)
+                        if (user) {
+                          toast({
+                            title: `${user.name}`,
+                            description: `Role: ${user.role}`,
+                            status: 'info',
+                            duration: 3000,
+                            isClosable: true,
+                          })
+                        }
+                      }}
+                    >
+                      {note.user}
+                    </Link>
+                  ) : (
+                    <Text fontWeight="medium">{note.user}</Text>
+                  )}
                   <Text>•</Text>
                   <Text>
                     {new Date(note.timestamp).toLocaleString('en-GB', {
@@ -3068,9 +3257,12 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
   )
 }
 
-function AccountsTab() {
+function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const toast = useToast()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
+  const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
+  const { isOpen: isBulkSheetsOpen, onOpen: onBulkSheetsOpen, onClose: onBulkSheetsClose } = useDisclosure()
+  const [bulkSheetsInput, setBulkSheetsInput] = useState('')
   const [newAccountForm, setNewAccountForm] = useState<Partial<Account>>({
     name: '',
     website: '',
@@ -3101,14 +3293,21 @@ function AccountsTab() {
     users: [],
   })
 
+  // Load deleted accounts to prevent re-adding them
+  const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
+
   // Load initial data from localStorage or use defaults
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
     const loaded = loadAccountsFromStorage()
     // Merge with default accounts to ensure new accounts are included
+    // BUT exclude any accounts that have been explicitly deleted
     const loadedAccountNames = new Set(loaded.map(a => a.name))
+    const deletedAccountsSet = loadDeletedAccountsFromStorage()
     
-    // Add any new accounts from defaults that aren't in storage
-    const newAccounts = accounts.filter(a => !loadedAccountNames.has(a.name))
+    // Add any new accounts from defaults that aren't in storage AND haven't been deleted
+    const newAccounts = accounts.filter(a => 
+      !loadedAccountNames.has(a.name) && !deletedAccountsSet.has(a.name)
+    )
     return [...loaded, ...newAccounts]
   })
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
@@ -3119,9 +3318,12 @@ function AccountsTab() {
   const [aboutSectionsMap, setAboutSectionsMap] = useState<Record<string, AboutSections>>(() => {
     const stored = loadAboutSectionsFromStorage()
     const loadedAccounts = loadAccountsFromStorage()
-    // Merge with account defaults
+    const deletedAccountsSet = loadDeletedAccountsFromStorage()
+    // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, AboutSections> = {}
-    const allAccounts = [...loadedAccounts, ...accounts.filter(a => !loadedAccounts.some(la => la.name === a.name))]
+    const allAccounts = [...loadedAccounts, ...accounts.filter(a => 
+      !loadedAccounts.some(la => la.name === a.name) && !deletedAccountsSet.has(a.name)
+    )]
     allAccounts.forEach(account => {
       merged[account.name] = stored[account.name] || account.aboutSections
     })
@@ -3132,9 +3334,12 @@ function AccountsTab() {
   const [sectorsMap, setSectorsMap] = useState<Record<string, string>>(() => {
     const stored = loadSectorsFromStorage()
     const loadedAccounts = loadAccountsFromStorage()
-    // Merge with account defaults
+    const deletedAccountsSet = loadDeletedAccountsFromStorage()
+    // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string> = {}
-    const allAccounts = [...loadedAccounts, ...accounts.filter(a => !loadedAccounts.some(la => la.name === a.name))]
+    const allAccounts = [...loadedAccounts, ...accounts.filter(a => 
+      !loadedAccounts.some(la => la.name === a.name) && !deletedAccountsSet.has(a.name)
+    )]
     allAccounts.forEach(account => {
       merged[account.name] = stored[account.name] || account.sector
     })
@@ -3144,9 +3349,12 @@ function AccountsTab() {
   const [targetLocationsMap, setTargetLocationsMap] = useState<Record<string, string[]>>(() => {
     const stored = loadTargetLocationsFromStorage()
     const loadedAccounts = loadAccountsFromStorage()
-    // Merge with account defaults
+    const deletedAccountsSet = loadDeletedAccountsFromStorage()
+    // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string[]> = {}
-    const allAccounts = [...loadedAccounts, ...accounts.filter(a => !loadedAccounts.some(la => la.name === a.name))]
+    const allAccounts = [...loadedAccounts, ...accounts.filter(a => 
+      !loadedAccounts.some(la => la.name === a.name) && !deletedAccountsSet.has(a.name)
+    )]
     allAccounts.forEach(account => {
       merged[account.name] = stored[account.name] || account.targetLocation
     })
@@ -3155,6 +3363,88 @@ function AccountsTab() {
   const [failedLogos, setFailedLogos] = useState<Set<string>>(new Set())
   const [aiLogos, setAiLogos] = useState<Record<string, string>>({})
   const [editingFields, setEditingFields] = useState<Record<string, string>>({}) // Track which fields are being edited: { "accountName:fieldName": "value" }
+  const [accountRefreshing, setAccountRefreshing] = useState<Record<string, boolean>>({}) // Track which account is being refreshed
+
+  // Update accounts with actuals from marketing leads
+  useEffect(() => {
+    const leads = loadLeadsFromStorage()
+    if (leads.length === 0) return
+
+    setAccountsData((prev) => {
+      const updated = prev.map((account) => {
+        const actuals = calculateActualsFromLeads(account.name, leads)
+        // Only update if values have changed to avoid unnecessary re-renders
+        if (account.weeklyActual !== actuals.weeklyActual || account.monthlyActual !== actuals.monthlyActual) {
+          return { ...account, weeklyActual: actuals.weeklyActual, monthlyActual: actuals.monthlyActual }
+        }
+        return account
+      })
+      
+      // Save to localStorage if any changes were made
+      const hasChanges = updated.some((acc, idx) => 
+        acc.weeklyActual !== prev[idx].weeklyActual || acc.monthlyActual !== prev[idx].monthlyActual
+      )
+      if (hasChanges) {
+        saveAccountsToStorage(updated)
+      }
+      
+      return updated
+    })
+  }, []) // Run once on mount
+
+  // Listen for leads updates
+  useEffect(() => {
+    const handleLeadsUpdated = () => {
+      const leads = loadLeadsFromStorage()
+      if (leads.length === 0) return
+
+      setAccountsData((prev) => {
+        const updated = prev.map((account) => {
+          const actuals = calculateActualsFromLeads(account.name, leads)
+          const leadCount = leads.filter((l) => l.accountName === account.name).length
+          if (
+            account.weeklyActual !== actuals.weeklyActual ||
+            account.monthlyActual !== actuals.monthlyActual ||
+            account.leads !== leadCount
+          ) {
+            return {
+              ...account,
+              weeklyActual: actuals.weeklyActual,
+              monthlyActual: actuals.monthlyActual,
+              leads: leadCount,
+            }
+          }
+          return account
+        })
+        
+        const hasChanges = updated.some((acc, idx) => 
+          acc.weeklyActual !== prev[idx].weeklyActual ||
+          acc.monthlyActual !== prev[idx].monthlyActual ||
+          acc.leads !== prev[idx].leads
+        )
+        if (hasChanges) {
+          saveAccountsToStorage(updated)
+          window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+          // Update selected account if it's open
+          if (selectedAccount) {
+            const updatedAccount = updated.find(a => a.name === selectedAccount.name)
+            if (updatedAccount) {
+              setSelectedAccount(updatedAccount)
+            }
+          }
+        }
+        
+        return updated
+      })
+    }
+
+    // Listen for custom event when leads are updated
+    window.addEventListener('leadsUpdated', handleLeadsUpdated)
+    
+    return () => {
+      window.removeEventListener('leadsUpdated', handleLeadsUpdated)
+    }
+  }, [selectedAccount])
 
   const updateAccount = (accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
@@ -3172,6 +3462,32 @@ function AccountsTab() {
       title: 'Account updated',
       status: 'success',
       duration: 2000,
+      isClosable: true,
+    })
+  }
+
+  const deleteAccount = (accountName: string) => {
+    setAccountsData((prev) => {
+      const updated = prev.filter((acc) => acc.name !== accountName)
+      // Save to localStorage
+      saveAccountsToStorage(updated)
+      // Add to deleted accounts list to prevent it from being re-added
+      const newDeletedAccounts = new Set(deletedAccounts)
+      newDeletedAccounts.add(accountName)
+      setDeletedAccounts(newDeletedAccounts)
+      saveDeletedAccountsToStorage(newDeletedAccounts)
+      // Dispatch event so LeadsTab can get updated accounts
+      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+      return updated
+    })
+    if (selectedAccount?.name === accountName) {
+      setSelectedAccount(null)
+    }
+    toast({
+      title: 'Account deleted',
+      description: `${accountName} has been permanently removed`,
+      status: 'success',
+      duration: 3000,
       isClosable: true,
     })
   }
@@ -3265,15 +3581,8 @@ function AccountsTab() {
     }
   }
 
-  const [statusFilters, setStatusFilters] = useState<Record<Account['status'], boolean>>({
-    Active: true,
-    Inactive: true,
-    'On Hold': true,
-  })
-
-  // Filter and sort all accounts alphabetically
+  // Sort all accounts alphabetically
   const filteredAndSortedAccounts = [...accountsData]
-    .filter((account) => statusFilters[account.status])
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
 
   const isDrawerOpen = Boolean(selectedAccount)
@@ -3339,6 +3648,8 @@ function AccountsTab() {
     setAccountsData((prev) => {
       const updated = [...prev, newAccount]
       saveAccountsToStorage(updated)
+      // Dispatch event so LeadsTab can get updated accounts and refresh leads
+      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
       return updated
     })
 
@@ -3504,6 +3815,102 @@ function AccountsTab() {
     setExpandedAbout((prev) => ({ ...prev, [accountName]: !prev[accountName] }))
   }
 
+  // Refresh AI data for a single account
+  const handleRefreshAccount = async (account: Account) => {
+    const accountName = account.name
+    
+    if (accountRefreshing[accountName]) return // Prevent multiple simultaneous refreshes
+    
+    setAccountRefreshing((prev) => ({ ...prev, [accountName]: true }))
+    setAboutLoading((prev) => ({ ...prev, [accountName]: true }))
+    setSectorLoading((prev) => ({ ...prev, [accountName]: true }))
+    
+    try {
+      console.log(`🔄 Refreshing AI data for ${accountName}...`)
+      
+      if (!isAIConfigured()) {
+        toast({
+          title: 'AI not configured',
+          description: 'AI endpoint or API key not configured. Cannot refresh AI data.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      // Fetch about sections (includes social media)
+      try {
+        const { sections, socialMedia } = await fetchAboutSections(account)
+        
+        // Verify we got real data
+        const hasRealData = !sections.whatTheyDo.includes('Information will be populated via AI research') &&
+                            !sections.whatTheyDo.includes('Unable to fetch AI data')
+        
+        if (hasRealData) {
+          setAboutSectionsMap((prev) => ({ ...prev, [accountName]: sections }))
+          if (socialMedia && socialMedia.length > 0) {
+            updateAccount(accountName, { socialMedia })
+          }
+          console.log(`✅ Successfully refreshed about sections for ${accountName}`)
+        } else {
+          console.warn(`⚠️ ${accountName} returned placeholder data`)
+        }
+      } catch (error) {
+        console.error(`❌ Failed to refresh about sections for ${accountName}:`, error)
+        toast({
+          title: 'Refresh error',
+          description: `Failed to refresh about sections for ${accountName}`,
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      }
+      
+      // Fetch sector
+      try {
+        const sector = await fetchSector(account)
+        if (sector && sector !== 'To be determined' && sector.trim() !== '') {
+          setSectorsMap((prev) => ({ ...prev, [accountName]: sector }))
+          updateAccount(accountName, { sector })
+          console.log(`✅ Successfully refreshed sector for ${accountName}: ${sector}`)
+        }
+      } catch (error) {
+        console.error(`❌ Failed to refresh sector for ${accountName}:`, error)
+      } finally {
+        setSectorLoading((prev) => ({ ...prev, [accountName]: false }))
+      }
+      
+      // Update selected account if it's the one being refreshed
+      if (selectedAccount && selectedAccount.name === accountName) {
+        const updatedAccount = accountsData.find(a => a.name === accountName)
+        if (updatedAccount) {
+          setSelectedAccount(updatedAccount)
+        }
+      }
+      
+      toast({
+        title: 'Refresh complete',
+        description: `Successfully refreshed AI data for ${accountName}`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    } catch (error) {
+      console.error(`❌ Error refreshing ${accountName}:`, error)
+      toast({
+        title: 'Refresh error',
+        description: `An error occurred while refreshing ${accountName}`,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setAboutLoading((prev) => ({ ...prev, [accountName]: false }))
+      setAccountRefreshing((prev) => ({ ...prev, [accountName]: false }))
+    }
+  }
+
   // Listen for navigation to account from contacts tab
   useEffect(() => {
     const handleNavigateToAccount = (event: Event) => {
@@ -3523,6 +3930,16 @@ function AccountsTab() {
       window.removeEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
     }
   }, [accountsData])
+
+  // Allow parent navigators (top-tab shell) to request focusing an account by name.
+  // If it exists, open the drawer for that account.
+  useEffect(() => {
+    if (!focusAccountName) return
+    const account = accountsData.find((acc) => acc.name === focusAccountName)
+    if (account) {
+      setSelectedAccount(account)
+    }
+  }, [focusAccountName, accountsData])
 
   const handleAccountClick = (accountName: string, e?: React.MouseEvent) => {
     try {
@@ -3576,56 +3993,129 @@ function AccountsTab() {
     isDrawerOpen,
   })
 
+  const hasStoredAccounts = (() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_ACCOUNTS) !== null
+    } catch {
+      return true
+    }
+  })()
+
+  const applyBulkSheets = () => {
+    const raw = bulkSheetsInput
+    const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    if (lines.length === 0) {
+      toast({ title: 'Nothing to apply', description: 'Paste account name + URL lines first.', status: 'info' })
+      return
+    }
+
+    const invalidLines: string[] = []
+    const requested: Array<{ name: string; url: string }> = []
+
+    for (const line of lines) {
+      const match = line.match(/^(.*?)\s*(?:,|\t|\|)\s*(https?:\/\/\S+)\s*$/)
+      if (!match) {
+        invalidLines.push(line)
+        continue
+      }
+      requested.push({ name: match[1].trim(), url: match[2].trim() })
+    }
+
+    const notFound: string[] = []
+    let updatedCount = 0
+
+    setAccountsData((prev) => {
+      const next = prev.map((acc) => {
+        const hit = requested.find(
+          (r) => r.name.toLowerCase() === acc.name.trim().toLowerCase(),
+        )
+        if (!hit) return acc
+        updatedCount++
+        return { ...acc, clientLeadsSheetUrl: hit.url }
+      })
+
+      // Track names that weren't found
+      for (const r of requested) {
+        const exists = prev.some((a) => a.name.trim().toLowerCase() === r.name.toLowerCase())
+        if (!exists) notFound.push(r.name)
+      }
+
+      saveAccountsToStorage(next)
+      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: next }))
+
+      return next
+    })
+
+    const parts: string[] = []
+    if (updatedCount > 0) parts.push(`Updated ${updatedCount} account(s).`)
+    if (invalidLines.length > 0) parts.push(`${invalidLines.length} invalid line(s) skipped.`)
+    if (notFound.length > 0) parts.push(`${notFound.length} account name(s) not found.`)
+
+    toast({
+      title: 'Google Sheets links applied',
+      description: parts.join(' '),
+      status: updatedCount > 0 ? 'success' : 'warning',
+      duration: 6000,
+      isClosable: true,
+    })
+
+    onBulkSheetsClose()
+    setBulkSheetsInput('')
+  }
+
+  const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
+  const bulkTemplate = accountNames.map((n) => `${n}, `).join('\n')
+
+  const copyToClipboard = async (text: string, successMsg: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+      } else {
+        // Fallback for older browsers: prompt copy
+        window.prompt('Copy to clipboard: Ctrl+C, Enter', text)
+      }
+      toast({ title: successMsg, status: 'success', duration: 2000, isClosable: true })
+    } catch (e: any) {
+      toast({
+        title: 'Copy failed',
+        description: e?.message || 'Unable to copy to clipboard in this browser.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }
+
   return (
     <>
       <Box mb={6} p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-        <HStack justify="space-between" align="flex-start" mb={3} flexWrap="wrap" gap={4}>
-          <Heading size="sm">Filter by Status</Heading>
-          <HStack spacing={3} flexWrap="wrap">
-            <ExportImportButtons
-              data={accountsData}
-              filename="accounts"
-              validateItem={(account) => {
-                return !!(account.name && account.status)
-              }}
-              getItemId={(account) => account.name}
-              onImport={(items) => {
-                setAccountsData(items)
-                saveAccountsToStorage(items)
-              }}
-              size="sm"
-            />
-            <Button
-              colorScheme="teal"
-              leftIcon={<CheckIcon />}
-              onClick={onCreateModalOpen}
-              size="sm"
-            >
-              Create New Account
-            </Button>
-          </HStack>
+        {!hasStoredAccounts && (
+          <Alert status="info" borderRadius="md" mb={3}>
+            <AlertIcon />
+            <AlertDescription fontSize="sm">
+              Accounts (including Google Sheets links) are saved per browser + domain/port. If you switched URLs/ports,
+              you may be seeing defaults—switch back or import your accounts data.
+            </AlertDescription>
+          </Alert>
+        )}
+        <HStack justify="flex-end" align="flex-start" mb={3} flexWrap="wrap" gap={4}>
+          <Button
+            variant="outline"
+            leftIcon={<ExternalLinkIcon />}
+            onClick={onBulkSheetsOpen}
+            size="sm"
+          >
+            Bulk Google Sheets Links
+          </Button>
+          <Button
+            colorScheme="teal"
+            leftIcon={<CheckIcon />}
+            onClick={onCreateModalOpen}
+            size="sm"
+          >
+            Create New Account
+          </Button>
         </HStack>
-        <Stack spacing={3}>
-          <Stack direction="row" spacing={6} flexWrap="wrap">
-            {statusColumns.map((column) => (
-              <Checkbox
-                key={column.id}
-                isChecked={statusFilters[column.id]}
-                onChange={(e) => {
-                  setStatusFilters((prev) => ({
-                    ...prev,
-                    [column.id]: e.target.checked,
-                  }))
-                }}
-                colorScheme={column.colorScheme}
-              >
-                <Text fontSize="sm" color={statusFilters[column.id] ? 'gray.800' : 'gray.400'}>
-                  {column.title}
-                </Text>
-              </Checkbox>
-            ))}
-          </Stack>
-        </Stack>
       </Box>
 
       <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={6}>
@@ -3729,6 +4219,102 @@ function AccountsTab() {
           </Box>
         )}
       </SimpleGrid>
+
+      {/* Bulk Sheets Modal */}
+      <Modal isOpen={isBulkSheetsOpen} onClose={onBulkSheetsClose} size="xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Bulk Google Sheets Links</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Stack spacing={3}>
+              <Text fontSize="sm" color="gray.600">
+                Paste one account per line using <Box as="span" fontWeight="semibold">comma</Box>, <Box as="span" fontWeight="semibold">tab</Box>, or <Box as="span" fontWeight="semibold">|</Box>:
+              </Text>
+              <Box
+                border="1px solid"
+                borderColor="gray.200"
+                borderRadius="md"
+                p={3}
+                bg="gray.50"
+              >
+                <HStack justify="space-between" align="flex-start" spacing={3} flexWrap="wrap">
+                  <Box>
+                    <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+                      Account names (auto)
+                    </Text>
+                    <Text fontSize="xs" color="gray.500">
+                      Use “Copy template” to get one line per account prefilled as <Box as="span" fontFamily="mono">Name,</Box>
+                    </Text>
+                  </Box>
+                  <HStack spacing={2} flexWrap="wrap">
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => copyToClipboard(accountNames.join('\n'), 'Copied account names')}
+                    >
+                      Copy names
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => copyToClipboard(bulkTemplate, 'Copied template')}
+                    >
+                      Copy template
+                    </Button>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      onClick={() => setBulkSheetsInput(bulkTemplate)}
+                    >
+                      Paste template below
+                    </Button>
+                  </HStack>
+                </HStack>
+                <Box
+                  mt={3}
+                  maxH="180px"
+                  overflowY="auto"
+                  fontFamily="mono"
+                  fontSize="xs"
+                  whiteSpace="pre"
+                  color="gray.700"
+                >
+                  {accountNames.join('\n')}
+                </Box>
+              </Box>
+              <Box
+                fontFamily="mono"
+                fontSize="sm"
+                bg="gray.50"
+                border="1px solid"
+                borderColor="gray.200"
+                borderRadius="md"
+                p={3}
+              >
+                OpenDoors Account Name, https://docs.google.com/spreadsheets/d/...
+              </Box>
+              <Textarea
+                value={bulkSheetsInput}
+                onChange={(e) => setBulkSheetsInput(e.target.value)}
+                placeholder="Account Name, https://docs.google.com/spreadsheets/d/..."
+                rows={10}
+              />
+              <Text fontSize="xs" color="gray.500">
+                Matching is case-insensitive by account name. This updates localStorage and triggers an accounts refresh event.
+              </Text>
+            </Stack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={onBulkSheetsClose}>
+              Cancel
+            </Button>
+            <Button colorScheme="teal" onClick={applyBulkSheets}>
+              Apply Links
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       {/* Create Account Modal */}
       <Modal isOpen={isCreateModalOpen} onClose={onCreateModalClose} size="xl">
@@ -3871,34 +4457,10 @@ function AccountsTab() {
 
               <SimpleGrid columns={2} gap={4}>
                 <FormControl>
-                  <FormLabel>Leads</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.leads || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, leads: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-
-                <FormControl>
                   <FormLabel>Weekly Target</FormLabel>
                   <NumberInput
                     value={newAccountForm.weeklyTarget || 0}
                     onChange={(_, value) => setNewAccountForm({ ...newAccountForm, weeklyTarget: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-              </SimpleGrid>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Weekly Actual</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.weeklyActual || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, weeklyActual: value || 0 })}
                     min={0}
                   >
                     <NumberInputField />
@@ -3910,19 +4472,6 @@ function AccountsTab() {
                   <NumberInput
                     value={newAccountForm.monthlyTarget || 0}
                     onChange={(_, value) => setNewAccountForm({ ...newAccountForm, monthlyTarget: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-              </SimpleGrid>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Monthly Actual</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.monthlyActual || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, monthlyActual: value || 0 })}
                     min={0}
                   >
                     <NumberInputField />
@@ -3981,9 +4530,20 @@ function AccountsTab() {
                       {sectorsMap[selectedAccount.name] ?? selectedAccount.sector}
                     </Text>
                   </Stack>
-                  <Button variant="outline" onClick={handleCloseDrawer}>
-                    Close
-                  </Button>
+                  <HStack spacing={2}>
+                    <IconButton
+                      aria-label="Refresh AI-generated data for this account"
+                      icon={<RepeatIcon />}
+                      onClick={() => handleRefreshAccount(selectedAccount)}
+                      isLoading={accountRefreshing[selectedAccount.name] || aboutLoading[selectedAccount.name] || sectorLoading[selectedAccount.name]}
+                      colorScheme="teal"
+                      size="sm"
+                      variant="outline"
+                    />
+                    <Button variant="outline" onClick={handleCloseDrawer}>
+                      Close
+                    </Button>
+                  </HStack>
                 </Stack>
               </Stack>
             </DrawerHeader>
@@ -4174,14 +4734,19 @@ function AccountsTab() {
                       </Stack>
                     </FieldRow>
 
-                    <FieldRow label="Notes">
-                      <NotesSection account={selectedAccount} updateAccount={updateAccount} toast={toast} />
-                    </FieldRow>
                   </Stack>
 
                   <Divider />
 
-                  <CalendarSection account={selectedAccount} />
+                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={6}>
+                    <Stack spacing={4}>
+                      <FieldRow label="Notes">
+                        <NotesSection account={selectedAccount} updateAccount={updateAccount} toast={toast} />
+                      </FieldRow>
+                      <UpcomingEventsSection account={selectedAccount} />
+                    </Stack>
+                    <CalendarSection account={selectedAccount} />
+                  </SimpleGrid>
 
                   <SimpleGrid columns={{ base: 1, md: 2 }} gap={6}>
                     <Stack spacing={2}>
@@ -4515,13 +5080,9 @@ function AccountsTab() {
                         const fieldKey = field.label.toLowerCase().replace(/\s+/g, '')
                         const isEditing = isFieldEditing(selectedAccount.name, fieldKey)
                         
-                        // Handle editable numeric fields
-                        if (['Leads', 'Weekly Target', 'Weekly Actual', 'Monthly Target', 'Monthly Actual'].includes(field.label)) {
-                          const fieldValue = field.label === 'Leads' ? selectedAccount.leads :
-                                            field.label === 'Weekly Target' ? selectedAccount.weeklyTarget :
-                                            field.label === 'Weekly Actual' ? selectedAccount.weeklyActual :
-                                            field.label === 'Monthly Target' ? selectedAccount.monthlyTarget :
-                                            selectedAccount.monthlyActual
+                        // Handle editable numeric fields (Weekly Target, Monthly Target)
+                        if (['Weekly Target', 'Monthly Target'].includes(field.label)) {
+                          const fieldValue = field.label === 'Weekly Target' ? selectedAccount.weeklyTarget : selectedAccount.monthlyTarget
                           
                           return (
                             <EditableField
@@ -4529,11 +5090,8 @@ function AccountsTab() {
                               value={fieldValue}
                               onSave={(value) => {
                                 const updates: Partial<Account> = {}
-                                if (field.label === 'Leads') updates.leads = Number(value)
-                                else if (field.label === 'Weekly Target') updates.weeklyTarget = Number(value)
-                                else if (field.label === 'Weekly Actual') updates.weeklyActual = Number(value)
+                                if (field.label === 'Weekly Target') updates.weeklyTarget = Number(value)
                                 else if (field.label === 'Monthly Target') updates.monthlyTarget = Number(value)
-                                else if (field.label === 'Monthly Actual') updates.monthlyActual = Number(value)
                                 updateAccount(selectedAccount.name, updates)
                                 stopEditing(selectedAccount.name, fieldKey)
                               }}
@@ -4542,34 +5100,6 @@ function AccountsTab() {
                               onEdit={() => startEditing(selectedAccount.name, fieldKey)}
                               label={field.label}
                               type="number"
-                            />
-                          )
-                        }
-                        
-                        // Handle Weekly Report URL field
-                        if (field.label === 'Weekly perform report') {
-                          return (
-                            <EditableField
-                              key={`${selectedAccount.name}-${field.label}`}
-                              value={selectedAccount.weeklyReport || ''}
-                              onSave={(value) => {
-                                updateAccount(selectedAccount.name, { weeklyReport: String(value) })
-                                stopEditing(selectedAccount.name, 'weeklyReport')
-                              }}
-                              onCancel={() => stopEditing(selectedAccount.name, 'weeklyReport')}
-                              isEditing={isEditing}
-                              onEdit={() => startEditing(selectedAccount.name, 'weeklyReport')}
-                              label={field.label}
-                              type="url"
-                              placeholder="https://..."
-                              renderDisplay={(value) => (
-                                value ? (
-                                  <Link href={String(value)} color="teal.600" isExternal display="inline-flex" alignItems="center" gap={1}>
-                                    {String(value)}
-                                    <ExternalLinkIcon />
-                                  </Link>
-                                ) : <Text fontSize="sm" color="gray.500">No report URL set</Text>
-                              )}
                             />
                           )
                         }
@@ -4585,10 +5115,57 @@ function AccountsTab() {
                         )
                       })}
                   </SimpleGrid>
+
+                  <Divider mt={8} />
+
+                  <Box py={4}>
+                    <Button
+                      colorScheme="red"
+                      variant="outline"
+                      leftIcon={<DeleteIcon />}
+                      onClick={onDeleteModalOpen}
+                      width="100%"
+                    >
+                      Delete Account
+                    </Button>
+                  </Box>
                 </Stack>
               </DrawerBody>
             </DrawerContent>
           </Drawer>
+        )}
+
+        {/* Delete Account Confirmation Modal */}
+        {selectedAccount && (
+          <Modal isOpen={isDeleteModalOpen} onClose={onDeleteModalClose}>
+            <ModalOverlay />
+            <ModalContent>
+              <ModalHeader>Delete Account</ModalHeader>
+              <ModalCloseButton />
+              <ModalBody>
+                <Text>
+                  Are you sure you want to delete <strong>{selectedAccount.name}</strong>? This action cannot be undone.
+                </Text>
+              </ModalBody>
+              <ModalFooter>
+                <Button variant="ghost" mr={3} onClick={onDeleteModalClose}>
+                  Cancel
+                </Button>
+                <Button
+                  colorScheme="red"
+                  onClick={() => {
+                    if (selectedAccount) {
+                      deleteAccount(selectedAccount.name)
+                      onDeleteModalClose()
+                      handleCloseDrawer()
+                    }
+                  }}
+                >
+                  Delete
+                </Button>
+              </ModalFooter>
+            </ModalContent>
+          </Modal>
         )}
 
       {selectedContact && (

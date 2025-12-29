@@ -22,19 +22,13 @@ import {
   IconButton,
   Select,
   SimpleGrid,
-  Tag,
-  TagLabel,
-  TagCloseButton,
-  Button,
-  Input,
-  InputGroup,
-  InputLeftElement,
   Icon,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon, SearchIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { MdArrowUpward, MdArrowDownward } from 'react-icons/md'
 import { accounts as defaultAccounts, type Account } from './AccountsTab'
 import { ExportImportButtons } from './ExportImportButtons'
+import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 
 // Load accounts from localStorage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -42,14 +36,16 @@ function loadAccountsFromStorage(): Account[] {
     const stored = localStorage.getItem('odcrm_accounts')
     if (stored) {
       const parsed = JSON.parse(stored) as Account[]
-      // Merge with default accounts to ensure new accounts are included
-      const loadedAccountNames = new Set(parsed.map(a => a.name))
-      const newAccounts = defaultAccounts.filter(a => !loadedAccountNames.has(a.name))
-      return [...parsed, ...newAccounts]
+      // Use localStorage as source of truth - it contains all accounts including newly created ones
+      // Only merge with default accounts if localStorage is empty (fallback)
+      if (parsed.length > 0) {
+        return parsed
+      }
     }
   } catch (error) {
     console.warn('Failed to load accounts from localStorage:', error)
   }
+  // Fallback to default accounts if localStorage is empty
   return defaultAccounts
 }
 
@@ -105,6 +101,7 @@ const normalizeLeadSource = (value: string | undefined): string | null => {
 // localStorage key for marketing leads
 const STORAGE_KEY_MARKETING_LEADS = 'odcrm_marketing_leads'
 const STORAGE_KEY_MARKETING_LEADS_LAST_REFRESH = 'odcrm_marketing_leads_last_refresh'
+const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = 'odcrm_accounts_last_updated'
 
 // Load leads from localStorage
 function loadLeadsFromStorage(): Lead[] {
@@ -153,11 +150,16 @@ function extractSheetId(url: string): string | null {
   }
 }
 
-// Convert Google Sheets URL to CSV export URL
-function getCsvExportUrl(sheetUrl: string, gid: string = '0'): string | null {
-  const sheetId = extractSheetId(sheetUrl)
-  if (!sheetId) return null
-  return `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+// Extract gid (sheet tab ID) from Google Sheets URL
+function extractGid(url: string): string | null {
+  try {
+    // Try to extract gid from URL parameters or hash
+    // Format can be: ?gid=123 or &gid=123 or #gid=0
+    const gidMatch = url.match(/(?:[?&#])gid=(\d+)/i)
+    return gidMatch ? gidMatch[1] : null
+  } catch {
+    return null
+  }
 }
 
 // Parse CSV data
@@ -206,88 +208,133 @@ async function fetchLeadsFromSheet(
   sheetUrl: string,
   accountName: string,
 ): Promise<Lead[]> {
-  try {
-    const csvUrl = getCsvExportUrl(sheetUrl)
-    if (!csvUrl) {
-      throw new Error('Invalid Google Sheets URL')
-    }
+  const sheetId = extractSheetId(sheetUrl)
+  if (!sheetId) {
+    throw new Error('Invalid Google Sheets URL format')
+  }
 
-    const response = await fetch(csvUrl, {
-      mode: 'cors',
-      headers: {
-        'Accept': 'text/csv',
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch: ${response.statusText}`)
-    }
-
-    const csvText = await response.text()
-    const rows = parseCsv(csvText)
-
-    if (rows.length < 2) {
-      return [] // No data rows
-    }
-
-    const headers = rows[0].map((h) => h.trim())
-    const leads: Lead[] = []
-
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i]
-      if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
-        continue // Skip empty rows
-      }
-
-      const lead: Lead = {
-        accountName,
-      }
-
-      // Map all columns dynamically using original header names
-      headers.forEach((header, index) => {
-        const value = row[index] || ''
-        // Use original header name as key, preserving exact field names
-        if (header) {
-          lead[header] = value
+  // Try to extract gid from URL, otherwise use '0'
+  const extractedGid = extractGid(sheetUrl)
+  const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
+  
+  let lastError: Error | null = null
+  
+  // Try with extracted gid first, then fallback to '0'
+  for (const gid of gidsToTry) {
+    try {
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+      
+      let response: Response
+      try {
+        response = await fetch(csvUrl, {
+          mode: 'cors',
+          headers: {
+            'Accept': 'text/csv, text/plain, */*',
+          },
+          credentials: 'omit', // Don't send credentials for public sheets
+        })
+      } catch (networkError) {
+        // Handle network errors (CORS, connection issues, etc.)
+        if (networkError instanceof TypeError && networkError.message.includes('Failed to fetch')) {
+          lastError = new Error('Network error: Sheet may not be publicly accessible or CORS is blocked. Please ensure the sheet is shared as "Anyone with the link can view"')
+          continue // Try next gid
         }
-      })
-
-      // Skip rows that contain "w/c" or "w/v" in any field (case-insensitive)
-      const containsWcOrWv = Object.values(lead).some(
-        (value) => {
-          const lowerValue = value ? String(value).toLowerCase() : ''
-          return lowerValue.includes('w/c') || lowerValue.includes('w/v')
-        }
-      )
-      if (containsWcOrWv) {
-        continue // Skip this row
-      }
-
-      // Skip rows where both Name and Company columns are empty
-      const nameValue = lead['Name'] || lead['name'] || ''
-      const companyValue = lead['Company'] || lead['company'] || ''
-      const hasName = nameValue && nameValue.trim() !== ''
-      const hasCompany = companyValue && companyValue.trim() !== ''
-      if (!hasName && !hasCompany) {
+        lastError = new Error(`Network error: ${networkError instanceof Error ? networkError.message : 'Unknown network error'}`)
         continue
       }
 
-      // Check if row has any meaningful data (at least 2 non-empty fields besides accountName)
-      const nonEmptyFields = Object.keys(lead).filter(
-        (key) => key !== 'accountName' && lead[key] && lead[key].trim() !== '',
-      )
-
-      // Only include rows with at least 2 fields of data (to filter out mostly empty rows)
-      if (nonEmptyFields.length >= 2) {
-        leads.push(lead)
+      if (!response.ok) {
+        if (response.status === 403) {
+          lastError = new Error('Sheet is not publicly accessible. Please set sharing to "Anyone with the link can view"')
+          continue
+        } else if (response.status === 404) {
+          lastError = new Error('Sheet not found. Please check the URL is correct')
+          continue
+        } else {
+          lastError = new Error(`Failed to fetch: ${response.status} ${response.statusText}`)
+          continue
+        }
       }
-    }
 
-    return leads
-  } catch (error) {
-    console.error(`Error fetching leads for ${accountName}:`, error)
-    throw error
+      const csvText = await response.text()
+      
+      // Check if we got an HTML error page instead of CSV
+      if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
+        lastError = new Error('Received HTML instead of CSV. The sheet may not be publicly accessible. Please ensure the sheet is shared as "Anyone with the link can view"')
+        continue
+      }
+      
+      const rows = parseCsv(csvText)
+
+      if (rows.length < 2) {
+        return [] // No data rows
+      }
+
+      const headers = rows[0].map((h) => h.trim())
+      const leads: Lead[] = []
+
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i]
+        if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
+          continue // Skip empty rows
+        }
+
+        const lead: Lead = {
+          accountName,
+        }
+
+        // Map all columns dynamically using original header names
+        headers.forEach((header, index) => {
+          const value = row[index] || ''
+          // Use original header name as key, preserving exact field names
+          if (header) {
+            lead[header] = value
+          }
+        })
+
+        // Skip rows that contain "w/c" or "w/v" in any field (case-insensitive)
+        const containsWcOrWv = Object.values(lead).some(
+          (value) => {
+            const lowerValue = value ? String(value).toLowerCase() : ''
+            return lowerValue.includes('w/c') || lowerValue.includes('w/v')
+          }
+        )
+        if (containsWcOrWv) {
+          continue // Skip this row
+        }
+
+        // Skip rows where both Name and Company columns are empty
+        const nameValue = lead['Name'] || lead['name'] || ''
+        const companyValue = lead['Company'] || lead['company'] || ''
+        const hasName = nameValue && nameValue.trim() !== ''
+        const hasCompany = companyValue && companyValue.trim() !== ''
+        if (!hasName && !hasCompany) {
+          continue
+        }
+
+        // Check if row has any meaningful data (at least 2 non-empty fields besides accountName)
+        const nonEmptyFields = Object.keys(lead).filter(
+          (key) => key !== 'accountName' && lead[key] && lead[key].trim() !== '',
+        )
+
+        // Only include rows with at least 2 fields of data (to filter out mostly empty rows)
+        if (nonEmptyFields.length >= 2) {
+          leads.push(lead)
+        }
+      }
+
+      // Success! Return the leads
+      return leads
+    } catch (parseError) {
+      // If parsing failed, try next gid
+      lastError = parseError instanceof Error ? parseError : new Error('Failed to parse CSV data')
+      continue
+    }
   }
+  
+  // If we get here, all attempts failed
+  console.error(`Error fetching leads for ${accountName}:`, lastError)
+  throw lastError || new Error('Failed to fetch leads from Google Sheet')
 }
 
 type LeadWithDate = {
@@ -295,7 +342,7 @@ type LeadWithDate = {
   parsedDate: Date
 }
 
-function MarketingLeadsTab() {
+function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) {
   // Load initial leads from localStorage
   const cachedLeads = loadLeadsFromStorage()
   const [leads, setLeads] = useState<Lead[]>(cachedLeads)
@@ -305,10 +352,11 @@ function MarketingLeadsTab() {
     const stored = loadLastRefreshFromStorage()
     return stored || new Date()
   })
-  const [filters, setFilters] = useState({
+  const [filters] = useState({
     account: '',
     search: '',
   })
+  const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [sortConfig, setSortConfig] = useState<{
     column: string | null
     direction: 'asc' | 'desc'
@@ -317,6 +365,12 @@ function MarketingLeadsTab() {
     direction: 'desc',
   })
   const toast = useToast()
+
+  // Allow parent navigators (top-tab shell) to focus an account's performance view.
+  useEffect(() => {
+    if (!focusAccountName) return
+    setPerformanceAccountFilter(focusAccountName)
+  }, [focusAccountName])
 
   // Helper to format last refresh time
   const formatLastRefresh = (date: Date) => {
@@ -332,6 +386,19 @@ function MarketingLeadsTab() {
   const shouldRefresh = (): boolean => {
     const lastRefreshTime = loadLastRefreshFromStorage()
     if (!lastRefreshTime) return true // No previous refresh, allow refresh
+
+    // If accounts were updated since last refresh (e.g., sheet URLs pasted), refresh immediately.
+    try {
+      const accountsUpdatedIso = localStorage.getItem(STORAGE_KEY_ACCOUNTS_LAST_UPDATED)
+      if (accountsUpdatedIso) {
+        const accountsUpdatedAt = new Date(accountsUpdatedIso)
+        if (!isNaN(accountsUpdatedAt.getTime()) && accountsUpdatedAt > lastRefreshTime) {
+          return true
+        }
+      }
+    } catch {
+      // ignore
+    }
     
     const now = new Date()
     const sixHoursInMs = 6 * 60 * 60 * 1000
@@ -355,18 +422,38 @@ function MarketingLeadsTab() {
       const accountsToUse = loadAccountsFromStorage()
       const allLeads: Lead[] = []
 
+      const failedAccounts: Array<{ name: string; error: string }> = []
+      
       for (const account of accountsToUse) {
         if (account.clientLeadsSheetUrl) {
           try {
+            console.log(`📊 Fetching leads for account: ${account.name} from ${account.clientLeadsSheetUrl}`)
             const accountLeads = await fetchLeadsFromSheet(
               account.clientLeadsSheetUrl,
               account.name,
             )
+            console.log(`✅ Loaded ${accountLeads.length} leads for ${account.name}`)
             allLeads.push(...accountLeads)
           } catch (err) {
-            console.warn(`Failed to load leads for ${account.name}:`, err)
+            const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+            console.error(`❌ Failed to load leads for ${account.name}:`, err)
+            failedAccounts.push({ name: account.name, error: errorMessage })
           }
+        } else {
+          console.log(`⏭️ Skipping ${account.name} - no Google Sheet URL configured`)
         }
+      }
+      
+      // Show summary toast if there were any failures
+      if (failedAccounts.length > 0) {
+        const failedNames = failedAccounts.map(a => a.name).join(', ')
+        toast({
+          title: `Failed to load leads for ${failedAccounts.length} account${failedAccounts.length !== 1 ? 's' : ''}`,
+          description: `${failedNames}. Please ensure the Google Sheets are publicly accessible (File > Share > Anyone with the link can view).`,
+          status: 'error',
+          duration: 8000,
+          isClosable: true,
+        })
       }
 
       setLeads(allLeads)
@@ -375,13 +462,43 @@ function MarketingLeadsTab() {
       
       // Save to localStorage
       saveLeadsToStorage(allLeads)
+
+      // Keep account lead counts in sync (so "Leads: X" badges update across the app).
+      syncAccountLeadCountsFromLeads(allLeads)
+      
+      // Dispatch event to update accounts with new actuals
+      window.dispatchEvent(new CustomEvent('leadsUpdated'))
       
       const accountsWithSheets = accountsToUse.filter(a => a.clientLeadsSheetUrl)
+      const accountsWithoutSheets = accountsToUse.filter(a => !a.clientLeadsSheetUrl)
+      
+      // Log summary for debugging
+      console.log(`📊 Lead Loading Summary:`)
+      console.log(`   Total accounts: ${accountsToUse.length}`)
+      console.log(`   Accounts with Google Sheets: ${accountsWithSheets.length}`)
+      console.log(`   Accounts without Google Sheets: ${accountsWithoutSheets.length}`)
+      console.log(`   Total leads loaded: ${allLeads.length}`)
+      if (accountsWithoutSheets.length > 0) {
+        console.log(`   Accounts without sheets: ${accountsWithoutSheets.map(a => a.name).join(', ')}`)
+      }
+      
+      // Group leads by account for summary
+      const leadsByAccount: Record<string, number> = {}
+      allLeads.forEach(lead => {
+        leadsByAccount[lead.accountName] = (leadsByAccount[lead.accountName] || 0) + 1
+      })
+      console.log(`   Leads by account:`, leadsByAccount)
+      
+      let description = `Loaded ${allLeads.length} leads from ${accountsWithSheets.length} account${accountsWithSheets.length !== 1 ? 's' : ''}`
+      if (accountsWithoutSheets.length > 0) {
+        description += `. ${accountsWithoutSheets.length} account${accountsWithoutSheets.length !== 1 ? 's' : ''} without Google Sheets configured.`
+      }
+      
       toast({
         title: 'Leads loaded successfully',
-        description: `Loaded ${allLeads.length} leads from ${accountsWithSheets.length} account${accountsWithSheets.length !== 1 ? 's' : ''}`,
+        description,
         status: 'success',
-        duration: 3000,
+        duration: 5000,
         isClosable: true,
       })
     } catch (err) {
@@ -404,12 +521,23 @@ function MarketingLeadsTab() {
     // Otherwise, use cached data
     loadLeads(false)
 
+    // Listen for account updates (when new accounts are created or Google Sheets URLs are added/updated)
+    const handleAccountsUpdated = (event?: Event) => {
+      console.log('📥 Accounts updated event received - refreshing leads...', event)
+      // Force refresh when accounts are updated to pick up new Google Sheets
+      // This ensures newly created accounts with Google Sheets URLs are immediately loaded
+      loadLeads(true)
+    }
+
+    window.addEventListener('accountsUpdated', handleAccountsUpdated)
+
     // Auto-refresh every 6 hours
     const refreshInterval = setInterval(() => {
       loadLeads(false)
     }, 6 * 60 * 60 * 1000) // 6 hours in milliseconds
 
     return () => {
+      window.removeEventListener('accountsUpdated', handleAccountsUpdated)
       clearInterval(refreshInterval)
     }
   }, [])
@@ -546,20 +674,102 @@ function MarketingLeadsTab() {
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
   }
 
-  const selectedAccountName = filters.account
+  // Unified analytics across all accounts
+  const unifiedAnalytics = useMemo(() => {
+    const accountsData = loadAccountsFromStorage()
+    
+    // Calculate total targets across all accounts
+    const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
+    const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
+    
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const endOfToday = new Date(startOfToday)
+    endOfToday.setDate(endOfToday.getDate() + 1)
 
-  const leadAnalytics = useMemo(() => {
-    if (!selectedAccountName) {
-      return null
+    const pastWeekStart = new Date(startOfToday)
+    pastWeekStart.setDate(pastWeekStart.getDate() - 6)
+
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+
+    // Calculate daily target from weekly/monthly
+    const dailyTargetFromWeekly = totalWeeklyTarget / 7
+    const dailyTargetFromMonthly = totalMonthlyTarget / daysInMonth
+    const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
+
+    // Process all leads (not filtered by account)
+    const leadsWithDates: LeadWithDate[] = leads
+      .map((lead) => {
+        const dateValue =
+          lead['Date'] ||
+          lead['date'] ||
+          lead['Week'] ||
+          lead['week'] ||
+          lead['First Meeting Date'] ||
+          ''
+        const parsedDate = parseDate(dateValue)
+        if (!parsedDate) {
+          return null
+        }
+        return {
+          data: lead,
+          parsedDate,
+        }
+      })
+      .filter((item): item is LeadWithDate => Boolean(item))
+
+    const computeMetrics = (start: Date, end: Date) => {
+      const breakdown: Record<string, number> = {}
+      let actual = 0
+
+      leadsWithDates.forEach((entry) => {
+        if (entry.parsedDate >= start && entry.parsedDate < end) {
+          actual += 1
+          const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
+          const normalizedSource = normalizeLeadSource(channel)
+          if (normalizedSource) {
+            breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
+          } else if (channel) {
+            // Also track non-normalized channels
+            breakdown[channel] = (breakdown[channel] || 0) + 1
+          }
+        }
+      })
+
+      return { actual, breakdown }
     }
+
+    const periodMetrics = {
+      today: {
+        label: 'Today',
+        ...computeMetrics(startOfToday, endOfToday),
+        target: Math.max(Math.round(dailyTarget), 0),
+      },
+      week: {
+        label: 'Past Week',
+        ...computeMetrics(pastWeekStart, endOfToday),
+        target: Math.max(Math.round(totalWeeklyTarget), 0),
+      },
+      month: {
+        label: 'This Month',
+        ...computeMetrics(monthStart, endOfToday),
+        target: Math.max(Math.round(totalMonthlyTarget), 0),
+      },
+    }
+
+    return { periodMetrics }
+  }, [leads])
+
+  // Account-specific performance analytics
+  const accountPerformance = useMemo(() => {
+    if (!performanceAccountFilter) return null
 
     const accountsData = loadAccountsFromStorage()
-    const account = accountsData.find((acc) => acc.name === selectedAccountName)
-    if (!account) {
-      return null
-    }
+    const account = accountsData.find((acc) => acc.name === performanceAccountFilter)
+    if (!account) return null
 
-    const accountLeads = leads.filter((lead) => lead.accountName === selectedAccountName)
+    const accountLeads = leads.filter((lead) => lead.accountName === performanceAccountFilter)
     const leadsWithDates: LeadWithDate[] = accountLeads
       .map((lead) => {
         const dateValue =
@@ -598,9 +808,12 @@ function MarketingLeadsTab() {
       leadsWithDates.forEach((entry) => {
         if (entry.parsedDate >= start && entry.parsedDate < end) {
           actual += 1
-          const normalizedSource = normalizeLeadSource(entry.data['Channel of Lead'])
+          const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
+          const normalizedSource = normalizeLeadSource(channel)
           if (normalizedSource) {
             breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
+          } else if (channel) {
+            breakdown[channel] = (breakdown[channel] || 0) + 1
           }
         }
       })
@@ -608,44 +821,25 @@ function MarketingLeadsTab() {
       return { actual, breakdown }
     }
 
-    const dailyTargetFromWeekly = account.weeklyTarget
-      ? account.weeklyTarget / 7
-      : 0
-    const dailyTargetFromMonthly = account.monthlyTarget
-      ? account.monthlyTarget / daysInMonth
-      : 0
-
-    const derivedDailyTarget =
-      dailyTargetFromWeekly > 0
-        ? dailyTargetFromWeekly
-        : dailyTargetFromMonthly
-    const roundedDailyTarget = Math.round(derivedDailyTarget)
-
-    const weeklyTarget =
-      account.weeklyTarget > 0
-        ? account.weeklyTarget
-        : Math.round(roundedDailyTarget * 7)
-
-    const monthlyTarget =
-      account.monthlyTarget > 0
-        ? account.monthlyTarget
-        : Math.round(roundedDailyTarget * daysInMonth)
+    const dailyTargetFromWeekly = account.weeklyTarget ? account.weeklyTarget / 7 : 0
+    const dailyTargetFromMonthly = account.monthlyTarget ? account.monthlyTarget / daysInMonth : 0
+    const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
 
     const periodMetrics = {
       today: {
         label: 'Today',
         ...computeMetrics(startOfToday, endOfToday),
-        target: Math.max(roundedDailyTarget, 0),
+        target: Math.max(Math.round(dailyTarget), 0),
       },
       week: {
         label: 'Past Week',
         ...computeMetrics(pastWeekStart, endOfToday),
-        target: Math.max(weeklyTarget, 0),
+        target: Math.max(Math.round(account.weeklyTarget || 0), 0),
       },
       month: {
         label: 'This Month',
         ...computeMetrics(monthStart, endOfToday),
-        target: Math.max(monthlyTarget, 0),
+        target: Math.max(Math.round(account.monthlyTarget || 0), 0),
       },
     }
 
@@ -653,12 +847,11 @@ function MarketingLeadsTab() {
       accountName: account.name,
       periodMetrics,
     }
-  }, [leads, selectedAccountName])
+  }, [leads, performanceAccountFilter])
 
   // Filter leads based on filter criteria
   const filteredLeads = leads
     .filter((lead) => {
-      if (filters.account && lead.accountName !== filters.account) return false
       if (filters.search) {
         const searchLower = filters.search.toLowerCase()
         const searchableText = Object.values(lead)
@@ -683,9 +876,6 @@ function MarketingLeadsTab() {
   // Get unique values for filter dropdowns
   const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
   
-  // Get accounts with Google Sheets configured for display
-  const accountsWithSheets = loadAccountsFromStorage().filter(a => a.clientLeadsSheetUrl)
-
   // Helper to check if a value is a URL
   const isUrl = (str: string): boolean => {
     if (!str || str === 'Yes' || str === 'No' || str.trim() === '') return false
@@ -754,6 +944,9 @@ function MarketingLeadsTab() {
             onImport={(importedLeads) => {
               setLeads(importedLeads)
               saveLeadsToStorage(importedLeads)
+              syncAccountLeadCountsFromLeads(importedLeads)
+              // Dispatch event to update accounts with new actuals
+              window.dispatchEvent(new CustomEvent('leadsUpdated'))
               toast({
                 title: 'Leads imported',
                 description: `${importedLeads.length} leads loaded successfully.`,
@@ -775,22 +968,146 @@ function MarketingLeadsTab() {
         </HStack>
       </HStack>
 
-      {selectedAccountName ? (
-        leadAnalytics ? (
+      {/* Unified Analytics Kanban Card */}
+      <Box
+        minW="280px"
+        bg="white"
+        borderRadius="lg"
+        p={4}
+        border="2px solid"
+        borderColor="teal.300"
+        shadow="md"
+      >
+        <HStack justify="space-between" mb={4}>
+          <Box>
+            <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+              Unified Lead Performance
+            </Text>
+            <Heading size="md" color="gray.700">
+              All Accounts Combined
+            </Heading>
+          </Box>
+          <Text fontSize="sm" color="gray.500">
+            {new Date().toLocaleDateString('en-GB', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            })}
+          </Text>
+        </HStack>
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+          {(['today', 'week', 'month'] as const).map((periodKey) => {
+            const period = unifiedAnalytics.periodMetrics[periodKey]
+            const variance = period.actual - period.target
+            // Get all channels (both normalized and raw)
+            const allChannels = Object.keys(period.breakdown).sort((a, b) => 
+              period.breakdown[b] - period.breakdown[a]
+            )
+            return (
+              <Box
+                key={periodKey}
+                border="1px solid"
+                borderColor="gray.200"
+                borderRadius="lg"
+                p={4}
+                bg="gray.50"
+                minH="280px"
+              >
+                <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+                  {period.label}
+                </Text>
+                <Heading size="2xl" mt={2} color="gray.800">
+                  {period.actual}
+                </Heading>
+                <Text fontSize="sm" color="gray.600">
+                  Actual Leads
+                </Text>
+                <Stack spacing={1} mt={3} fontSize="sm">
+                  <Text color="gray.600">
+                    Target Leads:{' '}
+                    <Text as="span" fontWeight="semibold">
+                      {period.target}
+                    </Text>
+                  </Text>
+                  <Text color={variance >= 0 ? 'teal.600' : 'red.600'}>
+                    Variance:{' '}
+                    <Text as="span" fontWeight="semibold">
+                      {variance > 0 ? '+' : ''}
+                      {variance}
+                    </Text>
+                  </Text>
+                </Stack>
+                <Box mt={4}>
+                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
+                    Channels
+                  </Text>
+                  {allChannels.length > 0 ? (
+                    <Stack spacing={1} maxH="120px" overflowY="auto">
+                      {allChannels.map((channel) => (
+                        <HStack key={channel} justify="space-between">
+                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                            {channel}
+                          </Text>
+                          <Badge colorScheme="teal" fontSize="xs">
+                            {period.breakdown[channel]}
+                          </Badge>
+                        </HStack>
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Text fontSize="sm" color="gray.400">
+                      No leads recorded
+                    </Text>
+                  )}
+                </Box>
+              </Box>
+            )
+          })}
+        </SimpleGrid>
+      </Box>
+
+      {/* Account Performance Filter Section */}
+      <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
+        <Heading size="sm" mb={4}>
+          Account Performance
+        </Heading>
+        <Box mb={4}>
+          <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
+            Select Account
+          </Text>
+          <Select
+            placeholder="Choose an account to view performance"
+            value={performanceAccountFilter}
+            onChange={(e) => setPerformanceAccountFilter(e.target.value)}
+            size="sm"
+            maxW="400px"
+          >
+            {uniqueAccounts.map((account) => (
+              <option key={account} value={account}>
+                {account}
+              </option>
+            ))}
+          </Select>
+        </Box>
+
+        {accountPerformance && (
           <Box
-            p={4}
+            minW="280px"
             bg="white"
             borderRadius="lg"
-            border="1px solid"
-            borderColor="gray.200"
+            p={4}
+            border="2px solid"
+            borderColor="blue.300"
+            shadow="md"
           >
-            <HStack justify="space-between" flexWrap="wrap" mb={4}>
+            <HStack justify="space-between" mb={4}>
               <Box>
                 <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
-                  Lead Performance
+                  Account Lead Performance
                 </Text>
                 <Heading size="md" color="gray.700">
-                  {leadAnalytics.accountName}
+                  {accountPerformance.accountName}
                 </Heading>
               </Box>
               <Text fontSize="sm" color="gray.500">
@@ -804,10 +1121,10 @@ function MarketingLeadsTab() {
             </HStack>
             <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
               {(['today', 'week', 'month'] as const).map((periodKey) => {
-                const period = leadAnalytics.periodMetrics[periodKey]
+                const period = accountPerformance.periodMetrics[periodKey]
                 const variance = period.actual - period.target
-                const sourceBreakdown = LEAD_SOURCE_CATEGORIES.filter(
-                  (source) => period.breakdown[source] > 0,
+                const allChannels = Object.keys(period.breakdown).sort((a, b) => 
+                  period.breakdown[b] - period.breakdown[a]
                 )
                 return (
                   <Box
@@ -817,7 +1134,7 @@ function MarketingLeadsTab() {
                     borderRadius="lg"
                     p={4}
                     bg="gray.50"
-                    minH="260px"
+                    minH="280px"
                   >
                     <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
                       {period.label}
@@ -845,18 +1162,19 @@ function MarketingLeadsTab() {
                     </Stack>
                     <Box mt={4}>
                       <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
-                        Breakdown by Source
+                        Channels
                       </Text>
-                      {sourceBreakdown.length > 0 ? (
-                        <Stack spacing={1}>
-                          {sourceBreakdown.map((source) => (
-                            <Text key={source} fontSize="sm" color="gray.700">
-                              • {source}:{' '}
-                              <Text as="span" fontWeight="semibold">
-                                {period.breakdown[source] ?? 0}
-                              </Text>{' '}
-                              leads
-                            </Text>
+                      {allChannels.length > 0 ? (
+                        <Stack spacing={1} maxH="120px" overflowY="auto">
+                          {allChannels.map((channel) => (
+                            <HStack key={channel} justify="space-between">
+                              <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                                {channel}
+                              </Text>
+                              <Badge colorScheme="blue" fontSize="xs">
+                                {period.breakdown[channel]}
+                              </Badge>
+                            </HStack>
                           ))}
                         </Stack>
                       ) : (
@@ -870,89 +1188,6 @@ function MarketingLeadsTab() {
               })}
             </SimpleGrid>
           </Box>
-        ) : (
-          <Alert status="info" borderRadius="lg">
-            <AlertIcon />
-            <AlertDescription>
-              Select a valid account with leads to view the analytics dashboard.
-            </AlertDescription>
-          </Alert>
-        )
-      ) : (
-        <Alert status="info" borderRadius="lg">
-          <AlertIcon />
-          <AlertDescription>
-            Choose an account from the filter below to view the Kanban analytics dashboard.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-        <Heading size="sm" mb={4}>
-          Filters
-        </Heading>
-        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-          <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
-              Account
-            </Text>
-            <Select
-              placeholder="All Accounts"
-              value={filters.account}
-              onChange={(e) => setFilters({ ...filters, account: e.target.value })}
-              size="sm"
-            >
-              {uniqueAccounts.map((account) => (
-                <option key={account} value={account}>
-                  {account}
-                </option>
-              ))}
-            </Select>
-          </Box>
-
-          <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
-              Search
-            </Text>
-            <InputGroup size="sm">
-              <InputLeftElement pointerEvents="none">
-                <SearchIcon color="gray.300" />
-              </InputLeftElement>
-              <Input
-                placeholder="Search leads..."
-                value={filters.search}
-                onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-              />
-            </InputGroup>
-          </Box>
-        </SimpleGrid>
-
-        {(filters.account || filters.search) && (
-          <HStack mt={4} flexWrap="wrap" spacing={2}>
-            <Text fontSize="sm" color="gray.600" fontWeight="medium">
-              Active filters:
-            </Text>
-            {filters.account && (
-              <Tag colorScheme="teal" size="md">
-                <TagLabel>Account: {filters.account}</TagLabel>
-                <TagCloseButton onClick={() => setFilters({ ...filters, account: '' })} />
-              </Tag>
-            )}
-            {filters.search && (
-              <Tag colorScheme="teal" size="md">
-                <TagLabel>Search: {filters.search}</TagLabel>
-                <TagCloseButton onClick={() => setFilters({ ...filters, search: '' })} />
-              </Tag>
-            )}
-            <Button
-              size="xs"
-              variant="ghost"
-              colorScheme="gray"
-              onClick={() => setFilters({ account: '', search: '' })}
-            >
-              Clear All
-            </Button>
-          </HStack>
         )}
       </Box>
 
