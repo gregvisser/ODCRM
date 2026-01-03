@@ -41,7 +41,7 @@ export default function CustomersHomePage({
       </TabList>
       <TabPanels pt={4}>
         <TabPanel px={0}>
-          <PlaceholderPage title="OpenDoors Customers" ownerAgent="Customers Agent" description="Coming soon.">
+          <PlaceholderPage title="OpenDoors Customers" ownerAgent="Customers Agent">
             <Text fontSize="sm" color="gray.700" mb={2}>
               Planned areas:
             </Text>

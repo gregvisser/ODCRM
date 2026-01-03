@@ -13,6 +13,13 @@ import {
   DrawerOverlay,
   Heading,
   Link,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
   SimpleGrid,
   Stack,
   Text,
@@ -54,17 +61,30 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon, RepeatIcon } from '@chakra-ui/icons'
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
-import { contacts } from './ContactsTab'
+import { emit, on } from '../platform/events'
+import { OdcrmStorageKeys } from '../platform/keys'
+import { getItem, getJson, isStorageAvailable, setItem, setJson } from '../platform/storage'
 
 type Contact = {
   name: string
-  title: string
+  title?: string
   account: string
-  tier: string
-  status: string
-  email: string
-  phone: string
+  tier?: string
+  status?: string
+  email?: string
+  phone?: string
   socialMedia?: SocialProfile[]
+}
+
+type StoredContact = {
+  id?: string
+  name: string
+  title?: string
+  account: string
+  tier?: string
+  status?: string
+  email?: string
+  phone?: string
 }
 
 type SocialProfile = {
@@ -138,14 +158,14 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 })
 
-// localStorage keys
-const STORAGE_KEY_ACCOUNTS = 'odcrm_accounts'
-const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = 'odcrm_accounts_last_updated'
-const STORAGE_KEY_ABOUT_SECTIONS = 'odcrm_about_sections'
-const STORAGE_KEY_SECTORS = 'odcrm_sectors'
-const STORAGE_KEY_TARGET_LOCATIONS = 'odcrm_target_locations'
-const STORAGE_KEY_MARKETING_LEADS = 'odcrm_marketing_leads'
-const STORAGE_KEY_DELETED_ACCOUNTS = 'odcrm_deleted_accounts'
+// storage keys (kept as locals to minimize churn across this large file)
+const STORAGE_KEY_ACCOUNTS = OdcrmStorageKeys.accounts
+const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = OdcrmStorageKeys.accountsLastUpdated
+const STORAGE_KEY_ABOUT_SECTIONS = OdcrmStorageKeys.aboutSections
+const STORAGE_KEY_SECTORS = OdcrmStorageKeys.sectors
+const STORAGE_KEY_TARGET_LOCATIONS = OdcrmStorageKeys.targetLocations
+const STORAGE_KEY_MARKETING_LEADS = OdcrmStorageKeys.marketingLeads
+const STORAGE_KEY_DELETED_ACCOUNTS = OdcrmStorageKeys.deletedAccounts
 
 // Lead type for marketing leads
 type Lead = {
@@ -153,17 +173,291 @@ type Lead = {
   accountName: string
 }
 
-// Load leads from localStorage
+// Load leads from storage
 function loadLeadsFromStorage(): Lead[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MARKETING_LEADS)
-    if (stored) {
-      return JSON.parse(stored) as Lead[]
+  const parsed = getJson<Lead[]>(STORAGE_KEY_MARKETING_LEADS)
+  return parsed && Array.isArray(parsed) ? parsed : []
+}
+
+function loadContactsFromStorage(): StoredContact[] {
+  const parsed = getJson<StoredContact[]>(OdcrmStorageKeys.contacts)
+  return parsed && Array.isArray(parsed) ? parsed : []
+}
+
+function seedContactsIfEmpty() {
+  // Only seed if there are no contacts saved yet.
+  const existing = getJson<unknown>(OdcrmStorageKeys.contacts)
+  if (Array.isArray(existing) && existing.length > 0) return
+
+  // Seed contacts from the screenshots the user provided.
+  // Accounts are mapped to existing canonical account names in this repo.
+  const canonicalAccount = (raw: string) => {
+    const key = raw.trim().toLowerCase()
+    const map: Record<string, string> = {
+      'protech': 'Protech Roofing',
+      'green the uk': 'GreenTheUK',
+      'renewable': 'Renewable Temp Power',
+      'maxspace': 'MaxSpace Projects',
+      'octavian': 'Octavian Security',
+      'morson': 'P&R Morson FM',
+      'shield': 'Shield Pest Control',
+      'legionella & fire safe': 'Legionella',
     }
-  } catch (error) {
-    console.warn('Failed to load leads from localStorage:', error)
+    return map[key] || raw.trim()
   }
-  return []
+
+  const seeded: StoredContact[] = [
+    // Sheet 1 (Client / Contact Name / Contact Email / Contact Number)
+    {
+      id: 'seed-ocs-chris-piper',
+      account: canonicalAccount('OCS'),
+      name: 'Chris Piper',
+      email: 'Chris.piper@ocs.com',
+      phone: '7484171055',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-beauparc-graeme-knight',
+      account: canonicalAccount('Beauparc'),
+      name: 'Graeme Knight',
+      email: 'Graeme.Knight@beauparc.co.uk',
+      phone: '7966520354',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-octavian-sanjay-patel',
+      account: canonicalAccount('Octavian'),
+      name: 'Sanjay Patel',
+      email: 's.patel@octaviangr.com',
+      phone: '7432809977',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-legionella-steve-morris',
+      account: canonicalAccount('Legionella & Fire Safe'),
+      name: 'Steve Morris',
+      email: 'Steve.Morris@legionellaandfiresafe.co.uk',
+      phone: '7970010055',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-morson-adam-simms',
+      account: canonicalAccount('Morson'),
+      name: 'Adam Simms',
+      email: 'adam.sims@morsonfm.co.uk',
+      phone: '7977124757',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-verve-raphael-barreto',
+      account: canonicalAccount('Verve Connect'),
+      name: 'Rephael Barreto',
+      email: 'raphael.barreto@verveconnect.co.uk',
+      phone: '7508241884',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-shield-dan-stewart',
+      account: canonicalAccount('Shield'),
+      name: 'Dan Stewart',
+      email: 'dan.steward@shieldpestcontrol.co.uk',
+      phone: '7977481269',
+      title: '',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+
+    // Sheet 2 (Account Name / Client Contact Name / Job Title / Email Address / Telephone Number / Main Office Number)
+    {
+      id: 'seed-protech-david-mclean',
+      account: canonicalAccount('Protech'),
+      name: 'David Mclean',
+      title: 'MD',
+      email: 'David.mclean@protechroofing.co.uk',
+      phone: '07977497239',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-greentheuk-francesca-tidd',
+      account: canonicalAccount('green the UK'),
+      name: 'Francesca Tidd',
+      title: 'Senior Consultant',
+      email: 'francesca@greentheuk.co.uk',
+      phone: '07463689541',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-greentheuk-sam',
+      account: canonicalAccount('green the UK'),
+      name: 'Sam',
+      title: 'Senior Consultant',
+      email: 'samuel@greentheuk.co.uk',
+      phone: '07463654639',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-greentheuk-xanthe-caldecoott',
+      account: canonicalAccount('green the UK'),
+      name: 'Xanthe Caldecott',
+      title: 'Founder & MD',
+      email: 'xanthe@greentheuk.com',
+      phone: '07787433925',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-renewable-andrew-grant',
+      account: canonicalAccount('Renewable'),
+      name: 'Andrew Grant',
+      title: 'Founder & MD',
+      email: 'andrew@rtp-ltd.co.uk',
+      phone: '07947492105',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-maxspace-bilal-khalid',
+      account: canonicalAccount('Maxspace'),
+      name: 'Bilal Khalid',
+      title: 'MD',
+      email: 'bilal@maxspaceprojects.co.uk',
+      phone: '07533143997',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-maxspace-carlos',
+      account: canonicalAccount('Maxspace'),
+      name: 'Carlos',
+      title: '',
+      email: 'carlos@maxspaceprojects.co.uk',
+      phone: '02038242334',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-vendease-dave-berman',
+      account: canonicalAccount('Vendease'),
+      name: 'Dave Berman',
+      title: 'Co-Founder',
+      email: 'dave.berman@vendease.co.uk',
+      phone: '07801062593',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-vendease-jonny-holmes',
+      account: canonicalAccount('Vendease'),
+      name: 'Jonny Holmes',
+      title: 'Co-Founder',
+      email: 'jonny.holmes@vendease.co.uk',
+      phone: '02072237533',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-papaya-nick-edwards',
+      account: canonicalAccount('Papaya'),
+      name: 'Nick Edwards',
+      title: 'MD',
+      email: 'nickedwards@papayauk.com',
+      phone: '07917479279',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-papaya-georgie-dronfield',
+      account: canonicalAccount('Papaya'),
+      name: 'Georgie Dronfield',
+      title: 'Head of Operations',
+      email: 'georgie.dronfield@papayauk.com',
+      phone: '07384813193',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-thomasfranks-tara-coots-williams',
+      account: canonicalAccount('Thomas Franks'),
+      name: 'Tara Coots-Williams',
+      title: 'Business Development Co-ordinator',
+      email: 'tara@thomasfranks.com',
+      phone: '07496353179',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-thomasfranks-claire-long',
+      account: canonicalAccount('Thomas Franks'),
+      name: 'Claire Long',
+      title: 'Group Business Development Director',
+      email: 'claire.long@thomasfranks.com',
+      phone: '07562669134',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-thomasfranks-james-pate',
+      account: canonicalAccount('Thomas Franks'),
+      name: 'James Pate',
+      title: 'Sales Director',
+      email: 'james.pate@thomasfranks.com',
+      phone: '07534677844',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-besafe-oliver-eginton',
+      account: canonicalAccount('Be Safe Technologies'),
+      name: 'Oliver Eginton',
+      title: 'Sales Director',
+      email: 'ollie@be-safetech.com',
+      phone: '03338008150',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-besafe-ross-sampson',
+      account: canonicalAccount('Be Safe Technologies'),
+      name: 'Ross Sampson',
+      title: 'CMO',
+      email: 'ross@be-safetech.com',
+      phone: '31 0 648266368',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+    {
+      id: 'seed-besafe-graham',
+      account: canonicalAccount('Be Safe Technologies'),
+      name: 'Graham',
+      title: 'CEO',
+      email: 'graham@be-safetech.com',
+      phone: '03338008150',
+      tier: 'Decision maker',
+      status: 'Active',
+    },
+  ]
+
+  try {
+    setJson(OdcrmStorageKeys.contacts, seeded)
+    emit('contactsUpdated', seeded)
+  } catch (error) {
+    console.warn('Failed to seed contacts into localStorage:', error)
+  }
 }
 
 // Helper to parse dates in various formats (same as MarketingLeadsTab)
@@ -232,119 +526,65 @@ function calculateActualsFromLeads(accountName: string, leads: Lead[]): { weekly
   return { weeklyActual, monthlyActual }
 }
 
-// Load deleted account names from localStorage
+// Load deleted account names from storage
 function loadDeletedAccountsFromStorage(): Set<string> {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_DELETED_ACCOUNTS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as string[]
-      return new Set(parsed)
-    }
-  } catch (error) {
-    console.warn('Failed to load deleted accounts from localStorage:', error)
-  }
-  return new Set<string>()
+  const parsed = getJson<string[]>(STORAGE_KEY_DELETED_ACCOUNTS)
+  return new Set(Array.isArray(parsed) ? parsed : [])
 }
 
-// Save deleted account names to localStorage
+// Save deleted account names to storage
 function saveDeletedAccountsToStorage(deletedAccounts: Set<string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY_DELETED_ACCOUNTS, JSON.stringify(Array.from(deletedAccounts)))
-  } catch (error) {
-    console.warn('Failed to save deleted accounts to localStorage:', error)
-  }
+  setJson(STORAGE_KEY_DELETED_ACCOUNTS, Array.from(deletedAccounts))
 }
 
-// Load accounts from localStorage or use default
+// Load accounts from storage or use default
 function loadAccountsFromStorage(): Account[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_ACCOUNTS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Account[]
-      console.log('✅ Loaded accounts from localStorage:', parsed.length)
-      return parsed
-    }
-  } catch (error) {
-    console.warn('Failed to load accounts from localStorage:', error)
+  const parsed = getJson<Account[]>(STORAGE_KEY_ACCOUNTS)
+  if (parsed && Array.isArray(parsed)) {
+    console.log('✅ Loaded accounts from storage:', parsed.length)
+    return parsed
   }
   return accounts
 }
 
-// Save accounts to localStorage
+// Save accounts to storage
 function saveAccountsToStorage(accountsData: Account[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_ACCOUNTS, JSON.stringify(accountsData))
-    localStorage.setItem(STORAGE_KEY_ACCOUNTS_LAST_UPDATED, new Date().toISOString())
-    console.log('💾 Saved accounts to localStorage')
-  } catch (error) {
-    console.warn('Failed to save accounts to localStorage:', error)
-  }
+  setJson(STORAGE_KEY_ACCOUNTS, accountsData)
+  setItem(STORAGE_KEY_ACCOUNTS_LAST_UPDATED, new Date().toISOString())
+  console.log('💾 Saved accounts to storage')
 }
 
-// Load about sections from localStorage
+// Load about sections from storage
 function loadAboutSectionsFromStorage(): Record<string, AboutSections> {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_ABOUT_SECTIONS)
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch (error) {
-    console.warn('Failed to load about sections from localStorage:', error)
-  }
-  return {}
+  const parsed = getJson<Record<string, AboutSections>>(STORAGE_KEY_ABOUT_SECTIONS)
+  return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
-// Save about sections to localStorage
+// Save about sections to storage
 function saveAboutSectionsToStorage(sections: Record<string, AboutSections>) {
-  try {
-    localStorage.setItem(STORAGE_KEY_ABOUT_SECTIONS, JSON.stringify(sections))
-  } catch (error) {
-    console.warn('Failed to save about sections to localStorage:', error)
-  }
+  setJson(STORAGE_KEY_ABOUT_SECTIONS, sections)
 }
 
-// Load sectors from localStorage
+// Load sectors from storage
 function loadSectorsFromStorage(): Record<string, string> {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_SECTORS)
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch (error) {
-    console.warn('Failed to load sectors from localStorage:', error)
-  }
-  return {}
+  const parsed = getJson<Record<string, string>>(STORAGE_KEY_SECTORS)
+  return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
-// Save sectors to localStorage
+// Save sectors to storage
 function saveSectorsToStorage(sectors: Record<string, string>) {
-  try {
-    localStorage.setItem(STORAGE_KEY_SECTORS, JSON.stringify(sectors))
-  } catch (error) {
-    console.warn('Failed to save sectors to localStorage:', error)
-  }
+  setJson(STORAGE_KEY_SECTORS, sectors)
 }
 
-// Load target locations from localStorage
+// Load target locations from storage
 function loadTargetLocationsFromStorage(): Record<string, string[]> {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_TARGET_LOCATIONS)
-    if (stored) {
-      return JSON.parse(stored)
-    }
-  } catch (error) {
-    console.warn('Failed to load target locations from localStorage:', error)
-  }
-  return {}
+  const parsed = getJson<Record<string, string[]>>(STORAGE_KEY_TARGET_LOCATIONS)
+  return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
-// Save target locations to localStorage
+// Save target locations to storage
 function saveTargetLocationsToStorage(locations: Record<string, string[]>) {
-  try {
-    localStorage.setItem(STORAGE_KEY_TARGET_LOCATIONS, JSON.stringify(locations))
-  } catch (error) {
-    console.warn('Failed to save target locations to localStorage:', error)
-  }
+  setJson(STORAGE_KEY_TARGET_LOCATIONS, locations)
 }
 
 export const accounts: Account[] = [
@@ -2196,7 +2436,8 @@ type FieldConfig = {
   render: (account: Account, onContactClick?: (contact: Contact) => void) => ReactNode
 }
 
-const fieldConfig: FieldConfig[] = [
+function getFieldConfig(contactsData: StoredContact[]): FieldConfig[] {
+  return [
   {
     label: 'Account',
     render: (account) => account.name,
@@ -2259,7 +2500,7 @@ const fieldConfig: FieldConfig[] = [
   {
     label: 'Contacts',
     render: (account, onContactClick) => {
-      const accountContacts = contacts.filter((contact) => contact.account === account.name)
+      const accountContacts = contactsData.filter((contact) => contact.account === account.name)
       if (accountContacts.length === 0) {
         return <Text fontSize="sm" color="gray.500">No contacts</Text>
       }
@@ -2283,7 +2524,7 @@ const fieldConfig: FieldConfig[] = [
               >
                 <Text fontWeight="medium">{contact.name}</Text>
                 <Text fontSize="xs" color="gray.500">
-                  {contact.title} • {contact.email}
+                  {contact.title || '—'} • {contact.email || '—'}
                 </Text>
               </Box>
             ))}
@@ -2350,8 +2591,7 @@ const fieldConfig: FieldConfig[] = [
             e.preventDefault()
             window.open(account.clientLeadsSheetUrl, '_blank')
             // Trigger navigation to leads tab
-            const event = new CustomEvent('navigateToLeads', { detail: { accountName: account.name } })
-            window.dispatchEvent(event)
+            emit('navigateToLeads', { accountName: account.name })
           }}
         >
           View Leads Sheet
@@ -2381,7 +2621,8 @@ const fieldConfig: FieldConfig[] = [
       </Stack>
     ),
   },
-]
+  ]
+}
 
 type TargetLocationMultiSelectProps = {
   locations: string[]
@@ -3094,7 +3335,7 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
   // Load user name from localStorage when account changes
   useEffect(() => {
     const noteUserKey = `note_user_${account.name}`
-    const savedUser = localStorage.getItem(noteUserKey) || ''
+    const savedUser = getItem(noteUserKey) || ''
     setNoteUser(savedUser)
   }, [account.name])
 
@@ -3102,7 +3343,7 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
   useEffect(() => {
     if (noteUser) {
       const noteUserKey = `note_user_${account.name}`
-      localStorage.setItem(noteUserKey, noteUser)
+      setItem(noteUserKey, noteUser)
     }
   }, [noteUser, account.name])
 
@@ -3296,6 +3537,13 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   // Load deleted accounts to prevent re-adding them
   const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
 
+  // Seed contacts (from screenshots) only if the user has no contacts saved yet.
+  useEffect(() => {
+    seedContactsIfEmpty()
+    setContactsData(loadContactsFromStorage())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Load initial data from localStorage or use defaults
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
     const loaded = loadAccountsFromStorage()
@@ -3313,6 +3561,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+  const [contactsData, setContactsData] = useState<StoredContact[]>(() => loadContactsFromStorage())
   const [contactSocialMediaMap, setContactSocialMediaMap] = useState<Record<string, SocialProfile[]>>({})
   const [contactSocialMediaLoading, setContactSocialMediaLoading] = useState<Record<string, boolean>>({})
   const [aboutSectionsMap, setAboutSectionsMap] = useState<Record<string, AboutSections>>(() => {
@@ -3424,7 +3673,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         )
         if (hasChanges) {
           saveAccountsToStorage(updated)
-          window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+          emit('accountsUpdated', updated)
           // Update selected account if it's open
           if (selectedAccount) {
             const updatedAccount = updated.find(a => a.name === selectedAccount.name)
@@ -3439,11 +3688,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     // Listen for custom event when leads are updated
-    window.addEventListener('leadsUpdated', handleLeadsUpdated)
-    
-    return () => {
-      window.removeEventListener('leadsUpdated', handleLeadsUpdated)
-    }
+    const off = on('leadsUpdated', () => handleLeadsUpdated())
+    return () => off()
   }, [selectedAccount])
 
   const updateAccount = (accountName: string, updates: Partial<Account>) => {
@@ -3452,7 +3698,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       // Save to localStorage
       saveAccountsToStorage(updated)
       // Dispatch event so LeadsTab can get updated accounts
-      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+      emit('accountsUpdated', updated)
       return updated
     })
     if (selectedAccount?.name === accountName) {
@@ -3477,7 +3723,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       setDeletedAccounts(newDeletedAccounts)
       saveDeletedAccountsToStorage(newDeletedAccounts)
       // Dispatch event so LeadsTab can get updated accounts
-      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+      emit('accountsUpdated', updated)
       return updated
     })
     if (selectedAccount?.name === accountName) {
@@ -3514,7 +3760,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     // Store accounts in window for LeadsTab to access
     ;(window as any).__getAccounts = () => accountsData
     // Also dispatch initial accounts
-    window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: accountsData }))
+    emit('accountsUpdated', accountsData)
   }, [accountsData])
 
   // Track which accounts we've attempted to auto-fetch sectors for
@@ -3649,7 +3895,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       const updated = [...prev, newAccount]
       saveAccountsToStorage(updated)
       // Dispatch event so LeadsTab can get updated accounts and refresh leads
-      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: updated }))
+      emit('accountsUpdated', updated)
       return updated
     })
 
@@ -3913,9 +4159,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   // Listen for navigation to account from contacts tab
   useEffect(() => {
-    const handleNavigateToAccount = (event: Event) => {
-      const customEvent = event as CustomEvent<{ accountName: string }>
-      const accountName = customEvent.detail?.accountName
+    const handleNavigateToAccount = (detail: { accountName?: string } | undefined) => {
+      const accountName = detail?.accountName
       if (accountName) {
         const account = accountsData.find((acc) => acc.name === accountName)
         if (account) {
@@ -3923,13 +4168,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       }
     }
-
-    window.addEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
-
-    return () => {
-      window.removeEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
-    }
+    const off = on<{ accountName?: string }>('navigateToAccount', (detail) => handleNavigateToAccount(detail))
+    return () => off()
   }, [accountsData])
+
+  // Keep contact counts/details live (ContactsTab dispatches contactsUpdated).
+  useEffect(() => {
+    const off = on<StoredContact[]>('contactsUpdated', (detail) => {
+      if (Array.isArray(detail)) setContactsData(detail)
+      else setContactsData(loadContactsFromStorage())
+    })
+    return () => off()
+  }, [])
 
   // Allow parent navigators (top-tab shell) to request focusing an account by name.
   // If it exists, open the drawer for that account.
@@ -3994,11 +4244,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   })
 
   const hasStoredAccounts = (() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY_ACCOUNTS) !== null
-    } catch {
-      return true
-    }
+    // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
+    if (!isStorageAvailable()) return true
+    return getItem(STORAGE_KEY_ACCOUNTS) !== null
   })()
 
   const applyBulkSheets = () => {
@@ -4041,7 +4289,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       }
 
       saveAccountsToStorage(next)
-      window.dispatchEvent(new CustomEvent('accountsUpdated', { detail: next }))
+      emit('accountsUpdated', next)
 
       return next
     })
@@ -4065,6 +4313,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
   const bulkTemplate = accountNames.map((n) => `${n}, `).join('\n')
+  const fieldConfig = getFieldConfig(contactsData)
 
   const copyToClipboard = async (text: string, successMsg: string) => {
     try {
@@ -4118,107 +4367,93 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         </HStack>
       </Box>
 
-      <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={6}>
-        {filteredAndSortedAccounts.map((account) => {
-          const statusColorScheme =
-            account.status === 'Active'
-              ? 'green'
-              : account.status === 'Inactive'
-                ? 'red'
-                : 'orange'
-          return (
-            <Box
-              key={account.name}
-              bg="white"
-              borderRadius="lg"
-              border="1px solid"
-              borderColor="gray.200"
-              p={4}
-              boxShadow="sm"
-              cursor="pointer"
-              _hover={{ boxShadow: 'md', borderColor: 'teal.300' }}
-              onClick={(e) => handleAccountClick(account.name, e)}
-            >
-              <Stack spacing={3}>
-                <Stack direction="row" align="center" spacing={3}>
-                  <Avatar
-                    size="lg"
-                    name={account.name}
-                    src={getAccountLogo(account, failedLogos, aiLogos)}
-                    bg="teal.50"
-                    onError={async () => {
-                      // If Clearbit failed and we haven't tried AI yet, fetch from AI
-                      if (!failedLogos.has(account.name) && !aiLogos[account.name]) {
-                        setFailedLogos((prev) => new Set(prev).add(account.name))
-                        
-                        // Try to get logo from AI
-                        const aiLogo = await fetchLogoFromAI(account)
-                        if (aiLogo) {
-                          setAiLogos((prev) => ({ ...prev, [account.name]: aiLogo }))
-                        } else {
-                          // If AI also fails, mark it so we use DiceBear fallback
-                          // The Avatar will automatically use initials when src fails
-                        }
-                      } else if (aiLogos[account.name]) {
-                        // If AI logo also failed, remove it and use DiceBear
-                        setAiLogos((prev) => {
-                          const updated = { ...prev }
-                          delete updated[account.name]
-                          return updated
-                        })
-                      }
-                    }}
-                  />
-                  <Box flex="1">
-                    <Heading size="sm">{account.name}</Heading>
-                    <Text fontSize="xs" color="gray.500">
+      <TableContainer
+        bg="white"
+        borderRadius="lg"
+        border="1px solid"
+        borderColor="gray.200"
+        overflowX="auto"
+      >
+        <Table size="sm" variant="simple">
+          <Thead bg="gray.50">
+            <Tr>
+              <Th>Account</Th>
+              <Th>Status</Th>
+              <Th>Sector</Th>
+              <Th isNumeric>Contacts</Th>
+              <Th isNumeric>Leads</Th>
+              <Th>Notes</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {filteredAndSortedAccounts.map((account) => {
+              const statusColorScheme =
+                account.status === 'Active' ? 'green' : account.status === 'Inactive' ? 'red' : 'orange'
+              return (
+                <Tr
+                  key={account.name}
+                  cursor="pointer"
+                  _hover={{ bg: 'teal.50' }}
+                  onClick={(e) => handleAccountClick(account.name, e)}
+                >
+                  <Td>
+                    <Box>
+                      <Text fontWeight="semibold" color="gray.800">
+                        {account.name}
+                      </Text>
+                      {account.website ? (
+                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                          {account.website}
+                        </Text>
+                      ) : null}
+                    </Box>
+                  </Td>
+                  <Td>
+                    <Badge colorScheme={statusColorScheme}>{account.status}</Badge>
+                  </Td>
+                  <Td>
+                    <Text fontSize="sm" color="gray.600" noOfLines={1}>
                       {sectorsMap[account.name] ?? account.sector}
                     </Text>
-                  </Box>
-                </Stack>
-                <Text fontSize="sm" color="gray.600">
-                  {(() => {
-                    try {
-                      const sections = getAboutSections(account)
-                      return truncateText(sectionsToPlainText(sections), 160)
-                    } catch (error) {
-                      console.error('Error rendering about text:', error)
-                      return 'Account information unavailable'
-                    }
-                  })()}
-                </Text>
-                <Stack direction="row" align="center" justify="space-between">
-                  <Badge colorScheme={statusColorScheme}>{account.status}</Badge>
-                  <Stack direction="row" spacing={3}>
-                    <Text fontSize="sm" color="gray.500">
-                      Contacts: {contacts.filter((c) => c.account === account.name).length}
+                  </Td>
+                  <Td isNumeric>
+                    <Text fontSize="sm" color="gray.700">
+                      {contactsData.filter((c) => c.account === account.name).length}
                     </Text>
-                    <Text fontSize="sm" color="gray.500">
-                      Leads: {account.leads}
+                  </Td>
+                  <Td isNumeric>
+                    <Text fontSize="sm" color="gray.700">
+                      {account.leads}
                     </Text>
-                  </Stack>
-                </Stack>
-              </Stack>
-            </Box>
-          )
-        })}
+                  </Td>
+                  <Td maxW="380px">
+                    <Text fontSize="sm" color="gray.600" noOfLines={2}>
+                      {(() => {
+                        try {
+                          const sections = getAboutSections(account)
+                          return truncateText(sectionsToPlainText(sections), 180)
+                        } catch {
+                          return ''
+                        }
+                      })()}
+                    </Text>
+                  </Td>
+                </Tr>
+              )
+            })}
 
-        {filteredAndSortedAccounts.length === 0 && (
-          <Box
-            bg="white"
-            borderRadius="lg"
-            border="1px dashed"
-            borderColor="gray.300"
-            p={8}
-            color="gray.500"
-            textAlign="center"
-            fontSize="sm"
-            gridColumn="1 / -1"
-          >
-            No accounts match the selected filters
-          </Box>
-        )}
-      </SimpleGrid>
+            {filteredAndSortedAccounts.length === 0 ? (
+              <Tr>
+                <Td colSpan={6}>
+                  <Box p={6} color="gray.500" textAlign="center" fontSize="sm">
+                    No accounts match the selected filters
+                  </Box>
+                </Td>
+              </Tr>
+            ) : null}
+          </Tbody>
+        </Table>
+      </TableContainer>
 
       {/* Bulk Sheets Modal */}
       <Modal isOpen={isBulkSheetsOpen} onClose={onBulkSheetsClose} size="xl">
@@ -4955,7 +5190,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                           clientLeadsSheetUrl: String(value) || undefined,
                         })
                         stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')
-                        window.dispatchEvent(new CustomEvent('accountsUpdated'))
                       }}
                       onCancel={() => stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
                       isEditing={isFieldEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
@@ -4977,10 +5211,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                               onClick={(e) => {
                                 e.preventDefault()
                                 window.open(String(value), '_blank')
-                                const event = new CustomEvent('navigateToLeads', {
-                                  detail: { accountName: selectedAccount.name },
-                                })
-                                window.dispatchEvent(event)
+                                emit('navigateToLeads', { accountName: selectedAccount.name })
                               }}
                             >
                               {String(value)}
@@ -4997,10 +5228,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                               onClick={(e) => {
                                 e.preventDefault()
                                 window.open(String(value), '_blank')
-                                const event = new CustomEvent('navigateToLeads', {
-                                  detail: { accountName: selectedAccount.name },
-                                })
-                                window.dispatchEvent(event)
+                                emit('navigateToLeads', { accountName: selectedAccount.name })
                               }}
                             >
                               Open in Leads Generated tab

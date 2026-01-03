@@ -7,19 +7,22 @@ A React + Vite + TypeScript CRM application for managing accounts, contacts, mar
 - **Accounts Management**: Manage client accounts with AI-powered company information
 - **Contacts Management**: Track contacts tied to each account
 - **Marketing Leads**: Import and manage leads from Google Sheets
+- **Email Campaigns**: Create and manage cold email campaigns with Outlook integration, automated sequences, reply detection, and performance tracking
 - **User Authorization**: Manage user accounts and permissions
 - **Analytics Dashboard**: Kanban-style analytics for lead performance
 
 ## Tech stack
 
-- Vite (React + TypeScript)
-- Chakra UI for layout and components
-- React Icons for sidebar visuals
-- dnd-kit for drag-and-drop functionality
+- **Frontend**: Vite (React + TypeScript), Chakra UI, React Icons, dnd-kit
+- **Backend**: Node.js + Express, TypeScript, Prisma ORM, PostgreSQL
+- **Email**: Microsoft Graph API (Outlook/Microsoft 365)
+- **Background Workers**: node-cron for scheduled tasks
 
 ## Getting started
 
 ### Local Development
+
+#### Frontend Only
 
 ```bash
 npm install
@@ -27,7 +30,28 @@ npm run dev
 # open http://localhost:5173 in your browser
 ```
 
-The dev server supports hot reload so you can verify UX updates immediately during each prompt.
+#### Full Stack (Frontend + Backend)
+
+```bash
+# Install frontend dependencies
+npm install
+
+# Install backend dependencies
+cd server
+npm install
+
+# Set up database (see EMAIL_CAMPAIGNS_SETUP.md)
+npx prisma generate
+npx prisma migrate dev
+
+# Start both servers (from root directory)
+npm run dev:all
+# OR start separately:
+# Terminal 1: npm run dev (frontend on :5173)
+# Terminal 2: npm run dev:server (backend on :3001)
+```
+
+The dev servers support hot reload. See `EMAIL_CAMPAIGNS_SETUP.md` for detailed setup instructions.
 
 ### Environment Variables
 
@@ -103,9 +127,22 @@ npm run build
 
 The production build will be in the `dist/` folder, ready for deployment.
 
+## Email Campaigns Module
+
+The Email Campaigns module enables:
+- **Multi-step email sequences** with customizable templates
+- **Outlook/Microsoft 365 integration** via OAuth
+- **Automated sending** with respect to send windows and daily limits
+- **Reply detection** by monitoring inboxes
+- **Performance tracking** (opens, replies, bounces, unsubscribes)
+- **Multi-tenant architecture** with customer scoping
+
+See `EMAIL_CAMPAIGNS_SETUP.md` for complete setup and configuration guide.
+
 ## Notes
 
-- All data is stored in browser localStorage (no backend database required)
+- **Frontend-only features** (Accounts, Contacts, Marketing Leads) store data in browser localStorage
+- **Email Campaigns** require the backend server and PostgreSQL database
 - Google Sheets must be publicly accessible for marketing leads feature
 - AI features require valid API keys to function
-- The app works without AI keys, but AI-powered features will be disabled
+- Microsoft Azure app registration required for Outlook OAuth

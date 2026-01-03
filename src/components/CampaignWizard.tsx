@@ -1,0 +1,667 @@
+import { useMemo, useState, useEffect } from 'react'
+import {
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  Input,
+  Textarea,
+  Select,
+  VStack,
+  HStack,
+  NumberInput,
+  NumberInputField,
+  NumberInputStepper,
+  NumberIncrementStepper,
+  NumberDecrementStepper,
+  Heading,
+  Text,
+  Divider,
+  useToast,
+  Alert,
+  AlertIcon,
+  AlertDescription
+} from '@chakra-ui/react'
+import { api } from '../utils/api'
+import { OdcrmStorageKeys } from '../platform/keys'
+import { getItem, getJson, setItem } from '../platform/storage'
+import { getEmailTemplates, type OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
+import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
+
+interface EmailIdentity {
+  id: string
+  emailAddress: string
+  displayName?: string
+}
+
+interface Contact {
+  id: string
+  firstName: string
+  lastName: string
+  companyName: string
+  email: string
+}
+
+interface WizardStepProps {
+  step: number
+  currentStep: number
+  title: string
+  children: React.ReactNode
+}
+
+function WizardStep({ step, currentStep, title, children }: WizardStepProps) {
+  if (currentStep !== step) return null
+
+  return (
+    <Box>
+      <Heading size="md" mb={4}>{title}</Heading>
+      {children}
+    </Box>
+  )
+}
+
+export default function CampaignWizard({
+  onSuccess,
+  onCancel,
+  campaignId
+}: {
+  onSuccess: () => void
+  onCancel: () => void
+  campaignId?: string
+}) {
+  const [step, setStep] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [identities, setIdentities] = useState<EmailIdentity[]>([])
+  const [, setContacts] = useState<Contact[]>([])
+  const toast = useToast()
+
+  // Form data
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    senderIdentityId: '',
+    customerAccountName: '',
+    sendWindowHoursStart: 9,
+    sendWindowHoursEnd: 17,
+    randomizeWithinHours: 24,
+    followUpDelayDaysMin: 3,
+    followUpDelayDaysMax: 5,
+    step1Subject: '',
+    step1Body: '',
+    step2Subject: '',
+    step2Body: '',
+    selectedProspectEmails: [] as string[]
+  })
+
+  useEffect(() => {
+    fetchIdentities()
+    fetchContacts()
+    if (campaignId) {
+      fetchCampaign(campaignId)
+    } else {
+      // Prefill last selections to speed up workflow for OpenDoors users.
+      const lastIdentity = getItem('odcrm_last_sender_identity_id') || ''
+      const lastAccount = getItem('odcrm_last_campaign_account') || ''
+      setFormData((prev) => ({
+        ...prev,
+        senderIdentityId: prev.senderIdentityId || lastIdentity,
+        customerAccountName: prev.customerAccountName || lastAccount,
+      }))
+    }
+  }, [campaignId])
+
+  const fetchIdentities = async () => {
+    // Use the same customerId that was used for OAuth connection
+    const customerId = localStorage.getItem('currentCustomerId') || 'test-customer-1'
+    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
+    if (error) {
+      console.error('Failed to fetch email identities:', error)
+      toast({ title: 'Error', description: 'Failed to load email accounts', status: 'error' })
+    } else if (data) {
+      setIdentities(data)
+    }
+  }
+
+  const fetchContacts = async () => {
+    // TODO: Fetch from contacts API when available
+    // For now, using placeholder
+    setContacts([])
+  }
+
+  const fetchCampaign = async (id: string) => {
+    const { data } = await api.get<any>(`/api/campaigns/${id}`)
+    if (data) {
+      setFormData({
+        name: data.name || '',
+        description: data.description || '',
+        senderIdentityId: data.senderIdentityId || '',
+        customerAccountName: '',
+        sendWindowHoursStart: data.sendWindowHoursStart || 9,
+        sendWindowHoursEnd: data.sendWindowHoursEnd || 17,
+        randomizeWithinHours: data.randomizeWithinHours || 24,
+        followUpDelayDaysMin: data.followUpDelayDaysMin || 3,
+        followUpDelayDaysMax: data.followUpDelayDaysMax || 5,
+        step1Subject: data.templates?.[0]?.subjectTemplate || '',
+        step1Body: data.templates?.[0]?.bodyTemplateHtml || '',
+        step2Subject: data.templates?.[1]?.subjectTemplate || '',
+        step2Body: data.templates?.[1]?.bodyTemplateHtml || '',
+        selectedProspectEmails: []
+      })
+    }
+  }
+
+  const availableAccounts = useMemo(() => {
+    const accounts = getJson<Array<{ name: string }>>(OdcrmStorageKeys.accounts) || []
+    const names = accounts.map((a) => a?.name).filter(Boolean)
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
+  }, [])
+
+  const allTemplates = useMemo(() => getEmailTemplates(), [])
+
+  const templatesForAccount = useMemo(() => {
+    const acct = (formData.customerAccountName || '').trim()
+    if (!acct) return allTemplates
+    return allTemplates.filter((t) => !t.account || t.account.toLowerCase() === acct.toLowerCase())
+  }, [allTemplates, formData.customerAccountName])
+
+  const stepTemplates = useMemo(() => {
+    const step1 = templatesForAccount.filter((t) => t.stepNumber === 1)
+    const step2 = templatesForAccount.filter((t) => t.stepNumber === 2)
+    return { step1, step2 }
+  }, [templatesForAccount])
+
+  const handleNext = () => {
+    if (step === 1 && !formData.senderIdentityId) {
+      toast({ title: 'Error', description: 'Please select your name/email first', status: 'error' })
+      return
+    }
+    if (step === 2 && (!formData.customerAccountName || !formData.name)) {
+      toast({ title: 'Error', description: 'Please select a customer and campaign name', status: 'error' })
+      return
+    }
+    if (
+      step === 3 &&
+      (!formData.step1Subject || !formData.step1Body || !formData.step2Subject || !formData.step2Body)
+    ) {
+      toast({ title: 'Error', description: 'Please fill in all template fields', status: 'error' })
+      return
+    }
+    setStep(step + 1)
+  }
+
+  const handleSave = async (): Promise<string | undefined> => {
+    setLoading(true)
+    try {
+      let id = campaignId
+
+      if (!id) {
+        // Create campaign
+        const { data, error } = await api.post<{ id: string }>('/api/campaigns', {
+          name: formData.name,
+          description: formData.description,
+          senderIdentityId: formData.senderIdentityId,
+          sendWindowHoursStart: formData.sendWindowHoursStart,
+          sendWindowHoursEnd: formData.sendWindowHoursEnd,
+          randomizeWithinHours: formData.randomizeWithinHours,
+          followUpDelayDaysMin: formData.followUpDelayDaysMin,
+          followUpDelayDaysMax: formData.followUpDelayDaysMax
+        })
+
+        if (error) throw new Error(error)
+        if (!data) throw new Error('No data returned when creating campaign')
+        // Prisma returns a full campaign object; it will include `id`.
+        id = (data as any).id
+      } else {
+        // Update campaign
+        await api.patch(`/api/campaigns/${id}`, {
+          name: formData.name,
+          description: formData.description,
+          senderIdentityId: formData.senderIdentityId,
+          sendWindowHoursStart: formData.sendWindowHoursStart,
+          sendWindowHoursEnd: formData.sendWindowHoursEnd,
+          randomizeWithinHours: formData.randomizeWithinHours,
+          followUpDelayDaysMin: formData.followUpDelayDaysMin,
+          followUpDelayDaysMax: formData.followUpDelayDaysMax
+        })
+      }
+
+      // Save templates
+      await api.post(`/api/campaigns/${id}/templates`, {
+        step1: {
+          subjectTemplate: formData.step1Subject,
+          bodyTemplateHtml: formData.step1Body,
+          bodyTemplateText: formData.step1Body.replace(/<[^>]*>/g, '')
+        },
+        step2: {
+          subjectTemplate: formData.step2Subject,
+          bodyTemplateHtml: formData.step2Body,
+          bodyTemplateText: formData.step2Body.replace(/<[^>]*>/g, '')
+        }
+      })
+
+      // Attach prospects (Cognism imports) if selected
+      if (formData.selectedProspectEmails.length > 0) {
+        const all = getCognismProspects()
+        const selected = new Set(formData.selectedProspectEmails.map((e) => e.toLowerCase()))
+        const scoped = all.filter((p) => {
+          if (!selected.has(p.email.toLowerCase())) return false
+          const acct = (formData.customerAccountName || '').trim().toLowerCase()
+          return acct ? (p.accountName || '').toLowerCase() === acct : true
+        })
+
+        if (scoped.length > 0) {
+          const upsert = await api.post<{ contacts: Array<{ id: string; email: string }> }>(`/api/contacts/bulk-upsert`, {
+            contacts: scoped.map((p: CognismProspect) => ({
+              firstName: p.firstName,
+              lastName: p.lastName,
+              jobTitle: p.jobTitle,
+              companyName: p.companyName,
+              email: p.email,
+              phone: p.phone,
+              source: 'cognism',
+            })),
+          })
+          if (upsert.error) throw new Error(upsert.error)
+
+          const ids = (upsert.data?.contacts || []).map((c) => c.id).filter(Boolean)
+          if (ids.length > 0) {
+            const attach = await api.post(`/api/campaigns/${id}/prospects`, { contactIds: ids })
+            if (attach.error) throw new Error(attach.error)
+          }
+        }
+      }
+
+      toast({ title: 'Success', description: 'Campaign saved', status: 'success' })
+
+      // Persist "last used" choices for speed.
+      setItem('odcrm_last_sender_identity_id', formData.senderIdentityId)
+      setItem('odcrm_last_campaign_account', formData.customerAccountName)
+
+      onSuccess()
+      return id
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message || 'Failed to save campaign', status: 'error' })
+      return undefined
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const applyTemplate = (t: OdcrmEmailTemplate) => {
+    if (t.stepNumber === 1) {
+      setFormData((prev) => ({ ...prev, step1Subject: t.subject, step1Body: t.body }))
+    } else {
+      setFormData((prev) => ({ ...prev, step2Subject: t.subject, step2Body: t.body }))
+    }
+  }
+
+  const cognismProspectsForCustomer = useMemo(() => {
+    const all = getCognismProspects()
+    const acct = (formData.customerAccountName || '').trim().toLowerCase()
+    if (!acct) return []
+    return all
+      .filter((p) => (p.accountName || '').toLowerCase() === acct)
+      .sort((a, b) => a.companyName.localeCompare(b.companyName))
+  }, [formData.customerAccountName])
+
+  return (
+    <Box>
+      <VStack spacing={4} align="stretch">
+        <WizardStep step={1} currentStep={step} title="Select Your Name">
+          <VStack spacing={4}>
+            <FormControl isRequired>
+              <FormLabel>Your name / email</FormLabel>
+              <Select
+                value={formData.senderIdentityId}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setFormData((prev) => ({ ...prev, senderIdentityId: next }))
+                  // Requested UX: picking your name moves you forward.
+                  if (next) setStep(2)
+                }}
+                placeholder="Select your name"
+              >
+                {identities.map((id) => (
+                  <option key={id.id} value={id.id}>
+                    {id.displayName ? `${id.displayName} — ` : ''}{id.emailAddress}
+                  </option>
+                ))}
+              </Select>
+              {identities.length === 0 && (
+                <Alert status="warning" mt={2}>
+                  <AlertIcon />
+                  <AlertDescription>
+                    No email accounts connected. Please connect an Outlook account first.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </FormControl>
+          </VStack>
+        </WizardStep>
+
+        <WizardStep step={2} currentStep={step} title="Select Customer & Settings">
+          <VStack spacing={4} align="stretch">
+            <FormControl isRequired>
+              <FormLabel>Customer account</FormLabel>
+              <Select
+                value={formData.customerAccountName}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setFormData((prev) => ({
+                    ...prev,
+                    customerAccountName: next,
+                    name: prev.name || (next ? `${next} Campaign` : ''),
+                  }))
+                }}
+                placeholder="Select customer"
+              >
+                {availableAccounts.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </Select>
+              {availableAccounts.length === 0 && (
+                <Alert status="warning" mt={2}>
+                  <AlertIcon />
+                  <AlertDescription>
+                    No customer accounts found. Add accounts in Customers → Accounts first.
+                  </AlertDescription>
+                </Alert>
+              )}
+            </FormControl>
+
+            <FormControl isRequired>
+              <FormLabel>Campaign name</FormLabel>
+              <Input
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="e.g., Legionella Jan Outreach"
+              />
+            </FormControl>
+
+            <FormControl>
+              <FormLabel>Description</FormLabel>
+              <Textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                placeholder="Optional notes"
+                rows={3}
+              />
+            </FormControl>
+
+            <Divider />
+
+            <FormControl>
+              <FormLabel>Send Window (Hours)</FormLabel>
+              <HStack>
+                <NumberInput
+                  value={formData.sendWindowHoursStart}
+                  onChange={(_, val) => setFormData({ ...formData, sendWindowHoursStart: val || 9 })}
+                  min={0}
+                  max={23}
+                >
+                  <NumberInputField />
+                  <NumberInputStepper>
+                    <NumberIncrementStepper />
+                    <NumberDecrementStepper />
+                  </NumberInputStepper>
+                </NumberInput>
+                <Text>to</Text>
+                <NumberInput
+                  value={formData.sendWindowHoursEnd}
+                  onChange={(_, val) => setFormData({ ...formData, sendWindowHoursEnd: val || 17 })}
+                  min={0}
+                  max={23}
+                >
+                  <NumberInputField />
+                  <NumberInputStepper>
+                    <NumberIncrementStepper />
+                    <NumberDecrementStepper />
+                  </NumberInputStepper>
+                </NumberInput>
+              </HStack>
+            </FormControl>
+
+            <FormControl>
+              <FormLabel>Follow-up Delay (Days)</FormLabel>
+              <HStack>
+                <NumberInput
+                  value={formData.followUpDelayDaysMin}
+                  onChange={(_, val) => setFormData({ ...formData, followUpDelayDaysMin: val || 3 })}
+                  min={1}
+                  max={30}
+                >
+                  <NumberInputField />
+                  <NumberInputStepper>
+                    <NumberIncrementStepper />
+                    <NumberDecrementStepper />
+                  </NumberInputStepper>
+                </NumberInput>
+                <Text>to</Text>
+                <NumberInput
+                  value={formData.followUpDelayDaysMax}
+                  onChange={(_, val) => setFormData({ ...formData, followUpDelayDaysMax: val || 5 })}
+                  min={1}
+                  max={30}
+                >
+                  <NumberInputField />
+                  <NumberInputStepper>
+                    <NumberIncrementStepper />
+                    <NumberDecrementStepper />
+                  </NumberInputStepper>
+                </NumberInput>
+              </HStack>
+            </FormControl>
+          </VStack>
+        </WizardStep>
+
+        <WizardStep step={3} currentStep={step} title="Choose Templates (Customer-Scoped)">
+          <VStack spacing={6} align="stretch">
+            <Alert status="info">
+              <AlertIcon />
+              <AlertDescription fontSize="sm">
+                Templates come from Marketing → Email Templates. You can still edit them here before saving.
+              </AlertDescription>
+            </Alert>
+
+            <Box>
+              <Heading size="sm" mb={3}>Initial Email (Step 1)</Heading>
+              <VStack spacing={3} align="stretch">
+                <FormControl>
+                  <FormLabel>Pick a template</FormLabel>
+                  <Select
+                    placeholder={stepTemplates.step1.length ? 'Select a Step 1 template' : 'No Step 1 templates found'}
+                    onChange={(e) => {
+                      const picked = stepTemplates.step1.find((t) => t.id === e.target.value)
+                      if (picked) applyTemplate(picked)
+                    }}
+                  >
+                    {stepTemplates.step1.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.account ? `[${t.account}] ` : ''}{t.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Subject</FormLabel>
+                  <Input
+                    value={formData.step1Subject}
+                    onChange={(e) => setFormData({ ...formData, step1Subject: e.target.value })}
+                    placeholder="Quick question about {{accountName}}"
+                  />
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Body</FormLabel>
+                  <Textarea
+                    value={formData.step1Body}
+                    onChange={(e) => setFormData({ ...formData, step1Body: e.target.value })}
+                    rows={10}
+                    fontFamily="mono"
+                    fontSize="sm"
+                  />
+                </FormControl>
+              </VStack>
+            </Box>
+
+            <Divider />
+
+            <Box>
+              <Heading size="sm" mb={3}>Follow-up Email (Step 2)</Heading>
+              <VStack spacing={3} align="stretch">
+                <FormControl>
+                  <FormLabel>Pick a template</FormLabel>
+                  <Select
+                    placeholder={stepTemplates.step2.length ? 'Select a Step 2 template' : 'No Step 2 templates found'}
+                    onChange={(e) => {
+                      const picked = stepTemplates.step2.find((t) => t.id === e.target.value)
+                      if (picked) applyTemplate(picked)
+                    }}
+                  >
+                    {stepTemplates.step2.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.account ? `[${t.account}] ` : ''}{t.name}
+                      </option>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Subject</FormLabel>
+                  <Input
+                    value={formData.step2Subject}
+                    onChange={(e) => setFormData({ ...formData, step2Subject: e.target.value })}
+                    placeholder="Following up — {{accountName}}"
+                  />
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Body</FormLabel>
+                  <Textarea
+                    value={formData.step2Body}
+                    onChange={(e) => setFormData({ ...formData, step2Body: e.target.value })}
+                    rows={10}
+                    fontFamily="mono"
+                    fontSize="sm"
+                  />
+                </FormControl>
+              </VStack>
+            </Box>
+
+            <Alert status="info">
+              <AlertIcon />
+              <AlertDescription fontSize="sm">
+                <strong>Variables:</strong> Use {`{{senderName}}`}, {`{{contactName}}`}, {`{{accountName}}`} in templates.
+              </AlertDescription>
+            </Alert>
+          </VStack>
+        </WizardStep>
+
+        <WizardStep step={4} currentStep={step} title="Attach Prospects (Cognism Export)">
+          <VStack spacing={4} align="stretch">
+            <Alert status="info">
+              <AlertIcon />
+              <AlertDescription fontSize="sm">
+                Import prospects first in Marketing → Cognism Prospects. Then select them here to attach to this campaign.
+              </AlertDescription>
+            </Alert>
+
+            {formData.customerAccountName ? (
+              cognismProspectsForCustomer.length === 0 ? (
+                <Alert status="warning">
+                  <AlertIcon />
+                  <AlertDescription fontSize="sm">
+                    No Cognism prospects found for <strong>{formData.customerAccountName}</strong> yet.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Box borderWidth={1} borderRadius="md" p={3}>
+                  <Text fontSize="sm" color="gray.700" mb={2}>
+                    Available prospects for <strong>{formData.customerAccountName}</strong>: {cognismProspectsForCustomer.length}
+                  </Text>
+                  <FormControl>
+                    <FormLabel fontSize="sm">Select prospects to attach</FormLabel>
+                    <Select
+                      multiple
+                      value={formData.selectedProspectEmails}
+                      onChange={(e) => {
+                        const next = Array.from(e.target.selectedOptions).map((o) => o.value)
+                        setFormData((prev) => ({ ...prev, selectedProspectEmails: next }))
+                      }}
+                      height="240px"
+                    >
+                      {cognismProspectsForCustomer.map((p) => (
+                        <option key={p.id} value={p.email.toLowerCase()}>
+                          {`${p.firstName} ${p.lastName}`.trim() || '(No name)'} — {p.email} — {p.companyName}
+                        </option>
+                      ))}
+                    </Select>
+                    <Text fontSize="xs" color="gray.500" mt={2}>
+                      Tip: hold Ctrl/Cmd to multi-select.
+                    </Text>
+                  </FormControl>
+                </Box>
+              )
+            ) : (
+              <Alert status="warning">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">Select a customer in the previous step first.</AlertDescription>
+              </Alert>
+            )}
+          </VStack>
+        </WizardStep>
+
+        <WizardStep step={5} currentStep={step} title="Review & Launch">
+          <VStack spacing={4} align="stretch">
+            <Box p={4} borderWidth={1} borderRadius="md">
+              <Text><strong>Campaign Name:</strong> {formData.name}</Text>
+              <Text><strong>Sender:</strong> {identities.find(i => i.id === formData.senderIdentityId)?.emailAddress}</Text>
+              <Text><strong>Customer:</strong> {formData.customerAccountName || '(not set)'}</Text>
+              <Text><strong>Send Window:</strong> {formData.sendWindowHoursStart}:00 - {formData.sendWindowHoursEnd}:00</Text>
+              <Text><strong>Follow-up Delay:</strong> {formData.followUpDelayDaysMin}-{formData.followUpDelayDaysMax} days</Text>
+            </Box>
+          </VStack>
+        </WizardStep>
+
+        <HStack justify="space-between" mt={6}>
+          <Button onClick={onCancel} isDisabled={loading}>
+            Cancel
+          </Button>
+          <HStack>
+            {step > 1 && (
+              <Button onClick={() => setStep(step - 1)} isDisabled={loading}>
+                Previous
+              </Button>
+            )}
+            {step < 5 ? (
+              <Button onClick={handleNext} colorScheme="blue" isDisabled={loading}>
+                Next
+              </Button>
+            ) : (
+              <>
+                <Button onClick={handleSave} colorScheme="blue" isLoading={loading}>
+                  Save as Draft
+                </Button>
+                <Button
+                  onClick={async () => {
+                    const id = await handleSave()
+                    if (!id) return
+                    const { error } = await api.post(`/api/campaigns/${id}/start`, {})
+                    if (error) {
+                      toast({ title: 'Error', description: error, status: 'error' })
+                      return
+                    }
+                    toast({ title: 'Campaign started', status: 'success', duration: 2000 })
+                  }}
+                  colorScheme="green"
+                  isLoading={loading}
+                >
+                  Start Campaign
+                </Button>
+              </>
+            )}
+          </HStack>
+        </HStack>
+      </VStack>
+    </Box>
+  )
+}

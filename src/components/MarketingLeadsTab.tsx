@@ -29,24 +29,15 @@ import { MdArrowUpward, MdArrowDownward } from 'react-icons/md'
 import { accounts as defaultAccounts, type Account } from './AccountsTab'
 import { ExportImportButtons } from './ExportImportButtons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
+import { emit, on } from '../platform/events'
+import { OdcrmStorageKeys } from '../platform/keys'
+import { getItem, getJson, setItem, setJson } from '../platform/storage'
 
-// Load accounts from localStorage (includes any edits made through the UI)
+// Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
-  try {
-    const stored = localStorage.getItem('odcrm_accounts')
-    if (stored) {
-      const parsed = JSON.parse(stored) as Account[]
-      // Use localStorage as source of truth - it contains all accounts including newly created ones
-      // Only merge with default accounts if localStorage is empty (fallback)
-      if (parsed.length > 0) {
-        return parsed
-      }
-    }
-  } catch (error) {
-    console.warn('Failed to load accounts from localStorage:', error)
-  }
-  // Fallback to default accounts if localStorage is empty
-  return defaultAccounts
+  const parsed = getJson<Account[]>(OdcrmStorageKeys.accounts)
+  if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed
+  return defaultAccounts // fallback if storage empty or invalid
 }
 
 type Lead = {
@@ -98,46 +89,24 @@ const normalizeLeadSource = (value: string | undefined): string | null => {
   return null
 }
 
-// localStorage key for marketing leads
-const STORAGE_KEY_MARKETING_LEADS = 'odcrm_marketing_leads'
-const STORAGE_KEY_MARKETING_LEADS_LAST_REFRESH = 'odcrm_marketing_leads_last_refresh'
-const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = 'odcrm_accounts_last_updated'
-
-// Load leads from localStorage
+// Load leads from storage
 function loadLeadsFromStorage(): Lead[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MARKETING_LEADS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Lead[]
-      return parsed
-    }
-  } catch (error) {
-    console.warn('Failed to load marketing leads from localStorage:', error)
-  }
-  return []
+  const parsed = getJson<Lead[]>(OdcrmStorageKeys.marketingLeads)
+  return parsed && Array.isArray(parsed) ? parsed : []
 }
 
-// Save leads to localStorage
+// Save leads to storage
 function saveLeadsToStorage(leads: Lead[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_MARKETING_LEADS, JSON.stringify(leads))
-    localStorage.setItem(STORAGE_KEY_MARKETING_LEADS_LAST_REFRESH, new Date().toISOString())
-  } catch (error) {
-    console.warn('Failed to save marketing leads to localStorage:', error)
-  }
+  setJson(OdcrmStorageKeys.marketingLeads, leads)
+  setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, new Date().toISOString())
 }
 
-// Load last refresh time from localStorage
+// Load last refresh time from storage
 function loadLastRefreshFromStorage(): Date | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_MARKETING_LEADS_LAST_REFRESH)
-    if (stored) {
-      return new Date(stored)
-    }
-  } catch (error) {
-    console.warn('Failed to load last refresh time from localStorage:', error)
-  }
-  return null
+  const stored = getItem(OdcrmStorageKeys.marketingLeadsLastRefresh)
+  if (!stored) return null
+  const d = new Date(stored)
+  return isNaN(d.getTime()) ? null : d
 }
 
 // Extract sheet ID from Google Sheets URL
@@ -389,7 +358,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
     // If accounts were updated since last refresh (e.g., sheet URLs pasted), refresh immediately.
     try {
-      const accountsUpdatedIso = localStorage.getItem(STORAGE_KEY_ACCOUNTS_LAST_UPDATED)
+      const accountsUpdatedIso = getItem(OdcrmStorageKeys.accountsLastUpdated)
       if (accountsUpdatedIso) {
         const accountsUpdatedAt = new Date(accountsUpdatedIso)
         if (!isNaN(accountsUpdatedAt.getTime()) && accountsUpdatedAt > lastRefreshTime) {
@@ -467,7 +436,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       syncAccountLeadCountsFromLeads(allLeads)
       
       // Dispatch event to update accounts with new actuals
-      window.dispatchEvent(new CustomEvent('leadsUpdated'))
+      emit('leadsUpdated')
       
       const accountsWithSheets = accountsToUse.filter(a => a.clientLeadsSheetUrl)
       const accountsWithoutSheets = accountsToUse.filter(a => !a.clientLeadsSheetUrl)
@@ -529,7 +498,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       loadLeads(true)
     }
 
-    window.addEventListener('accountsUpdated', handleAccountsUpdated)
+    const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
 
     // Auto-refresh every 6 hours
     const refreshInterval = setInterval(() => {
@@ -537,7 +506,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     }, 6 * 60 * 60 * 1000) // 6 hours in milliseconds
 
     return () => {
-      window.removeEventListener('accountsUpdated', handleAccountsUpdated)
+      offAccountsUpdated()
       clearInterval(refreshInterval)
     }
   }, [])
@@ -946,7 +915,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               saveLeadsToStorage(importedLeads)
               syncAccountLeadCountsFromLeads(importedLeads)
               // Dispatch event to update accounts with new actuals
-              window.dispatchEvent(new CustomEvent('leadsUpdated'))
+              emit('leadsUpdated')
               toast({
                 title: 'Leads imported',
                 description: `${importedLeads.length} leads loaded successfully.`,

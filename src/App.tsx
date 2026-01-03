@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Flex,
+  Grid,
+  GridItem,
   Heading,
   Text,
   VStack,
@@ -10,6 +12,7 @@ import {
 import { CRM_TOP_TABS, getCrmTopTab, type CrmTopTabId } from './contracts/nav'
 import { CrmTopTabs } from './components/nav/CrmTopTabs'
 import { DataPortability } from './components/DataPortability'
+import { HeaderImagePicker } from './components/HeaderImagePicker'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import SalesHomePage from './tabs/sales/SalesHomePage'
 import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/MarketingHomePage'
@@ -21,6 +24,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('overview')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
+  const [uxToolsEnabled, setUxToolsEnabled] = useState<boolean>(false)
 
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
@@ -30,6 +34,8 @@ function App() {
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
       'marketing-leads': { tab: 'marketing-home' as const, view: 'leads' satisfies MarketingViewId },
       'email-campaigns': { tab: 'marketing-home' as const, view: 'campaigns' satisfies MarketingViewId },
+      'email-templates': { tab: 'marketing-home' as const, view: 'templates' satisfies MarketingViewId },
+      'cognism-prospects': { tab: 'marketing-home' as const, view: 'cognism-prospects' satisfies MarketingViewId },
       'user-authorization': { tab: 'operations-home' as const, view: 'user-authorization' satisfies OperationsViewId },
     } as const
   }, [])
@@ -96,6 +102,34 @@ function App() {
     }
   }, [])
 
+  // UX tools toggle (owner-only-ish): Ctrl+Shift+U to show/hide power tools in the header.
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('odcrm_ux_tools_enabled')
+      if (stored === 'true') setUxToolsEnabled(true)
+    } catch {
+      // ignore
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && (e.key === 'U' || e.key === 'u')) {
+        e.preventDefault()
+        setUxToolsEnabled((prev) => {
+          const next = !prev
+          try {
+            localStorage.setItem('odcrm_ux_tools_enabled', String(next))
+          } catch {
+            // ignore
+          }
+          return next
+        })
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   const page = (() => {
     switch (activeTab) {
       case 'customers-home':
@@ -143,21 +177,39 @@ function App() {
 
   return (
     <Flex minH="100vh" bg="brand.50" direction="column">
-      <Box bg="white" borderBottom="1px solid" borderColor="brand.100" px={{ base: 4, md: 6 }} py={4}>
+      <Box bg="white" borderBottom="1px solid" borderColor="brand.100" px={{ base: 4, md: 6 }} py={{ base: 4, md: 5 }}>
         <VStack align="stretch" spacing={3}>
-          <Flex align="center" justify="space-between" gap={4} wrap="wrap">
-            <Box>
-              <Heading size="md" color="brand.800" fontWeight="bold" letterSpacing="wide">
-                OpenDoors CRM
-              </Heading>
-              <Text fontSize="sm" color="brand.400">
-                {getCrmTopTab(activeTab).ownerAgent}
+          <Grid
+            alignItems="center"
+            templateColumns={{ base: '1fr', md: '1fr auto 1fr' }}
+            gap={4}
+          >
+            {/* Left: intentionally blank to keep the logo perfectly centered */}
+            <GridItem display={{ base: 'none', md: 'block' }} />
+
+            {/* Center: logo + subheader */}
+            <GridItem display={{ base: 'none', md: 'block' }}>
+              <VStack spacing={1} w="100%" maxW="720px" align="center" mx="auto">
+                <HeaderImagePicker variant="logo" maxHeightPx={180} lockEdits />
+                <Text fontSize="sm" color="brand.500" fontWeight="semibold" letterSpacing="wide" textAlign="center">
+                  OpenDoors Marketing CRM
+                </Text>
+              </VStack>
+            </GridItem>
+
+            {/* Right: UX-only tools (hidden by default) */}
+            <GridItem justifySelf={{ base: 'stretch', md: 'end' }}>
+              {uxToolsEnabled ? <DataPortability /> : null}
+            </GridItem>
+          </Grid>
+          <Box display={{ base: 'block', md: 'none' }} pt={1}>
+            <VStack spacing={1} align="center">
+              <HeaderImagePicker variant="logo" maxHeightPx={160} lockEdits />
+              <Text fontSize="sm" color="brand.500" fontWeight="semibold" letterSpacing="wide" textAlign="center">
+                OpenDoors Marketing CRM
               </Text>
-            </Box>
-            <Box>
-              <DataPortability />
-            </Box>
-          </Flex>
+            </VStack>
+          </Box>
           <CrmTopTabs
             activeTab={activeTab}
             onTabClick={(tabId) => {
@@ -175,7 +227,7 @@ function App() {
             {getCrmTopTab(activeTab).label}
           </Heading>
           <Text color="brand.500" fontSize={{ base: 'sm', md: 'md' }}>
-            {activeView !== 'overview' ? `View: ${activeView}` : 'Coming soon.'}
+            {activeView !== 'overview' ? `View: ${activeView}` : null}
           </Text>
         </Box>
 

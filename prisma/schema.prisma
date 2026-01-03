@@ -1,0 +1,248 @@
+// Prisma schema for Email Campaigns CRM
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Customer (client) entity - existing multi-tenant setup
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  domain    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  contacts          Contact[]
+  emailIdentities   EmailIdentity[]
+  emailCampaigns    EmailCampaign[]
+
+  @@index([id])
+  @@map("customers")
+}
+
+// Contact (prospect, imported from Cognism)
+model Contact {
+  id         String   @id @default(cuid())
+  customerId String
+  firstName  String
+  lastName   String
+  jobTitle   String?
+  companyName String
+  email      String
+  phone      String?
+  source     String   @default("cognism") // e.g. "cognism"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  customer              Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  emailCampaignProspects EmailCampaignProspect[]
+
+  @@index([customerId])
+  @@index([email])
+  @@index([customerId, email])
+  @@map("contacts")
+}
+
+// EmailIdentity (sender email address used for campaigns)
+model EmailIdentity {
+  id              String    @id @default(cuid())
+  customerId      String
+  emailAddress    String
+  displayName     String?
+  provider        String    @default("outlook") // "outlook"
+  outlookTenantId String?
+  outlookUserId   String?
+  accessToken     String?   @db.Text
+  refreshToken    String?   @db.Text
+  tokenExpiresAt  DateTime?
+  dailySendLimit  Int       @default(150)
+  isActive        Boolean   @default(true)
+  lastCheckedAt   DateTime? // For reply detection polling
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  customer              Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  emailCampaigns        EmailCampaign[]
+  emailCampaignProspects EmailCampaignProspect[]
+  emailMessageMetadata  EmailMessageMetadata[]
+
+  @@unique([customerId, emailAddress])
+  @@index([customerId])
+  @@index([emailAddress])
+  @@index([isActive])
+  @@map("email_identities")
+}
+
+// EmailCampaign
+model EmailCampaign {
+  id                   String   @id @default(cuid())
+  customerId           String
+  name                 String
+  description          String?
+  status               CampaignStatus @default(draft)
+  senderIdentityId     String
+  sendWindowHoursStart Int      @default(9) // 0-23
+  sendWindowHoursEnd   Int      @default(17) // 0-23
+  randomizeWithinHours Int      @default(24) // spread first emails over this time
+  followUpDelayDaysMin Int      @default(3)
+  followUpDelayDaysMax Int      @default(5)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  customer                Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  senderIdentity          EmailIdentity           @relation(fields: [senderIdentityId], references: [id])
+  templates               EmailCampaignTemplate[]
+  prospects               EmailCampaignProspect[]
+  events                  EmailEvent[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([customerId, status])
+  @@index([senderIdentityId])
+  @@map("email_campaigns")
+}
+
+enum CampaignStatus {
+  draft
+  running
+  paused
+  completed
+}
+
+// EmailCampaignTemplate
+model EmailCampaignTemplate {
+  id             String   @id @default(cuid())
+  campaignId     String
+  stepNumber     Int      // 1 for initial email, 2 for follow-up
+  subjectTemplate String  @db.Text
+  bodyTemplateHtml String @db.Text
+  bodyTemplateText String? @db.Text
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  campaign EmailCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, stepNumber])
+  @@index([campaignId])
+  @@map("email_campaign_templates")
+}
+
+// EmailCampaignProspect
+model EmailCampaignProspect {
+  id                String                 @id @default(cuid())
+  campaignId        String
+  contactId         String
+  senderIdentityId  String
+  step1ScheduledAt  DateTime?
+  step1SentAt       DateTime?
+  step2ScheduledAt  DateTime?
+  step2SentAt       DateTime?
+  lastStatus        ProspectStatus         @default(pending)
+  openCount         Int                    @default(0)
+  lastOpenedAt      DateTime?
+  unsubscribedAt    DateTime?
+  bouncedAt         DateTime?
+  replyDetectedAt   DateTime?
+  replyCount        Int                    @default(0)
+  lastReplySnippet  String?                @db.Text
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  // Relations
+  campaign            EmailCampaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact             Contact                @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  senderIdentity      EmailIdentity          @relation(fields: [senderIdentityId], references: [id])
+  events              EmailEvent[]
+  emailMessageMetadata EmailMessageMetadata[]
+
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([senderIdentityId])
+  @@index([lastStatus])
+  @@index([campaignId, lastStatus])
+  @@index([step1ScheduledAt])
+  @@index([step2ScheduledAt])
+  @@map("email_campaign_prospects")
+}
+
+enum ProspectStatus {
+  pending
+  step1_sent
+  step2_sent
+  bounced
+  unsubscribed
+  replied
+  completed
+}
+
+// EmailEvent
+model EmailEvent {
+  id                  String   @id @default(cuid())
+  campaignId          String
+  campaignProspectId  String
+  type                EventType
+  metadata            Json?    // include raw provider response, headers, messageId, etc.
+  occurredAt          DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  // Relations
+  campaign          EmailCampaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignProspect  EmailCampaignProspect  @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([campaignProspectId])
+  @@index([type])
+  @@index([occurredAt])
+  @@index([campaignId, type])
+  @@map("email_events")
+}
+
+enum EventType {
+  sent
+  bounced
+  delivered
+  opened
+  unsubscribed
+  replied
+}
+
+// EmailMessageMetadata
+model EmailMessageMetadata {
+  id                  String   @id @default(cuid())
+  campaignProspectId  String?
+  senderIdentityId    String
+  providerMessageId   String   // Graph / Outlook message id of the SENT email
+  threadId            String?  // conversationId or similar from Graph
+  direction           MessageDirection @default(outbound)
+  fromAddress         String
+  toAddress           String
+  subject             String   @db.Text
+  rawHeaders          Json?    // JSON or text, optional
+  createdAt           DateTime @default(now())
+
+  // Relations
+  campaignProspect  EmailCampaignProspect? @relation(fields: [campaignProspectId], references: [id], onDelete: SetNull)
+  senderIdentity    EmailIdentity          @relation(fields: [senderIdentityId], references: [id], onDelete: Cascade)
+
+  @@unique([providerMessageId])
+  @@index([senderIdentityId])
+  @@index([campaignProspectId])
+  @@index([threadId])
+  @@index([toAddress])
+  @@index([providerMessageId, threadId])
+  @@map("email_message_metadata")
+}
+
+enum MessageDirection {
+  outbound
+  inbound
+}

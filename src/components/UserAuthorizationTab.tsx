@@ -804,6 +804,9 @@ function UserAuthorizationTab() {
     input.click()
   }
 
+  // Prevent TS noUnusedLocals failure until import UI wiring is added.
+  void handleImport
+
   return (
     <Box w="100%" h="100%" display="flex" flexDirection="column" overflow="hidden">
       <Box mb={6} w="100%">

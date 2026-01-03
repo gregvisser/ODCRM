@@ -28,53 +28,37 @@ import {
   Button,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
+import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
+import { emit, on } from '../platform/events'
+import { OdcrmStorageKeys } from '../platform/keys'
+import { getItem, getJson, setItem, setJson } from '../platform/storage'
 
 type Lead = {
   [key: string]: string // Dynamic fields from Google Sheet
   accountName: string
 }
 
-// localStorage key for leads
-const STORAGE_KEY_LEADS = 'odcrm_leads'
-const STORAGE_KEY_LEADS_LAST_REFRESH = 'odcrm_leads_last_refresh'
-
-// Load leads from localStorage
+// Load leads from storage
 function loadLeadsFromStorage(): Lead[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_LEADS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Lead[]
-      console.log('✅ Loaded leads from localStorage:', parsed.length)
-      return parsed
-    }
-  } catch (error) {
-    console.warn('Failed to load leads from localStorage:', error)
-  }
-  return []
+  const parsed = getJson<Lead[]>(OdcrmStorageKeys.leads)
+  if (!parsed || !Array.isArray(parsed)) return []
+  console.log('✅ Loaded leads from storage:', parsed.length)
+  return parsed
 }
 
-// Save leads to localStorage
+// Save leads to storage
 function saveLeadsToStorage(leads: Lead[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_LEADS, JSON.stringify(leads))
-    localStorage.setItem(STORAGE_KEY_LEADS_LAST_REFRESH, new Date().toISOString())
-    console.log('💾 Saved leads to localStorage:', leads.length)
-  } catch (error) {
-    console.warn('Failed to save leads to localStorage:', error)
-  }
+  setJson(OdcrmStorageKeys.leads, leads)
+  setItem(OdcrmStorageKeys.leadsLastRefresh, new Date().toISOString())
+  console.log('💾 Saved leads to storage:', leads.length)
 }
 
-// Load last refresh time from localStorage
+// Load last refresh time from storage
 function loadLastRefreshFromStorage(): Date | null {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_LEADS_LAST_REFRESH)
-    if (stored) {
-      return new Date(stored)
-    }
-  } catch (error) {
-    console.warn('Failed to load last refresh time from localStorage:', error)
-  }
-  return null
+  const stored = getItem(OdcrmStorageKeys.leadsLastRefresh)
+  if (!stored) return null
+  const d = new Date(stored)
+  return isNaN(d.getTime()) ? null : d
 }
 
 // Extract sheet ID from Google Sheets URL
@@ -263,12 +247,14 @@ function LeadsTab() {
     setError(null)
 
     try {
-      // Get updated accounts data from AccountsTab
+      // Load accounts from localStorage to get latest Google Sheets URLs (source of truth).
+      // Falls back to the bundled default accounts if localStorage is empty.
       let accountsToUse: typeof import('./AccountsTab').accounts
-      
-      if ((window as any).__getAccounts) {
-        accountsToUse = (window as any).__getAccounts()
-      } else {
+      try {
+        const stored = getJson<typeof import('./AccountsTab').accounts>(OdcrmStorageKeys.accounts)
+        if (stored && Array.isArray(stored)) accountsToUse = stored
+        else accountsToUse = (await import('./AccountsTab')).accounts
+      } catch {
         const { accounts } = await import('./AccountsTab')
         accountsToUse = accounts
       }
@@ -295,6 +281,8 @@ function LeadsTab() {
       
       // Save to localStorage
       saveLeadsToStorage(allLeads)
+      syncAccountLeadCountsFromLeads(allLeads)
+      emit('leadsUpdated')
     } catch (err) {
       setError('Failed to load leads data. Please check that the Google Sheets are publicly accessible.')
       console.error('Error loading leads:', err)
@@ -314,47 +302,32 @@ function LeadsTab() {
     }, 6 * 60 * 60 * 1000) // 6 hours in milliseconds
 
     // Listen for navigation events (but only refresh if 6 hours have passed)
-    const handleNavigate = (event: CustomEvent) => {
-      const accountName = event.detail?.accountName
+    const handleNavigate = (event: { accountName?: string } | undefined) => {
+      const accountName = event?.accountName
       if (accountName) {
-        // Only show toast and refresh if 6 hours have passed
-        if (shouldRefresh()) {
-          toast({
-            title: 'Loading leads...',
-            description: `Fetching leads for ${accountName}`,
-            status: 'info',
-            duration: 2000,
-          })
-          loadLeads(false)
-        } else {
-          toast({
-            title: 'Using cached data',
-            description: `Data will auto-refresh every 6 hours. Last refresh: ${formatLastRefresh(lastRefresh)}`,
-            status: 'info',
-            duration: 2000,
-          })
-        }
+        toast({
+          title: 'Loading leads...',
+          description: `Fetching leads for ${accountName}`,
+          status: 'info',
+          duration: 2000,
+        })
+        loadLeads(true)
       }
     }
 
-    // Listen for accounts updated event (but only refresh if 6 hours have passed)
+    // When accounts (or their sheet URLs) change, force refresh so dependent views stay in sync.
     const handleAccountsUpdated = () => {
-      console.log('Accounts updated, checking if refresh is needed...')
-      if (shouldRefresh()) {
-        console.log('6 hours have passed, reloading leads...')
-        loadLeads(false)
-      } else {
-        console.log('Skipping refresh - less than 6 hours since last refresh')
-      }
+      console.log('Accounts updated, refreshing leads...')
+      loadLeads(true)
     }
 
-    window.addEventListener('navigateToLeads', handleNavigate as EventListener)
-    window.addEventListener('accountsUpdated', handleAccountsUpdated)
+    const offNavigate = on<{ accountName?: string }>('navigateToLeads', (detail) => handleNavigate(detail))
+    const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
 
     return () => {
       clearInterval(refreshInterval)
-      window.removeEventListener('navigateToLeads', handleNavigate as EventListener)
-      window.removeEventListener('accountsUpdated', handleAccountsUpdated)
+      offNavigate()
+      offAccountsUpdated()
     }
   }, [toast, lastRefresh])
 

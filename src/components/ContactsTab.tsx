@@ -4,6 +4,7 @@ import {
   Badge,
   Box,
   Heading,
+  Text,
   Table,
   Tbody,
   Td,
@@ -13,6 +14,9 @@ import {
   Link,
   Button,
   HStack,
+  Stack,
+  Textarea,
+  Checkbox,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -35,8 +39,10 @@ import {
   AlertDialogOverlay,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
-import { accounts } from './AccountsTab'
 import { ExportImportButtons } from './ExportImportButtons'
+import { emit, on } from '../platform/events'
+import { OdcrmStorageKeys } from '../platform/keys'
+import { getJson, setItem, setJson } from '../platform/storage'
 
 export type Contact = {
   id: string
@@ -233,34 +239,129 @@ const defaultContacts: Contact[] = [
   },
 ]
 
-// Export for backward compatibility
-export const contacts = defaultContacts
-
-// localStorage key
-const STORAGE_KEY_CONTACTS = 'odcrm_contacts'
-
-// Load contacts from localStorage or use default
+// Load contacts from storage or use default
 function loadContactsFromStorage(): Contact[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_CONTACTS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as Contact[]
-      console.log('✅ Loaded contacts from localStorage:', parsed.length)
-      return parsed
-    }
-  } catch (error) {
-    console.warn('Failed to load contacts from localStorage:', error)
+  const parsed = getJson<Contact[]>(OdcrmStorageKeys.contacts)
+  if (parsed && Array.isArray(parsed)) {
+    console.log('✅ Loaded contacts from storage:', parsed.length)
+    return parsed
   }
   return defaultContacts
 }
 
-// Save contacts to localStorage
+// Save contacts to storage
 function saveContactsToStorage(contactsData: Contact[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_CONTACTS, JSON.stringify(contactsData))
-    console.log('💾 Saved contacts to localStorage')
-  } catch (error) {
-    console.warn('Failed to save contacts to localStorage:', error)
+  setJson(OdcrmStorageKeys.contacts, contactsData)
+  console.log('💾 Saved contacts to storage')
+}
+
+function loadAccountNamesFromStorage(): string[] {
+  const parsed = getJson<Array<{ name: string }>>(OdcrmStorageKeys.accounts)
+  if (!parsed || !Array.isArray(parsed)) return []
+  return parsed.map((acc) => acc?.name).filter(Boolean)
+}
+
+function loadDeletedAccountsFromStorage(): Set<string> {
+  const parsed = getJson<string[]>(OdcrmStorageKeys.deletedAccounts)
+  return new Set(Array.isArray(parsed) ? parsed : [])
+}
+
+type ParsedContactRow = {
+  account: string
+  name: string
+  title?: string
+  email?: string
+  phone?: string
+}
+
+function detectDelimiter(text: string): '\t' | ',' {
+  const firstLine = text.split(/\r?\n/)[0] || ''
+  return firstLine.includes('\t') ? '\t' : ','
+}
+
+function parseSpreadsheetContacts(text: string): ParsedContactRow[] {
+  const raw = text.trim()
+  if (!raw) return []
+
+  const delimiter = detectDelimiter(raw)
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== '')
+  if (lines.length < 2) return []
+
+  const headers = lines[0].split(delimiter).map((h) => h.trim().toLowerCase())
+  const rows = lines.slice(1)
+
+  const pick = (cells: string[], aliases: string[]) => {
+    for (const alias of aliases) {
+      const idx = headers.indexOf(alias)
+      if (idx >= 0) {
+        const v = (cells[idx] ?? '').trim()
+        if (v) return v
+      }
+    }
+    return ''
+  }
+
+  const accountAliases = ['account name', 'account', 'client', 'company']
+  const nameAliases = ['client contact name', 'contact name', 'name']
+  const titleAliases = ['job title', 'title']
+  const emailAliases = ['email address', 'contact email', 'email']
+  const phoneAliases = ['telephone number', 'contact number', 'main office number', 'phone', 'contact phone']
+
+  const parsed: ParsedContactRow[] = []
+
+  for (const line of rows) {
+    const cells = line.split(delimiter).map((c) => c.trim())
+    const account = pick(cells, accountAliases)
+    const name = pick(cells, nameAliases)
+    const title = pick(cells, titleAliases) || undefined
+    const email = pick(cells, emailAliases) || undefined
+    const phone = pick(cells, phoneAliases) || undefined
+
+    // Skip fully empty lines
+    if (!account && !name && !email && !phone) continue
+    parsed.push({ account, name, title, email, phone })
+  }
+
+  return parsed
+}
+
+function buildBlankAccount(name: string) {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const end = new Date(start)
+  end.setFullYear(end.getFullYear() + 1)
+  const isoDate = (d: Date) => d.toISOString().split('T')[0]
+
+  return {
+    name,
+    website: '',
+    status: 'Active',
+    sector: 'To be determined',
+    targetLocation: [],
+    targetTitle: '',
+    monthlySpendGBP: 0,
+    defcon: 3,
+    contractStart: isoDate(start),
+    contractEnd: isoDate(end),
+    days: 1,
+    contacts: 0,
+    leads: 0,
+    weeklyTarget: 0,
+    weeklyActual: 0,
+    monthlyTarget: 0,
+    monthlyActual: 0,
+    weeklyReport: '',
+    clientLeadsSheetUrl: '',
+    aboutSections: {
+      whatTheyDo: 'Information will be populated via AI research.',
+      accreditations: 'Information will be populated via AI research.',
+      keyLeaders: 'Information will be populated via AI research.',
+      companyProfile: 'Information will be populated via AI research.',
+      recentNews: 'Information will be populated via AI research.',
+    },
+    socialMedia: [],
+    agreements: [],
+    users: [],
   }
 }
 
@@ -279,37 +380,175 @@ function ContactsTab() {
   } = useDisclosure()
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null)
   const [contactToEdit, setContactToEdit] = useState<Contact | null>(null)
-  const [isEditMode, setIsEditMode] = useState(false)
+  const [, setIsEditMode] = useState(false)
   const toast = useToast()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
   // Load accounts from localStorage (same pattern as AccountsTab)
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([])
+  const {
+    isOpen: isImportOpen,
+    onOpen: onImportOpen,
+    onClose: onImportClose,
+  } = useDisclosure()
+  const [importText, setImportText] = useState<string>('')
+  const [createMissingAccounts, setCreateMissingAccounts] = useState<boolean>(true)
 
   useEffect(() => {
-    // Load accounts from localStorage
-    try {
-      const stored = localStorage.getItem('odcrm_accounts')
-      if (stored) {
-        const parsed = JSON.parse(stored) as Array<{ name: string }>
-        const accountNames = parsed.map((acc) => acc.name)
-        setAvailableAccounts(accountNames)
-      } else {
-        // Fallback to exported accounts
-        const accountNames = accounts.map((acc) => acc.name)
-        setAvailableAccounts(accountNames)
+    const refresh = () => setAvailableAccounts(loadAccountNamesFromStorage())
+    refresh()
+
+    const handleAccountsUpdated = () => {
+      const names = loadAccountNamesFromStorage()
+      setAvailableAccounts(names)
+
+      // If accounts are deleted, remove linked contacts so the system stays in sync.
+      if (names.length > 0) {
+        const setNames = new Set(names)
+        setContactsData((prev) => {
+          const next = prev.filter((c) => setNames.has(c.account))
+          return next
+        })
       }
-    } catch (error) {
-      // Fallback to exported accounts
-      const accountNames = accounts.map((acc) => acc.name)
-      setAvailableAccounts(accountNames)
     }
+
+    const off = on('accountsUpdated', () => handleAccountsUpdated())
+    return () => off()
   }, [])
 
   // Save contacts to localStorage whenever data changes
   useEffect(() => {
     saveContactsToStorage(contactsData)
+    // Dispatch event to notify other tabs (like AccountsTab) that contacts have changed
+    emit('contactsUpdated', contactsData)
   }, [contactsData])
+
+  const handleImportContacts = () => {
+    const parsed = parseSpreadsheetContacts(importText)
+    if (parsed.length === 0) {
+      toast({
+        title: 'Nothing to import',
+        description: 'Paste a spreadsheet (with headers) into the box first.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    const existingAccountNames = loadAccountNamesFromStorage()
+    const canonicalByLower = new Map(existingAccountNames.map((n) => [n.trim().toLowerCase(), n] as const))
+    const deleted = loadDeletedAccountsFromStorage()
+
+    const normalizeAccount = (rawAccount: string) => {
+      const cleaned = rawAccount.trim()
+      const canonical = canonicalByLower.get(cleaned.toLowerCase())
+      return canonical || cleaned
+    }
+
+    const missingAccounts = new Set<string>()
+    const nextContacts: Contact[] = [...contactsData]
+    const indexByKey = new Map<string, number>()
+    for (let i = 0; i < nextContacts.length; i++) {
+      const c = nextContacts[i]
+      const key = `${c.account.toLowerCase()}|${(c.email || c.name).toLowerCase()}`
+      indexByKey.set(key, i)
+    }
+
+    let created = 0
+    let updated = 0
+    let skippedDeletedAccount = 0
+
+    for (const row of parsed) {
+      const account = normalizeAccount(row.account || '')
+      if (!account) continue
+      if (deleted.has(account)) {
+        skippedDeletedAccount++
+        continue
+      }
+
+      if (!canonicalByLower.has(account.toLowerCase()) && createMissingAccounts) {
+        missingAccounts.add(account)
+      }
+
+      const name = (row.name || '').trim()
+      const email = (row.email || '').trim()
+      const phone = (row.phone || '').trim()
+      const title = (row.title || '').trim()
+
+      const key = `${account.toLowerCase()}|${(email || name || phone).toLowerCase()}`
+      const existingIndex = indexByKey.get(key)
+
+      if (existingIndex !== undefined) {
+        const prev = nextContacts[existingIndex]
+        const merged: Contact = {
+          ...prev,
+          account,
+          name: name || prev.name,
+          title: title || prev.title,
+          email: email || prev.email,
+          phone: phone || prev.phone,
+          tier: prev.tier || 'Decision maker',
+          status: prev.status || 'Active',
+        }
+        nextContacts[existingIndex] = merged
+        updated++
+      } else {
+        nextContacts.push({
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          account,
+          name: name || '(Unnamed contact)',
+          title: title || '',
+          email: email || '',
+          phone: phone || '',
+          tier: 'Decision maker',
+          status: 'Active',
+        })
+        indexByKey.set(key, nextContacts.length - 1)
+        created++
+      }
+    }
+
+    // Optionally create missing accounts so contacts are linked.
+    let createdAccountsCount = 0
+    if (createMissingAccounts && missingAccounts.size > 0) {
+      try {
+        const accounts = getJson<any[]>(OdcrmStorageKeys.accounts) || []
+        const existingLower = new Set(accounts.map((a) => String(a?.name || '').toLowerCase()).filter(Boolean))
+
+        for (const name of missingAccounts) {
+          if (existingLower.has(name.toLowerCase())) continue
+          accounts.push(buildBlankAccount(name))
+          existingLower.add(name.toLowerCase())
+          createdAccountsCount++
+        }
+
+        setJson(OdcrmStorageKeys.accounts, accounts)
+        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+        emit('accountsUpdated', accounts)
+      } catch (e) {
+        console.warn('Failed to create missing accounts during contacts import', e)
+      }
+    }
+
+    setContactsData(nextContacts)
+    onImportClose()
+    setImportText('')
+
+    const parts: string[] = []
+    if (created > 0) parts.push(`Imported ${created} new contact(s).`)
+    if (updated > 0) parts.push(`Updated ${updated} existing contact(s).`)
+    if (createdAccountsCount > 0) parts.push(`Created ${createdAccountsCount} new account(s).`)
+    if (skippedDeletedAccount > 0) parts.push(`${skippedDeletedAccount} row(s) skipped (account was deleted).`)
+
+    toast({
+      title: 'Contacts imported',
+      description: parts.join(' '),
+      status: 'success',
+      duration: 6000,
+      isClosable: true,
+    })
+  }
 
   // Form state
   const [newContact, setNewContact] = useState<Omit<Contact, 'id'>>({
@@ -489,6 +728,9 @@ function ContactsTab() {
               saveContactsToStorage(items)
             }}
           />
+          <Button variant="outline" onClick={onImportOpen}>
+            Import Spreadsheet
+          </Button>
           <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onOpen}>
             Create Contact
           </Button>
@@ -527,10 +769,7 @@ function ContactsTab() {
                   onClick={(e) => {
                     e.preventDefault()
                     // Trigger navigation to accounts tab and open the account
-                    const event = new CustomEvent('navigateToAccount', {
-                      detail: { accountName: contact.account },
-                    })
-                    window.dispatchEvent(event)
+                    emit('navigateToAccount', { accountName: contact.account })
                   }}
                   _hover={{ textDecoration: 'underline' }}
                 >
@@ -579,6 +818,48 @@ function ContactsTab() {
           ))}
         </Tbody>
       </Table>
+
+      {/* Spreadsheet Import Modal */}
+      <Modal isOpen={isImportOpen} onClose={onImportClose} size="xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Import contacts from spreadsheet</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Stack spacing={3}>
+              <Text fontSize="sm" color="gray.600">
+                Paste a table copied from Excel/Google Sheets (include the header row). Supported headers include:
+                Account/Client, Contact Name, Job Title, Email Address, Telephone/Contact Number.
+              </Text>
+              <Textarea
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder="Paste spreadsheet here (Ctrl+V)..."
+                minH="220px"
+                fontFamily="mono"
+                fontSize="sm"
+              />
+              <Checkbox
+                isChecked={createMissingAccounts}
+                onChange={(e) => setCreateMissingAccounts(e.target.checked)}
+              >
+                Create missing accounts automatically (recommended to keep links in sync)
+              </Checkbox>
+              <Text fontSize="xs" color="gray.500">
+                Tip: Press Ctrl+Shift+U to show Data Portability if you need to export/import full snapshots.
+              </Text>
+            </Stack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" onClick={onImportClose}>
+              Cancel
+            </Button>
+            <Button colorScheme="teal" onClick={handleImportContacts} ml={3}>
+              Import
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
 
       {/* Create Contact Modal */}
       <Modal isOpen={isOpen} onClose={handleCloseModal} size="lg">
