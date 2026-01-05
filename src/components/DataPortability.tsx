@@ -4,6 +4,8 @@ import { createOdcrmSnapshot, downloadOdcrmSnapshot, importOdcrmSnapshot } from 
 export function DataPortability() {
   const toast = useToast()
   const origin = window.location.origin
+  const isDevLocalhost = /^(http:\/\/localhost:|http:\/\/127\.0\.0\.1:|http:\/\/\[::1\]:)/.test(origin)
+  const recommendedDevOrigin = 'http://localhost:5173'
 
   const accountsSummary = (() => {
     try {
@@ -14,6 +16,14 @@ export function DataPortability() {
       return { accounts: parsed.length, withSheets }
     } catch {
       return { accounts: 0, withSheets: 0 }
+    }
+  })()
+
+  const accountsLastUpdated = (() => {
+    try {
+      return localStorage.getItem('odcrm_accounts_last_updated') || ''
+    } catch {
+      return ''
     }
   })()
 
@@ -84,7 +94,14 @@ export function DataPortability() {
       </Text>
       <Text fontSize="xs" color="gray.600" mb={2}>
         Current: <Box as="span" fontWeight="semibold">{origin}</Box> • Accounts: {accountsSummary.accounts} • Sheets: {accountsSummary.withSheets}
+        {accountsLastUpdated ? ` • Last saved: ${accountsLastUpdated}` : ''}
       </Text>
+      {isDevLocalhost && origin !== recommendedDevOrigin ? (
+        <Text fontSize="xs" color="orange.600" mb={2}>
+          Warning: local data is per URL/port. For consistent saved data in dev, use{' '}
+          <Box as="span" fontWeight="semibold">{recommendedDevOrigin}</Box>.
+        </Text>
+      ) : null}
       <HStack spacing={2} flexWrap="wrap" mb={2}>
         <Button
           size="xs"

@@ -3594,6 +3594,47 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     )
     return [...loaded, ...newAccounts]
   })
+
+  // Ensure account changes are persisted immediately (guards against missed save paths and prevents "reverts")
+  // Also keeps multiple tabs in sync via the native `storage` event.
+  const accountsAutosaveTimerRef = useRef<number | null>(null)
+  const accountsLastSavedJsonRef = useRef<string>('')
+
+  useEffect(() => {
+    try {
+      const json = JSON.stringify(accountsData)
+      if (json === accountsLastSavedJsonRef.current) return
+
+      if (accountsAutosaveTimerRef.current) window.clearTimeout(accountsAutosaveTimerRef.current)
+      accountsAutosaveTimerRef.current = window.setTimeout(() => {
+        saveAccountsToStorage(accountsData)
+        accountsLastSavedJsonRef.current = json
+      }, 200)
+    } catch {
+      // ignore serialization/storage failures (e.g. storage disabled)
+    }
+
+    return () => {
+      if (accountsAutosaveTimerRef.current) window.clearTimeout(accountsAutosaveTimerRef.current)
+    }
+  }, [accountsData])
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY_ACCOUNTS && e.key !== STORAGE_KEY_ACCOUNTS_LAST_UPDATED) return
+
+      const loaded = loadAccountsFromStorage()
+      const loadedAccountNames = new Set(loaded.map((a) => a.name))
+      const deletedAccountsSet = loadDeletedAccountsFromStorage()
+      const newAccounts = accounts.filter(
+        (a) => !loadedAccountNames.has(a.name) && !deletedAccountsSet.has(a.name)
+      )
+      setAccountsData([...loaded, ...newAccounts])
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
