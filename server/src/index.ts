@@ -26,6 +26,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
+// API health check (kept separate from customer-scoped routes)
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+})
+
 // API Routes
 app.use('/api/campaigns', campaignRoutes)
 app.use('/api/contacts', contactsRoutes)

@@ -22,11 +22,16 @@ export function HeaderImagePicker({
    * This is UI/UX gating only (not security). True enforcement requires auth/roles.
    */
   lockEdits = true,
+  /**
+   * Whether to show a hint when not editing (e.g. "press Ctrl+Shift+L").
+   */
+  showLockedHint = false,
 }: {
   storageKey?: string
   variant?: 'logo' | 'default'
   maxHeightPx?: number
   lockEdits?: boolean
+  showLockedHint?: boolean
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [dataUrl, setDataUrl] = useState<string | null>(null)
@@ -43,7 +48,9 @@ export function HeaderImagePicker({
   }, [storageKey])
 
   // Owner-only-ish UX: unlock edit mode via keyboard shortcut.
-  // Ctrl+Shift+L toggles edit controls and persists it locally.
+  // Ctrl+Shift+L toggles edit controls.
+  // NOTE: We intentionally keep this session-only (sessionStorage) so "Change Logo"
+  // never appears by default after refresh, even on shared machines.
   useEffect(() => {
     if (!lockEdits) {
       setIsEditing(true)
@@ -51,7 +58,15 @@ export function HeaderImagePicker({
     }
 
     try {
-      const stored = localStorage.getItem(`${storageKey}__editing`)
+      // Back-compat: if an old localStorage unlock exists, clear it so edit controls
+      // don't stick around permanently.
+      localStorage.removeItem(`${storageKey}__editing`)
+    } catch {
+      // ignore
+    }
+
+    try {
+      const stored = sessionStorage.getItem(`${storageKey}__editing`)
       if (stored === 'true') setIsEditing(true)
     } catch {
       // ignore
@@ -63,7 +78,7 @@ export function HeaderImagePicker({
         setIsEditing((prev) => {
           const next = !prev
           try {
-            localStorage.setItem(`${storageKey}__editing`, String(next))
+            sessionStorage.setItem(`${storageKey}__editing`, String(next))
           } catch {
             // ignore
           }
@@ -166,9 +181,11 @@ export function HeaderImagePicker({
           />
         </Box>
       ) : (
-        <Text fontSize="xs" color="gray.500" textAlign="center">
-          Logo slot (press Ctrl+Shift+L to edit).
-        </Text>
+        showLockedHint ? (
+          <Text fontSize="xs" color="gray.500" textAlign="center">
+            Logo is locked.
+          </Text>
+        ) : null
       )}
 
       {error ? (

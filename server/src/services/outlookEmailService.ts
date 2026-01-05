@@ -82,7 +82,9 @@ async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
       client_secret: clientSecret,
       refresh_token: identity.refreshToken,
       grant_type: 'refresh_token',
-      scope: 'https://graph.microsoft.com/.default offline_access Mail.Send Mail.Read'
+      // Delegated token refresh must use delegated scopes (do NOT combine `.default` with resource scopes)
+      // Keep this aligned with the scopes used during the initial OAuth authorization (see `routes/outlook.ts`).
+      scope: 'https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read offline_access'
     })
 
     const response = await fetch(tokenUrl, {

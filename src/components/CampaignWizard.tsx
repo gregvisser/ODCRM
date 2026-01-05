@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import {
   Box,
   Button,
+  Checkbox,
   FormControl,
   FormLabel,
   Input,
@@ -9,6 +10,12 @@ import {
   Select,
   VStack,
   HStack,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
   NumberInput,
   NumberInputField,
   NumberInputStepper,
@@ -74,6 +81,7 @@ export default function CampaignWizard({
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [, setContacts] = useState<Contact[]>([])
   const toast = useToast()
+  const [prospectSearch, setProspectSearch] = useState('')
 
   // Form data
   const [formData, setFormData] = useState({
@@ -304,6 +312,28 @@ export default function CampaignWizard({
       .sort((a, b) => a.companyName.localeCompare(b.companyName))
   }, [formData.customerAccountName])
 
+  const filteredCognismProspects = useMemo(() => {
+    const base = cognismProspectsForCustomer
+    const q = prospectSearch.trim().toLowerCase()
+    if (!q) return base
+    return base.filter((p) =>
+      [p.firstName, p.lastName, p.email, p.companyName, p.jobTitle, p.phone]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q)
+    )
+  }, [cognismProspectsForCustomer, prospectSearch])
+
+  const selectedProspectSet = useMemo(
+    () => new Set(formData.selectedProspectEmails.map((e) => e.toLowerCase())),
+    [formData.selectedProspectEmails]
+  )
+
+  const setSelectedProspects = (next: Set<string>) => {
+    setFormData((prev) => ({ ...prev, selectedProspectEmails: Array.from(next) }))
+  }
+
   return (
     <Box>
       <VStack spacing={4} align="stretch">
@@ -351,7 +381,9 @@ export default function CampaignWizard({
                     ...prev,
                     customerAccountName: next,
                     name: prev.name || (next ? `${next} Campaign` : ''),
+                    selectedProspectEmails: [],
                   }))
+                  setProspectSearch('')
                 }}
                 placeholder="Select customer"
               >
@@ -575,30 +607,104 @@ export default function CampaignWizard({
                 </Alert>
               ) : (
                 <Box borderWidth={1} borderRadius="md" p={3}>
-                  <Text fontSize="sm" color="gray.700" mb={2}>
-                    Available prospects for <strong>{formData.customerAccountName}</strong>: {cognismProspectsForCustomer.length}
-                  </Text>
-                  <FormControl>
-                    <FormLabel fontSize="sm">Select prospects to attach</FormLabel>
-                    <Select
-                      multiple
-                      value={formData.selectedProspectEmails}
-                      onChange={(e) => {
-                        const next = Array.from(e.target.selectedOptions).map((o) => o.value)
-                        setFormData((prev) => ({ ...prev, selectedProspectEmails: next }))
-                      }}
-                      height="240px"
-                    >
-                      {cognismProspectsForCustomer.map((p) => (
-                        <option key={p.id} value={p.email.toLowerCase()}>
-                          {`${p.firstName} ${p.lastName}`.trim() || '(No name)'} — {p.email} — {p.companyName}
-                        </option>
-                      ))}
-                    </Select>
-                    <Text fontSize="xs" color="gray.500" mt={2}>
-                      Tip: hold Ctrl/Cmd to multi-select.
-                    </Text>
+                  <HStack justify="space-between" align="flex-start" flexWrap="wrap" gap={3} mb={3}>
+                    <Box>
+                      <Text fontSize="sm" color="gray.700">
+                        Total: <strong>{cognismProspectsForCustomer.length}</strong> · Filtered:{' '}
+                        <strong>{filteredCognismProspects.length}</strong> · Selected:{' '}
+                        <strong>{selectedProspectSet.size}</strong>
+                      </Text>
+                      <Text fontSize="xs" color="gray.500">
+                        Customer: <strong>{formData.customerAccountName}</strong>
+                      </Text>
+                    </Box>
+                    <HStack>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const next = new Set(selectedProspectSet)
+                          for (const p of filteredCognismProspects) next.add(p.email.toLowerCase())
+                          setSelectedProspects(next)
+                        }}
+                      >
+                        Select filtered
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSelectedProspects(new Set())}
+                      >
+                        Clear
+                      </Button>
+                    </HStack>
+                  </HStack>
+
+                  <FormControl mb={3}>
+                    <FormLabel fontSize="sm" mb={1}>Search</FormLabel>
+                    <Input
+                      size="sm"
+                      value={prospectSearch}
+                      onChange={(e) => setProspectSearch(e.target.value)}
+                      placeholder="Search name, email, company, title..."
+                    />
                   </FormControl>
+
+                  <Box borderWidth={1} borderRadius="md" overflowX="auto">
+                    <Table size="sm">
+                      <Thead bg="gray.50">
+                        <Tr>
+                          <Th w="60px">Select</Th>
+                          <Th>Name</Th>
+                          <Th>Email</Th>
+                          <Th>Company</Th>
+                          <Th>Title</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {filteredCognismProspects.length === 0 ? (
+                          <Tr>
+                            <Td colSpan={5}>
+                              <Text py={3} fontSize="sm" color="gray.500">
+                                No prospects match this search.
+                              </Text>
+                            </Td>
+                          </Tr>
+                        ) : (
+                          filteredCognismProspects.slice(0, 500).map((p) => {
+                            const emailKey = p.email.toLowerCase()
+                            const isChecked = selectedProspectSet.has(emailKey)
+                            return (
+                              <Tr key={p.id}>
+                                <Td>
+                                  <Checkbox
+                                    isChecked={isChecked}
+                                    onChange={(e) => {
+                                      const next = new Set(selectedProspectSet)
+                                      if (e.target.checked) next.add(emailKey)
+                                      else next.delete(emailKey)
+                                      setSelectedProspects(next)
+                                    }}
+                                  />
+                                </Td>
+                                <Td>
+                                  <Text fontSize="sm" fontWeight="semibold">
+                                    {`${p.firstName} ${p.lastName}`.trim() || '(No name)'}
+                                  </Text>
+                                </Td>
+                                <Td><Text fontSize="sm">{p.email}</Text></Td>
+                                <Td><Text fontSize="sm">{p.companyName}</Text></Td>
+                                <Td><Text fontSize="sm" color="gray.700">{p.jobTitle || '-'}</Text></Td>
+                              </Tr>
+                            )
+                          })
+                        )}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                  <Text fontSize="xs" color="gray.500" mt={2}>
+                    Showing up to 500 rows for performance.
+                  </Text>
                 </Box>
               )
             ) : (

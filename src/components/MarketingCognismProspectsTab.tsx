@@ -40,55 +40,146 @@ type ParsedProspectRow = {
   phone?: string
 }
 
+type ParseMeta = {
+  delimiter: '\t' | ','
+  headers: string[]
+  mapping: Record<string, string | null>
+  missingRequired: string[]
+}
+
+type ParseResult = {
+  rows: ParsedProspectRow[]
+  meta: ParseMeta | null
+}
+
 function detectDelimiter(text: string): '\t' | ',' {
-  const firstLine = text.split(/\r?\n/)[0] || ''
-  return firstLine.includes('\t') ? '\t' : ','
+  const firstLine = (text.split(/\r?\n/)[0] || '').trim()
+  const commas = (firstLine.match(/,/g) || []).length
+  const tabs = (firstLine.match(/\t/g) || []).length
+  return tabs > commas ? '\t' : ','
 }
 
 function normalizeHeader(h: string): string {
-  return h.trim().toLowerCase().replace(/\s+/g, ' ')
+  return h
+    .trim()
+    .replace(/^"|"$/g, '')
+    .toLowerCase()
+    .replace(/[_\-]+/g, ' ')
+    .replace(/[()]/g, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
-function pick(cells: string[], headers: string[], aliases: string[]): string {
+function parseDelimitedLine(line: string, delimiter: '\t' | ','): string[] {
+  // Minimal CSV/TSV parser with quote handling:
+  // - Supports quoted fields with escaped quotes ("")
+  // - Does not support multi-line quoted fields (rare in exports)
+  const out: string[] = []
+  let cur = ''
+  let inQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"'
+        i++
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+    if (!inQuotes && ch === delimiter) {
+      out.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  out.push(cur)
+  return out.map((c) => c.trim())
+}
+
+function findHeaderIndex(headers: string[], aliases: string[], predicate?: (h: string) => boolean): number {
   for (const alias of aliases) {
     const idx = headers.indexOf(alias)
-    if (idx >= 0) {
-      const v = (cells[idx] ?? '').trim().replace(/^"|"$/g, '')
-      if (v) return v
-    }
+    if (idx >= 0) return idx
   }
-  return ''
+  if (predicate) {
+    const idx = headers.findIndex(predicate)
+    if (idx >= 0) return idx
+  }
+  return -1
 }
 
-function parseCognismExport(text: string): ParsedProspectRow[] {
+function getCell(cells: string[], idx: number): string {
+  if (idx < 0) return ''
+  const v = (cells[idx] ?? '').trim().replace(/^"|"$/g, '')
+  return v
+}
+
+function parseCognismExport(text: string): ParseResult {
   const raw = text.trim()
-  if (!raw) return []
+  if (!raw) return { rows: [], meta: null }
   const delimiter = detectDelimiter(raw)
   const lines = raw.split(/\r?\n/).filter((l) => l.trim() !== '')
-  if (lines.length < 2) return []
+  if (lines.length < 2) return { rows: [], meta: null }
 
-  const headers = lines[0]
-    .split(delimiter)
-    .map((h) => normalizeHeader(h.replace(/^"|"$/g, '')))
+  const headerCells = parseDelimitedLine(lines[0], delimiter)
+  const headers = headerCells.map((h) => normalizeHeader(h))
 
   const rows = lines.slice(1)
 
-  const firstNameAliases = ['first name', 'firstname', 'first']
-  const lastNameAliases = ['last name', 'lastname', 'last']
-  const jobTitleAliases = ['job title', 'title', 'position']
-  const companyAliases = ['company', 'company name', 'account', 'organisation', 'organization']
-  const emailAliases = ['email', 'email address', 'work email']
-  const phoneAliases = ['mobile', 'mobile phone', 'phone', 'phone number', 'direct dial', 'direct']
+  const firstNameAliases = ['first name', 'firstname', 'contact first name', 'first']
+  const lastNameAliases = ['last name', 'lastname', 'contact last name', 'last']
+  const jobTitleAliases = ['job title', 'title', 'position', 'role']
+  const companyAliases = ['company name', 'company', 'account', 'organisation', 'organization', 'organisation name', 'organization name']
+  const emailAliases = ['work email', 'email address', 'email', 'business email']
+  const phoneAliases = [
+    'direct dial',
+    'direct phone',
+    'direct',
+    'mobile phone',
+    'mobile',
+    'phone number',
+    'phone',
+    'telephone',
+  ]
+
+  const idxFirstName = findHeaderIndex(headers, firstNameAliases, (h) => h.includes('first') && h.includes('name'))
+  const idxLastName = findHeaderIndex(headers, lastNameAliases, (h) => h.includes('last') && h.includes('name'))
+  const idxJobTitle = findHeaderIndex(headers, jobTitleAliases, (h) => h.includes('job') && h.includes('title'))
+  const idxCompany = findHeaderIndex(headers, companyAliases, (h) => h.includes('company') || h.includes('organisation') || h.includes('organization') || h.includes('account'))
+  const idxEmail = findHeaderIndex(headers, emailAliases, (h) => h.includes('email'))
+  const idxPhone = findHeaderIndex(headers, phoneAliases, (h) => h.includes('phone') || h.includes('mobile') || h.includes('dial') || h.includes('telephone'))
+
+  const missingRequired: string[] = []
+  if (idxEmail < 0) missingRequired.push('email')
+  if (idxCompany < 0) missingRequired.push('company')
+
+  const meta: ParseMeta = {
+    delimiter,
+    headers,
+    mapping: {
+      firstName: idxFirstName >= 0 ? headerCells[idxFirstName] : null,
+      lastName: idxLastName >= 0 ? headerCells[idxLastName] : null,
+      jobTitle: idxJobTitle >= 0 ? headerCells[idxJobTitle] : null,
+      companyName: idxCompany >= 0 ? headerCells[idxCompany] : null,
+      email: idxEmail >= 0 ? headerCells[idxEmail] : null,
+      phone: idxPhone >= 0 ? headerCells[idxPhone] : null,
+    },
+    missingRequired,
+  }
 
   const out: ParsedProspectRow[] = []
   for (const line of rows) {
-    const cells = line.split(delimiter).map((c) => c.trim())
-    const email = pick(cells, headers, emailAliases).toLowerCase()
-    const companyName = pick(cells, headers, companyAliases)
-    const firstName = pick(cells, headers, firstNameAliases)
-    const lastName = pick(cells, headers, lastNameAliases)
-    const jobTitle = pick(cells, headers, jobTitleAliases) || undefined
-    const phone = pick(cells, headers, phoneAliases) || undefined
+    const cells = parseDelimitedLine(line, delimiter)
+    const email = getCell(cells, idxEmail).toLowerCase()
+    const companyName = getCell(cells, idxCompany)
+    const firstName = getCell(cells, idxFirstName)
+    const lastName = getCell(cells, idxLastName)
+    const jobTitle = getCell(cells, idxJobTitle) || undefined
+    const phone = getCell(cells, idxPhone) || undefined
 
     if (!email || !email.includes('@')) continue
     if (!companyName) continue
@@ -103,7 +194,7 @@ function parseCognismExport(text: string): ParsedProspectRow[] {
     })
   }
 
-  return out
+  return { rows: out, meta }
 }
 
 export default function MarketingCognismProspectsTab() {
@@ -124,7 +215,8 @@ export default function MarketingCognismProspectsTab() {
   const stored = useMemo(() => getCognismProspects(), [])
   const [prospects, setProspects] = useState<CognismProspect[]>(stored)
 
-  const parsed = useMemo(() => parseCognismExport(rawText), [rawText])
+  const parsedResult = useMemo(() => parseCognismExport(rawText), [rawText])
+  const parsed = parsedResult.rows
 
   const visible = useMemo(() => {
     const scoped = selectedCustomer
@@ -322,6 +414,25 @@ export default function MarketingCognismProspectsTab() {
         <Text fontSize="sm" color="gray.600" mt={2}>
           Parsed rows: <strong>{parsed.length}</strong>
         </Text>
+        {rawText.trim() !== '' && parsedResult.meta && (
+          <Box mt={3}>
+            {parsedResult.meta.missingRequired.length > 0 && (
+              <Alert status="warning" mb={2}>
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  Couldn’t find required columns: <strong>{parsedResult.meta.missingRequired.join(', ')}</strong>. If this is a Cognism export,
+                  please paste the full header row.
+                </AlertDescription>
+              </Alert>
+            )}
+            <Text fontSize="xs" color="gray.500">
+              Detected delimiter: <strong>{parsedResult.meta.delimiter === '\t' ? 'TSV (tab)' : 'CSV (comma)'}</strong>. Detected columns:{' '}
+              <strong>
+                Email={parsedResult.meta.mapping.email || '—'}, Company={parsedResult.meta.mapping.companyName || '—'}, Name={parsedResult.meta.mapping.firstName || '—'} / {parsedResult.meta.mapping.lastName || '—'}
+              </strong>
+            </Text>
+          </Box>
+        )}
       </Box>
 
       <HStack justify="space-between" flexWrap="wrap">

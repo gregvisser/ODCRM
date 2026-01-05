@@ -812,7 +812,7 @@ export const accounts: Account[] = [
   },
   {
     name: 'My Purchasing Partner',
-    website: 'https://www.mypurchasingpartner.com/',
+    website: 'https://www.mypurchasingpartner.co.uk/',
     aboutSections: {
       whatTheyDo: 'Information will be populated via AI research.',
       accreditations: 'Information will be populated via AI research.',
@@ -873,7 +873,7 @@ export const accounts: Account[] = [
   },
   {
     name: 'Renewable Temp Power',
-    website: 'https://renewabletemporarypower.com/',
+    website: 'https://renewabletemporarypower.co.uk/',
     aboutSections: {
       whatTheyDo: 'Information will be populated via AI research.',
       accreditations: 'Information will be populated via AI research.',
@@ -1547,33 +1547,69 @@ async function fetchLogoFromAI(account: Account): Promise<string | null> {
   }
 }
 
+// Some customer logos don't resolve reliably via Clearbit/favicon (or their sites block hotlinking/fetching).
+// We hard-pin the official logo assets for those customers here.
+const HARDCODED_ACCOUNT_LOGOS: Record<string, string> = {
+  Beauparc: 'https://beauparc.ie/wp-content/uploads/2017/12/logo.png',
+  'Seven Clean Seas':
+    'https://cdn.prod.website-files.com/64f7de2bc62f55fed197d14a/6763c26d6c9bf69e5e988fae_SCS-logo-white-animated.gif',
+  Legionella: 'https://legionellacontrol.com/wp-content/uploads/2018/02/legionella-control-logo2x.png',
+  'MaxSpace Projects':
+    'https://maxspaceprojects.co.uk/wp-content/uploads/MaxSpace-Projects-Logo-Main-e1738719394741.webp',
+  MaxSpace:
+    'https://maxspaceprojects.co.uk/wp-content/uploads/MaxSpace-Projects-Logo-Main-e1738719394741.webp',
+  'My Purchasing Partner': 'https://www.mypurchasingpartner.co.uk/wp-content/uploads/logo.svg',
+  OCS: 'https://ocs.com/app/uploads/2024/09/OCS-Group-Logo-300x116.png',
+  'Octavian Security':
+    'https://www.octaviansecurity.com/wp-content/uploads/2020/07/octavian-logo-R-256x45-FINAL-e1593692669215.png',
+  Papaya: 'https://www.papayaglobal.com/wp-content/uploads/2023/02/papaya-new-logo.svg',
+  'P&R Morson FM': 'https://www.morsonfm.co.uk/wp-content/uploads/2021/12/PR-Morson-Logo.png',
+  'Protech Roofing': 'https://protechroofing.co.uk/wp-content/uploads/2023/07/Protech-Roofing_Logo_Whitegold.svg',
+  'Renewable Temp Power': 'https://renewabletemporarypower.co.uk/wp-content/uploads/2022/05/rtp-logo.svg',
+  'Shield Pest Control':
+    'https://shieldpestcontrol.co.uk/wp-content/uploads/2025/03/Updated-Shield-Company-Logo.webp',
+  'Thomas Franks': 'https://thomasfranks.com/wp-content/uploads/2024/08/thomas-franks-logo.svg',
+  'Be Safe Technologies': 'https://be-safetech.com/wp-content/uploads/2023/03/Besafe-logo-2.png',
+  GreenTheUK: 'https://greentheuk.com/assets/images/assets/green-the-uk-logo.png',
+  FusionTek: 'https://fusiontek.co.uk/wp-content/uploads/2023/01/2000-%D0%BF%D0%B8%D0%BA%D1%81%D0%B5%D0%BB%D0%B5%D0%B9.png',
+  Vendease: 'https://www.google.com/s2/favicons?sz=128&domain=vendease.com',
+  'Verve Connect': 'https://verveconnect.co.uk/wp-content/uploads/2018/11/verve-connect-footer-logo.svg',
+}
+
 const getAccountLogo = (
   account: Account,
   failedLogos?: Set<string>,
   aiLogos?: Record<string, string>,
 ) => {
-  const fallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(account.name)}`
+  const dicebearFallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(account.name)}`
 
-  // If we have an AI-found logo, use it
-  if (aiLogos?.[account.name]) {
-    return aiLogos[account.name]
+  // Prefer hard-pinned customer logos (unless they've failed to load).
+  const hardcoded = HARDCODED_ACCOUNT_LOGOS[account.name]
+  if (hardcoded && !failedLogos?.has(account.name)) {
+    return hardcoded.startsWith('//') ? `https:${hardcoded}` : hardcoded
   }
 
-  // If we know this logo failed before, use fallback immediately
-  if (failedLogos?.has(account.name)) {
-    return fallback
+  // If we have an AI-found logo, use it (unless it has failed to load).
+  if (aiLogos?.[account.name] && !failedLogos?.has(account.name)) {
+    const ai = aiLogos[account.name]
+    return ai.startsWith('//') ? `https:${ai}` : ai
   }
 
   try {
     const hostname = new URL(account.website).hostname
-    if (!hostname) return fallback
+    if (!hostname) return dicebearFallback
 
     // Remove 'www.' prefix if present for better Clearbit matching
     const cleanHostname = hostname.replace(/^www\./, '')
+    // If Clearbit failed, fall back to Google's favicon service (usually still a recognizable logo mark).
+    if (failedLogos?.has(account.name)) {
+      return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(cleanHostname)}`
+    }
+
     return `https://logo.clearbit.com/${cleanHostname}`
   } catch (error) {
     console.warn('Unable to derive logo from website', { account, error })
-    return fallback
+    return dicebearFallback
   }
 }
 
@@ -4397,16 +4433,28 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   onClick={(e) => handleAccountClick(account.name, e)}
                 >
                   <Td>
-                    <Box>
-                      <Text fontWeight="semibold" color="gray.800">
-                        {account.name}
-                      </Text>
-                      {account.website ? (
-                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
-                          {account.website}
+                    <HStack spacing={3}>
+                      <Avatar
+                        size="sm"
+                        name={account.name}
+                        src={getAccountLogo(account, failedLogos, aiLogos)}
+                        bg="teal.50"
+                        onError={() => {
+                          // Mark Clearbit as failed so we immediately fall back to favicon.
+                          setFailedLogos((prev) => new Set(prev).add(account.name))
+                        }}
+                      />
+                      <Box>
+                        <Text fontWeight="semibold" color="gray.800">
+                          {account.name}
                         </Text>
-                      ) : null}
-                    </Box>
+                        {account.website ? (
+                          <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                            {account.website}
+                          </Text>
+                        ) : null}
+                      </Box>
+                    </HStack>
                   </Td>
                   <Td>
                     <Badge colorScheme={statusColorScheme}>{account.status}</Badge>

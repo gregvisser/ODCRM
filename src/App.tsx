@@ -191,9 +191,6 @@ function App() {
             <GridItem display={{ base: 'none', md: 'block' }}>
               <VStack spacing={1} w="100%" maxW="720px" align="center" mx="auto">
                 <HeaderImagePicker variant="logo" maxHeightPx={180} lockEdits />
-                <Text fontSize="sm" color="brand.500" fontWeight="semibold" letterSpacing="wide" textAlign="center">
-                  OpenDoors Marketing CRM
-                </Text>
               </VStack>
             </GridItem>
 
@@ -205,9 +202,6 @@ function App() {
           <Box display={{ base: 'block', md: 'none' }} pt={1}>
             <VStack spacing={1} align="center">
               <HeaderImagePicker variant="logo" maxHeightPx={160} lockEdits />
-              <Text fontSize="sm" color="brand.500" fontWeight="semibold" letterSpacing="wide" textAlign="center">
-                OpenDoors Marketing CRM
-              </Text>
             </VStack>
           </Box>
           <CrmTopTabs

@@ -8,7 +8,11 @@ const prisma = new PrismaClient()
 
 const getCustomerId = (req: express.Request): string => {
   const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
-  if (!customerId) throw new Error('Customer ID required')
+  if (!customerId) {
+    const err = new Error('Customer ID required') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
   return customerId
 }
 
