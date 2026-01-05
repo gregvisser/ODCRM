@@ -96,6 +96,13 @@ export function DataPortability() {
         <Button
           size="xs"
           variant="ghost"
+          onClick={() => window.open('http://localhost:5174', '_blank')}
+        >
+          Open :5174
+        </Button>
+        <Button
+          size="xs"
+          variant="ghost"
           onClick={() => window.open('http://localhost:4173', '_blank')}
         >
           Open :4173
