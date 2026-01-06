@@ -37,6 +37,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
+import { settingsStore } from '../platform'
 
 interface EmailIdentity {
   id: string
@@ -62,7 +63,7 @@ export default function EmailSettingsTab() {
   const fetchIdentities = async () => {
     setLoading(true)
     // Use the same customerId that was used for OAuth connection
-    const customerId = localStorage.getItem('currentCustomerId') || 'test-customer-1'
+    const customerId = settingsStore.getCurrentCustomerId('test-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
@@ -73,7 +74,7 @@ export default function EmailSettingsTab() {
   }
 
   const handleConnectOutlook = () => {
-    const customerId = localStorage.getItem('currentCustomerId') || 'default'
+    const customerId = settingsStore.getCurrentCustomerId('default')
     window.location.href = `http://localhost:3001/api/outlook/auth?customerId=${customerId}`
   }
 

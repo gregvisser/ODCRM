@@ -1,5 +1,6 @@
+import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
-import { getJson, setJson } from '../storage'
+import { getJson, setItem, setJson } from '../storage'
 
 export type CognismProspect = {
   id: string
@@ -21,6 +22,12 @@ export function getCognismProspects(): CognismProspect[] {
 
 export function setCognismProspects(items: CognismProspect[]): void {
   setJson(OdcrmStorageKeys.cognismProspects, items)
+  setItem(OdcrmStorageKeys.cognismProspectsLastUpdated, new Date().toISOString())
+  emit('cognismProspectsUpdated', items)
+}
+
+export function onCognismProspectsUpdated(handler: (items: CognismProspect[]) => void): () => void {
+  return on<CognismProspect[]>('cognismProspectsUpdated', (detail) => handler(Array.isArray(detail) ? detail : []))
 }
 
 

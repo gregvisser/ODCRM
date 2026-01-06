@@ -1,6 +1,6 @@
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
-import { getJson, setJson } from '../storage'
+import { getJson, setItem, setJson } from '../storage'
 
 export function getContacts<T = unknown>(): T[] {
   const data = getJson<unknown>(OdcrmStorageKeys.contacts)
@@ -9,6 +9,7 @@ export function getContacts<T = unknown>(): T[] {
 
 export function setContacts<T = unknown>(contacts: T[]): void {
   setJson(OdcrmStorageKeys.contacts, contacts)
+  setItem(OdcrmStorageKeys.contactsLastUpdated, new Date().toISOString())
   emit('contactsUpdated', contacts)
 }
 

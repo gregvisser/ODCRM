@@ -6,5 +6,9 @@ export * as contactsStore from './stores/contacts'
 export * as cognismProspectsStore from './stores/cognismProspects'
 export * as emailTemplatesStore from './stores/emailTemplates'
 export * as leadsStore from './stores/leads'
+export * as campaignWorkflowsStore from './stores/campaignWorkflows'
+export * as usersStore from './stores/users'
+export * as settingsStore from './stores/settings'
+export * as headerImageStore from './stores/headerImage'
 
 

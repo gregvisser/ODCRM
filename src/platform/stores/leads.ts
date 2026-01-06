@@ -1,6 +1,6 @@
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
-import { getJson, setJson } from '../storage'
+import { getJson, setItem, setJson } from '../storage'
 
 export function getLeads<T = unknown>(): T[] {
   const data = getJson<unknown>(OdcrmStorageKeys.leads)
@@ -9,7 +9,8 @@ export function getLeads<T = unknown>(): T[] {
 
 export function setLeads<T = unknown>(leads: T[]): void {
   setJson(OdcrmStorageKeys.leads, leads)
-  emit('leadsUpdated')
+  setItem(OdcrmStorageKeys.leadsLastRefresh, new Date().toISOString())
+  emit('leadsUpdated', leads)
 }
 
 export function onLeadsUpdated(handler: () => void): () => void {

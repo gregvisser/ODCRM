@@ -1,6 +1,6 @@
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
-import { getJson, setJson } from '../storage'
+import { getJson, setItem, setJson } from '../storage'
 
 export function getAccounts<T = unknown>(): T[] {
   const data = getJson<unknown>(OdcrmStorageKeys.accounts)
@@ -9,6 +9,7 @@ export function getAccounts<T = unknown>(): T[] {
 
 export function setAccounts<T = unknown>(accounts: T[]): void {
   setJson(OdcrmStorageKeys.accounts, accounts)
+  setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
   emit('accountsUpdated', accounts)
 }
 

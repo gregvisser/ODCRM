@@ -1,5 +1,6 @@
+import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
-import { getJson, setJson } from '../storage'
+import { getJson, setItem, setJson } from '../storage'
 
 export type OdcrmEmailTemplate = {
   id: string
@@ -23,6 +24,19 @@ export function getEmailTemplates(): OdcrmEmailTemplate[] {
 
 export function setEmailTemplates(templates: OdcrmEmailTemplate[]): void {
   setJson(OdcrmStorageKeys.emailTemplates, templates)
+  setItem(OdcrmStorageKeys.emailTemplatesLastUpdated, new Date().toISOString())
+  emit('emailTemplatesUpdated', templates)
+}
+
+export function onEmailTemplatesUpdated(handler: (templates: OdcrmEmailTemplate[]) => void): () => void {
+  return on<OdcrmEmailTemplate[]>('emailTemplatesUpdated', (detail) => handler(Array.isArray(detail) ? detail : []))
+}
+
+export function ensureEmailTemplatesSeeded(defaultTemplates: OdcrmEmailTemplate[]): OdcrmEmailTemplate[] {
+  const existing = getEmailTemplates()
+  if (existing.length > 0) return existing
+  setEmailTemplates(defaultTemplates)
+  return defaultTemplates
 }
 
 

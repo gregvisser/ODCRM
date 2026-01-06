@@ -30,10 +30,10 @@ import {
   AlertDescription
 } from '@chakra-ui/react'
 import { api } from '../utils/api'
-import { OdcrmStorageKeys } from '../platform/keys'
-import { getItem, getJson, setItem } from '../platform/storage'
+import { getItem, setItem } from '../platform/storage'
 import { getEmailTemplates, type OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
+import { accountsStore, settingsStore } from '../platform'
 
 interface EmailIdentity {
   id: string
@@ -120,7 +120,7 @@ export default function CampaignWizard({
 
   const fetchIdentities = async () => {
     // Use the same customerId that was used for OAuth connection
-    const customerId = localStorage.getItem('currentCustomerId') || 'test-customer-1'
+    const customerId = settingsStore.getCurrentCustomerId('test-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
       console.error('Failed to fetch email identities:', error)
@@ -159,7 +159,7 @@ export default function CampaignWizard({
   }
 
   const availableAccounts = useMemo(() => {
-    const accounts = getJson<Array<{ name: string }>>(OdcrmStorageKeys.accounts) || []
+    const accounts = accountsStore.getAccounts<{ name: string }>()
     const names = accounts.map((a) => a?.name).filter(Boolean)
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
   }, [])

@@ -52,6 +52,7 @@ import {
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { MdEmail } from 'react-icons/md'
 import { accounts } from './AccountsTab'
+import { accountsStore, campaignWorkflowsStore, emailTemplatesStore } from '../platform'
 
 type EmailTemplate = {
   id: string
@@ -121,10 +122,6 @@ Best regards,
   stepNumber: 2,
 }
 
-// localStorage keys
-const STORAGE_KEY_WORKFLOWS = 'odcrm_campaign_workflows'
-const STORAGE_KEY_EMAIL_TEMPLATES = 'odcrm_email_templates'
-
 // Create default Legionella workflow for demo
 function createLegionellaWorkflow(): CampaignWorkflow {
   // Dates: First email Nov 30, 8 AM; Second email Dec 4, 8 AM
@@ -178,47 +175,18 @@ What will it take to get 10 minutes on your calendar in the next few days?`,
   }
 }
 
-// Load workflows from localStorage
-function loadWorkflowsFromStorage(): CampaignWorkflow[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_WORKFLOWS)
-    if (stored) {
-      const parsed = JSON.parse(stored) as CampaignWorkflow[]
-      console.log('✅ Loaded workflows from localStorage:', parsed.length)
-      
-      // Check if Legionella workflow exists, if not add it
-      const hasLegionellaWorkflow = parsed.some(w => w.id === 'legionella-demo-workflow')
-      if (!hasLegionellaWorkflow) {
-        const legionellaWorkflow = createLegionellaWorkflow()
-        const updated = [...parsed, legionellaWorkflow]
-        saveWorkflowsToStorage(updated)
-        console.log('✅ Added Legionella demo workflow')
-        return updated
-      }
-      
-      return parsed
-    } else {
-      // First time - create Legionella workflow
-      const legionellaWorkflow = createLegionellaWorkflow()
-      saveWorkflowsToStorage([legionellaWorkflow])
-      console.log('✅ Initialized with Legionella demo workflow')
-      return [legionellaWorkflow]
-    }
-  } catch (error) {
-    console.warn('Failed to load workflows from localStorage:', error)
-    // Return Legionella workflow as fallback
-    return [createLegionellaWorkflow()]
-  }
-}
+function loadWorkflowsFromStore(): CampaignWorkflow[] {
+  const parsed = campaignWorkflowsStore.getCampaignWorkflows<CampaignWorkflow>()
 
-// Save workflows to localStorage
-function saveWorkflowsToStorage(workflows: CampaignWorkflow[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_WORKFLOWS, JSON.stringify(workflows))
-    console.log('💾 Saved workflows to localStorage')
-  } catch (error) {
-    console.warn('Failed to save workflows to localStorage:', error)
+  // Ensure Legionella demo workflow exists
+  const hasLegionellaWorkflow = parsed.some((w) => w?.id === 'legionella-demo-workflow')
+  if (!hasLegionellaWorkflow) {
+    const updated = [...parsed, createLegionellaWorkflow()]
+    campaignWorkflowsStore.setCampaignWorkflows(updated)
+    return updated
   }
+
+  return parsed
 }
 
 // Default email templates provided by user
@@ -263,39 +231,13 @@ What will it take to get 10 minutes on your calendar in the next few days?`,
   },
 ]
 
-// Load email templates from localStorage
-function loadEmailTemplatesFromStorage(): SavedEmailTemplate[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY_EMAIL_TEMPLATES)
-    if (stored) {
-      const parsed = JSON.parse(stored) as SavedEmailTemplate[]
-      console.log('✅ Loaded email templates from localStorage:', parsed.length)
-      return parsed
-    } else {
-      // Save default templates on first load
-      saveEmailTemplatesToStorage(defaultTemplates)
-      console.log('✅ Initialized with default email templates')
-      return defaultTemplates
-    }
-  } catch (error) {
-    console.warn('Failed to load email templates from localStorage:', error)
-    return defaultTemplates
-  }
-}
-
-// Save email templates to localStorage
-function saveEmailTemplatesToStorage(templates: SavedEmailTemplate[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY_EMAIL_TEMPLATES, JSON.stringify(templates))
-    console.log('💾 Saved email templates to localStorage')
-  } catch (error) {
-    console.warn('Failed to save email templates to localStorage:', error)
-  }
+function loadEmailTemplatesFromStore(): SavedEmailTemplate[] {
+  return emailTemplatesStore.ensureEmailTemplatesSeeded(defaultTemplates as any) as any
 }
 
 function CampaignSequencesTab() {
-  const [workflows, setWorkflows] = useState<CampaignWorkflow[]>(() => loadWorkflowsFromStorage())
-  const [templates, setTemplates] = useState<SavedEmailTemplate[]>(() => loadEmailTemplatesFromStorage())
+  const [workflows, setWorkflows] = useState<CampaignWorkflow[]>(() => loadWorkflowsFromStore())
+  const [templates, setTemplates] = useState<SavedEmailTemplate[]>(() => loadEmailTemplatesFromStore())
   const { isOpen, onOpen, onClose } = useDisclosure()
   const {
     isOpen: isDeleteOpen,
@@ -329,35 +271,41 @@ function CampaignSequencesTab() {
   const [isTemplateEditMode, setIsTemplateEditMode] = useState(false)
   const templateCancelRef = useRef<HTMLButtonElement>(null)
 
-  // Load accounts from localStorage
+  // Load accounts from store (and keep in sync across tabs)
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([])
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem('odcrm_accounts')
-      if (stored) {
-        const parsed = JSON.parse(stored) as Array<{ name: string }>
-        const accountNames = parsed.map((acc) => acc.name)
-        setAvailableAccounts(accountNames)
-      } else {
-        const accountNames = accounts.map((acc) => acc.name)
-        setAvailableAccounts(accountNames)
-      }
-    } catch (error) {
-      const accountNames = accounts.map((acc) => acc.name)
-      setAvailableAccounts(accountNames)
+    const compute = () => {
+      const storedAccounts = accountsStore.getAccounts<{ name: string }>()
+      const storedNames = storedAccounts.map((a) => a?.name).filter(Boolean) as string[]
+      const defaultNames = accounts.map((acc) => acc.name)
+      return Array.from(new Set([...storedNames, ...defaultNames])).sort((a, b) => a.localeCompare(b))
     }
+
+    setAvailableAccounts(compute())
+    const off = accountsStore.onAccountsUpdated(() => setAvailableAccounts(compute()))
+    return () => off()
   }, [])
 
-  // Save workflows to localStorage whenever data changes
+  // Persist workflows immediately (and broadcast cross-tab)
   useEffect(() => {
-    saveWorkflowsToStorage(workflows)
+    campaignWorkflowsStore.setCampaignWorkflows(workflows)
   }, [workflows])
 
-  // Save templates to localStorage whenever data changes
+  // Persist templates immediately (and broadcast cross-tab)
   useEffect(() => {
-    saveEmailTemplatesToStorage(templates)
+    emailTemplatesStore.setEmailTemplates(templates as any)
   }, [templates])
+
+  // Cross-tab sync for workflows/templates
+  useEffect(() => {
+    const offWorkflows = campaignWorkflowsStore.onCampaignWorkflowsUpdated<CampaignWorkflow>((items) => setWorkflows(items))
+    const offTemplates = emailTemplatesStore.onEmailTemplatesUpdated((items) => setTemplates(items as any))
+    return () => {
+      offWorkflows()
+      offTemplates()
+    }
+  }, [])
 
   // Form state
   const [newWorkflow, setNewWorkflow] = useState<Omit<CampaignWorkflow, 'id' | 'createdAt' | 'updatedAt'>>({

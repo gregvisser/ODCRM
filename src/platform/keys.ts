@@ -11,15 +11,25 @@ export const OdcrmStorageKeys = {
   sectors: 'odcrm_sectors',
   targetLocations: 'odcrm_target_locations',
   emailTemplates: 'odcrm_email_templates',
+  emailTemplatesLastUpdated: 'odcrm_email_templates_last_updated',
   contacts: 'odcrm_contacts',
+  contactsLastUpdated: 'odcrm_contacts_last_updated',
   deletedAccounts: 'odcrm_deleted_accounts',
   leads: 'odcrm_leads',
   leadsLastRefresh: 'odcrm_leads_last_refresh',
   marketingLeads: 'odcrm_marketing_leads',
   marketingLeadsLastRefresh: 'odcrm_marketing_leads_last_refresh',
   cognismProspects: 'odcrm_cognism_prospects',
+  cognismProspectsLastUpdated: 'odcrm_cognism_prospects_last_updated',
+  campaignWorkflows: 'odcrm_campaign_workflows',
+  campaignWorkflowsLastUpdated: 'odcrm_campaign_workflows_last_updated',
   headerImageDataUrl: 'odcrm_header_image_data_url',
   uxToolsEnabled: 'odcrm_ux_tools_enabled',
+
+  // Keep legacy/unprefixed keys stable (already used in UI + API header injection).
+  currentCustomerId: 'currentCustomerId',
+  users: 'users',
+  usersLastUpdated: 'odcrm_users_last_updated',
 } as const
 
 
