@@ -63,7 +63,7 @@ export default function EmailSettingsTab() {
   const fetchIdentities = async () => {
     setLoading(true)
     // Use the same customerId that was used for OAuth connection
-    const customerId = settingsStore.getCurrentCustomerId('test-customer-1')
+    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
