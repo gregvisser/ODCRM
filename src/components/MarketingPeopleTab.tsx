@@ -161,7 +161,7 @@ export default function MarketingPeopleTab() {
       } else if (data) {
         toast({
           title: 'Import Successful',
-          description: `Created ${data.created}, updated ${data.updated} contact(s)`,
+          description: `Created ${(data as any).created || 0}, updated ${(data as any).updated || 0} contact(s)`,
           status: 'success',
           duration: 5000,
         })

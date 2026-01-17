@@ -402,7 +402,7 @@ function loadDeletedAccountsFromStorage(): Set<string> {
 }
 
 type ParsedContactRow = {
-  // account: string
+  account?: string
   name: string
   title?: string
   email?: string
@@ -880,7 +880,7 @@ function ContactsTab() {
     setNewContact({
       name: '',
       title: '',
-      // account: '',
+      accounts: [],
       tier: 'Decision maker',
       status: 'Active',
       email: '',
