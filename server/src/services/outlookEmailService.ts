@@ -104,7 +104,7 @@ async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
     const data = (await response.json()) as any
 
     // Update identity in database
-    await prisma.emailIdentity.update({
+    await prisma.email_identities.update({
       where: { id: identity.id },
       data: {
         accessToken: data.access_token,
@@ -129,7 +129,7 @@ export async function sendEmail(
 ): Promise<SendEmailResult> {
   try {
     // Load identity
-    const identity = await prisma.emailIdentity.findUnique({
+    const identity = await prisma.email_identities.findUnique({
       where: { id: params.senderIdentityId }
     })
 
@@ -211,7 +211,7 @@ export async function sendEmail(
 
     // Store email metadata
     if (messageId && params.campaignProspectId) {
-      await prisma.emailMessageMetadata.create({
+      await prisma.email_message_metadata.create({
         data: {
           campaignProspectId: params.campaignProspectId,
           senderIdentityId: identity.id,
@@ -250,7 +250,7 @@ export async function fetchRecentInboxMessages(
   hoursBack: number = 72
 ): Promise<InboxMessage[]> {
   try {
-    const identity = await prisma.emailIdentity.findUnique({
+    const identity = await prisma.email_identities.findUnique({
       where: { id: identityId }
     })
 

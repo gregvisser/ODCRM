@@ -301,7 +301,7 @@ router.get('/callback', async (req, res) => {
     try {
       // Enforce max 5 connected sender identities per customer (Reply-style safety rail).
       // If this email is already connected, allow re-auth (token refresh/update).
-      const existing = await prisma.emailIdentity.findUnique({
+      const existing = await prisma.email_identities.findUnique({
         where: {
           customerId_emailAddress: {
             customerId,
@@ -311,7 +311,7 @@ router.get('/callback', async (req, res) => {
       })
 
       if (!existing) {
-        const activeCount = await prisma.emailIdentity.count({
+        const activeCount = await prisma.email_identities.count({
           where: { customerId, isActive: true }
         })
 
@@ -334,7 +334,7 @@ router.get('/callback', async (req, res) => {
         }
       }
 
-      const identity = await prisma.emailIdentity.upsert({
+      const identity = await prisma.email_identities.upsert({
         where: {
           customerId_emailAddress: {
             customerId,
@@ -428,7 +428,7 @@ router.get('/identities', async (req, res, next) => {
       return res.status(400).json({ error: 'Customer ID required' })
     }
 
-    const identities = await prisma.emailIdentity.findMany({
+    const identities = await prisma.email_identities.findMany({
       where: { customerId },
       select: {
         id: true,
@@ -454,7 +454,7 @@ router.patch('/identities/:id', async (req, res, next) => {
     const { id } = req.params
     const data = req.body
 
-    const identity = await prisma.emailIdentity.findFirst({
+    const identity = await prisma.email_identities.findFirst({
       where: { id, customerId }
     })
 
@@ -462,7 +462,7 @@ router.patch('/identities/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Identity not found' })
     }
 
-    const updated = await prisma.emailIdentity.update({
+    const updated = await prisma.email_identities.update({
       where: { id },
       data
     })
@@ -479,7 +479,7 @@ router.delete('/identities/:id', async (req, res, next) => {
     const customerId = req.headers['x-customer-id'] as string || req.query.customerId as string
     const { id } = req.params
 
-    const identity = await prisma.emailIdentity.findFirst({
+    const identity = await prisma.email_identities.findFirst({
       where: { id, customerId }
     })
 
@@ -487,7 +487,7 @@ router.delete('/identities/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Identity not found' })
     }
 
-    await prisma.emailIdentity.update({
+    await prisma.email_identities.update({
       where: { id },
       data: { isActive: false }
     })

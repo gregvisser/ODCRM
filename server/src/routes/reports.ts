@@ -33,7 +33,7 @@ router.get('/emails', async (req, res, next) => {
     const { start, end } = parseRange(dateRangeSchema.parse(req.query))
 
     // Totals by type in range
-    const byType = await prisma.emailEvent.groupBy({
+    const byType = await prisma.email_events.groupBy({
       by: ['type'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -48,7 +48,7 @@ router.get('/emails', async (req, res, next) => {
     }, {})
 
     // By campaign + type
-    const byCampaignType = await prisma.emailEvent.groupBy({
+    const byCampaignType = await prisma.email_events.groupBy({
       by: ['campaignId', 'type'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -59,7 +59,7 @@ router.get('/emails', async (req, res, next) => {
 
     const campaignIds = Array.from(new Set(byCampaignType.map((r) => r.campaignId)))
     const campaigns = campaignIds.length
-      ? await prisma.emailCampaign.findMany({
+      ? await prisma.email_campaigns.findMany({
           where: { id: { in: campaignIds }, customerId },
           select: {
             id: true,
@@ -105,7 +105,7 @@ router.get('/team-performance', async (req, res, next) => {
     const { start, end } = parseRange(dateRangeSchema.parse(req.query))
 
     // Count sent/replied grouped by sender identity via campaigns.
-    const sentByCampaign = await prisma.emailEvent.groupBy({
+    const sentByCampaign = await prisma.email_events.groupBy({
       by: ['campaignId'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -115,7 +115,7 @@ router.get('/team-performance', async (req, res, next) => {
       _count: { _all: true },
     })
 
-    const repliedByCampaign = await prisma.emailEvent.groupBy({
+    const repliedByCampaign = await prisma.email_events.groupBy({
       by: ['campaignId'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -127,7 +127,7 @@ router.get('/team-performance', async (req, res, next) => {
 
     const campaignIds = Array.from(new Set([...sentByCampaign.map((r) => r.campaignId), ...repliedByCampaign.map((r) => r.campaignId)]))
     const campaigns = campaignIds.length
-      ? await prisma.emailCampaign.findMany({
+      ? await prisma.email_campaigns.findMany({
           where: { id: { in: campaignIds }, customerId },
           select: {
             id: true,

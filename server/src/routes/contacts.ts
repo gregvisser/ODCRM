@@ -19,7 +19,7 @@ const getCustomerId = (req: express.Request): string => {
 router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const contacts = await prisma.contact.findMany({
+    const contacts = await prisma.contacts.findMany({
       where: { customerId },
       orderBy: { createdAt: 'desc' },
       take: 1000,
@@ -54,13 +54,13 @@ router.post('/bulk-upsert', async (req, res, next) => {
     let updated = 0
 
     for (const c of data.contacts) {
-      const existing = await prisma.contact.findFirst({
+      const existing = await prisma.contacts.findFirst({
         where: { customerId, email: c.email },
         select: { id: true },
       })
 
       if (existing) {
-        await prisma.contact.update({
+        await prisma.contacts.update({
           where: { id: existing.id },
           data: {
             firstName: c.firstName || '',
@@ -74,7 +74,7 @@ router.post('/bulk-upsert', async (req, res, next) => {
         })
         updated++
       } else {
-        await prisma.contact.create({
+        await prisma.contacts.create({
           data: {
             id: randomUUID(),
             customerId,
@@ -92,7 +92,7 @@ router.post('/bulk-upsert', async (req, res, next) => {
       }
     }
 
-    const contacts = await prisma.contact.findMany({
+    const contacts = await prisma.contacts.findMany({
       where: { customerId, email: { in: data.contacts.map((c) => c.email) } },
       select: { id: true, email: true },
     })

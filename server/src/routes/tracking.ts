@@ -14,13 +14,13 @@ router.get('/open', async (req, res) => {
     }
 
     // Find prospect
-    const prospect = await prisma.emailCampaignProspect.findUnique({
+    const prospect = await prisma.email_campaign_prospects.findUnique({
       where: { id: cpid }
     })
 
     if (prospect) {
       // Record event
-      await prisma.emailEvent.create({
+      await prisma.email_events.create({
         data: {
           campaignId: prospect.campaignId,
           campaignProspectId: prospect.id,
@@ -30,7 +30,7 @@ router.get('/open', async (req, res) => {
       })
 
       // Update prospect stats
-      await prisma.emailCampaignProspect.update({
+      await prisma.email_campaign_prospects.update({
         where: { id: prospect.id },
         data: {
           openCount: { increment: 1 },
@@ -63,7 +63,7 @@ router.get('/unsubscribe', async (req, res) => {
       `)
     }
 
-    const prospect = await prisma.emailCampaignProspect.findUnique({
+    const prospect = await prisma.email_campaign_prospects.findUnique({
       where: { id: cpid },
       include: {
         contact: true
@@ -96,7 +96,7 @@ router.get('/unsubscribe', async (req, res) => {
     }
 
     // Record unsubscribe
-    await prisma.emailEvent.create({
+    await prisma.email_events.create({
       data: {
         campaignId: prospect.campaignId,
         campaignProspectId: prospect.id,
@@ -106,7 +106,7 @@ router.get('/unsubscribe', async (req, res) => {
     })
 
     // Update prospect
-    await prisma.emailCampaignProspect.update({
+    await prisma.email_campaign_prospects.update({
       where: { id: prospect.id },
       data: {
         unsubscribedAt: new Date(),

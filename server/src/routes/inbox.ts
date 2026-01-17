@@ -35,7 +35,7 @@ router.get('/replies', async (req, res, next) => {
     const { start, end, campaignId, limit } = listRepliesSchema.parse(req.query)
     const { startDate, endDate } = parseRange(start, end)
 
-    const rows = await prisma.emailCampaignProspect.findMany({
+    const rows = await prisma.email_campaign_prospects.findMany({
       where: {
         campaign: { customerId },
         ...(campaignId ? { campaignId } : {}),
