@@ -65,7 +65,7 @@ router.post('/', async (req, res, next) => {
     }
 
     const created = await prisma.emailSendSchedule.create({
-      data: { ...data, customerId },
+      data: { ...data, customerId } as any,
     })
     res.json(created)
   } catch (error) {
