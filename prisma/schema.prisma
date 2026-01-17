@@ -15,7 +15,7 @@ model Customer {
   domain    String?
   leadsReportingUrl String?
   sector String?
-  clientStatus String @default("active")
+  clientStatus ClientStatus @default(active)
   targetJobTitle String?
   prospectingLocation String?
   monthlyIntakeGBP Decimal?
@@ -342,6 +342,13 @@ model EmailMessageMetadata {
 enum MessageDirection {
   outbound
   inbound
+}
+
+enum ClientStatus {
+  active
+  inactive
+  onboarding
+  win_back
 }
 
 // CustomerContact (customer's internal contacts)

@@ -1,0 +1,26 @@
+VERCEL ENVIRONMENT VARIABLE
+========================================
+
+Add this in Vercel during project setup:
+
+Key:
+VITE_API_URL
+
+Value:
+https://odcrm-api.onrender.com
+
+Environment:
+☑ Production
+☑ Preview (optional)
+☐ Development (not needed)
+
+========================================
+
+IMPORTANT:
+- This tells the frontend where to find the backend API
+- Without this, the frontend will use localhost (won't work in production)
+- You can update this later if needed (Settings → Environment Variables)
+
+AFTER CUSTOM DOMAIN SETUP:
+Update the value to:
+https://api.yourdomain.com

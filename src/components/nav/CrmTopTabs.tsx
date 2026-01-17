@@ -7,7 +7,7 @@ import {
   AddIcon,
 } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from '../../contracts/nav'
-import { ComponentType } from 'react'
+import type { ComponentType } from 'react'
 
 // Icon mapping for each tab
 const getTabIcon = (tabId: CrmTopTabId): ComponentType<any> => {

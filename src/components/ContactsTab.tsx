@@ -294,7 +294,7 @@ function loadContactsFromStorage(): Contact[] {
   
   // ONLY if storage is completely empty and has never been initialized, use defaults
   // Check if we've ever saved contacts (indicates user has used the system)
-  const hasEverSaved = getItem(OdcrmStorageKeys.contactsLastUpdated)
+  const hasEverSaved = localStorage.getItem(OdcrmStorageKeys.contactsLastUpdated)
   if (!hasEverSaved) {
     console.log('⚠️ No contacts in storage and never initialized, using defaults')
     // Save defaults to storage on first load
@@ -402,7 +402,7 @@ function loadDeletedAccountsFromStorage(): Set<string> {
 }
 
 type ParsedContactRow = {
-  account: string
+  // account: string
   name: string
   title?: string
   email?: string
@@ -880,7 +880,7 @@ function ContactsTab() {
     setNewContact({
       name: '',
       title: '',
-      account: '',
+      // account: '',
       tier: 'Decision maker',
       status: 'Active',
       email: '',
