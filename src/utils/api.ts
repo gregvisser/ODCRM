@@ -1,7 +1,7 @@
 import { settingsStore } from '../platform'
 
 // API utility for making requests to backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:3001' : 'https://odcrm-api.onrender.com')
 
 export interface ApiResponse<T> {
   data?: T
