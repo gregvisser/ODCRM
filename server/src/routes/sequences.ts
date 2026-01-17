@@ -42,7 +42,7 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ error: 'customerId is required' })
     }
 
-    const sequences = await prisma.email_sequences.findMany({
+    const sequences = await prisma.emailSequence.findMany({
       where: { customerId },
       include: {
         _count: {
@@ -75,7 +75,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const sequence = await prisma.email_sequences.findUnique({
+    const sequence = await prisma.emailSequence.findUnique({
       where: { id },
       include: {
         steps: {
@@ -117,7 +117,7 @@ router.post('/', async (req, res) => {
   try {
     const validated = createSequenceSchema.parse(req.body)
 
-    const sequence = await prisma.email_sequences.create({
+    const sequence = await prisma.emailSequence.create({
       data: {
         id: `seq_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         customerId: validated.customerId,
@@ -179,7 +179,7 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params
     const validated = updateSequenceSchema.parse(req.body)
 
-    const sequence = await prisma.email_sequences.update({
+    const sequence = await prisma.emailSequence.update({
       where: { id },
       data: {
         ...validated,
@@ -216,7 +216,7 @@ router.delete('/:id', async (req, res) => {
     const { id } = req.params
 
     // Check if sequence is used by any campaigns
-    const campaignsUsingSequence = await prisma.email_campaigns.count({
+    const campaignsUsingSequence = await prisma.emailCampaign.count({
       where: { sequenceId: id },
     })
 
@@ -226,7 +226,7 @@ router.delete('/:id', async (req, res) => {
       })
     }
 
-    await prisma.email_sequences.delete({
+    await prisma.emailSequence.delete({
       where: { id },
     })
 
@@ -244,13 +244,13 @@ router.post('/:id/steps', async (req, res) => {
     const validated = createStepSchema.parse(req.body)
 
     // Verify sequence exists
-    const sequence = await prisma.email_sequences.findUnique({ where: { id } })
+    const sequence = await prisma.emailSequence.findUnique({ where: { id } })
     if (!sequence) {
       return res.status(404).json({ error: 'Sequence not found' })
     }
 
     // Check if stepOrder already exists
-    const existingStep = await prisma.email_sequence_steps.findUnique({
+    const existingStep = await prisma.emailSequenceStep.findUnique({
       where: {
         sequenceId_stepOrder: {
           sequenceId: id,
@@ -263,7 +263,7 @@ router.post('/:id/steps', async (req, res) => {
       return res.status(400).json({ error: `Step ${validated.stepOrder} already exists` })
     }
 
-    const step = await prisma.email_sequence_steps.create({
+    const step = await prisma.emailSequenceStep.create({
       data: {
         id: `step_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         sequenceId: id,
@@ -277,7 +277,7 @@ router.post('/:id/steps', async (req, res) => {
     })
 
     // Update sequence's updatedAt
-    await prisma.email_sequences.update({
+    await prisma.emailSequence.update({
       where: { id },
       data: { updatedAt: new Date() },
     })
@@ -307,7 +307,7 @@ router.put('/:id/steps/:stepId', async (req, res) => {
     const { id, stepId } = req.params
     const validated = createStepSchema.partial().parse(req.body)
 
-    const step = await prisma.email_sequence_steps.update({
+    const step = await prisma.emailSequenceStep.update({
       where: { id: stepId },
       data: {
         ...validated,
@@ -316,7 +316,7 @@ router.put('/:id/steps/:stepId', async (req, res) => {
     })
 
     // Update sequence's updatedAt
-    await prisma.email_sequences.update({
+    await prisma.emailSequence.update({
       where: { id },
       data: { updatedAt: new Date() },
     })
@@ -345,12 +345,12 @@ router.delete('/:id/steps/:stepId', async (req, res) => {
   try {
     const { id, stepId } = req.params
 
-    await prisma.email_sequence_steps.delete({
+    await prisma.emailSequenceStep.delete({
       where: { id: stepId },
     })
 
     // Update sequence's updatedAt
-    await prisma.email_sequences.update({
+    await prisma.emailSequence.update({
       where: { id },
       data: { updatedAt: new Date() },
     })

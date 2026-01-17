@@ -43,7 +43,7 @@ export async function processCampaigns(
   )
 
   // Find campaign prospects that are due to be sent
-  const candidates = await prisma.email_campaign_prospects.findMany({
+  const candidates = await prisma.emailCampaignProspect.findMany({
     where: {
       lastStatus: 'pending',
       email_campaigns: { status: 'running' },
@@ -113,7 +113,7 @@ export async function processSequenceBasedCampaigns(
   )
 
   // Find campaigns that use sequences (the new workflow)
-  const campaigns = await prisma.email_campaigns.findMany({
+  const campaigns = await prisma.emailCampaign.findMany({
     where: {
       status: 'running',
       sequenceId: { not: null },
@@ -138,7 +138,7 @@ export async function processSequenceBasedCampaigns(
     if (!campaign.sequenceId) continue
 
     // Get sequence steps
-    const sequence = await prisma.email_sequences.findUnique({
+    const sequence = await prisma.emailSequence.findUnique({
       where: { id: campaign.sequenceId },
       include: {
         steps: {
@@ -150,14 +150,14 @@ export async function processSequenceBasedCampaigns(
     if (!sequence || sequence.steps.length === 0) continue
 
     // Get email identity
-    const identity = await prisma.email_identities.findUnique({
+    const identity = await prisma.emailIdentity.findUnique({
       where: { id: campaign.senderIdentityId },
     })
 
     if (!identity || !identity.isActive) continue
 
     // Check daily cap for this identity
-    const sentToday = await prisma.email_events.count({
+    const sentToday = await prisma.emailEvent.count({
       where: {
         type: 'sent',
         occurredAt: { gte: dayStartUtc },
@@ -175,7 +175,7 @@ export async function processSequenceBasedCampaigns(
     }
 
     // Get prospects for this campaign that are pending
-    const prospects = await prisma.email_campaign_prospects.findMany({
+    const prospects = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
         lastStatus: 'pending',
@@ -242,7 +242,7 @@ export async function processSequenceBasedCampaigns(
 
       if (result.ok) {
         // Create email event
-        await prisma.email_events.create({
+        await prisma.emailEvent.create({
           data: {
             id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             campaignId: campaign.id,
@@ -256,7 +256,7 @@ export async function processSequenceBasedCampaigns(
         })
 
         // Update prospect status
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: {
             lastStatus: 'step1_sent',
@@ -280,7 +280,7 @@ export async function processSequenceBasedCampaigns(
         )
 
         // Create bounced event if needed
-        await prisma.email_events.create({
+        await prisma.emailEvent.create({
           data: {
             id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             campaignId: campaign.id,

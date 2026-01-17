@@ -47,7 +47,7 @@ const upsertCustomerContactSchema = z.object({
 // GET /api/customers - List all customers with their contacts
 router.get('/', async (req, res) => {
   try {
-    const customers = await prisma.customers.findMany({
+    const customers = await prisma.customer.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
         customer_contacts: true,
@@ -80,7 +80,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const customer = await prisma.customers.findUnique({
+    const customer = await prisma.customer.findUnique({
       where: { id },
       include: {
         customer_contacts: true,
@@ -117,7 +117,7 @@ router.post('/', async (req, res) => {
   try {
     const validated = upsertCustomerSchema.parse(req.body)
 
-    const customer = await prisma.customers.create({
+    const customer = await prisma.customer.create({
       data: {
         id: `cust_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: validated.name,
@@ -156,7 +156,7 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params
     const validated = upsertCustomerSchema.parse(req.body)
 
-    const customer = await prisma.customers.update({
+    const customer = await prisma.customer.update({
       where: { id },
       data: {
         name: validated.name,
@@ -196,10 +196,10 @@ router.delete('/:id', async (req, res) => {
 
     // Check for related records
     const [contactsCount, campaignsCount, listsCount, sequencesCount] = await Promise.all([
-      prisma.contacts.count({ where: { customerId: id } }),
-      prisma.email_campaigns.count({ where: { customerId: id } }),
-      prisma.contact_lists.count({ where: { customerId: id } }),
-      prisma.email_sequences.count({ where: { customerId: id } }),
+      prisma.contact.count({ where: { customerId: id } }),
+      prisma.emailCampaign.count({ where: { customerId: id } }),
+      prisma.contactList.count({ where: { customerId: id } }),
+      prisma.emailSequence.count({ where: { customerId: id } }),
     ])
 
     if (contactsCount > 0 || campaignsCount > 0 || listsCount > 0 || sequencesCount > 0) {
@@ -208,7 +208,7 @@ router.delete('/:id', async (req, res) => {
       })
     }
 
-    await prisma.customers.delete({ where: { id } })
+    await prisma.customer.delete({ where: { id } })
 
     return res.json({ success: true })
   } catch (error) {
@@ -223,7 +223,7 @@ router.post('/:id/contacts', async (req, res) => {
     const { id } = req.params
     const validated = upsertCustomerContactSchema.parse({ ...req.body, customerId: id })
 
-    const contact = await prisma.customer_contacts.create({
+    const contact = await prisma.customerContact.create({
       data: {
         id: `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         customerId: validated.customerId,
@@ -256,7 +256,7 @@ router.put('/:customerId/contacts/:contactId', async (req, res) => {
     const { contactId } = req.params
     const validated = upsertCustomerContactSchema.omit({ customerId: true }).parse(req.body)
 
-    const contact = await prisma.customer_contacts.update({
+    const contact = await prisma.customerContact.update({
       where: { id: contactId },
       data: {
         name: validated.name,
@@ -287,7 +287,7 @@ router.delete('/:customerId/contacts/:contactId', async (req, res) => {
   try {
     const { contactId } = req.params
 
-    await prisma.customer_contacts.delete({
+    await prisma.customerContact.delete({
       where: { id: contactId },
     })
 

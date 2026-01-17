@@ -5,7 +5,7 @@
  */
 
 import nodemailer from 'nodemailer'
-import type { email_identities } from '@prisma/client'
+import type { EmailIdentity } from '@prisma/client'
 
 export type SendEmailResult = { ok: true } | { ok: false; error: string }
 
@@ -66,10 +66,10 @@ export async function sendEmailViaSMTP(args: {
 }
 
 /**
- * Send email using email_identities record (supports both SMTP and OAuth)
+ * Send email using EmailIdentity record (supports both SMTP and OAuth)
  */
 export async function sendEmail(args: {
-  identity: email_identities
+  identity: EmailIdentity
   to: string
   subject: string
   text?: string

@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
       return res.status(400).json({ error: 'customerId is required' })
     }
 
-    const lists = await prisma.contact_lists.findMany({
+    const lists = await prisma.contactList.findMany({
       where: { customerId },
       include: {
         _count: {
@@ -62,7 +62,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const list = await prisma.contact_lists.findUnique({
+    const list = await prisma.contactList.findUnique({
       where: { id },
       include: {
         contact_list_members: {
@@ -107,7 +107,7 @@ router.post('/', async (req, res) => {
   try {
     const validated = createListSchema.parse(req.body)
 
-    const list = await prisma.contact_lists.create({
+    const list = await prisma.contactList.create({
       data: {
         id: `list_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         customerId: validated.customerId,
@@ -141,7 +141,7 @@ router.put('/:id', async (req, res) => {
     const { id } = req.params
     const validated = updateListSchema.parse(req.body)
 
-    const list = await prisma.contact_lists.update({
+    const list = await prisma.contactList.update({
       where: { id },
       data: {
         ...validated,
@@ -177,7 +177,7 @@ router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    await prisma.contact_lists.delete({
+    await prisma.contactList.delete({
       where: { id },
     })
 
@@ -195,14 +195,14 @@ router.post('/:id/contacts', async (req, res) => {
     const validated = addContactsSchema.parse(req.body)
 
     // Verify list exists
-    const list = await prisma.contact_lists.findUnique({ where: { id } })
+    const list = await prisma.contactList.findUnique({ where: { id } })
     if (!list) {
       return res.status(404).json({ error: 'List not found' })
     }
 
     // Create list members (skip duplicates)
     const createPromises = validated.contactIds.map((contactId) =>
-      prisma.contact_list_members.upsert({
+      prisma.contactListMember.upsert({
         where: {
           listId_contactId: {
             listId: id,
@@ -221,7 +221,7 @@ router.post('/:id/contacts', async (req, res) => {
     await Promise.all(createPromises)
 
     // Update list's updatedAt
-    await prisma.contact_lists.update({
+    await prisma.contactList.update({
       where: { id },
       data: { updatedAt: new Date() },
     })
@@ -241,7 +241,7 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
   try {
     const { id, contactId } = req.params
 
-    await prisma.contact_list_members.deleteMany({
+    await prisma.contactListMember.deleteMany({
       where: {
         listId: id,
         contactId,
@@ -249,7 +249,7 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
     })
 
     // Update list's updatedAt
-    await prisma.contact_lists.update({
+    await prisma.contactList.update({
       where: { id },
       data: { updatedAt: new Date() },
     })
