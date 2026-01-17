@@ -4,7 +4,13 @@ import { getItem, removeItem, setItem } from '../storage'
 
 export function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
-  return v && String(v).trim() ? String(v) : fallback
+  if (v && String(v).trim()) {
+    return String(v)
+  }
+  if (fallback && String(fallback).trim()) {
+    setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
+  }
+  return fallback
 }
 
 export function setCurrentCustomerId(customerId: string): void {
