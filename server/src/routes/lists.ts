@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
       where: { customerId },
       include: {
         _count: {
-          select: { contact_list_members: true },
+          select: { contactListMember: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.contact_list_members,
+      contactCount: list._count.contactListMember,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     }))
@@ -65,7 +65,7 @@ router.get('/:id', async (req, res) => {
     const list = await prisma.contactList.findUnique({
       where: { id },
       include: {
-        contact_list_members: {
+        contactListMember: {
           include: {
             contact: true,
           },
@@ -84,7 +84,7 @@ router.get('/:id', async (req, res) => {
       description: list.description,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
-      contacts: list.contact_list_members.map((member) => ({
+      contacts: list.contactListMember.map((member) => ({
         id: member.contact.id,
         firstName: member.contact.firstName,
         lastName: member.contact.lastName,
@@ -149,7 +149,7 @@ router.put('/:id', async (req, res) => {
       },
       include: {
         _count: {
-          select: { contact_list_members: true },
+          select: { contactListMember: true },
         },
       },
     })
@@ -159,7 +159,7 @@ router.put('/:id', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.contact_list_members,
+      contactCount: list._count.contactListMember,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     })
