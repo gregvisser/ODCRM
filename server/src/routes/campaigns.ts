@@ -73,14 +73,14 @@ router.get('/', async (req, res, next) => {
     const campaigns = await prisma.emailCampaign.findMany({
       where: { customerId },
       include: {
-        email_identities: {
+        senderIdentity: {
           select: {
             id: true,
             emailAddress: true,
             displayName: true
           }
         },
-        email_campaign_prospects: {
+        emailCampaignProspects: {
           select: {
             lastStatus: true,
             openCount: true,
@@ -95,7 +95,7 @@ router.get('/', async (req, res, next) => {
 
     // Calculate metrics for each campaign
     const campaignsWithMetrics = await Promise.all(campaigns.map(async (campaign) => {
-      const prospects = campaign.email_campaign_prospects
+      const prospects = campaign.emailCampaignProspects
       const totalProspects = prospects.length
       const opened = prospects.filter(p => p.openCount > 0).length
       const bounced = prospects.filter(p => p.bouncedAt).length
