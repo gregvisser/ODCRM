@@ -75,7 +75,10 @@ export default function EmailSettingsTab() {
 
   const handleConnectOutlook = () => {
     const customerId = settingsStore.getCurrentCustomerId('default')
-    window.location.href = `http://localhost:3001/api/outlook/auth?customerId=${customerId}`
+    const apiUrl = window.location.hostname.includes('localhost') 
+      ? 'http://localhost:3001' 
+      : 'https://odcrm-api.onrender.com'
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
   }
 
   const handleEdit = (identity: EmailIdentity) => {
