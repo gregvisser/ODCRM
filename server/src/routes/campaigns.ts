@@ -80,7 +80,7 @@ router.get('/', async (req, res, next) => {
             displayName: true
           }
         },
-        emailCampaignProspects: {
+        prospects: {
           select: {
             lastStatus: true,
             openCount: true,
@@ -95,7 +95,7 @@ router.get('/', async (req, res, next) => {
 
     // Calculate metrics for each campaign
     const campaignsWithMetrics = await Promise.all(campaigns.map(async (campaign) => {
-      const prospects = campaign.emailCampaignProspects
+      const prospects = campaign.prospects
       const totalProspects = prospects.length
       const opened = prospects.filter(p => p.openCount > 0).length
       const bounced = prospects.filter(p => p.bouncedAt).length

@@ -200,10 +200,10 @@ model EmailCampaign {
   senderIdentity           EmailIdentity              @relation(fields: [senderIdentityId], references: [id])
   list                     ContactList?               @relation("CampaignToList", fields: [listId], references: [id])
   sequence                 EmailSequence?             @relation("CampaignToSequence", fields: [sequenceId], references: [id])
-  emailCampaignProspects   EmailCampaignProspect[]
-  emailCampaignTemplates   EmailCampaignTemplate[]
-  emailCampaignProspectSteps EmailCampaignProspectStep[]
-  emailEvents              EmailEvent[]
+  prospects                EmailCampaignProspect[]
+  templates                EmailCampaignTemplate[]
+  prospectSteps            EmailCampaignProspectStep[]
+  events                   EmailEvent[]
 
   @@index([customerId])
   @@index([customerId, status])
