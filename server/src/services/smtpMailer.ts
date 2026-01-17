@@ -1,17 +1,10 @@
 /**
  * SMTP Email Sending Service
- * Ported from OpensDoorsV2
- * Supports both SMTP and OAuth email sending
  * NOTE: SMTP functionality disabled - using Microsoft Graph/Outlook instead
+ * This file is kept for compatibility but all functions return errors
  */
 
-// import nodemailer from 'nodemailer'
 import type { EmailIdentity } from '@prisma/client'
-
-// Stub for nodemailer to allow build without dependency
-const nodemailer = {
-  createTransport: () => ({ sendMail: async () => ({}) })
-}
 
 export type SendEmailResult = { ok: true } | { ok: false; error: string }
 
@@ -121,21 +114,5 @@ export async function sendEmail(args: {
  * Test SMTP connection
  */
 export async function testSmtpConnection(account: SmtpAccount): Promise<SendEmailResult> {
-  try {
-    const transporter = nodemailer.createTransport({
-      host: account.smtpHost,
-      port: account.smtpPort,
-      secure: account.smtpSecure,
-      auth: {
-        user: account.smtpUsername,
-        pass: account.smtpPassword,
-      },
-    })
-
-    await transporter.verify()
-    return { ok: true }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : 'SMTP connection failed'
-    return { ok: false, error: message }
-  }
+  return { ok: false, error: 'SMTP not configured - use Outlook instead' }
 }
