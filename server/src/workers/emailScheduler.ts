@@ -29,7 +29,6 @@ async function processScheduledEmails(prisma: PrismaClient) {
     where: { status: 'running' },
     include: {
       senderIdentity: true,
-      sendSchedule: true,
       templates: {
         orderBy: { stepNumber: 'asc' }
       }
@@ -62,19 +61,10 @@ async function processScheduledEmails(prisma: PrismaClient) {
   }
 
   for (const campaign of runningCampaigns) {
-    // Check if we're within send window / schedule.
-    const schedule = (campaign as any).sendSchedule as any | null
-    if (schedule) {
-      const tz = schedule.timezone || 'UTC'
-      const { day, hour } = getScheduleNow(tz)
-      const allowedDays = Array.isArray(schedule.daysOfWeek) ? schedule.daysOfWeek : [1, 2, 3, 4, 5]
-      if (!allowedDays.includes(day)) continue
-      if (hour < schedule.startHour || hour >= schedule.endHour) continue
-    } else {
-      const currentHour = now.getHours()
-      if (currentHour < campaign.sendWindowHoursStart || currentHour >= campaign.sendWindowHoursEnd) {
-        continue
-      }
+    // Check if we're within send window (using campaign's sendWindowHoursStart/End)
+    const currentHour = now.getHours()
+    if (currentHour < campaign.sendWindowHoursStart || currentHour >= campaign.sendWindowHoursEnd) {
+      continue
     }
 
     // Check daily send limit for this identity
