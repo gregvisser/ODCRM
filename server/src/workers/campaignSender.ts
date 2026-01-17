@@ -181,7 +181,7 @@ export async function processSequenceBasedCampaigns(
         lastStatus: 'pending',
       },
       include: {
-        contacts: true,
+        contact: true,
       },
       take: Math.min(batchSize, mailboxDailyCap - sentToday),
     })
@@ -189,7 +189,7 @@ export async function processSequenceBasedCampaigns(
     scannedCount += prospects.length
 
     for (const prospect of prospects) {
-      const contact = prospect.contacts
+      const contact = prospect.contact
 
       // Determine which step to send (simplified - step 1 for all pending)
       const step = sequence.steps[0]

@@ -260,7 +260,7 @@ async function sendCampaignEmail(
     }
 
     // Render template
-    const variables: TemplateVariables = {
+    const variables = {
       firstName: prospect.contact.firstName,
       lastName: prospect.contact.lastName,
       companyName: prospect.contact.companyName,

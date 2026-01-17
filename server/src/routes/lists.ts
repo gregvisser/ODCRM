@@ -202,7 +202,7 @@ router.post('/:id/contacts', async (req, res) => {
 
     // Create list members (skip duplicates)
     const createPromises = validated.contactIds.map((contactId) =>
-      prisma.members.upsert({
+      prisma.contactListMember.upsert({
         where: {
           listId_contactId: {
             listId: id,
@@ -241,7 +241,7 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
   try {
     const { id, contactId } = req.params
 
-    await prisma.members.deleteMany({
+    await prisma.contactListMember.deleteMany({
       where: {
         listId: id,
         contactId,
