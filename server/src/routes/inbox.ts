@@ -37,17 +37,17 @@ router.get('/replies', async (req, res, next) => {
 
     const rows = await prisma.email_campaign_prospects.findMany({
       where: {
-        campaign: { customerId },
+        email_campaigns: { customerId },
         ...(campaignId ? { campaignId } : {}),
         replyDetectedAt: { not: null, gte: startDate, lte: endDate },
       },
       include: {
-        contact: true,
-        campaign: {
+        contacts: true,
+        email_campaigns: {
           select: {
             id: true,
             name: true,
-            senderIdentity: { select: { emailAddress: true, displayName: true } },
+            email_identities: { select: { emailAddress: true, displayName: true } },
           },
         },
       },
@@ -60,15 +60,15 @@ router.get('/replies', async (req, res, next) => {
       items: rows.map((p) => ({
         prospectId: p.id,
         campaignId: p.campaignId,
-        campaignName: p.campaign?.name,
-        senderEmail: p.campaign?.senderIdentity?.emailAddress,
-        senderName: p.campaign?.senderIdentity?.displayName,
-        contact: {
-          id: p.contact.id,
-          firstName: p.contact.firstName,
-          lastName: p.contact.lastName,
-          companyName: p.contact.companyName,
-          email: p.contact.email,
+        campaignName: pemail_campaigns?.name,
+        senderEmail: pemail_campaigns?.email_identities?.emailAddress,
+        senderName: pemail_campaigns?.email_identities?.displayName,
+        contacts: {
+          id: p.contacts.id,
+          firstName: p.contacts.firstName,
+          lastName: p.contacts.lastName,
+          companyName: p.contacts.companyName,
+          email: p.contacts.email,
         },
         replyDetectedAt: p.replyDetectedAt,
         replyCount: p.replyCount,

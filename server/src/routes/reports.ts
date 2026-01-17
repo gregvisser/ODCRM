@@ -37,7 +37,7 @@ router.get('/emails', async (req, res, next) => {
       by: ['type'],
       where: {
         occurredAt: { gte: start, lte: end },
-        campaign: { customerId },
+        email_campaigns: { customerId },
       },
       _count: { _all: true },
     })
@@ -52,7 +52,7 @@ router.get('/emails', async (req, res, next) => {
       by: ['campaignId', 'type'],
       where: {
         occurredAt: { gte: start, lte: end },
-        campaign: { customerId },
+        email_campaigns: { customerId },
       },
       _count: { _all: true },
     })
@@ -64,7 +64,7 @@ router.get('/emails', async (req, res, next) => {
           select: {
             id: true,
             name: true,
-            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
+            email_identities: { select: { id: true, emailAddress: true, displayName: true } },
           },
         })
       : []
@@ -82,7 +82,7 @@ router.get('/emails', async (req, res, next) => {
         return {
           campaignId: id,
           campaignName: c?.name || '(unknown)',
-          senderIdentity: c?.senderIdentity || null,
+          email_identities: c?.email_identities || null,
           counts,
         }
       })
@@ -110,7 +110,7 @@ router.get('/team-performance', async (req, res, next) => {
       where: {
         occurredAt: { gte: start, lte: end },
         type: 'sent',
-        campaign: { customerId },
+        email_campaigns: { customerId },
       },
       _count: { _all: true },
     })
@@ -120,7 +120,7 @@ router.get('/team-performance', async (req, res, next) => {
       where: {
         occurredAt: { gte: start, lte: end },
         type: 'replied',
-        campaign: { customerId },
+        email_campaigns: { customerId },
       },
       _count: { _all: true },
     })
@@ -131,7 +131,7 @@ router.get('/team-performance', async (req, res, next) => {
           where: { id: { in: campaignIds }, customerId },
           select: {
             id: true,
-            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
+            email_identities: { select: { id: true, emailAddress: true, displayName: true } },
           },
         })
       : []
@@ -145,7 +145,7 @@ router.get('/team-performance', async (req, res, next) => {
     >()
 
     for (const c of campaigns) {
-      const identity = c.senderIdentity
+      const identity = c.email_identities
       const key = identity.id
       const prev = byIdentity.get(key) || {
         identityId: identity.id,

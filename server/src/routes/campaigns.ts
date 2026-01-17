@@ -54,7 +54,7 @@ router.post('/', async (req, res, next) => {
         status: 'draft'
       } as any,
       include: {
-        senderIdentity: true
+        email_identities: true
       }
     })
 
@@ -72,14 +72,14 @@ router.get('/', async (req, res, next) => {
     const campaigns = await prisma.email_campaigns.findMany({
       where: { customerId },
       include: {
-        senderIdentity: {
+        email_identities: {
           select: {
             id: true,
             emailAddress: true,
             displayName: true
           }
         },
-        prospects: {
+        email_campaign_prospects: {
           select: {
             lastStatus: true,
             openCount: true,
@@ -94,7 +94,7 @@ router.get('/', async (req, res, next) => {
 
     // Calculate metrics for each campaign
     const campaignsWithMetrics = await Promise.all(campaigns.map(async (campaign) => {
-      const prospects = campaign.prospects
+      const prospects = campaign.email_campaign_prospects
       const totalProspects = prospects.length
       const opened = prospects.filter(p => p.openCount > 0).length
       const bounced = prospects.filter(p => p.bouncedAt).length
@@ -107,7 +107,7 @@ router.get('/', async (req, res, next) => {
       })
 
       return {
-        ...campaign,
+        ..email_campaigns,
         metrics: {
           totalProspects,
           emailsSent,
@@ -141,13 +141,13 @@ router.get('/:id', async (req, res, next) => {
         customerId
       },
       include: {
-        senderIdentity: true,
-        templates: {
+        email_identities: true,
+        email_campaign_templates: {
           orderBy: { stepNumber: 'asc' }
         },
-        prospects: {
+        email_campaign_prospects: {
           include: {
-            contact: true
+            contacts: true
           },
           orderBy: { createdAt: 'desc' }
         }
@@ -356,7 +356,7 @@ router.post('/:id/prospects', async (req, res, next) => {
 
     const prospects = await prisma.email_campaign_prospects.findMany({
       where: { campaignId: id },
-      include: { contact: true }
+      include: { contacts: true }
     })
 
     res.json({ attached: newContactIds.length, total: prospects.length })
@@ -373,14 +373,14 @@ router.post('/:id/start', async (req, res, next) => {
 
     const campaign = await prisma.email_campaigns.findFirst({
       where: { id, customerId },
-      include: { templates: true }
+      include: { email_campaign_templates: true }
     })
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
-    const hasStep1 = campaign.templates.some((t) => t.stepNumber === 1)
+    const hasStep1 = campaign.email_campaign_templates.some((t) => t.stepNumber === 1)
     if (!hasStep1) {
       return res.status(400).json({ error: 'Campaign must have a Step 1 template before starting' })
     }

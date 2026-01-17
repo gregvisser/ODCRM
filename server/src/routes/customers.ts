@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
     const customers = await prisma.customers.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        customerContacts: true,
+        customer_contacts: true,
       },
     })
 
@@ -61,8 +61,8 @@ router.get('/', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
-      customerContacts: customer.customerContacts.map((contact) => ({
-        ...contact,
+      customer_contacts: customer.customer_contacts.map((contact) => ({
+        ...contacts,
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       })),
@@ -83,7 +83,7 @@ router.get('/:id', async (req, res) => {
     const customer = await prisma.customers.findUnique({
       where: { id },
       include: {
-        customerContacts: true,
+        customer_contacts: true,
       },
     })
 
@@ -98,8 +98,8 @@ router.get('/:id', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
-      customerContacts: customer.customerContacts.map((contact) => ({
-        ...contact,
+      customer_contacts: customer.customer_contacts.map((contact) => ({
+        ...contacts,
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       })),
@@ -245,7 +245,7 @@ router.post('/:id/contacts', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
-    console.error('Error creating customer contact:', error)
+    console.error('Error creating customer contacts:', error)
     return res.status(500).json({ error: 'Failed to create contact' })
   }
 })
@@ -277,7 +277,7 @@ router.put('/:customerId/contacts/:contactId', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
-    console.error('Error updating customer contact:', error)
+    console.error('Error updating customer contacts:', error)
     return res.status(500).json({ error: 'Failed to update contact' })
   }
 })
@@ -293,7 +293,7 @@ router.delete('/:customerId/contacts/:contactId', async (req, res) => {
 
     return res.json({ success: true })
   } catch (error) {
-    console.error('Error deleting customer contact:', error)
+    console.error('Error deleting customer contacts:', error)
     return res.status(500).json({ error: 'Failed to delete contact' })
   }
 })

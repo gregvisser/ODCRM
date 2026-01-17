@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
       where: { customerId },
       include: {
         _count: {
-          select: { members: true },
+          select: { contact_list_members: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.members,
+      contactCount: list._count.contact_list_members,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     }))
@@ -65,9 +65,9 @@ router.get('/:id', async (req, res) => {
     const list = await prisma.contact_lists.findUnique({
       where: { id },
       include: {
-        members: {
+        contact_list_members: {
           include: {
-            contact: true,
+            contacts: true,
           },
         },
       },
@@ -84,15 +84,15 @@ router.get('/:id', async (req, res) => {
       description: list.description,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
-      contacts: list.members.map((member) => ({
-        id: member.contact.id,
-        firstName: member.contact.firstName,
-        lastName: member.contact.lastName,
-        email: member.contact.email,
-        companyName: member.contact.companyName,
-        jobTitle: member.contact.jobTitle,
-        phone: member.contact.phone,
-        status: member.contact.status,
+      contacts: list.contact_list_members.map((member) => ({
+        id: member.contacts.id,
+        firstName: member.contacts.firstName,
+        lastName: member.contacts.lastName,
+        email: member.contacts.email,
+        companyName: member.contacts.companyName,
+        jobTitle: member.contacts.jobTitle,
+        phone: member.contacts.phone,
+        status: member.contacts.status,
         addedAt: member.createdAt.toISOString(),
       })),
     })
@@ -149,7 +149,7 @@ router.put('/:id', async (req, res) => {
       },
       include: {
         _count: {
-          select: { members: true },
+          select: { contact_list_members: true },
         },
       },
     })
@@ -159,7 +159,7 @@ router.put('/:id', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.members,
+      contactCount: list._count.contact_list_members,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     })
