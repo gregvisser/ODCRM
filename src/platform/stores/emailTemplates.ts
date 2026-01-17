@@ -7,7 +7,11 @@ export type OdcrmEmailTemplate = {
   name: string
   subject: string
   body: string
-  stepNumber: 1 | 2
+  /**
+   * Optional "recommended step" for organizing templates.
+   * ODCRM sequences can use templates on any step (1..10).
+   */
+  stepNumber: number
   /**
    * Optional account/customer name this template is associated with.
    * If omitted/empty, treat as "global".

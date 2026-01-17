@@ -20,6 +20,7 @@ model Customer {
   contacts          Contact[]
   emailIdentities   EmailIdentity[]
   emailCampaigns    EmailCampaign[]
+  emailSendSchedules EmailSendSchedule[]
 
   @@index([id])
   @@map("customers")
@@ -88,6 +89,7 @@ model EmailCampaign {
   description          String?
   status               CampaignStatus @default(draft)
   senderIdentityId     String
+  sendScheduleId       String?
   sendWindowHoursStart Int      @default(9) // 0-23
   sendWindowHoursEnd   Int      @default(17) // 0-23
   randomizeWithinHours Int      @default(24) // spread first emails over this time
@@ -99,15 +101,40 @@ model EmailCampaign {
   // Relations
   customer                Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
   senderIdentity          EmailIdentity           @relation(fields: [senderIdentityId], references: [id])
+  sendSchedule            EmailSendSchedule?      @relation(fields: [sendScheduleId], references: [id], onDelete: SetNull)
   templates               EmailCampaignTemplate[]
   prospects               EmailCampaignProspect[]
+  prospectSteps           EmailCampaignProspectStep[]
   events                  EmailEvent[]
 
   @@index([customerId])
   @@index([status])
   @@index([customerId, status])
   @@index([senderIdentityId])
+  @@index([sendScheduleId])
   @@map("email_campaigns")
+}
+
+/// Customer-owned sending schedule (like Reply.io “Schedule: Default” selector).
+/// Used to control allowed days/hours/timezone for campaign sends.
+model EmailSendSchedule {
+  id         String   @id @default(cuid())
+  customerId String
+  name       String
+  timezone   String   @default("UTC")
+  // 0=Sun .. 6=Sat
+  daysOfWeek Int[]
+  startHour  Int      @default(9)
+  endHour    Int      @default(17)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  campaigns  EmailCampaign[]
+
+  @@unique([customerId, name])
+  @@index([customerId])
+  @@map("email_send_schedules")
 }
 
 enum CampaignStatus {
@@ -122,6 +149,12 @@ model EmailCampaignTemplate {
   id             String   @id @default(cuid())
   campaignId     String
   stepNumber     Int      // 1 for initial email, 2 for follow-up
+  /// Delay AFTER the previous step before this step is eligible to send.
+  /// Step 1 should generally be 0/0 ("right away").
+  ///
+  /// If null, the system will fall back to the campaign-level followUpDelayDaysMin/Max.
+  delayDaysMin   Int?
+  delayDaysMax   Int?
   subjectTemplate String  @db.Text
   bodyTemplateHtml String @db.Text
   bodyTemplateText String? @db.Text
@@ -163,6 +196,7 @@ model EmailCampaignProspect {
   senderIdentity      EmailIdentity          @relation(fields: [senderIdentityId], references: [id])
   events              EmailEvent[]
   emailMessageMetadata EmailMessageMetadata[]
+  steps               EmailCampaignProspectStep[]
 
   @@index([campaignId])
   @@index([contactId])
@@ -174,10 +208,41 @@ model EmailCampaignProspect {
   @@map("email_campaign_prospects")
 }
 
+/// Per-prospect, per-step scheduling state.
+/// Enables sequences up to 10 email steps.
+model EmailCampaignProspectStep {
+  id                 String   @id @default(cuid())
+  campaignId         String
+  campaignProspectId String
+  stepNumber         Int
+  scheduledAt        DateTime?
+  sentAt             DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Relations
+  campaign  EmailCampaign         @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  prospect  EmailCampaignProspect @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignProspectId, stepNumber])
+  @@index([campaignId, stepNumber])
+  @@index([campaignId, scheduledAt])
+  @@index([scheduledAt])
+  @@map("email_campaign_prospect_steps")
+}
+
 enum ProspectStatus {
   pending
   step1_sent
   step2_sent
+  step3_sent
+  step4_sent
+  step5_sent
+  step6_sent
+  step7_sent
+  step8_sent
+  step9_sent
+  step10_sent
   bounced
   unsubscribed
   replied

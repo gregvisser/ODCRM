@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import {
-  Box,
-  Flex,
-  Grid,
-  GridItem,
-  Heading,
-  Text,
-  VStack,
-  Divider,
-} from '@chakra-ui/react'
-import { CRM_TOP_TABS, getCrmTopTab, type CrmTopTabId } from './contracts/nav'
+import { Box, Divider, Flex, VStack, IconButton, useColorMode } from '@chakra-ui/react'
+import { MoonIcon, SunIcon } from '@chakra-ui/icons'
+import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { CrmTopTabs } from './components/nav/CrmTopTabs'
 import { DataPortability } from './components/DataPortability'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
@@ -25,6 +17,7 @@ function App() {
   const [activeView, setActiveView] = useState<string>('overview')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const [uxToolsEnabled, setUxToolsEnabled] = useState<boolean>(false)
+  const { colorMode, toggleColorMode } = useColorMode()
 
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
@@ -36,6 +29,10 @@ function App() {
       'email-campaigns': { tab: 'marketing-home' as const, view: 'campaigns' satisfies MarketingViewId },
       'email-templates': { tab: 'marketing-home' as const, view: 'templates' satisfies MarketingViewId },
       'cognism-prospects': { tab: 'marketing-home' as const, view: 'cognism-prospects' satisfies MarketingViewId },
+      inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies MarketingViewId },
+      reports: { tab: 'marketing-home' as const, view: 'reports' satisfies MarketingViewId },
+      'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies MarketingViewId },
+      schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies MarketingViewId },
       'user-authorization': { tab: 'operations-home' as const, view: 'user-authorization' satisfies OperationsViewId },
     } as const
   }, [])
@@ -176,34 +173,44 @@ function App() {
   })()
 
   return (
-    <Flex minH="100vh" bg="brand.50" direction="column">
-      <Box bg="white" borderBottom="1px solid" borderColor="brand.100" px={{ base: 4, md: 6 }} py={{ base: 4, md: 5 }}>
-        <VStack align="stretch" spacing={3}>
-          <Grid
-            alignItems="center"
-            templateColumns={{ base: '1fr', md: '1fr auto 1fr' }}
-            gap={4}
-          >
-            {/* Left: intentionally blank to keep the logo perfectly centered */}
-            <GridItem display={{ base: 'none', md: 'block' }} />
+    <Flex
+      minH="100vh"
+      bg="mist.50"
+      direction="row"
+      position="relative"
+      overflow="hidden"
+    >
+      {/* Left Sidebar Navigation */}
+      <Box
+        w={{ base: '60px', md: '240px' }}
+        minW={{ base: '60px', md: '240px' }}
+        bg="bg.surface"
+        borderRight="1px solid"
+        borderColor="border.subtle"
+        p={{ base: 2, md: 4 }}
+        display="flex"
+        flexDirection="column"
+        gap={4}
+        position="sticky"
+        top={0}
+        h="100vh"
+        overflowY="auto"
+        zIndex={10}
+      >
+        {/* Logo - only show on larger screens */}
+        <Box display={{ base: 'none', md: 'block' }} mb={4}>
+          <VStack spacing={2} align="flex-start" w="100%">
+            <HeaderImagePicker 
+              variant="logo" 
+              maxHeightPx={120} 
+              lockEdits={false}
+              storageKey="odcrm_sidebar_logo_data_url"
+            />
+          </VStack>
+        </Box>
 
-            {/* Center: logo + subheader */}
-            <GridItem display={{ base: 'none', md: 'block' }}>
-              <VStack spacing={1} w="100%" maxW="720px" align="center" mx="auto">
-                <HeaderImagePicker variant="logo" maxHeightPx={180} lockEdits />
-              </VStack>
-            </GridItem>
-
-            {/* Right: UX-only tools (hidden by default) */}
-            <GridItem justifySelf={{ base: 'stretch', md: 'end' }}>
-              {uxToolsEnabled ? <DataPortability /> : null}
-            </GridItem>
-          </Grid>
-          <Box display={{ base: 'block', md: 'none' }} pt={1}>
-            <VStack spacing={1} align="center">
-              <HeaderImagePicker variant="logo" maxHeightPx={160} lockEdits />
-            </VStack>
-          </Box>
+        {/* Navigation Tabs */}
+        <Box flex={1}>
           <CrmTopTabs
             activeTab={activeTab}
             onTabClick={(tabId) => {
@@ -212,33 +219,60 @@ function App() {
               setFocusAccountName(undefined)
             }}
           />
-        </VStack>
+        </Box>
+
+        {/* Dark mode toggle at bottom */}
+        <Box>
+          <IconButton
+            aria-label="Toggle color mode"
+            icon={colorMode === 'light' ? <MoonIcon /> : <SunIcon />}
+            onClick={toggleColorMode}
+            variant="ghost"
+            colorScheme="gray"
+            size="md"
+            w="100%"
+          />
+          {uxToolsEnabled ? <Box mt={2}><DataPortability /></Box> : null}
+        </Box>
       </Box>
 
-      <Box flex="1" p={{ base: 4, md: 6, lg: 10 }} overflowY="auto" w="100%" minW={0}>
-        <Box mb={4}>
-          <Heading size="lg" color="brand.800" mb={1} noOfLines={2}>
-            {getCrmTopTab(activeTab).label}
-          </Heading>
-          <Text color="brand.500" fontSize={{ base: 'sm', md: 'md' }}>
-            {activeView !== 'overview' ? `View: ${activeView}` : null}
-          </Text>
-        </Box>
-
+      {/* Main Content Area */}
+      <Box
+        flex="1"
+        display="flex"
+        flexDirection="column"
+        minW={0}
+        px={{ base: 3, md: 6 }}
+        py={{ base: 4, md: 8 }}
+      >
         <Box
-          bg="white"
-          borderRadius="2xl"
-          border="1px solid"
-          borderColor="brand.100"
-          p={{ base: 4, md: 6 }}
-          boxShadow="sm"
           w="100%"
-          minW={0}
-          overflowX="auto"
+          maxW="1440px"
+          mx="auto"
+          flex="1"
+          display="flex"
+          flexDirection="column"
+          gap={{ base: 4, md: 6 }}
+          position="relative"
+          zIndex={1}
         >
-          {page}
+          {/* Main Content */}
+          <Box
+            bg="bg.surface"
+            borderRadius="3xl"
+            border="1px solid"
+            borderColor="border.subtle"
+            p={{ base: 4, md: 6, lg: 8 }}
+            boxShadow="2xl"
+            w="100%"
+            minW={0}
+            overflowX="auto"
+            flex="1"
+          >
+            {page}
+          </Box>
+          <Divider mt={8} opacity={0} />
         </Box>
-        <Divider mt={8} opacity={0} />
       </Box>
     </Flex>
   )

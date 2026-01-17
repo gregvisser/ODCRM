@@ -649,7 +649,7 @@ function CampaignSequencesTab() {
         </Text>
       </Box>
 
-      <Tabs colorScheme="teal">
+      <Tabs colorScheme="gray">
         <TabList>
           <Tab>Workflows</Tab>
           <Tab>Templates</Tab>
@@ -660,7 +660,7 @@ function CampaignSequencesTab() {
           <TabPanel>
             <Stack spacing={6}>
               <HStack justify="flex-end">
-                <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onOpen}>
+                <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onOpen}>
                   Create Workflow
                 </Button>
               </HStack>
@@ -681,7 +681,7 @@ function CampaignSequencesTab() {
           <Text fontSize="sm" color="gray.500" mb={4}>
             Create your first email campaign workflow to get started
           </Text>
-          <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onOpen}>
+          <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onOpen}>
             Create Your First Workflow
           </Button>
         </Box>
@@ -714,7 +714,7 @@ function CampaignSequencesTab() {
                   </Td>
                   <Td>
                     {workflow.account ? (
-                      <Badge colorScheme="teal">{workflow.account}</Badge>
+                      <Badge colorScheme="gray">{workflow.account}</Badge>
                     ) : (
                       <Text fontSize="sm" color="gray.400" fontStyle="italic">
                         Not linked
@@ -770,7 +770,7 @@ function CampaignSequencesTab() {
                         aria-label="Edit workflow"
                         icon={<EditIcon />}
                         size="sm"
-                        colorScheme="teal"
+                        colorScheme="gray"
                         variant="ghost"
                         onClick={() => handleEditClick(workflow)}
                       />
@@ -778,7 +778,7 @@ function CampaignSequencesTab() {
                         aria-label="Delete workflow"
                         icon={<DeleteIcon />}
                         size="sm"
-                        colorScheme="red"
+                        colorScheme="gray"
                         variant="ghost"
                         onClick={() => handleDeleteClick(workflow)}
                       />
@@ -797,7 +797,7 @@ function CampaignSequencesTab() {
           <TabPanel>
             <Stack spacing={6}>
               <HStack justify="flex-end">
-                <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onTemplateModalOpen}>
+                <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>
                   Create Template
                 </Button>
               </HStack>
@@ -818,7 +818,7 @@ function CampaignSequencesTab() {
                   <Text fontSize="sm" color="gray.500" mb={4}>
                     Create your first email template to get started
                   </Text>
-                  <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onTemplateModalOpen}>
+                  <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>
                     Create Your First Template
                   </Button>
                 </Box>
@@ -843,7 +843,7 @@ function CampaignSequencesTab() {
                           </Td>
                           <Td>
                             {template.account ? (
-                              <Badge colorScheme="teal">{template.account}</Badge>
+                              <Badge colorScheme="gray">{template.account}</Badge>
                             ) : (
                               <Text fontSize="sm" color="gray.400" fontStyle="italic">
                                 Not linked
@@ -875,7 +875,7 @@ function CampaignSequencesTab() {
                                 aria-label="Edit template"
                                 icon={<EditIcon />}
                                 size="sm"
-                                colorScheme="teal"
+                                colorScheme="gray"
                                 variant="ghost"
                                 onClick={() => handleEditTemplateClick(template)}
                               />
@@ -883,7 +883,7 @@ function CampaignSequencesTab() {
                                 aria-label="Delete template"
                                 icon={<DeleteIcon />}
                                 size="sm"
-                                colorScheme="red"
+                                colorScheme="gray"
                                 variant="ghost"
                                 onClick={() => handleDeleteTemplateClick(template)}
                               />
@@ -1069,7 +1069,7 @@ function CampaignSequencesTab() {
               Cancel
             </Button>
             <Button
-              colorScheme="teal"
+              colorScheme="gray"
               onClick={isEditMode ? handleUpdateWorkflow : handleCreateWorkflow}
             >
               {isEditMode ? 'Save Changes' : 'Create Workflow'}
@@ -1093,7 +1093,7 @@ function CampaignSequencesTab() {
               <Button ref={cancelRef} onClick={onDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={handleDeleteConfirm} ml={3}>
+              <Button colorScheme="gray" onClick={handleDeleteConfirm} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>
@@ -1193,7 +1193,7 @@ function CampaignSequencesTab() {
               Cancel
             </Button>
             <Button
-              colorScheme="teal"
+              colorScheme="gray"
               onClick={isTemplateEditMode ? handleUpdateTemplate : handleCreateTemplate}
             >
               {isTemplateEditMode ? 'Save Changes' : 'Create Template'}
@@ -1221,7 +1221,7 @@ function CampaignSequencesTab() {
               <Button ref={templateCancelRef} onClick={onTemplateDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={handleDeleteTemplateConfirm} ml={3}>
+              <Button colorScheme="gray" onClick={handleDeleteTemplateConfirm} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>

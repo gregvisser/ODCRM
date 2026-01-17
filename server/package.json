@@ -7,11 +7,11 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
-    "db:push": "prisma db push",
-    "setup": "npm install && npx prisma generate && echo '✅ Setup complete! Next: Create .env file and run npm run db:migrate'"
+    "db:generate": "prisma generate --schema ../prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema ../prisma/schema.prisma",
+    "db:studio": "prisma studio --schema ../prisma/schema.prisma",
+    "db:push": "prisma db push --schema ../prisma/schema.prisma",
+    "setup": "npm install && npx prisma generate --schema ../prisma/schema.prisma && echo '✅ Setup complete! Next: Create .env file and run npm run db:migrate'"
   },
   "dependencies": {
     "@azure/identity": "^4.0.0",
@@ -28,6 +28,7 @@
     "@types/express": "^4.17.21",
     "@types/node": "^20.14.9",
     "@types/node-cron": "^3.0.11",
+    "@types/nodemailer": "^7.0.5",
     "prisma": "^5.19.0",
     "tsx": "^4.16.1",
     "typescript": "^5.5.3"

@@ -1,10 +1,9 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 const getCustomerId = (req: express.Request): string => {
   const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)

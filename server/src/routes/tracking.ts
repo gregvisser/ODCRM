@@ -1,8 +1,7 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 // Open tracking pixel
 router.get('/open', async (req, res) => {
@@ -114,6 +113,18 @@ router.get('/unsubscribe', async (req, res) => {
         lastStatus: 'unsubscribed'
       }
     })
+
+    // New scheduler: cancel any future (unsent) steps for this prospect.
+    try {
+      await (prisma as any).emailCampaignProspectStep.deleteMany({
+        where: {
+          campaignProspectId: prospect.id,
+          sentAt: null
+        }
+      })
+    } catch {
+      // ignore if schema not migrated yet
+    }
 
     res.send(`
       <html>

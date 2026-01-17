@@ -1,5 +1,6 @@
 import { Client } from '@microsoft/microsoft-graph-client'
 import { EmailIdentity, EmailMessageMetadata, PrismaClient } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 
 export interface SendEmailParams {
   senderIdentityId: string
@@ -103,7 +104,6 @@ async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
     const data = (await response.json()) as any
 
     // Update identity in database
-    const prisma = new PrismaClient()
     await prisma.emailIdentity.update({
       where: { id: identity.id },
       data: {
@@ -112,7 +112,6 @@ async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
         tokenExpiresAt: new Date(Date.now() + (data.expires_in * 1000))
       }
     })
-    await prisma.$disconnect()
 
     return data.access_token
   } catch (error) {

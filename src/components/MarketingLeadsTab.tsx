@@ -98,7 +98,13 @@ function loadLeadsFromStorage(): Lead[] {
 // Save leads to storage
 function saveLeadsToStorage(leads: Lead[]) {
   setJson(OdcrmStorageKeys.marketingLeads, leads)
-  setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, new Date().toISOString())
+  const nowIso = new Date().toISOString()
+  setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, nowIso)
+
+  // Keep the shared leads store in sync so Accounts tab / account cards can read the same data.
+  // (AccountsTab reads `odcrm_leads` for per-account lead counts + weekly/monthly actuals.)
+  setJson(OdcrmStorageKeys.leads, leads)
+  setItem(OdcrmStorageKeys.leadsLastRefresh, nowIso)
 }
 
 // Load last refresh time from storage
@@ -514,7 +520,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   if (loading && leads.length === 0) {
     return (
       <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="teal.500" thickness="4px" />
+        <Spinner size="xl" color="brand.700" thickness="4px" />
         <Text mt={4} color="gray.600">
           Loading leads data from Google Sheets...
         </Text>
@@ -656,10 +662,16 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     const endOfToday = new Date(startOfToday)
     endOfToday.setDate(endOfToday.getDate() + 1)
 
-    const pastWeekStart = new Date(startOfToday)
-    pastWeekStart.setDate(pastWeekStart.getDate() - 6)
+    // Current week: Monday -> next Monday (exclusive)
+    const currentWeekStart = new Date(startOfToday)
+    const day = currentWeekStart.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    currentWeekStart.setDate(currentWeekStart.getDate() + diff)
+    const currentWeekEnd = new Date(currentWeekStart)
+    currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
 
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1) // exclusive (start of next month)
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
 
     // Calculate daily target from weekly/monthly
@@ -690,6 +702,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
     const computeMetrics = (start: Date, end: Date) => {
       const breakdown: Record<string, number> = {}
+      const teamBreakdown: Record<string, number> = {}
       let actual = 0
 
       leadsWithDates.forEach((entry) => {
@@ -703,10 +716,30 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             // Also track non-normalized channels
             breakdown[channel] = (breakdown[channel] || 0) + 1
           }
+
+          // OD Team Member breakdown
+          const rawTeamMember =
+            entry.data['OD Team Member'] ||
+            entry.data['OD team member'] ||
+            entry.data['od team member'] ||
+            entry.data['OD Team'] ||
+            entry.data['od team'] ||
+            ''
+
+          if (rawTeamMember && rawTeamMember.trim()) {
+            const members = rawTeamMember
+              .split(/,|&|\/|\+|\band\b/gi)
+              .map((m) => m.trim())
+              .filter(Boolean)
+
+            members.forEach((member) => {
+              teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
+            })
+          }
         }
       })
 
-      return { actual, breakdown }
+      return { actual, breakdown, teamBreakdown }
     }
 
     const periodMetrics = {
@@ -716,13 +749,13 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         target: Math.max(Math.round(dailyTarget), 0),
       },
       week: {
-        label: 'Past Week',
-        ...computeMetrics(pastWeekStart, endOfToday),
+        label: 'This Week',
+        ...computeMetrics(currentWeekStart, currentWeekEnd),
         target: Math.max(Math.round(totalWeeklyTarget), 0),
       },
       month: {
         label: 'This Month',
-        ...computeMetrics(monthStart, endOfToday),
+        ...computeMetrics(monthStart, monthEnd),
         target: Math.max(Math.round(totalMonthlyTarget), 0),
       },
     }
@@ -764,14 +797,21 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     const endOfToday = new Date(startOfToday)
     endOfToday.setDate(endOfToday.getDate() + 1)
 
-    const pastWeekStart = new Date(startOfToday)
-    pastWeekStart.setDate(pastWeekStart.getDate() - 6)
+    // Current week: Monday -> next Monday (exclusive)
+    const currentWeekStart = new Date(startOfToday)
+    const day = currentWeekStart.getDay()
+    const diff = day === 0 ? -6 : 1 - day
+    currentWeekStart.setDate(currentWeekStart.getDate() + diff)
+    const currentWeekEnd = new Date(currentWeekStart)
+    currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
 
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1) // exclusive (start of next month)
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
 
     const computeMetrics = (start: Date, end: Date) => {
       const breakdown: Record<string, number> = {}
+      const teamBreakdown: Record<string, number> = {}
       let actual = 0
 
       leadsWithDates.forEach((entry) => {
@@ -784,10 +824,30 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
           } else if (channel) {
             breakdown[channel] = (breakdown[channel] || 0) + 1
           }
+
+          // OD Team Member breakdown
+          const rawTeamMember =
+            entry.data['OD Team Member'] ||
+            entry.data['OD team member'] ||
+            entry.data['od team member'] ||
+            entry.data['OD Team'] ||
+            entry.data['od team'] ||
+            ''
+
+          if (rawTeamMember && rawTeamMember.trim()) {
+            const members = rawTeamMember
+              .split(/,|&|\/|\+|\band\b/gi)
+              .map((m) => m.trim())
+              .filter(Boolean)
+
+            members.forEach((member) => {
+              teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
+            })
+          }
         }
       })
 
-      return { actual, breakdown }
+      return { actual, breakdown, teamBreakdown }
     }
 
     const dailyTargetFromWeekly = account.weeklyTarget ? account.weeklyTarget / 7 : 0
@@ -801,13 +861,13 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         target: Math.max(Math.round(dailyTarget), 0),
       },
       week: {
-        label: 'Past Week',
-        ...computeMetrics(pastWeekStart, endOfToday),
+        label: 'This Week',
+        ...computeMetrics(currentWeekStart, currentWeekEnd),
         target: Math.max(Math.round(account.weeklyTarget || 0), 0),
       },
       month: {
         label: 'This Month',
-        ...computeMetrics(monthStart, endOfToday),
+        ...computeMetrics(monthStart, monthEnd),
         target: Math.max(Math.round(account.monthlyTarget || 0), 0),
       },
     }
@@ -864,7 +924,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     if (header.toLowerCase().includes('link') || header.toLowerCase().includes('recording')) {
       if (isUrl(value)) {
         return (
-          <Link href={value} isExternal color="teal.600" display="inline-flex" alignItems="center" gap={1}>
+          <Link href={value} isExternal color="text.muted" display="inline-flex" alignItems="center" gap={1}>
             View <ExternalLinkIcon />
           </Link>
         )
@@ -931,7 +991,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             icon={<RepeatIcon />}
             onClick={() => loadLeads(true)}
             isLoading={loading}
-            colorScheme="teal"
+            variant="ghost"
+            colorScheme="gray"
             size="sm"
           />
         </HStack>
@@ -940,12 +1001,12 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       {/* Unified Analytics Kanban Card */}
       <Box
         minW="280px"
-        bg="white"
+        bg="bg.surface"
         borderRadius="lg"
         p={4}
-        border="2px solid"
-        borderColor="teal.300"
-        shadow="md"
+        border="1px solid"
+        borderColor="border.subtle"
+        shadow="sm"
       >
         <HStack justify="space-between" mb={4}>
           <Box>
@@ -970,17 +1031,20 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             const period = unifiedAnalytics.periodMetrics[periodKey]
             const variance = period.actual - period.target
             // Get all channels (both normalized and raw)
-            const allChannels = Object.keys(period.breakdown).sort((a, b) => 
-              period.breakdown[b] - period.breakdown[a]
+            const allChannels = Object.keys(period.breakdown).sort(
+              (a, b) => period.breakdown[b] - period.breakdown[a],
+            )
+            const allTeamMembers = Object.keys(period.teamBreakdown || {}).sort(
+              (a, b) => (period.teamBreakdown?.[b] || 0) - (period.teamBreakdown?.[a] || 0),
             )
             return (
               <Box
                 key={periodKey}
                 border="1px solid"
-                borderColor="gray.200"
+                borderColor="border.subtle"
                 borderRadius="lg"
                 p={4}
-                bg="gray.50"
+                bg="bg.subtle"
                 minH="280px"
               >
                 <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
@@ -999,7 +1063,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                       {period.target}
                     </Text>
                   </Text>
-                  <Text color={variance >= 0 ? 'teal.600' : 'red.600'}>
+                  <Text color="text.muted">
                     Variance:{' '}
                     <Text as="span" fontWeight="semibold">
                       {variance > 0 ? '+' : ''}
@@ -1018,7 +1082,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                           <Text fontSize="sm" color="gray.700" noOfLines={1}>
                             {channel}
                           </Text>
-                          <Badge colorScheme="teal" fontSize="xs">
+                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
                             {period.breakdown[channel]}
                           </Badge>
                         </HStack>
@@ -1030,6 +1094,30 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                     </Text>
                   )}
                 </Box>
+
+                <Box mt={4}>
+                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
+                    OD Team
+                  </Text>
+                  {allTeamMembers.length > 0 ? (
+                    <Stack spacing={1} maxH="120px" overflowY="auto">
+                      {allTeamMembers.map((member) => (
+                        <HStack key={member} justify="space-between">
+                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                            {member}
+                          </Text>
+                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                            {period.teamBreakdown?.[member] || 0}
+                          </Badge>
+                        </HStack>
+                      ))}
+                    </Stack>
+                  ) : (
+                    <Text fontSize="sm" color="gray.400">
+                      No team members recorded
+                    </Text>
+                  )}
+                </Box>
               </Box>
             )
           })}
@@ -1037,7 +1125,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       </Box>
 
       {/* Account Performance Filter Section */}
-      <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
+      <Box p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
         <Heading size="sm" mb={4}>
           Account Performance
         </Heading>
@@ -1063,12 +1151,12 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         {accountPerformance && (
           <Box
             minW="280px"
-            bg="white"
+            bg="bg.surface"
             borderRadius="lg"
             p={4}
-            border="2px solid"
-            borderColor="blue.300"
-            shadow="md"
+            border="1px solid"
+            borderColor="border.subtle"
+            shadow="sm"
           >
             <HStack justify="space-between" mb={4}>
               <Box>
@@ -1092,17 +1180,20 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               {(['today', 'week', 'month'] as const).map((periodKey) => {
                 const period = accountPerformance.periodMetrics[periodKey]
                 const variance = period.actual - period.target
-                const allChannels = Object.keys(period.breakdown).sort((a, b) => 
-                  period.breakdown[b] - period.breakdown[a]
+                const allChannels = Object.keys(period.breakdown).sort(
+                  (a, b) => period.breakdown[b] - period.breakdown[a],
+                )
+                const allTeamMembers = Object.keys(period.teamBreakdown || {}).sort(
+                  (a, b) => (period.teamBreakdown?.[b] || 0) - (period.teamBreakdown?.[a] || 0),
                 )
                 return (
                   <Box
                     key={periodKey}
                     border="1px solid"
-                    borderColor="gray.200"
+                    borderColor="border.subtle"
                     borderRadius="lg"
                     p={4}
-                    bg="gray.50"
+                    bg="bg.subtle"
                     minH="280px"
                   >
                     <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
@@ -1121,7 +1212,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                           {period.target}
                         </Text>
                       </Text>
-                      <Text color={variance >= 0 ? 'teal.600' : 'red.600'}>
+                      <Text color="text.muted">
                         Variance:{' '}
                         <Text as="span" fontWeight="semibold">
                           {variance > 0 ? '+' : ''}
@@ -1140,7 +1231,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                               <Text fontSize="sm" color="gray.700" noOfLines={1}>
                                 {channel}
                               </Text>
-                              <Badge colorScheme="blue" fontSize="xs">
+                              <Badge variant="subtle" colorScheme="gray" fontSize="xs">
                                 {period.breakdown[channel]}
                               </Badge>
                             </HStack>
@@ -1149,6 +1240,30 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                       ) : (
                         <Text fontSize="sm" color="gray.400">
                           No leads recorded
+                        </Text>
+                      )}
+                    </Box>
+
+                    <Box mt={4}>
+                      <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
+                        OD Team
+                      </Text>
+                      {allTeamMembers.length > 0 ? (
+                        <Stack spacing={1} maxH="120px" overflowY="auto">
+                          {allTeamMembers.map((member) => (
+                            <HStack key={member} justify="space-between">
+                              <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                                {member}
+                              </Text>
+                              <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                                {period.teamBreakdown?.[member] || 0}
+                              </Badge>
+                            </HStack>
+                          ))}
+                        </Stack>
+                      ) : (
+                        <Text fontSize="sm" color="gray.400">
+                          No team members recorded
                         </Text>
                       )}
                     </Box>
@@ -1170,7 +1285,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       )}
 
       {filteredLeads.length === 0 ? (
-        <Box textAlign="center" py={12} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
+        <Box textAlign="center" py={12} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
           <Text fontSize="lg" color="gray.600">
             No leads match the selected filters
           </Text>
@@ -1185,18 +1300,18 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
           maxH="calc(100vh - 400px)"
           maxW="100%"
           border="1px solid"
-          borderColor="gray.200"
+          borderColor="border.subtle"
           borderRadius="lg"
-          bg="white"
+          bg="bg.surface"
         >
           <Table variant="simple" size="sm" minW="max-content">
-            <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
+            <Thead bg="bg.subtle" position="sticky" top={0} zIndex={10}>
               <Tr>
                 <Th 
                   whiteSpace="nowrap" 
                   px={3} 
                   py={2} 
-                  bg="gray.50" 
+                  bg="bg.subtle" 
                   position="sticky" 
                   left={0} 
                   zIndex={11}
@@ -1218,11 +1333,11 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                     whiteSpace="nowrap" 
                     px={3} 
                     py={2} 
-                    bg="gray.50"
+                    bg="bg.subtle"
                     cursor="pointer"
                     userSelect="none"
                     onClick={() => handleSort(col)}
-                    _hover={{ bg: 'gray.100' }}
+                    _hover={{ bg: 'bg.subtle' }}
                   >
                     <HStack spacing={1}>
                       <Text>{col}</Text>
@@ -1238,23 +1353,23 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               {filteredLeads.map((lead, index) => (
                 <Tr
                   key={`${lead.accountName}-${index}`}
-                  _hover={{ bg: 'gray.50' }}
+                  _hover={{ bg: 'bg.subtle' }}
                 >
                   <Td
                     px={3}
                     py={2}
                     position="sticky"
                     left={0}
-                    bg="white"
+                    bg="bg.surface"
                     zIndex={5}
-                    _hover={{ bg: 'gray.50' }}
+                    _hover={{ bg: 'bg.subtle' }}
                     sx={{
                       'tr:hover &': {
-                        bg: 'gray.50',
+                        bg: 'bg.subtle',
                       },
                     }}
                   >
-                    <Badge colorScheme="teal">{lead.accountName}</Badge>
+                    <Badge variant="subtle" colorScheme="gray">{lead.accountName}</Badge>
                   </Td>
                   {columns.map((col) => {
                     // Get value from lead object using the column name

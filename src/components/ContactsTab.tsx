@@ -16,7 +16,6 @@ import {
   HStack,
   Stack,
   Textarea,
-  Checkbox,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -37,18 +36,21 @@ import {
   AlertDialogHeader,
   AlertDialogContent,
   AlertDialogOverlay,
+  Alert,
+  AlertIcon,
+  Checkbox,
 } from '@chakra-ui/react'
-import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
-import { ExportImportButtons } from './ExportImportButtons'
+import { AddIcon, DeleteIcon, EditIcon, AttachmentIcon } from '@chakra-ui/icons'
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
-import { getJson, setItem, setJson } from '../platform/storage'
+import { getJson, setItem, setJson, keys, removeItem } from '../platform/storage'
+import { useExportImport } from '../utils/exportImport'
 
 export type Contact = {
   id: string
   name: string
   title: string
-  account: string
+  accounts: string[] // Changed from single account to array to support multiple accounts
   tier: string
   status: string
   email: string
@@ -61,7 +63,7 @@ const defaultContacts: Contact[] = [
     id: '1',
     name: 'Oliver Kade',
     title: 'CTO & UK Country Manager',
-    account: 'Seven Clean Seas',
+    accounts: ['Seven Clean Seas'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'oliver.kade@sevencleanseas.com',
@@ -71,7 +73,7 @@ const defaultContacts: Contact[] = [
     id: '2',
     name: 'Wafi Ramadhani',
     title: 'Operations Lead',
-    account: 'Seven Clean Seas',
+    accounts: ['Seven Clean Seas'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'wafi.ramadhani@sevencleanseas.com',
@@ -81,7 +83,7 @@ const defaultContacts: Contact[] = [
     id: '3',
     name: 'Pamela Correia',
     title: 'Co-Founder',
-    account: 'Seven Clean Seas',
+    accounts: ['Seven Clean Seas'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'pamela.correia@sevencleanseas.com',
@@ -91,7 +93,7 @@ const defaultContacts: Contact[] = [
     id: '4',
     name: 'Chris Piper',
     title: 'Business Manager',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'chris.piper@ocs.com',
@@ -101,7 +103,7 @@ const defaultContacts: Contact[] = [
     id: '5',
     name: 'Sanjay Patel',
     title: 'Sales Director UK&I',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'sanjay.patel@ocs.com',
@@ -111,7 +113,7 @@ const defaultContacts: Contact[] = [
     id: '6',
     name: 'Ben Windsor',
     title: 'Sales Director Catering',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'ben.windsor@ocs.com',
@@ -121,7 +123,7 @@ const defaultContacts: Contact[] = [
     id: '7',
     name: 'Dan Stewart',
     title: 'Sales Director Cleaning and Security',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'dan.stewart@ocs.com',
@@ -131,7 +133,7 @@ const defaultContacts: Contact[] = [
     id: '8',
     name: 'Bilal Khalid',
     title: 'Sales Director Hard Services',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'bilal.khalid@ocs.com',
@@ -141,7 +143,7 @@ const defaultContacts: Contact[] = [
     id: '9',
     name: 'Omer Khalid',
     title: 'Sales Director Facilities',
-    account: 'OCS',
+    accounts: ['OCS'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'omer.khalid@ocs.com',
@@ -151,7 +153,7 @@ const defaultContacts: Contact[] = [
     id: '10',
     name: 'Omer Khalid',
     title: 'COO',
-    account: 'MaxSpace Projects',
+    accounts: ['MaxSpace Projects'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'carlos@maxspaceprojects.co.uk',
@@ -161,7 +163,7 @@ const defaultContacts: Contact[] = [
     id: '11',
     name: 'Rephael Barreto',
     title: 'Managing Director',
-    account: 'Verve Connect',
+    accounts: ['Verve Connect'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'raphael.barreto@verveconnect.co.uk',
@@ -171,7 +173,7 @@ const defaultContacts: Contact[] = [
     id: '12',
     name: 'Dan Stewart',
     title: 'Director',
-    account: 'Shield Pest Control',
+    accounts: ['Shield Pest Control'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'dan.steward@shieldpestcontrol.co.uk',
@@ -181,7 +183,7 @@ const defaultContacts: Contact[] = [
     id: '13',
     name: 'Sanjay Patel',
     title: 'Director',
-    account: 'My Purchasing Partner',
+    accounts: ['My Purchasing Partner'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'sanjay.patel@mypurchasingpartner.com',
@@ -191,7 +193,7 @@ const defaultContacts: Contact[] = [
     id: '14',
     name: 'Ben Windsor',
     title: 'Director',
-    account: 'Octavian Security',
+    accounts: ['Octavian Security'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'ben.windsor@octaviansecurity.com',
@@ -201,7 +203,7 @@ const defaultContacts: Contact[] = [
     id: '15',
     name: 'Chris Piper',
     title: 'Director',
-    account: 'Beauparc',
+    accounts: ['Beauparc'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'chris.piper@beauparc.ie',
@@ -211,7 +213,7 @@ const defaultContacts: Contact[] = [
     id: '16',
     name: 'Bilal Khalid',
     title: 'Director',
-    account: 'FusionTek',
+    accounts: ['FusionTek'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'bilal.khalid@fusiontek.co.uk',
@@ -221,7 +223,7 @@ const defaultContacts: Contact[] = [
     id: '17',
     name: 'Oliver Kade',
     title: 'Director',
-    account: 'Legionella',
+    accounts: ['Legionella'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'oliver.kade@legionellacontrol.com',
@@ -231,7 +233,7 @@ const defaultContacts: Contact[] = [
     id: '18',
     name: 'Pamela Correia',
     title: 'Technical Operations Manager',
-    account: 'P&R Morson FM',
+    accounts: ['P&R Morson FM'],
     tier: 'Decision maker',
     status: 'Active',
     email: 'pamela.correia@morsonfm.co.uk',
@@ -239,20 +241,153 @@ const defaultContacts: Contact[] = [
   },
 ]
 
+// Migration helper: convert old single account to accounts array
+function migrateContact(contact: any): Contact {
+  if (contact.accounts && Array.isArray(contact.accounts)) {
+    return contact as Contact
+  }
+  // Legacy contact with single account field
+  return {
+    ...contact,
+    accounts: contact.account ? [contact.account] : [],
+  }
+}
+
+// Load deleted contacts from storage
+function loadDeletedContactsFromStorage(): Set<string> {
+  const parsed = getJson<string[]>(OdcrmStorageKeys.deletedContacts)
+  return new Set(Array.isArray(parsed) ? parsed : [])
+}
+
+// Save deleted contacts to storage
+function saveDeletedContactsToStorage(deletedIds: string[]) {
+  setJson(OdcrmStorageKeys.deletedContacts, deletedIds)
+}
+
 // Load contacts from storage or use default
 function loadContactsFromStorage(): Contact[] {
   const parsed = getJson<Contact[]>(OdcrmStorageKeys.contacts)
-  if (parsed && Array.isArray(parsed)) {
-    console.log('✅ Loaded contacts from storage:', parsed.length)
-    return parsed
+  const deletedContactsSet = loadDeletedContactsFromStorage()
+  
+  // CRITICAL: If there's ANY data in storage (even empty array), use ONLY that data
+  // NEVER merge with defaults - this prevents deleted contacts from coming back
+  if (parsed !== null && Array.isArray(parsed)) {
+    // Filter out deleted contacts and migrate old format to new format
+    const filtered = parsed
+      .filter(c => !deletedContactsSet.has(c.id))
+      .map(c => migrateContact(c)) // Migrate old single account to accounts array
+    console.log('✅ Loaded contacts from storage:', filtered.length, `(filtered ${parsed.length - filtered.length} deleted)`)
+    
+    // If any contacts were migrated, save them back to storage
+    const needsMigration = parsed.some(c => !c.accounts || !Array.isArray(c.accounts))
+    if (needsMigration) {
+      console.log('🔄 Migrating contacts to new format (single account -> accounts array)')
+      try {
+        saveContactsToStorage(filtered)
+      } catch (e) {
+        console.error('Failed to save migrated contacts:', e)
+      }
+    }
+    
+    return filtered
   }
-  return defaultContacts
+  
+  // ONLY if storage is completely empty and has never been initialized, use defaults
+  // Check if we've ever saved contacts (indicates user has used the system)
+  const hasEverSaved = getItem(OdcrmStorageKeys.contactsLastUpdated)
+  if (!hasEverSaved) {
+    console.log('⚠️ No contacts in storage and never initialized, using defaults')
+    // Save defaults to storage on first load
+    try {
+      saveContactsToStorage(defaultContacts)
+      setItem(OdcrmStorageKeys.contactsLastUpdated, new Date().toISOString())
+    } catch (e) {
+      console.error('Failed to save default contacts:', e)
+    }
+    return [...defaultContacts]
+  }
+  
+  // If storage was initialized but is now empty, return empty array (user deleted everything)
+  console.log('✅ No contacts in storage (user deleted all), returning empty array')
+  return []
 }
 
 // Save contacts to storage
 function saveContactsToStorage(contactsData: Contact[]) {
+  // Create backup before saving (keep last 5 backups)
+  try {
+    const currentContacts = getJson<Contact[]>(OdcrmStorageKeys.contacts)
+    if (currentContacts && Array.isArray(currentContacts) && currentContacts.length > 0) {
+      const backupKey = `odcrm_contacts_backup_${Date.now()}`
+      setJson(backupKey, currentContacts)
+      // Keep only last 5 backups
+      const backupKeys = keys().filter(k => k.startsWith('odcrm_contacts_backup_')).sort()
+      if (backupKeys.length > 5) {
+        backupKeys.slice(0, backupKeys.length - 5).forEach(k => removeItem(k))
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to create backup before save:', e)
+  }
+  
   setJson(OdcrmStorageKeys.contacts, contactsData)
   console.log('💾 Saved contacts to storage')
+}
+
+// Load most recent backup
+function loadMostRecentBackup(): Contact[] | null {
+  try {
+    const backupKeys = keys()
+      .filter(k => k.startsWith('odcrm_contacts_backup_'))
+      .sort()
+      .reverse()
+    
+    if (backupKeys.length === 0) return null
+    
+    const mostRecent = getJson<Contact[]>(backupKeys[0])
+    return mostRecent && Array.isArray(mostRecent) ? mostRecent : null
+  } catch (e) {
+    console.warn('Failed to load backup:', e)
+    return null
+  }
+}
+
+// Load most recent account backup
+function loadMostRecentAccountBackup(): any[] | null {
+  try {
+    const backupKeys = keys()
+      .filter(k => k.startsWith('odcrm_accounts_backup_'))
+      .sort()
+      .reverse()
+    
+    if (backupKeys.length === 0) return null
+    
+    const mostRecent = getJson<any[]>(backupKeys[0])
+    return mostRecent && Array.isArray(mostRecent) ? mostRecent : null
+  } catch (e) {
+    console.warn('Failed to load account backup:', e)
+    return null
+  }
+}
+
+// Restore accounts from most recent backup
+function restoreAccountsFromBackup() {
+  const backup = loadMostRecentAccountBackup()
+  if (!backup) {
+    console.warn('No account backup found')
+    return false
+  }
+
+  try {
+    setJson(OdcrmStorageKeys.accounts, backup)
+    setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+    emit('accountsUpdated', backup)
+    console.log('✅ Restored accounts from backup')
+    return true
+  } catch (e) {
+    console.error('Failed to restore accounts:', e)
+    return false
+  }
 }
 
 function loadAccountNamesFromStorage(): string[] {
@@ -325,48 +460,28 @@ function parseSpreadsheetContacts(text: string): ParsedContactRow[] {
   return parsed
 }
 
-function buildBlankAccount(name: string) {
-  const now = new Date()
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const end = new Date(start)
-  end.setFullYear(end.getFullYear() + 1)
-  const isoDate = (d: Date) => d.toISOString().split('T')[0]
-
-  return {
-    name,
-    website: '',
-    status: 'Active',
-    sector: 'To be determined',
-    targetLocation: [],
-    targetTitle: '',
-    monthlySpendGBP: 0,
-    defcon: 3,
-    contractStart: isoDate(start),
-    contractEnd: isoDate(end),
-    days: 1,
-    contacts: 0,
-    leads: 0,
-    weeklyTarget: 0,
-    weeklyActual: 0,
-    monthlyTarget: 0,
-    monthlyActual: 0,
-    weeklyReport: '',
-    clientLeadsSheetUrl: '',
-    aboutSections: {
-      whatTheyDo: 'Information will be populated via AI research.',
-      accreditations: 'Information will be populated via AI research.',
-      keyLeaders: 'Information will be populated via AI research.',
-      companyProfile: 'Information will be populated via AI research.',
-      recentNews: 'Information will be populated via AI research.',
-    },
-    socialMedia: [],
-    agreements: [],
-    users: [],
-  }
-}
 
 function ContactsTab() {
-  const [contactsData, setContactsData] = useState<Contact[]>(() => loadContactsFromStorage())
+  const [contactsData, setContactsData] = useState<Contact[]>(() => {
+    const loaded = loadContactsFromStorage()
+    // If no contacts loaded but backups exist, try to recover from most recent backup
+    if (loaded.length === 0) {
+      const backup = loadMostRecentBackup()
+      if (backup && backup.length > 0) {
+        console.log('🔄 No contacts found, attempting recovery from backup...')
+        // Migrate backup contacts to new format
+        const migrated = backup.map(c => migrateContact(c))
+        try {
+          saveContactsToStorage(migrated)
+          console.log('✅ Recovered', migrated.length, 'contacts from backup')
+          return migrated
+        } catch (e) {
+          console.error('Failed to recover contacts from backup:', e)
+        }
+      }
+    }
+    return loaded
+  })
   const { isOpen, onOpen, onClose } = useDisclosure()
   const {
     isOpen: isDeleteOpen,
@@ -381,6 +496,7 @@ function ContactsTab() {
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null)
   const [contactToEdit, setContactToEdit] = useState<Contact | null>(null)
   const [, setIsEditMode] = useState(false)
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set())
   const toast = useToast()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
@@ -392,7 +508,6 @@ function ContactsTab() {
     onClose: onImportClose,
   } = useDisclosure()
   const [importText, setImportText] = useState<string>('')
-  const [createMissingAccounts, setCreateMissingAccounts] = useState<boolean>(true)
 
   useEffect(() => {
     const refresh = () => setAvailableAccounts(loadAccountNamesFromStorage())
@@ -402,12 +517,24 @@ function ContactsTab() {
       const names = loadAccountNamesFromStorage()
       setAvailableAccounts(names)
 
-      // If accounts are deleted, remove linked contacts so the system stays in sync.
+      // If accounts are deleted, remove those accounts from contacts (but keep contact even if all accounts deleted)
+      // This prevents data loss - contacts can be reassigned to accounts later
       if (names.length > 0) {
         const setNames = new Set(names)
         setContactsData((prev) => {
-          const next = prev.filter((c) => setNames.has(c.account))
+          const next = prev.map((c) => {
+            // Filter out deleted accounts from contact's accounts array
+            const validAccounts = (c.accounts || []).filter(acc => setNames.has(acc))
+            // Keep the contact even if no valid accounts remain (they can be reassigned)
+            return { ...c, accounts: validAccounts }
+          })
           return next
+        })
+      } else {
+        // If no accounts exist, keep contacts but clear their accounts arrays
+        // This prevents data loss
+        setContactsData((prev) => {
+          return prev.map((c) => ({ ...c, accounts: [] }))
         })
       }
     }
@@ -416,14 +543,56 @@ function ContactsTab() {
     return () => off()
   }, [])
 
+  // Filter out invalid accounts from contacts' accounts arrays (but keep contacts even if all accounts invalid)
+  // This allows contacts to exist temporarily while accounts are being created
+  useEffect(() => {
+    const validAccountNames = new Set(loadAccountNamesFromStorage().map(n => n.toLowerCase()))
+    setContactsData(prev => {
+      const updated = prev.map(c => {
+        // Filter out invalid accounts from contact's accounts array
+        const validAccounts = (c.accounts || []).filter(acc => validAccountNames.has(acc.toLowerCase()))
+        // Keep the contact even if no valid accounts (they might be created later)
+        // Just update the accounts array to only include valid ones
+        return { ...c, accounts: validAccounts }
+      })
+      // Only update if something actually changed
+      const hasChanges = updated.some((c, idx) => {
+        const prevAccounts = prev[idx]?.accounts || []
+        const newAccounts = c.accounts || []
+        return prevAccounts.length !== newAccounts.length || 
+               prevAccounts.some((acc, i) => acc !== newAccounts[i])
+      })
+      return hasChanges ? updated : prev
+    })
+  }, [availableAccounts])
+
   // Save contacts to localStorage whenever data changes
   useEffect(() => {
+    // Mark that contacts have been saved (prevents defaults from restoring)
+    setItem(OdcrmStorageKeys.contactsLastUpdated, new Date().toISOString())
     saveContactsToStorage(contactsData)
     // Dispatch event to notify other tabs (like AccountsTab) that contacts have changed
     emit('contactsUpdated', contactsData)
   }, [contactsData])
 
   const handleImportContacts = () => {
+    // Create backup before importing
+    try {
+      const currentContacts = getJson<Contact[]>(OdcrmStorageKeys.contacts)
+      if (currentContacts && Array.isArray(currentContacts) && currentContacts.length > 0) {
+        const backupKey = `odcrm_contacts_backup_${Date.now()}`
+        setJson(backupKey, currentContacts)
+        console.log('💾 Created backup before import')
+        // Keep only last 5 backups
+        const backupKeys = keys().filter(k => k.startsWith('odcrm_contacts_backup_')).sort()
+        if (backupKeys.length > 5) {
+          backupKeys.slice(0, backupKeys.length - 5).forEach(k => removeItem(k))
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to create backup before import:', e)
+    }
+
     const parsed = parseSpreadsheetContacts(importText)
     if (parsed.length === 0) {
       toast({
@@ -446,12 +615,12 @@ function ContactsTab() {
       return canonical || cleaned
     }
 
-    const missingAccounts = new Set<string>()
     const nextContacts: Contact[] = [...contactsData]
     const indexByKey = new Map<string, number>()
     for (let i = 0; i < nextContacts.length; i++) {
       const c = nextContacts[i]
-      const key = `${c.account.toLowerCase()}|${(c.email || c.name).toLowerCase()}`
+      // Use email or name as key (not account, since contacts can have multiple accounts)
+      const key = `${(c.email || c.name).toLowerCase()}`
       indexByKey.set(key, i)
     }
 
@@ -467,8 +636,10 @@ function ContactsTab() {
         continue
       }
 
-      if (!canonicalByLower.has(account.toLowerCase()) && createMissingAccounts) {
-        missingAccounts.add(account)
+      // Only allow contacts with existing accounts - do not create new accounts
+      if (!canonicalByLower.has(account.toLowerCase())) {
+        // Skip this contact - account doesn't exist
+        continue
       }
 
       const name = (row.name || '').trim()
@@ -476,14 +647,21 @@ function ContactsTab() {
       const phone = (row.phone || '').trim()
       const title = (row.title || '').trim()
 
-      const key = `${account.toLowerCase()}|${(email || name || phone).toLowerCase()}`
+      // Use email or name as key for matching (not account)
+      const key = `${(email || name || phone).toLowerCase()}`
       const existingIndex = indexByKey.get(key)
 
       if (existingIndex !== undefined) {
         const prev = nextContacts[existingIndex]
+        // Add account to existing contact's accounts array if not already present
+        const existingAccounts = prev.accounts || []
+        const accountLower = account.toLowerCase()
+        const hasAccount = existingAccounts.some(a => a.toLowerCase() === accountLower)
+        const updatedAccounts = hasAccount ? existingAccounts : [...existingAccounts, account]
+        
         const merged: Contact = {
           ...prev,
-          account,
+          accounts: updatedAccounts,
           name: name || prev.name,
           title: title || prev.title,
           email: email || prev.email,
@@ -496,7 +674,7 @@ function ContactsTab() {
       } else {
         nextContacts.push({
           id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          account,
+          accounts: [account],
           name: name || '(Unnamed contact)',
           title: title || '',
           email: email || '',
@@ -509,37 +687,29 @@ function ContactsTab() {
       }
     }
 
-    // Optionally create missing accounts so contacts are linked.
-    let createdAccountsCount = 0
-    if (createMissingAccounts && missingAccounts.size > 0) {
-      try {
-        const accounts = getJson<any[]>(OdcrmStorageKeys.accounts) || []
-        const existingLower = new Set(accounts.map((a) => String(a?.name || '').toLowerCase()).filter(Boolean))
-
-        for (const name of missingAccounts) {
-          if (existingLower.has(name.toLowerCase())) continue
-          accounts.push(buildBlankAccount(name))
-          existingLower.add(name.toLowerCase())
-          createdAccountsCount++
-        }
-
-        setJson(OdcrmStorageKeys.accounts, accounts)
-        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-        emit('accountsUpdated', accounts)
-      } catch (e) {
-        console.warn('Failed to create missing accounts during contacts import', e)
+    // Filter out any contacts that don't have valid accounts
+    const validAccountNames = new Set(loadAccountNamesFromStorage().map(n => n.toLowerCase()))
+    const filteredContacts = nextContacts.map(c => {
+      // Filter out invalid accounts from contact's accounts array
+      const validAccounts = (c.accounts || []).filter(acc => validAccountNames.has(acc.toLowerCase()))
+      if (validAccounts.length === 0) {
+        console.log(`Removing contact ${c.name} - no valid accounts`)
+        return null
       }
-    }
+      // Update contact with only valid accounts
+      return { ...c, accounts: validAccounts }
+    }).filter((c): c is Contact => c !== null)
 
-    setContactsData(nextContacts)
+    setContactsData(filteredContacts)
     onImportClose()
     setImportText('')
 
+    const skippedInvalidAccount = parsed.length - created - updated - skippedDeletedAccount
     const parts: string[] = []
     if (created > 0) parts.push(`Imported ${created} new contact(s).`)
     if (updated > 0) parts.push(`Updated ${updated} existing contact(s).`)
-    if (createdAccountsCount > 0) parts.push(`Created ${createdAccountsCount} new account(s).`)
     if (skippedDeletedAccount > 0) parts.push(`${skippedDeletedAccount} row(s) skipped (account was deleted).`)
+    if (skippedInvalidAccount > 0) parts.push(`${skippedInvalidAccount} row(s) skipped (account does not exist - create account first).`)
 
     toast({
       title: 'Contacts imported',
@@ -554,7 +724,7 @@ function ContactsTab() {
   const [newContact, setNewContact] = useState<Omit<Contact, 'id'>>({
     name: '',
     title: '',
-    account: '',
+    accounts: [],
     tier: 'Decision maker',
     status: 'Active',
     email: '',
@@ -563,12 +733,26 @@ function ContactsTab() {
 
   const handleCreateContact = () => {
     // Validate required fields
-    if (!newContact.name || !newContact.account || !newContact.email) {
+    if (!newContact.name || !newContact.accounts || newContact.accounts.length === 0 || !newContact.email) {
       toast({
         title: 'Validation Error',
-        description: 'Please fill in all required fields (Name, Account, Email)',
+        description: 'Please fill in all required fields (Name, at least one Account, Email)',
         status: 'error',
         duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Validate that all accounts exist
+    const validAccountNames = new Set(loadAccountNamesFromStorage().map(n => n.toLowerCase()))
+    const invalidAccounts = newContact.accounts.filter(acc => !validAccountNames.has(acc.toLowerCase()))
+    if (invalidAccounts.length > 0) {
+      toast({
+        title: 'Invalid Account(s)',
+        description: `Account(s) "${invalidAccounts.join(', ')}" do not exist. Please create them first in the Accounts tab.`,
+        status: 'error',
+        duration: 4000,
         isClosable: true,
       })
       return
@@ -588,7 +772,7 @@ function ContactsTab() {
     setNewContact({
       name: '',
       title: '',
-      account: '',
+      accounts: [],
       tier: 'Decision maker',
       status: 'Active',
       email: '',
@@ -599,9 +783,12 @@ function ContactsTab() {
     onClose()
 
     // Show success toast
+    const accountsText = contact.accounts.length === 1 
+      ? contact.accounts[0] 
+      : `${contact.accounts.length} accounts`
     toast({
       title: 'Contact Created',
-      description: `${contact.name} has been successfully created and linked to ${contact.account}`,
+      description: `${contact.name} has been successfully created and linked to ${accountsText}`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -615,7 +802,7 @@ function ContactsTab() {
     setNewContact({
       name: contact.name,
       title: contact.title,
-      account: contact.account,
+      accounts: contact.accounts || [],
       tier: contact.tier,
       status: contact.status,
       email: contact.email,
@@ -628,12 +815,26 @@ function ContactsTab() {
     if (!contactToEdit) return
 
     // Validate required fields
-    if (!newContact.name || !newContact.account || !newContact.email) {
+    if (!newContact.name || !newContact.accounts || newContact.accounts.length === 0 || !newContact.email) {
       toast({
         title: 'Validation Error',
-        description: 'Please fill in all required fields (Name, Account, Email)',
+        description: 'Please fill in all required fields (Name, at least one Account, Email)',
         status: 'error',
         duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Validate that all accounts exist
+    const validAccountNames = new Set(loadAccountNamesFromStorage().map(n => n.toLowerCase()))
+    const invalidAccounts = newContact.accounts.filter(acc => !validAccountNames.has(acc.toLowerCase()))
+    if (invalidAccounts.length > 0) {
+      toast({
+        title: 'Invalid Account(s)',
+        description: `Account(s) "${invalidAccounts.join(', ')}" do not exist. Please create them first in the Accounts tab.`,
+        status: 'error',
+        duration: 4000,
         isClosable: true,
       })
       return
@@ -654,7 +855,7 @@ function ContactsTab() {
     setNewContact({
       name: '',
       title: '',
-      account: '',
+      accounts: [],
       tier: 'Decision maker',
       status: 'Active',
       email: '',
@@ -698,7 +899,22 @@ function ContactsTab() {
 
   const handleDeleteConfirm = () => {
     if (contactToDelete) {
-      setContactsData(contactsData.filter((c) => c.id !== contactToDelete.id))
+      // Add to deleted contacts list
+      const deletedContacts = loadDeletedContactsFromStorage()
+      deletedContacts.add(contactToDelete.id)
+      saveDeletedContactsToStorage(Array.from(deletedContacts))
+      
+      // Remove from contacts data
+      const updated = contactsData.filter((c) => c.id !== contactToDelete.id)
+      setContactsData(updated)
+      
+      // Remove from selected if it was selected
+      setSelectedContactIds(prev => {
+        const next = new Set(prev)
+        next.delete(contactToDelete.id)
+        return next
+      })
+      
       toast({
         title: 'Contact Deleted',
         description: `${contactToDelete.name} has been permanently deleted`,
@@ -711,27 +927,192 @@ function ContactsTab() {
     }
   }
 
+  const handleSelectAll = (isChecked: boolean) => {
+    if (isChecked) {
+      setSelectedContactIds(new Set(contactsData.map(c => c.id)))
+    } else {
+      setSelectedContactIds(new Set())
+    }
+  }
+
+  const handleSelectContact = (contactId: string, isChecked: boolean) => {
+    setSelectedContactIds(prev => {
+      const next = new Set(prev)
+      if (isChecked) {
+        next.add(contactId)
+      } else {
+        next.delete(contactId)
+      }
+      return next
+    })
+  }
+
+  const handleBulkDelete = () => {
+    if (selectedContactIds.size === 0) return
+
+    const contactsToDelete = contactsData.filter(c => selectedContactIds.has(c.id))
+    const deletedContacts = loadDeletedContactsFromStorage()
+    
+    // Add all selected contacts to deleted list
+    contactsToDelete.forEach(contact => {
+      deletedContacts.add(contact.id)
+    })
+    saveDeletedContactsToStorage(Array.from(deletedContacts))
+    
+    // Remove from contacts data
+    const updated = contactsData.filter(c => !selectedContactIds.has(c.id))
+    setContactsData(updated)
+    
+    // Clear selection
+    setSelectedContactIds(new Set())
+    
+    toast({
+      title: 'Contacts Deleted',
+      description: `Deleted ${contactsToDelete.length} contact(s)`,
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
+  }
+
+  const handleUndoLastImport = () => {
+    // First, restore accounts from backup (to remove any accounts created during import)
+    const accountsRestored = restoreAccountsFromBackup()
+    
+    // Then restore contacts
+    const backup = loadMostRecentBackup()
+    if (!backup) {
+      // If no backup, restore to default contacts
+      setContactsData(defaultContacts)
+      toast({
+        title: 'Contacts restored',
+        description: accountsRestored 
+          ? 'Restored to default contacts and accounts from backup (no contact backup found)'
+          : 'Restored to default contacts (no backup found)',
+        status: accountsRestored ? 'success' : 'info',
+        duration: 4000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setContactsData(backup)
+    toast({
+      title: 'Import undone',
+      description: accountsRestored
+        ? 'Restored contacts and accounts from before the last import'
+        : 'Restored contacts from before the last import',
+      status: 'success',
+      duration: 4000,
+      isClosable: true,
+    })
+  }
+
+  const handleUndoLastDelete = () => {
+    // Restore the most recently deleted contact
+    const deletedContacts = loadDeletedContactsFromStorage()
+    if (deletedContacts.size === 0) {
+      toast({
+        title: 'Nothing to undo',
+        description: 'No deleted contacts to restore',
+        status: 'info',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Get the most recent backup to find the deleted contact
+    const backup = loadMostRecentBackup()
+    if (!backup) {
+      toast({
+        title: 'Cannot undo',
+        description: 'No backup found to restore deleted contact',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Find contacts in backup that are in deleted list but not in current data
+    const currentContactIds = new Set(contactsData.map(c => c.id))
+    const deletedToRestore = backup.filter(c => deletedContacts.has(c.id) && !currentContactIds.has(c.id))
+    
+    if (deletedToRestore.length === 0) {
+      toast({
+        title: 'Nothing to undo',
+        description: 'No deleted contacts found in backup',
+        status: 'info',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Restore the most recently deleted contact (first one found)
+    const contactToRestore = deletedToRestore[0]
+    
+    // Remove from deleted list
+    deletedContacts.delete(contactToRestore.id)
+    saveDeletedContactsToStorage(Array.from(deletedContacts))
+    
+    // Add back to contacts
+    setContactsData([...contactsData, contactToRestore])
+    
+    toast({
+      title: 'Contact restored',
+      description: `${contactToRestore.name} has been restored`,
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
+  }
+
+  // Prepare contacts data for CSV export (flatten accounts array to comma-separated string)
+  const contactsForExport = contactsData.map(contact => ({
+    id: contact.id,
+    name: contact.name,
+    title: contact.title || '',
+    accounts: (contact.accounts || []).join('; '), // Join multiple accounts with semicolon
+    tier: contact.tier || '',
+    status: contact.status || '',
+    email: contact.email || '',
+    phone: contact.phone || '',
+  }))
+
+  const { exportData: exportContactsData } = useExportImport({
+    data: contactsForExport,
+    filename: 'contacts',
+    toast,
+  })
+
   return (
     <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.100" boxShadow="sm">
       <HStack justify="space-between" p={6} pb={4} flexWrap="wrap" gap={4}>
         <Heading size="md">Contacts by account</Heading>
         <HStack spacing={3} flexWrap="wrap">
-          <ExportImportButtons
-            data={contactsData}
-            filename="contacts"
-            validateItem={(contact) => {
-              return !!(contact.name && contact.email && contact.account)
-            }}
-            getItemId={(contact) => contact.id}
-            onImport={(items) => {
-              setContactsData(items)
-              saveContactsToStorage(items)
-            }}
-          />
-          <Button variant="outline" onClick={onImportOpen}>
+          {selectedContactIds.size > 0 && (
+            <Button
+              leftIcon={<DeleteIcon />}
+              colorScheme="red"
+              variant="solid"
+              onClick={handleBulkDelete}
+            >
+              Delete Selected ({selectedContactIds.size})
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            onClick={() => exportContactsData('csv')}
+            isDisabled={contactsData.length === 0}
+          >
+            Export CSV
+          </Button>
+          <Button leftIcon={<AttachmentIcon />} colorScheme="blue" variant="outline" onClick={onImportOpen}>
             Import Spreadsheet
           </Button>
-          <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onOpen}>
+          <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onOpen}>
             Create Contact
           </Button>
         </HStack>
@@ -739,6 +1120,14 @@ function ContactsTab() {
       <Table variant="simple">
         <Thead bg="gray.50">
           <Tr>
+            <Th>
+              <Checkbox
+                isChecked={selectedContactIds.size > 0 && selectedContactIds.size === contactsData.length}
+                isIndeterminate={selectedContactIds.size > 0 && selectedContactIds.size < contactsData.length}
+                onChange={(e) => handleSelectAll(e.target.checked)}
+                aria-label="Select all contacts"
+              />
+            </Th>
             <Th>Contact</Th>
             <Th>Title</Th>
             <Th>Email address</Th>
@@ -753,6 +1142,13 @@ function ContactsTab() {
           {contactsData.map((contact) => (
             <Tr key={contact.id}>
               <Td>
+                <Checkbox
+                  isChecked={selectedContactIds.has(contact.id)}
+                  onChange={(e) => handleSelectContact(contact.id, e.target.checked)}
+                  aria-label={`Select ${contact.name}`}
+                />
+              </Td>
+              <Td>
                 <Box display="flex" alignItems="center" gap="3">
                   <Avatar name={contact.name} size="sm" />
                   <Heading size="sm">{contact.name}</Heading>
@@ -762,19 +1158,29 @@ function ContactsTab() {
               <Td>{contact.email}</Td>
               <Td>{contact.phone}</Td>
               <Td>
-                <Link
-                  color="teal.600"
-                  fontWeight="medium"
-                  cursor="pointer"
-                  onClick={(e) => {
-                    e.preventDefault()
-                    // Trigger navigation to accounts tab and open the account
-                    emit('navigateToAccount', { accountName: contact.account })
-                  }}
-                  _hover={{ textDecoration: 'underline' }}
-                >
-                  {contact.account}
-                </Link>
+                <Stack spacing={1}>
+                  {contact.accounts && contact.accounts.length > 0 ? (
+                    contact.accounts.map((account) => (
+                      <Link
+                        key={account}
+                        color="text.muted"
+                        fontWeight="medium"
+                        cursor="pointer"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          // Trigger navigation to accounts tab and open the account
+                          emit('navigateToAccount', { accountName: account })
+                        }}
+                        _hover={{ textDecoration: 'underline' }}
+                        display="block"
+                      >
+                        {account}
+                      </Link>
+                    ))
+                  ) : (
+                    <Text fontSize="sm" color="gray.400">No accounts</Text>
+                  )}
+                </Stack>
               </Td>
               <Td>
                 <Badge colorScheme={contact.tier === 'Decision maker' ? 'purple' : 'blue'}>
@@ -800,7 +1206,7 @@ function ContactsTab() {
                     aria-label="Edit contact"
                     icon={<EditIcon />}
                     size="sm"
-                    colorScheme="teal"
+                    colorScheme="gray"
                     variant="ghost"
                     onClick={() => handleEditClick(contact)}
                   />
@@ -808,7 +1214,7 @@ function ContactsTab() {
                     aria-label="Delete contact"
                     icon={<DeleteIcon />}
                     size="sm"
-                    colorScheme="red"
+                    colorScheme="gray"
                     variant="ghost"
                     onClick={() => handleDeleteClick(contact)}
                   />
@@ -839,12 +1245,15 @@ function ContactsTab() {
                 fontFamily="mono"
                 fontSize="sm"
               />
-              <Checkbox
-                isChecked={createMissingAccounts}
-                onChange={(e) => setCreateMissingAccounts(e.target.checked)}
-              >
-                Create missing accounts automatically (recommended to keep links in sync)
-              </Checkbox>
+              <Alert status="info" borderRadius="md">
+                <AlertIcon />
+                <Box>
+                  <Text fontSize="sm" fontWeight="medium">Important:</Text>
+                  <Text fontSize="xs" mt={1}>
+                    Contacts can only be imported for existing accounts. If an account doesn't exist, create it first in the Accounts tab.
+                  </Text>
+                </Box>
+              </Alert>
               <Text fontSize="xs" color="gray.500">
                 Tip: Press Ctrl+Shift+U to show Data Portability if you need to export/import full snapshots.
               </Text>
@@ -854,7 +1263,7 @@ function ContactsTab() {
             <Button variant="ghost" onClick={onImportClose}>
               Cancel
             </Button>
-            <Button colorScheme="teal" onClick={handleImportContacts} ml={3}>
+            <Button colorScheme="gray" onClick={handleImportContacts} ml={3}>
               Import
             </Button>
           </ModalFooter>
@@ -885,18 +1294,27 @@ function ContactsTab() {
               />
             </FormControl>
             <FormControl isRequired mb={4}>
-              <FormLabel>Account</FormLabel>
-              <Select
-                value={newContact.account}
-                onChange={(e) => setNewContact({ ...newContact, account: e.target.value })}
-                placeholder="Select an account"
-              >
+              <FormLabel>Accounts (select one or more)</FormLabel>
+              <Stack spacing={2} maxH="200px" overflowY="auto" border="1px solid" borderColor="gray.200" borderRadius="md" p={2}>
                 {availableAccounts.map((account) => (
-                  <option key={account} value={account}>
+                  <Checkbox
+                    key={account}
+                    isChecked={newContact.accounts.includes(account)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewContact({ ...newContact, accounts: [...newContact.accounts, account] })
+                      } else {
+                        setNewContact({ ...newContact, accounts: newContact.accounts.filter(a => a !== account) })
+                      }
+                    }}
+                  >
                     {account}
-                  </option>
+                  </Checkbox>
                 ))}
-              </Select>
+                {availableAccounts.length === 0 && (
+                  <Text fontSize="sm" color="gray.500">No accounts available. Create an account first.</Text>
+                )}
+              </Stack>
             </FormControl>
             <FormControl isRequired mb={4}>
               <FormLabel>Email</FormLabel>
@@ -943,7 +1361,7 @@ function ContactsTab() {
             <Button variant="ghost" mr={3} onClick={handleCloseModal}>
               Cancel
             </Button>
-            <Button colorScheme="teal" onClick={handleCreateContact}>
+            <Button colorScheme="gray" onClick={handleCreateContact}>
               Create Contact
             </Button>
           </ModalFooter>
@@ -974,18 +1392,27 @@ function ContactsTab() {
               />
             </FormControl>
             <FormControl isRequired mb={4}>
-              <FormLabel>Account</FormLabel>
-              <Select
-                value={newContact.account}
-                onChange={(e) => setNewContact({ ...newContact, account: e.target.value })}
-                placeholder="Select an account"
-              >
+              <FormLabel>Accounts (select one or more)</FormLabel>
+              <Stack spacing={2} maxH="200px" overflowY="auto" border="1px solid" borderColor="gray.200" borderRadius="md" p={2}>
                 {availableAccounts.map((account) => (
-                  <option key={account} value={account}>
+                  <Checkbox
+                    key={account}
+                    isChecked={newContact.accounts.includes(account)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewContact({ ...newContact, accounts: [...newContact.accounts, account] })
+                      } else {
+                        setNewContact({ ...newContact, accounts: newContact.accounts.filter(a => a !== account) })
+                      }
+                    }}
+                  >
                     {account}
-                  </option>
+                  </Checkbox>
                 ))}
-              </Select>
+                {availableAccounts.length === 0 && (
+                  <Text fontSize="sm" color="gray.500">No accounts available. Create an account first.</Text>
+                )}
+              </Stack>
             </FormControl>
             <FormControl isRequired mb={4}>
               <FormLabel>Email</FormLabel>
@@ -1032,7 +1459,7 @@ function ContactsTab() {
             <Button variant="ghost" mr={3} onClick={handleCloseModal}>
               Cancel
             </Button>
-            <Button colorScheme="teal" onClick={handleUpdateContact}>
+            <Button colorScheme="gray" onClick={handleUpdateContact}>
               Save Changes
             </Button>
           </ModalFooter>
@@ -1054,7 +1481,7 @@ function ContactsTab() {
               <Button ref={cancelRef} onClick={onDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={handleDeleteConfirm} ml={3}>
+              <Button colorScheme="gray" onClick={handleDeleteConfirm} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>

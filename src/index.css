@@ -9,9 +9,16 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background-color: #effae9;
+  color: #1f322b;
 }
 
 body {
   margin: 0;
-  background-color: #f7fafc;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(117, 169, 154, 0.15), transparent 45%),
+    radial-gradient(circle at 85% 10%, rgba(62, 180, 137, 0.12), transparent 40%),
+    #effae9;
 }
+

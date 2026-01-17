@@ -385,7 +385,7 @@ export default function MarketingCognismProspectsTab() {
           }}
         />
 
-        <Button colorScheme="teal" onClick={importParsed}>
+        <Button colorScheme="gray" onClick={importParsed}>
           Import to Cognism Prospects
         </Button>
       </HStack>
@@ -457,7 +457,7 @@ export default function MarketingCognismProspectsTab() {
             aria-label="Delete customer list"
             icon={<DeleteIcon />}
             size="sm"
-            colorScheme="red"
+            colorScheme="gray"
             variant="outline"
             onClick={deleteCustomerList}
             isDisabled={!selectedCustomer}
@@ -517,7 +517,7 @@ export default function MarketingCognismProspectsTab() {
                       <Text fontSize="sm" color="gray.700">{p.jobTitle || '-'}</Text>
                     </Td>
                     <Td>
-                      {p.accountName ? <Badge colorScheme="teal">{p.accountName}</Badge> : <Badge>Unassigned</Badge>}
+                      {p.accountName ? <Badge colorScheme="gray">{p.accountName}</Badge> : <Badge>Unassigned</Badge>}
                     </Td>
                   </Tr>
                 )

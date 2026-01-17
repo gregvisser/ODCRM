@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Box, Button, HStack, IconButton, Image, Text, VStack } from '@chakra-ui/react'
-import { CloseIcon } from '@chakra-ui/icons'
+import { Box, Button, Image, Text, VStack } from '@chakra-ui/react'
 
 const DEFAULT_STORAGE_KEY = 'odcrm_header_image_data_url'
 
@@ -127,34 +126,22 @@ export function HeaderImagePicker({
 
   return (
     <VStack align="center" spacing={2} w="100%" maxW="520px">
-      {isEditing ? (
-        <HStack spacing={2} justify="center" w="100%">
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            void handlePick(e.target.files?.[0])
-            // allow selecting the same file again later
-            e.currentTarget.value = ''
-          }}
-        />
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          void handlePick(e.target.files?.[0])
+          // allow selecting the same file again later
+          e.currentTarget.value = ''
+        }}
+      />
 
+      {isEditing && !dataUrl ? (
         <Button size="sm" variant={variant === 'logo' ? 'ghost' : 'outline'} onClick={() => inputRef.current?.click()}>
-          {dataUrl ? 'Change Logo' : 'Add Logo'}
+          Add Logo
         </Button>
-
-        {dataUrl ? (
-          <IconButton
-            aria-label="Remove header image"
-            icon={<CloseIcon boxSize={3} />}
-            size="sm"
-            variant="ghost"
-            onClick={clear}
-          />
-        ) : null}
-        </HStack>
       ) : null}
 
       {dataUrl ? (
@@ -170,6 +157,7 @@ export function HeaderImagePicker({
           borderColor="transparent"
           px={0}
           py={0}
+          position="relative"
         >
           <Image
             src={dataUrl}
@@ -178,6 +166,15 @@ export function HeaderImagePicker({
             maxW="100%"
             objectFit="contain"
             borderRadius="md"
+            cursor={isEditing ? 'pointer' : 'default'}
+            onClick={() => {
+              if (isEditing) {
+                inputRef.current?.click()
+              }
+            }}
+            _hover={isEditing ? {
+              opacity: 0.8,
+            } : {}}
           />
         </Box>
       ) : (
@@ -189,7 +186,7 @@ export function HeaderImagePicker({
       )}
 
       {error ? (
-        <Text fontSize="xs" color="red.500" textAlign="center">
+        <Text fontSize="xs" color="text.muted" textAlign="center">
           {error}
         </Text>
       ) : null}

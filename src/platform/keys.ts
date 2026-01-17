@@ -14,6 +14,7 @@ export const OdcrmStorageKeys = {
   emailTemplatesLastUpdated: 'odcrm_email_templates_last_updated',
   contacts: 'odcrm_contacts',
   contactsLastUpdated: 'odcrm_contacts_last_updated',
+  deletedContacts: 'odcrm_deleted_contacts',
   deletedAccounts: 'odcrm_deleted_accounts',
   leads: 'odcrm_leads',
   leadsLastRefresh: 'odcrm_leads_last_refresh',

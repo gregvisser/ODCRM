@@ -334,7 +334,7 @@ function LeadsTab() {
   if (loading) {
     return (
       <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="teal.500" thickness="4px" />
+        <Spinner size="xl" color="brand.500" thickness="4px" />
         <Text mt={4} color="gray.600">
           Loading leads data from Google Sheets...
         </Text>
@@ -491,7 +491,7 @@ function LeadsTab() {
     if (header.toLowerCase().includes('link') || header.toLowerCase().includes('website')) {
       if (isUrl(value)) {
         return (
-          <Link href={value} isExternal color="teal.600" display="inline-flex" alignItems="center" gap={1}>
+          <Link href={value} isExternal color="text.muted" display="inline-flex" alignItems="center" gap={1}>
             <ExternalLinkIcon />
           </Link>
         )
@@ -529,7 +529,7 @@ function LeadsTab() {
           icon={<RepeatIcon />}
           onClick={() => loadLeads(true)}
           isLoading={loading}
-          colorScheme="teal"
+          colorScheme="gray"
           size="sm"
         />
       </HStack>
@@ -582,13 +582,13 @@ function LeadsTab() {
               Active filters:
             </Text>
             {filters.account && (
-              <Tag colorScheme="teal" size="md">
+              <Tag colorScheme="gray" size="md">
                 <TagLabel>Account: {filters.account}</TagLabel>
                 <TagCloseButton onClick={() => setFilters({ ...filters, account: '' })} />
               </Tag>
             )}
             {filters.channelOfLead && (
-              <Tag colorScheme="teal" size="md">
+              <Tag colorScheme="gray" size="md">
                 <TagLabel>Channel: {filters.channelOfLead}</TagLabel>
                 <TagCloseButton onClick={() => setFilters({ ...filters, channelOfLead: '' })} />
               </Tag>
@@ -664,7 +664,7 @@ function LeadsTab() {
                           },
                         }}
                       >
-                        <Badge colorScheme="teal">{lead.accountName}</Badge>
+                        <Badge colorScheme="gray">{lead.accountName}</Badge>
                       </Td>
                     )
                   }

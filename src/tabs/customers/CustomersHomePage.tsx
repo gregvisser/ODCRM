@@ -1,14 +1,12 @@
-import { Box, ListItem, Tab, TabList, TabPanel, TabPanels, Tabs, Text, UnorderedList } from '@chakra-ui/react'
+import { Box, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
-import { PlaceholderPage } from '../../components/PlaceholderPage'
-import { CUSTOMERS_PLANNED_AREAS } from './constants'
 
-export type CustomersViewId = 'overview' | 'accounts' | 'contacts'
+export type CustomersViewId = 'accounts' | 'contacts'
 
 function coerceCustomersViewId(view?: string): CustomersViewId {
   if (view === 'accounts' || view === 'contacts') return view
-  return 'overview'
+  return 'accounts'
 }
 
 export default function CustomersHomePage({
@@ -21,37 +19,34 @@ export default function CustomersHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceCustomersViewId(view)
-  const tabIndex = activeView === 'overview' ? 0 : activeView === 'accounts' ? 1 : 2
+  const tabIndex = activeView === 'accounts' ? 0 : 1
 
   return (
     <Tabs
       index={tabIndex}
       onChange={(nextIndex) => {
-        const nextView: CustomersViewId = nextIndex === 1 ? 'accounts' : nextIndex === 2 ? 'contacts' : 'overview'
+        const nextView: CustomersViewId = nextIndex === 1 ? 'contacts' : 'accounts'
         onNavigate?.(nextView)
       }}
       isLazy
       variant="enclosed"
       colorScheme="teal"
     >
-      <TabList>
-        <Tab>Overview</Tab>
-        <Tab>Accounts</Tab>
-        <Tab>Contacts</Tab>
-      </TabList>
+      <Box
+        position="sticky"
+        top={0}
+        zIndex={5}
+        bg="bg.surface"
+        borderTopRadius="md"
+        pt={2}
+        pb={1}
+      >
+        <TabList>
+          <Tab>Accounts</Tab>
+          <Tab>Contacts</Tab>
+        </TabList>
+      </Box>
       <TabPanels pt={4}>
-        <TabPanel px={0}>
-          <PlaceholderPage title="OpenDoors Customers" ownerAgent="Customers Agent">
-            <Text fontSize="sm" color="gray.700" mb={2}>
-              Planned areas:
-            </Text>
-            <UnorderedList fontSize="sm" color="gray.600" spacing={1} pl={5}>
-              {CUSTOMERS_PLANNED_AREAS.map((a) => (
-                <ListItem key={a}>{a}</ListItem>
-              ))}
-            </UnorderedList>
-          </PlaceholderPage>
-        </TabPanel>
         <TabPanel px={0}>
           <Box>
             <AccountsTab focusAccountName={focusAccountName} />

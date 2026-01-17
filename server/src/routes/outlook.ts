@@ -1,8 +1,7 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 type TokenResponse = {
   access_token: string
@@ -300,6 +299,41 @@ router.get('/callback', async (req, res) => {
     }
 
     try {
+      // Enforce max 5 connected sender identities per customer (Reply-style safety rail).
+      // If this email is already connected, allow re-auth (token refresh/update).
+      const existing = await prisma.emailIdentity.findUnique({
+        where: {
+          customerId_emailAddress: {
+            customerId,
+            emailAddress
+          }
+        }
+      })
+
+      if (!existing) {
+        const activeCount = await prisma.emailIdentity.count({
+          where: { customerId, isActive: true }
+        })
+
+        if (activeCount >= 5) {
+          return res.status(400).send(`
+            <html>
+              <head><title>Sender Limit Reached</title></head>
+              <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px;">
+                <h1>Sender Limit Reached</h1>
+                <p>This customer already has <strong>${activeCount}</strong> active Outlook sender accounts connected.</p>
+                <p>For deliverability safety, OpenDoors limits each customer to <strong>5</strong> sender identities.</p>
+                <hr>
+                <p>
+                  You can disconnect an existing sender on the identities page, then try connecting this account again.
+                </p>
+                <p><a href="/api/outlook/identities?customerId=${customerId}">View connected accounts</a></p>
+              </body>
+            </html>
+          `)
+        }
+      }
+
       const identity = await prisma.emailIdentity.upsert({
         where: {
           customerId_emailAddress: {

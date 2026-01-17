@@ -1,9 +1,8 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 // Middleware to get customerId from context (in production, get from auth)
 // For now, we'll accept it as a query param or header
@@ -23,6 +22,7 @@ const createCampaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   senderIdentityId: z.string(),
+  sendScheduleId: z.string().optional(),
   sendWindowHoursStart: z.number().int().min(0).max(23),
   sendWindowHoursEnd: z.number().int().min(0).max(23),
   randomizeWithinHours: z.number().int().positive().default(24),
@@ -82,8 +82,6 @@ router.get('/', async (req, res, next) => {
         prospects: {
           select: {
             lastStatus: true,
-            step1SentAt: true,
-            step2SentAt: true,
             openCount: true,
             replyDetectedAt: true,
             bouncedAt: true,
@@ -95,33 +93,35 @@ router.get('/', async (req, res, next) => {
     })
 
     // Calculate metrics for each campaign
-    const campaignsWithMetrics = campaigns.map(campaign => {
+    const campaignsWithMetrics = await Promise.all(campaigns.map(async (campaign) => {
       const prospects = campaign.prospects
       const totalProspects = prospects.length
-      const step1Sent = prospects.filter(p => p.step1SentAt).length
-      const step2Sent = prospects.filter(p => p.step2SentAt).length
-      const totalSent = step1Sent + step2Sent
       const opened = prospects.filter(p => p.openCount > 0).length
       const bounced = prospects.filter(p => p.bouncedAt).length
       const unsubscribed = prospects.filter(p => p.unsubscribedAt).length
       const replied = prospects.filter(p => p.replyDetectedAt).length
 
+      // Supports N-step sequences: use events to count total emails sent.
+      const emailsSent = await prisma.emailEvent.count({
+        where: { campaignId: campaign.id, type: 'sent' }
+      })
+
       return {
         ...campaign,
         metrics: {
           totalProspects,
-          emailsSent: totalSent,
+          emailsSent,
           opened,
           bounced,
           unsubscribed,
           replied,
-          openRate: totalSent > 0 ? (opened / totalSent) * 100 : 0,
-          bounceRate: totalSent > 0 ? (bounced / totalSent) * 100 : 0,
-          unsubscribeRate: totalSent > 0 ? (unsubscribed / totalSent) * 100 : 0,
-          replyRate: totalSent > 0 ? (replied / totalSent) * 100 : 0
+          openRate: emailsSent > 0 ? (opened / emailsSent) * 100 : 0,
+          bounceRate: emailsSent > 0 ? (bounced / emailsSent) * 100 : 0,
+          unsubscribeRate: emailsSent > 0 ? (unsubscribed / emailsSent) * 100 : 0,
+          replyRate: emailsSent > 0 ? (replied / emailsSent) * 100 : 0
         }
       }
-    })
+    }))
 
     res.json(campaignsWithMetrics)
   } catch (error) {
@@ -191,8 +191,22 @@ router.patch('/:id', async (req, res, next) => {
   }
 })
 
-// Save templates
-const saveTemplatesSchema = z.object({
+// Save templates (supports N steps, max 10)
+const saveTemplateStepSchema = z.object({
+  stepNumber: z.number().int().min(1).max(10),
+  subjectTemplate: z.string(),
+  bodyTemplateHtml: z.string(),
+  bodyTemplateText: z.string().optional(),
+  delayDaysMin: z.number().int().min(0).max(365).optional(),
+  delayDaysMax: z.number().int().min(0).max(365).optional(),
+})
+
+const saveTemplatesSchemaV2 = z.object({
+  steps: z.array(saveTemplateStepSchema).min(1).max(10),
+})
+
+// Legacy schema (2 fixed steps)
+const saveTemplatesSchemaV1 = z.object({
   step1: z.object({
     subjectTemplate: z.string(),
     bodyTemplateHtml: z.string(),
@@ -209,7 +223,7 @@ router.post('/:id/templates', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
-    const data = saveTemplatesSchema.parse(req.body)
+    const body = req.body as any
 
     // Verify campaign belongs to customer
     const campaign = await prisma.emailCampaign.findFirst({
@@ -220,6 +234,41 @@ router.post('/:id/templates', async (req, res, next) => {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
+    // Resolve steps (v2 or v1)
+    let steps: Array<z.infer<typeof saveTemplateStepSchema>> = []
+    if (body && Array.isArray(body.steps)) {
+      steps = saveTemplatesSchemaV2.parse(body).steps
+    } else {
+      const v1 = saveTemplatesSchemaV1.parse(body)
+      steps = [
+        {
+          stepNumber: 1,
+          subjectTemplate: v1.step1.subjectTemplate,
+          bodyTemplateHtml: v1.step1.bodyTemplateHtml,
+          bodyTemplateText: v1.step1.bodyTemplateText,
+          delayDaysMin: 0,
+          delayDaysMax: 0,
+        },
+        {
+          stepNumber: 2,
+          subjectTemplate: v1.step2.subjectTemplate,
+          bodyTemplateHtml: v1.step2.bodyTemplateHtml,
+          bodyTemplateText: v1.step2.bodyTemplateText,
+          // Leave delays undefined to fall back to campaign-level follow-up settings.
+        },
+      ]
+    }
+
+    // Validate unique step numbers and presence of step 1
+    const nums = steps.map((s) => s.stepNumber)
+    const unique = new Set(nums)
+    if (unique.size !== nums.length) {
+      return res.status(400).json({ error: 'Duplicate stepNumber values are not allowed' })
+    }
+    if (!unique.has(1)) {
+      return res.status(400).json({ error: 'Step 1 template is required' })
+    }
+
     // Delete existing templates
     await prisma.emailCampaignTemplate.deleteMany({
       where: { campaignId: id }
@@ -227,22 +276,16 @@ router.post('/:id/templates', async (req, res, next) => {
 
     // Create new templates
     await prisma.emailCampaignTemplate.createMany({
-      data: [
-        {
-          campaignId: id,
-          stepNumber: 1,
-          subjectTemplate: data.step1.subjectTemplate,
-          bodyTemplateHtml: data.step1.bodyTemplateHtml,
-          bodyTemplateText: data.step1.bodyTemplateText
-        },
-        {
-          campaignId: id,
-          stepNumber: 2,
-          subjectTemplate: data.step2.subjectTemplate,
-          bodyTemplateHtml: data.step2.bodyTemplateHtml,
-          bodyTemplateText: data.step2.bodyTemplateText
-        }
-      ]
+      data: steps.map((s) => ({
+        campaignId: id,
+        stepNumber: s.stepNumber,
+        subjectTemplate: s.subjectTemplate,
+        bodyTemplateHtml: s.bodyTemplateHtml,
+        bodyTemplateText: s.bodyTemplateText,
+        // New fields (requires Prisma generate + migration); keep TS compile-safe until then.
+        delayDaysMin: s.delayDaysMin,
+        delayDaysMax: s.delayDaysMax,
+      })) as any
     })
 
     const templates = await prisma.emailCampaignTemplate.findMany({
@@ -337,8 +380,9 @@ router.post('/:id/start', async (req, res, next) => {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
-    if (campaign.templates.length < 2) {
-      return res.status(400).json({ error: 'Campaign must have 2 templates before starting' })
+    const hasStep1 = campaign.templates.some((t) => t.stepNumber === 1)
+    if (!hasStep1) {
+      return res.status(400).json({ error: 'Campaign must have a Step 1 template before starting' })
     }
 
     // Update status
@@ -347,7 +391,7 @@ router.post('/:id/start', async (req, res, next) => {
       data: { status: 'running' }
     })
 
-    // Schedule step1 emails for pending prospects
+    // Schedule step 1 emails for pending prospects
     const pendingProspects = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: id,
@@ -357,15 +401,36 @@ router.post('/:id/start', async (req, res, next) => {
     })
 
     const now = new Date()
-    for (const prospect of pendingProspects) {
-      // Randomize send time within randomizeWithinHours
-      const randomHours = Math.random() * campaign.randomizeWithinHours
-      const scheduledAt = new Date(now.getTime() + randomHours * 60 * 60 * 1000)
 
-      await prisma.emailCampaignProspect.update({
-        where: { id: prospect.id },
-        data: { step1ScheduledAt: scheduledAt }
+    // Best-effort: prefer new prospect-step scheduling table, fall back to legacy columns.
+    try {
+      // Clear any previously scheduled (unsent) steps in case of restart.
+      await (prisma as any).emailCampaignProspectStep.deleteMany({
+        where: { campaignId: id, sentAt: null }
       })
+
+      await (prisma as any).emailCampaignProspectStep.createMany({
+        data: pendingProspects.map((prospect) => {
+          const randomHours = Math.random() * campaign.randomizeWithinHours
+          const scheduledAt = new Date(now.getTime() + randomHours * 60 * 60 * 1000)
+          return {
+            campaignId: id,
+            campaignProspectId: prospect.id,
+            stepNumber: 1,
+            scheduledAt,
+          }
+        }),
+      })
+    } catch (e) {
+      for (const prospect of pendingProspects) {
+        const randomHours = Math.random() * campaign.randomizeWithinHours
+        const scheduledAt = new Date(now.getTime() + randomHours * 60 * 60 * 1000)
+
+        await prisma.emailCampaignProspect.update({
+          where: { id: prospect.id },
+          data: { step1ScheduledAt: scheduledAt }
+        })
+      }
     }
 
     res.json({ message: 'Campaign started', scheduled: pendingProspects.length })

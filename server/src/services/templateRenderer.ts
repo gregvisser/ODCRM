@@ -1,119 +1,101 @@
-import { Contact, EmailCampaignTemplate } from '@prisma/client'
-
 /**
- * Render email template with contact variables
+ * Template placeholder rendering service
+ * Ported from OpensDoorsV2
  */
-export function renderTemplate(
-  template: EmailCampaignTemplate,
-  contact: Contact
-): { subject: string; htmlBody: string; textBody?: string } {
-  const variables: Record<string, string> = {
-    firstName: contact.firstName || '',
-    lastName: contact.lastName || '',
-    fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-    companyName: contact.companyName || '',
-    jobTitle: contact.jobTitle || '',
-    email: contact.email || ''
-  }
 
-  // Replace variables in subject
-  let subject = template.subjectTemplate
-  for (const [key, value] of Object.entries(variables)) {
-    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g')
-    subject = subject.replace(regex, value)
-  }
-
-  // Replace variables in HTML body
-  let htmlBody = template.bodyTemplateHtml
-  for (const [key, value] of Object.entries(variables)) {
-    const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g')
-    htmlBody = htmlBody.replace(regex, escapeHtml(value))
-  }
-
-  // Replace variables in text body (if available)
-  let textBody = template.bodyTemplateText ?? undefined
-  if (textBody) {
-    for (const [key, value] of Object.entries(variables)) {
-      const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g')
-      textBody = textBody.replace(regex, value)
-    }
-  }
-
-  return { subject, htmlBody, textBody }
+export type TemplateVariables = {
+  firstName?: string | null
+  lastName?: string | null
+  company?: string | null
+  companyName?: string | null
+  email?: string | null
+  title?: string | null
+  jobTitle?: string | null
+  phone?: string | null
 }
 
-/**
- * Escape HTML to prevent XSS
- */
-function escapeHtml(text: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
-  }
-  return text.replace(/[&<>"']/g, (m) => map[m])
-}
+const PLACEHOLDER_KEYS: Array<keyof TemplateVariables> = [
+  'firstName',
+  'lastName',
+  'company',
+  'companyName',
+  'email',
+  'title',
+  'jobTitle',
+  'phone',
+]
 
 /**
- * Inject tracking pixel and unsubscribe link into HTML body
+ * Apply template placeholders like {{firstName}}, {{company}}, etc.
+ * @param template - Template string with {{placeholder}} syntax
+ * @param vars - Variable values to replace
+ * @returns Rendered template with placeholders replaced
  */
-export function injectTracking(
-  htmlBody: string,
-  campaignProspectId: string,
-  trackingDomain: string
+export function applyTemplatePlaceholders(
+  template: string,
+  vars: TemplateVariables
 ): string {
-  // Generate simple token for unsubscribe (in production, use proper signing)
-  const unsubscribeToken = Buffer.from(campaignProspectId).toString('base64').replace(/[+/=]/g, '')
+  let out = template
 
-  // Inject tracking pixel before closing body tag
-  const trackingPixel = `
-    <img src="${trackingDomain}/api/email/open?cpid=${campaignProspectId}&e=${encodeURIComponent(campaignProspectId)}" 
-         width="1" height="1" style="display:none;" alt="" />
-  `
-
-  // Inject unsubscribe link
-  const unsubscribeLink = `
-    <p style="font-size: 12px; color: #666; margin-top: 20px;">
-      <a href="${trackingDomain}/unsubscribe?cpid=${campaignProspectId}&token=${unsubscribeToken}" 
-         style="color: #666; text-decoration: underline;">
-        Unsubscribe from this email list
-      </a>
-    </p>
-  `
-
-  // Insert before closing body tag, or append if no body tag
-  if (htmlBody.includes('</body>')) {
-    htmlBody = htmlBody.replace('</body>', trackingPixel + unsubscribeLink + '</body>')
-  } else {
-    htmlBody += trackingPixel + unsubscribeLink
+  for (const key of PLACEHOLDER_KEYS) {
+    const value = vars[key] ?? ''
+    out = out.replaceAll(`{{${key}}}`, value)
   }
 
-  return htmlBody
+  // Also support {{companyName}} → {{company}} fallback
+  if (vars.companyName && !vars.company) {
+    out = out.replaceAll('{{company}}', vars.companyName)
+  }
+  if (vars.company && !vars.companyName) {
+    out = out.replaceAll('{{companyName}}', vars.company)
+  }
+
+  // Support {{jobTitle}} → {{title}} fallback
+  if (vars.jobTitle && !vars.title) {
+    out = out.replaceAll('{{title}}', vars.jobTitle)
+  }
+  if (vars.title && !vars.jobTitle) {
+    out = out.replaceAll('{{jobTitle}}', vars.title)
+  }
+
+  return out
 }
 
 /**
- * Extract reply snippet from message body
+ * Preview template with sample data
  */
-export function extractReplySnippet(body: string, maxLength: number = 300): string {
-  // Remove HTML tags if present
-  const textOnly = body.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+export function previewTemplate(template: string): string {
+  return applyTemplatePlaceholders(template, {
+    firstName: 'John',
+    lastName: 'Doe',
+    company: 'Acme Corp',
+    companyName: 'Acme Corp',
+    email: 'john.doe@acme.com',
+    title: 'CEO',
+    jobTitle: 'CEO',
+    phone: '+1-555-0100',
+  })
+}
 
-  if (textOnly.length <= maxLength) {
-    return textOnly
-  }
+/**
+ * Get all placeholders used in a template
+ */
+export function extractPlaceholders(template: string): string[] {
+  const matches = template.match(/\{\{(\w+)\}\}/g) || []
+  return [...new Set(matches.map((m) => m.slice(2, -2)))]
+}
 
-  // Try to find a sentence boundary near maxLength
-  const truncated = textOnly.substring(0, maxLength)
-  const lastPeriod = truncated.lastIndexOf('.')
-  const lastExclamation = truncated.lastIndexOf('!')
-  const lastQuestion = truncated.lastIndexOf('?')
-  const lastSentenceEnd = Math.max(lastPeriod, lastExclamation, lastQuestion)
+/**
+ * Render template (alias for applyTemplatePlaceholders for compatibility)
+ */
+export function renderTemplate(template: string, vars: TemplateVariables): string {
+  return applyTemplatePlaceholders(template, vars)
+}
 
-  if (lastSentenceEnd > maxLength * 0.7) {
-    return truncated.substring(0, lastSentenceEnd + 1)
-  }
-
-  return truncated + '...'
+/**
+ * Inject tracking (placeholder for ODCRM compatibility)
+ */
+export function injectTracking(html: string, trackingData?: any): string {
+  // Placeholder - would inject tracking pixel and link rewriting
+  return html
 }

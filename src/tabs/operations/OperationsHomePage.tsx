@@ -31,10 +31,20 @@ export default function OperationsHomePage({
       variant="enclosed"
       colorScheme="teal"
     >
-      <TabList>
-        <Tab>Overview</Tab>
-        <Tab>User Authorization</Tab>
-      </TabList>
+      <Box
+        position="sticky"
+        top={0}
+        zIndex={5}
+        bg="bg.surface"
+        borderTopRadius="md"
+        pt={2}
+        pb={1}
+      >
+        <TabList>
+          <Tab>Overview</Tab>
+          <Tab>User Authorization</Tab>
+        </TabList>
+      </Box>
       <TabPanels pt={4}>
         <TabPanel px={0}>
           <PlaceholderPage title="Operations" ownerAgent="Operations Agent">

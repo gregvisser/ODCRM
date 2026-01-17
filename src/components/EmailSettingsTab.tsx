@@ -124,7 +124,7 @@ export default function EmailSettingsTab() {
     <Box>
       <HStack justify="space-between" mb={6}>
         <Heading size="lg">Email Accounts</Heading>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleConnectOutlook}>
+        <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={handleConnectOutlook}>
           Connect Outlook Account
         </Button>
       </HStack>
@@ -139,7 +139,7 @@ export default function EmailSettingsTab() {
       {identities.length === 0 ? (
         <Box textAlign="center" py={10}>
           <Text color="gray.500" mb={4}>No email accounts connected yet.</Text>
-          <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleConnectOutlook}>
+          <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={handleConnectOutlook}>
             Connect Your First Outlook Account
           </Button>
         </Box>
@@ -179,7 +179,7 @@ export default function EmailSettingsTab() {
                       aria-label="Disconnect"
                       icon={<DeleteIcon />}
                       size="sm"
-                      colorScheme="red"
+                      colorScheme="gray"
                       onClick={() => handleDisconnect(identity.id)}
                     />
                   </HStack>
@@ -221,7 +221,7 @@ export default function EmailSettingsTab() {
             <Button variant="ghost" mr={3} onClick={onEditClose}>
               Cancel
             </Button>
-            <Button colorScheme="blue" onClick={handleSaveEdit}>
+            <Button colorScheme="gray" onClick={handleSaveEdit}>
               Save
             </Button>
           </ModalFooter>

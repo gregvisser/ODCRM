@@ -7,6 +7,15 @@
     <title>odcrm</title>
   </head>
   <body>
+    <script>
+      // ColorModeScript - prevents flash of wrong color mode
+      (function() {
+        const colorMode = localStorage.getItem('chakra-ui-color-mode') || 'light';
+        if (colorMode === 'dark') {
+          document.documentElement.classList.add('chakra-ui-dark');
+        }
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

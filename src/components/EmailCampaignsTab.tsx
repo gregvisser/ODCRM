@@ -64,6 +64,7 @@ export default function EmailCampaignsTab() {
   const [campaigns, setCampaigns] = useState<EmailCampaign[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null)
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null)
   const [campaignToDelete, setCampaignToDelete] = useState<EmailCampaign | null>(null)
   const { isOpen: isWizardOpen, onOpen: onWizardOpen, onClose: onWizardClose } = useDisclosure()
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useAlertDisclosure()
@@ -174,7 +175,14 @@ export default function EmailCampaignsTab() {
     <Box>
       <HStack justify="space-between" mb={6}>
         <Heading size="lg">Email Campaigns</Heading>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={onWizardOpen}>
+        <Button
+          leftIcon={<AddIcon />}
+          colorScheme="gray"
+          onClick={() => {
+            setEditingCampaignId(null)
+            onWizardOpen()
+          }}
+        >
           New Campaign
         </Button>
       </HStack>
@@ -182,7 +190,14 @@ export default function EmailCampaignsTab() {
       {campaigns.length === 0 ? (
         <Box textAlign="center" py={10}>
           <Text color="gray.500" mb={4}>No campaigns yet. Create your first campaign to get started.</Text>
-          <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={onWizardOpen}>
+          <Button
+            leftIcon={<AddIcon />}
+            colorScheme="gray"
+            onClick={() => {
+              setEditingCampaignId(null)
+              onWizardOpen()
+            }}
+          >
             Create Campaign
           </Button>
         </Box>
@@ -242,21 +257,24 @@ export default function EmailCampaignsTab() {
                         aria-label="Edit"
                         icon={<EditIcon />}
                         size="sm"
-                        onClick={onWizardOpen}
+                        onClick={() => {
+                          setEditingCampaignId(campaign.id)
+                          onWizardOpen()
+                        }}
                       />
                     )}
                     {campaign.status === 'draft' && (
-                      <Button size="sm" colorScheme="green" onClick={() => handleStartCampaign(campaign.id)}>
+                      <Button size="sm" colorScheme="gray" onClick={() => handleStartCampaign(campaign.id)}>
                         Start
                       </Button>
                     )}
                     {campaign.status === 'running' && (
-                      <Button size="sm" colorScheme="yellow" onClick={() => handlePauseCampaign(campaign.id)}>
+                      <Button size="sm" colorScheme="gray" onClick={() => handlePauseCampaign(campaign.id)}>
                         Pause
                       </Button>
                     )}
                     {campaign.status === 'paused' && (
-                      <Button size="sm" colorScheme="green" onClick={() => handleStartCampaign(campaign.id)}>
+                      <Button size="sm" colorScheme="gray" onClick={() => handleStartCampaign(campaign.id)}>
                         Resume
                       </Button>
                     )}
@@ -269,7 +287,7 @@ export default function EmailCampaignsTab() {
                       aria-label="Delete"
                       icon={<DeleteIcon />}
                       size="sm"
-                      colorScheme="red"
+                      colorScheme="gray"
                       onClick={() => handleDeleteClick(campaign)}
                     />
                   </HStack>
@@ -283,15 +301,21 @@ export default function EmailCampaignsTab() {
       <Modal isOpen={isWizardOpen} onClose={onWizardClose} size="xl">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Create Email Campaign</ModalHeader>
+          <ModalHeader>{editingCampaignId ? 'Edit Email Campaign' : 'Create Email Campaign'}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <CampaignWizard
+              key={editingCampaignId ?? 'new-campaign'}
               onSuccess={() => {
                 onWizardClose()
+                setEditingCampaignId(null)
                 fetchCampaigns()
               }}
-              onCancel={onWizardClose}
+              onCancel={() => {
+                onWizardClose()
+                setEditingCampaignId(null)
+              }}
+              campaignId={editingCampaignId ?? undefined}
             />
           </ModalBody>
         </ModalContent>
@@ -325,7 +349,7 @@ export default function EmailCampaignsTab() {
               <Button ref={cancelRef} onClick={onDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={handleDeleteConfirm} ml={3}>
+              <Button colorScheme="gray" onClick={handleDeleteConfirm} ml={3}>
                 Delete Campaign
               </Button>
             </AlertDialogFooter>

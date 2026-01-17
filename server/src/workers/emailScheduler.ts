@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { renderTemplate, injectTracking } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 
 /**
  * Background worker that runs every minute to send scheduled emails
@@ -21,23 +21,59 @@ export function startEmailScheduler(prisma: PrismaClient) {
 
 async function processScheduledEmails(prisma: PrismaClient) {
   const now = new Date()
-  const currentHour = now.getHours()
+  const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
   // Find all running campaigns
   const runningCampaigns = await prisma.emailCampaign.findMany({
     where: { status: 'running' },
     include: {
       senderIdentity: true,
+      sendSchedule: true,
       templates: {
         orderBy: { stepNumber: 'asc' }
       }
     }
   })
 
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  }
+
+  const getScheduleNow = (timeZone: string) => {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      hour12: false,
+    })
+    const parts = dtf.formatToParts(now)
+    const weekday = parts.find((p) => p.type === 'weekday')?.value ?? 'Mon'
+    const hourStr = parts.find((p) => p.type === 'hour')?.value ?? '00'
+    const hour = parseInt(hourStr, 10)
+    const day = weekdayMap[weekday] ?? 1
+    return { day, hour }
+  }
+
   for (const campaign of runningCampaigns) {
-    // Check if we're within send window
-    if (currentHour < campaign.sendWindowHoursStart || currentHour >= campaign.sendWindowHoursEnd) {
-      continue // Skip if outside send window
+    // Check if we're within send window / schedule.
+    const schedule = (campaign as any).sendSchedule as any | null
+    if (schedule) {
+      const tz = schedule.timezone || 'UTC'
+      const { day, hour } = getScheduleNow(tz)
+      const allowedDays = Array.isArray(schedule.daysOfWeek) ? schedule.daysOfWeek : [1, 2, 3, 4, 5]
+      if (!allowedDays.includes(day)) continue
+      if (hour < schedule.startHour || hour >= schedule.endHour) continue
+    } else {
+      const currentHour = now.getHours()
+      if (currentHour < campaign.sendWindowHoursStart || currentHour >= campaign.sendWindowHoursEnd) {
+        continue
+      }
     }
 
     // Check daily send limit for this identity
@@ -61,7 +97,109 @@ async function processScheduledEmails(prisma: PrismaClient) {
       continue
     }
 
-    // Find prospects ready for step 1 (initial email)
+    // Customer-level safety: hard cap total sends per 24h (rolling).
+    // This reduces blacklist/domain risk when multiple identities/campaigns run.
+    const customerSentLast24h = await prisma.emailEvent.count({
+      where: {
+        type: 'sent',
+        occurredAt: { gte: since24h },
+        campaign: { customerId: campaign.customerId }
+      }
+    })
+    if (customerSentLast24h >= 160) {
+      console.log(`⚠️ Customer 24h send cap reached (${customerSentLast24h}/160) for customer ${campaign.customerId}`)
+      continue
+    }
+
+    // Preferred path: N-step sequences via EmailCampaignProspectStep.
+    // If schema/client isn't migrated yet, fall back to legacy 2-step columns.
+    let usedNewStepScheduling = false
+    try {
+      const dueSteps = await (prisma as any).emailCampaignProspectStep.findMany({
+        where: {
+          campaignId: campaign.id,
+          scheduledAt: { lte: now },
+          sentAt: null,
+          prospect: {
+            unsubscribedAt: null,
+            bouncedAt: null,
+            replyDetectedAt: null,
+          }
+        },
+        include: {
+          prospect: { include: { contact: true } }
+        },
+        orderBy: { scheduledAt: 'asc' },
+        take: 10
+      })
+
+      if (Array.isArray(dueSteps)) {
+        usedNewStepScheduling = true
+        for (const row of dueSteps) {
+          if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+
+          // Re-check customer cap as we send in batches
+          const customerSent = await prisma.emailEvent.count({
+            where: {
+              type: 'sent',
+              occurredAt: { gte: since24h },
+              campaign: { customerId: campaign.customerId }
+            }
+          })
+          if (customerSent >= 160) break
+
+          const prospect = row.prospect
+          const stepNumber = row.stepNumber
+          await sendCampaignEmail(prisma, campaign, prospect, stepNumber)
+
+          // Mark row as sent (best-effort)
+          await (prisma as any).emailCampaignProspectStep.update({
+            where: { id: row.id },
+            data: { sentAt: new Date() }
+          })
+
+          // Schedule next step if it exists
+          const nextStepNumber = stepNumber + 1
+          const nextTemplate = campaign.templates.find((t: any) => t.stepNumber === nextStepNumber)
+          if (nextTemplate) {
+            const min = Number.isFinite(nextTemplate.delayDaysMin) ? nextTemplate.delayDaysMin : campaign.followUpDelayDaysMin
+            const max = Number.isFinite(nextTemplate.delayDaysMax) ? nextTemplate.delayDaysMax : campaign.followUpDelayDaysMax
+            const delayDays = min + Math.random() * Math.max(0, (max - min))
+            const scheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000)
+
+            await (prisma as any).emailCampaignProspectStep.upsert({
+              where: {
+                campaignProspectId_stepNumber: {
+                  campaignProspectId: prospect.id,
+                  stepNumber: nextStepNumber
+                }
+              },
+              update: { scheduledAt },
+              create: {
+                campaignId: campaign.id,
+                campaignProspectId: prospect.id,
+                stepNumber: nextStepNumber,
+                scheduledAt
+              }
+            })
+          } else {
+            // No next template; consider sequence done.
+            await prisma.emailCampaignProspect.update({
+              where: { id: prospect.id },
+              data: { lastStatus: 'completed' }
+            })
+          }
+
+          emailsSentToday++
+        }
+      }
+    } catch {
+      // ignored; fallback below
+    }
+
+    if (usedNewStepScheduling) continue
+
+    // Legacy fallback: 2-step campaigns using fixed columns.
     const step1Ready = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
@@ -78,17 +216,12 @@ async function processScheduledEmails(prisma: PrismaClient) {
       take: 10 // Process in batches
     })
 
-    // Process step 1 emails
     for (const prospect of step1Ready) {
-      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) {
-        break
-      }
-
+      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
       await sendCampaignEmail(prisma, campaign, prospect, 1)
       emailsSentToday++
     }
 
-    // Find prospects ready for step 2 (follow-up)
     const step2Ready = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
@@ -105,12 +238,8 @@ async function processScheduledEmails(prisma: PrismaClient) {
       take: 10 // Process in batches
     })
 
-    // Process step 2 emails
     for (const prospect of step2Ready) {
-      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) {
-        break
-      }
-
+      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
       await sendCampaignEmail(prisma, campaign, prospect, 2)
       emailsSentToday++
     }
@@ -121,7 +250,7 @@ async function sendCampaignEmail(
   prisma: PrismaClient,
   campaign: any,
   prospect: any,
-  stepNumber: 1 | 2
+  stepNumber: number
 ) {
   try {
     const template = campaign.templates.find((t: any) => t.stepNumber === stepNumber)
@@ -131,19 +260,29 @@ async function sendCampaignEmail(
     }
 
     // Render template
-    const rendered = renderTemplate(template, prospect.contact)
+    const rendered = applyTemplatePlaceholders(template.bodyTemplateHtml, {
+      firstName: prospect.contact.firstName,
+      lastName: prospect.contact.lastName,
+      companyName: prospect.contact.companyName,
+      email: prospect.contact.email,
+      jobTitle: prospect.contact.jobTitle,
+    })
+    
+    const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, {
+      senderName: campaign.senderIdentity?.displayName || campaign.senderIdentity?.emailAddress || '',
+      senderEmail: campaign.senderIdentity?.emailAddress || ''
+    })
 
     // Inject tracking
     const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN || 'http://localhost:3001'
-    const htmlBody = injectTracking(rendered.htmlBody, prospect.id, trackingDomain)
 
     // Send email
     const result = await sendEmail(prisma, {
       senderIdentityId: campaign.senderIdentityId,
       toEmail: prospect.contact.email,
-      subject: rendered.subject,
+      subject: subjectRendered,
       htmlBody,
-      textBody: rendered.textBody,
+      textBody: template.bodyTemplateText || htmlBody,
       campaignProspectId: prospect.id
     })
 
@@ -166,7 +305,7 @@ async function sendCampaignEmail(
       // Update prospect
       const updateData: any = {
         [`step${stepNumber}SentAt`]: new Date(),
-        lastStatus: stepNumber === 1 ? 'step1_sent' : 'step2_sent'
+        lastStatus: stepNumber === 1 ? 'step1_sent' : (`step${Math.min(stepNumber, 10)}_sent`)
       }
 
       await prisma.emailCampaignProspect.update({
@@ -174,9 +313,9 @@ async function sendCampaignEmail(
         data: updateData
       })
 
-      // If step 1, schedule step 2
+      // Legacy: If step 1, schedule step 2 using fixed columns
       if (stepNumber === 1) {
-        const delayDays = campaign.followUpDelayDaysMin + 
+        const delayDays = campaign.followUpDelayDaysMin +
           Math.random() * (campaign.followUpDelayDaysMax - campaign.followUpDelayDaysMin)
         const step2ScheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000)
 
@@ -184,8 +323,8 @@ async function sendCampaignEmail(
           where: { id: prospect.id },
           data: { step2ScheduledAt }
         })
-      } else {
-        // Step 2 sent, mark as completed
+      } else if (stepNumber === 2) {
+        // Legacy: Step 2 sent, mark as completed
         await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: { lastStatus: 'completed' }

@@ -1,7 +1,11 @@
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { fetchRecentInboxMessages } from '../services/outlookEmailService.js'
-import { extractReplySnippet } from '../services/templateRenderer.js'
+
+// Simple reply snippet extractor
+function extractReplySnippet(body: string): string {
+  return body.substring(0, 200).trim()
+}
 
 /**
  * Background worker that runs every 5 minutes to detect email replies
@@ -219,10 +223,22 @@ async function processReply(
         replyCount: 1,
         lastReplySnippet: snippet,
         lastStatus: 'replied',
-        // Cancel any future scheduled sends
+        // Legacy cancel any future scheduled sends
         step2ScheduledAt: null
       }
     })
+
+    // New scheduler: cancel any future (unsent) steps for this prospect.
+    try {
+      await (prisma as any).emailCampaignProspectStep.deleteMany({
+        where: {
+          campaignProspectId,
+          sentAt: null
+        }
+      })
+    } catch {
+      // ignore if schema not migrated yet
+    }
 
     console.log(`📬 Reply detected for prospect ${campaignProspectId}`)
   } catch (error) {

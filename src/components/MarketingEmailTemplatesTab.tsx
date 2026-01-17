@@ -208,7 +208,7 @@ export default function MarketingEmailTemplatesTab() {
           Email Templates
         </Heading>
         <Text color="gray.600">
-          Create customer-specific templates (Step 1 + Step 2) that OpenDoors users can pick when creating campaigns.
+          Create customer-specific templates that OpenDoors users can pick for any step in a campaign sequence (up to 10 steps).
         </Text>
       </Box>
 
@@ -229,7 +229,7 @@ export default function MarketingEmailTemplatesTab() {
             </Select>
           </FormControl>
         </HStack>
-        <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={openCreate} size="sm">
+        <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={openCreate} size="sm">
           Create Template
         </Button>
       </HStack>
@@ -266,7 +266,7 @@ export default function MarketingEmailTemplatesTab() {
                     </Td>
                     <Td>
                       {t.account ? (
-                        <Badge colorScheme="teal">{t.account}</Badge>
+                        <Badge colorScheme="gray">{t.account}</Badge>
                       ) : (
                         <Text fontSize="sm" color="gray.400" fontStyle="italic">
                           Global
@@ -274,7 +274,9 @@ export default function MarketingEmailTemplatesTab() {
                       )}
                     </Td>
                     <Td>
-                      <Badge colorScheme={t.stepNumber === 1 ? 'blue' : 'purple'}>Step {t.stepNumber}</Badge>
+                      <Badge colorScheme={t.stepNumber === 1 ? 'blue' : t.stepNumber === 2 ? 'purple' : 'gray'}>
+                        Step {t.stepNumber}
+                      </Badge>
                     </Td>
                     <Td>
                       <Text fontSize="sm" noOfLines={1} maxW="520px">
@@ -293,7 +295,7 @@ export default function MarketingEmailTemplatesTab() {
                           icon={<EditIcon />}
                           size="sm"
                           variant="ghost"
-                          colorScheme="teal"
+                          colorScheme="gray"
                           onClick={() => openEdit(t)}
                         />
                         <IconButton
@@ -301,7 +303,7 @@ export default function MarketingEmailTemplatesTab() {
                           icon={<DeleteIcon />}
                           size="sm"
                           variant="ghost"
-                          colorScheme="red"
+                          colorScheme="gray"
                           onClick={() => requestDelete(t)}
                         />
                       </HStack>
@@ -353,10 +355,16 @@ export default function MarketingEmailTemplatesTab() {
                   <FormLabel>Step</FormLabel>
                   <Select
                     value={String(draft.stepNumber)}
-                    onChange={(e) => setDraft({ ...draft, stepNumber: parseInt(e.target.value, 10) as 1 | 2 })}
+                    onChange={(e) => setDraft({ ...draft, stepNumber: Math.min(10, Math.max(1, parseInt(e.target.value, 10) || 1)) })}
                   >
-                    <option value="1">Step 1</option>
-                    <option value="2">Step 2</option>
+                    {Array.from({ length: 10 }).map((_, i) => {
+                      const n = i + 1
+                      return (
+                        <option key={n} value={String(n)}>
+                          Step {n}
+                        </option>
+                      )
+                    })}
                   </Select>
                 </FormControl>
               </HStack>
@@ -382,7 +390,7 @@ export default function MarketingEmailTemplatesTab() {
             <Button variant="ghost" mr={3} onClick={onClose}>
               Cancel
             </Button>
-            <Button colorScheme="teal" onClick={save}>
+            <Button colorScheme="gray" onClick={save}>
               {isEditMode ? 'Save changes' : 'Create template'}
             </Button>
           </ModalFooter>
@@ -402,7 +410,7 @@ export default function MarketingEmailTemplatesTab() {
               <Button ref={cancelRef} onClick={onDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={confirmDelete} ml={3}>
+              <Button colorScheme="gray" onClick={confirmDelete} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>

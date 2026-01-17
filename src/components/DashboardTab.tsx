@@ -27,10 +27,10 @@ function DashboardTab() {
         {kpis.map((kpi) => (
           <Box
             key={kpi.label}
-            bg="white"
+            bg="bg.surface"
             borderRadius="lg"
             border="1px solid"
-            borderColor="gray.100"
+            borderColor="border.subtle"
             p={6}
             boxShadow="sm"
           >
@@ -40,7 +40,7 @@ function DashboardTab() {
             <Heading size="lg" mt={2}>
               {kpi.value}
             </Heading>
-            <Text fontSize="sm" color="teal.600" mt={1}>
+            <Text fontSize="sm" color="text.muted" mt={1}>
               {kpi.change}
             </Text>
           </Box>
@@ -69,13 +69,8 @@ function DashboardTab() {
                   </Text>
                 </Box>
                 <Badge
-                  colorScheme={
-                    initiative.status === 'On track'
-                      ? 'green'
-                      : initiative.status === 'Needs creative'
-                        ? 'orange'
-                        : 'purple'
-                  }
+                  variant="subtle"
+                  colorScheme="gray"
                   alignSelf="flex-start"
                 >
                   {initiative.status}

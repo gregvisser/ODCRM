@@ -97,7 +97,7 @@ export function DataPortability() {
         {accountsLastUpdated ? ` • Last saved: ${accountsLastUpdated}` : ''}
       </Text>
       {isDevLocalhost && origin !== recommendedDevOrigin ? (
-        <Text fontSize="xs" color="orange.600" mb={2}>
+        <Text fontSize="xs" color="text.muted" mb={2}>
           Warning: local data is per URL/port. For consistent saved data in dev, use{' '}
           <Box as="span" fontWeight="semibold">{recommendedDevOrigin}</Box>.
         </Text>

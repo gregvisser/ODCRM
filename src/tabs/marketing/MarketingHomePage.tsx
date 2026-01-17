@@ -1,15 +1,46 @@
-import { Box, ListItem, Tab, TabList, TabPanel, TabPanels, Tabs, Text, UnorderedList } from '@chakra-ui/react'
+import { Box, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
+import EmailSettingsTab from '../../components/EmailSettingsTab'
+import MarketingInboxTab from '../../components/MarketingInboxTab'
 import MarketingCognismProspectsTab from '../../components/MarketingCognismProspectsTab'
 import MarketingEmailTemplatesTab from '../../components/MarketingEmailTemplatesTab'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
-import { PlaceholderPage } from '../../components/PlaceholderPage'
-import { MARKETING_PLANNED_AREAS } from './constants'
+import MarketingListsTab from '../../components/MarketingListsTab'
+import MarketingPeopleTab from '../../components/MarketingPeopleTab'
+import MarketingReportsTab from '../../components/MarketingReportsTab'
+import MarketingSchedulesTab from '../../components/MarketingSchedulesTab'
+import MarketingSequencesTab from '../../components/MarketingSequencesTab'
+import MarketingDashboard from '../../components/MarketingDashboard'
 
-export type MarketingViewId = 'overview' | 'leads' | 'campaigns' | 'templates' | 'cognism-prospects'
+export type MarketingViewId =
+  | 'overview'
+  | 'campaigns'
+  | 'sequences'
+  | 'people'
+  | 'lists'
+  | 'inbox'
+  | 'reports'
+  | 'templates'
+  | 'email-accounts'
+  | 'schedules'
+  | 'cognism-prospects'
+  | 'leads'
 
 function coerceMarketingViewId(view?: string): MarketingViewId {
-  if (view === 'leads' || view === 'campaigns' || view === 'templates' || view === 'cognism-prospects') return view
+  if (
+    view === 'leads' ||
+    view === 'campaigns' ||
+    view === 'sequences' ||
+    view === 'people' ||
+    view === 'lists' ||
+    view === 'inbox' ||
+    view === 'reports' ||
+    view === 'templates' ||
+    view === 'email-accounts' ||
+    view === 'schedules' ||
+    view === 'cognism-prospects'
+  )
+    return view
   return 'overview'
 }
 
@@ -26,13 +57,27 @@ export default function MarketingHomePage({
   const tabIndex =
     activeView === 'overview'
       ? 0
-      : activeView === 'leads'
+      : activeView === 'campaigns'
         ? 1
-        : activeView === 'campaigns'
+        : activeView === 'sequences'
           ? 2
-          : activeView === 'templates'
+          : activeView === 'people'
             ? 3
-            : 4
+            : activeView === 'lists'
+              ? 4
+              : activeView === 'inbox'
+                ? 5
+                : activeView === 'reports'
+                  ? 6
+                  : activeView === 'templates'
+                    ? 7
+                    : activeView === 'email-accounts'
+                      ? 8
+                      : activeView === 'schedules'
+                        ? 9
+                        : activeView === 'cognism-prospects'
+                          ? 10
+                          : 11
 
   return (
     <Tabs
@@ -40,48 +85,90 @@ export default function MarketingHomePage({
       onChange={(nextIndex) => {
         const nextView: MarketingViewId =
           nextIndex === 1
-            ? 'leads'
+            ? 'campaigns'
             : nextIndex === 2
-              ? 'campaigns'
+              ? 'sequences'
               : nextIndex === 3
-                ? 'templates'
+                ? 'people'
                 : nextIndex === 4
-                  ? 'cognism-prospects'
-                  : 'overview'
+                  ? 'lists'
+                  : nextIndex === 5
+                    ? 'inbox'
+                    : nextIndex === 6
+                      ? 'reports'
+                      : nextIndex === 7
+                        ? 'templates'
+                        : nextIndex === 8
+                          ? 'email-accounts'
+                          : nextIndex === 9
+                            ? 'schedules'
+                            : nextIndex === 10
+                              ? 'cognism-prospects'
+                              : nextIndex === 11
+                                ? 'leads'
+                                : 'overview'
         onNavigate?.(nextView)
       }}
       isLazy
       variant="enclosed"
       colorScheme="teal"
     >
-      <TabList>
-        <Tab>Overview</Tab>
-        <Tab>Leads</Tab>
-        <Tab>Email Campaigns</Tab>
-        <Tab>Email Templates</Tab>
-        <Tab>Cognism Prospects</Tab>
-      </TabList>
+      <Box
+        position="sticky"
+        top={0}
+        zIndex={5}
+        bg="bg.surface"
+        borderTopRadius="md"
+        pt={2}
+        pb={1}
+      >
+        <TabList overflowX="auto" whiteSpace="nowrap">
+          <Tab>Overview</Tab>
+          <Tab>Campaigns</Tab>
+          <Tab>Sequences</Tab>
+          <Tab>People</Tab>
+          <Tab>Lists</Tab>
+          <Tab>Inbox</Tab>
+          <Tab>Reports</Tab>
+          <Tab>Templates</Tab>
+          <Tab>Email Accounts</Tab>
+          <Tab>Schedules</Tab>
+          <Tab>Cognism Prospects</Tab>
+          <Tab>Leads</Tab>
+        </TabList>
+      </Box>
       <TabPanels pt={4}>
         <TabPanel px={0}>
-          <PlaceholderPage title="OpenDoors Marketing" ownerAgent="Marketing Agent">
-            <Text fontSize="sm" color="gray.700" mb={2}>
-              Planned areas:
-            </Text>
-            <UnorderedList fontSize="sm" color="gray.600" spacing={1} pl={5}>
-              {MARKETING_PLANNED_AREAS.map((a) => (
-                <ListItem key={a}>{a}</ListItem>
-              ))}
-            </UnorderedList>
-          </PlaceholderPage>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingLeadsTab focusAccountName={focusAccountName} />
-          </Box>
+          <MarketingDashboard />
         </TabPanel>
         <TabPanel px={0}>
           <Box>
             <EmailCampaignsTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingSequencesTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingPeopleTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingListsTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingInboxTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingReportsTab />
           </Box>
         </TabPanel>
         <TabPanel px={0}>
@@ -91,7 +178,22 @@ export default function MarketingHomePage({
         </TabPanel>
         <TabPanel px={0}>
           <Box>
+            <EmailSettingsTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingSchedulesTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
             <MarketingCognismProspectsTab />
+          </Box>
+        </TabPanel>
+        <TabPanel px={0}>
+          <Box>
+            <MarketingLeadsTab focusAccountName={focusAccountName} />
           </Box>
         </TabPanel>
       </TabPanels>

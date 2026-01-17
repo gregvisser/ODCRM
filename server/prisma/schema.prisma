@@ -17,27 +17,88 @@ model contacts {
   email                    String
   phone                    String?
   source                   String                     @default("cognism")
+  status                   ContactStatus              @default(active)
   createdAt                DateTime                   @default(now())
   updatedAt                DateTime
   customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   email_campaign_prospects email_campaign_prospects[]
+  contact_list_members     contact_list_members[]
 
   @@index([customerId, email])
   @@index([customerId])
   @@index([email])
+  @@index([status])
+}
+
+enum ContactStatus {
+  active
+  inactive
+  unsubscribed
+  bounced
 }
 
 model customers {
-  id               String             @id
-  name             String
-  domain           String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime
-  contacts         contacts[]
-  email_campaigns  email_campaigns[]
-  email_identities email_identities[]
+  id                    String               @id
+  name                  String
+  domain                String?
+  
+  // Business details (from OpensDoorsV2 ClientAccount)
+  leadsReportingUrl     String?
+  sector                String?
+  clientStatus          ClientStatus         @default(active)
+  targetJobTitle        String?
+  prospectingLocation   String?
+  
+  // Financial & performance tracking
+  monthlyIntakeGBP      Decimal?             @db.Decimal(10, 2)
+  defcon                Int?                 // Priority level 1-6
+  
+  // Lead targets & actuals
+  weeklyLeadTarget      Int?
+  weeklyLeadActual      Int?
+  monthlyLeadTarget     Int?
+  monthlyLeadActual     Int?
+  
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime
+  
+  contacts              contacts[]
+  email_campaigns       email_campaigns[]
+  email_identities      email_identities[]
+  customer_contacts     customer_contacts[]
+  contact_lists         contact_lists[]
+  email_sequences       email_sequences[]
 
   @@index([id])
+  @@index([domain])
+  @@index([name])
+  @@index([clientStatus])
+}
+
+enum ClientStatus {
+  active
+  inactive
+  onboarding
+  win_back
+}
+
+// Client contacts (people at the customer's company - our POCs)
+model customer_contacts {
+  id         String   @id
+  customerId String
+  name       String
+  email      String?
+  phone      String?
+  title      String?
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime
+  
+  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([email])
 }
 
 model email_campaign_prospects {
@@ -64,6 +125,7 @@ model email_campaign_prospects {
   email_identities       email_identities         @relation(fields: [senderIdentityId], references: [id])
   email_events           email_events[]
   email_message_metadata email_message_metadata[]
+  email_campaign_prospect_steps email_campaign_prospect_steps[]
 
   @@index([campaignId])
   @@index([campaignId, lastStatus])
@@ -78,6 +140,12 @@ model email_campaign_templates {
   id               String          @id
   campaignId       String
   stepNumber       Int
+  /// Delay AFTER the previous step before this step is eligible to send.
+  /// Step 1 should generally be 0/0 ("right away").
+  ///
+  /// If null, the system will fall back to the campaign-level followUpDelayDaysMin/Max.
+  delayDaysMin     Int?
+  delayDaysMax     Int?
   subjectTemplate  String
   bodyTemplateHtml String
   bodyTemplateText String?
@@ -96,6 +164,11 @@ model email_campaigns {
   description              String?
   status                   CampaignStatus             @default(draft)
   senderIdentityId         String
+  
+  // Optional: link to list and sequence (OpensDoorsV2 workflow)
+  listId                   String?
+  sequenceId               String?
+  
   sendWindowHoursStart     Int                        @default(9)
   sendWindowHoursEnd       Int                        @default(17)
   randomizeWithinHours     Int                        @default(24)
@@ -105,14 +178,19 @@ model email_campaigns {
   updatedAt                DateTime
   email_campaign_prospects email_campaign_prospects[]
   email_campaign_templates email_campaign_templates[]
+  email_campaign_prospect_steps email_campaign_prospect_steps[]
   customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   email_identities         email_identities           @relation(fields: [senderIdentityId], references: [id])
   email_events             email_events[]
+  list                     contact_lists?             @relation("CampaignToList", fields: [listId], references: [id])
+  sequence                 email_sequences?           @relation("CampaignToSequence", fields: [sequenceId], references: [id])
 
   @@index([customerId])
   @@index([customerId, status])
   @@index([senderIdentityId])
   @@index([status])
+  @@index([listId])
+  @@index([sequenceId])
 }
 
 model email_events {
@@ -138,12 +216,22 @@ model email_identities {
   customerId               String
   emailAddress             String
   displayName              String?
-  provider                 String                     @default("outlook")
+  provider                 String                     @default("outlook") // "outlook" or "smtp"
+  
+  // OAuth fields (for Outlook)
   outlookTenantId          String?
   outlookUserId            String?
   accessToken              String?
   refreshToken             String?
   tokenExpiresAt           DateTime?
+  
+  // SMTP fields (for manual email accounts)
+  smtpHost                 String?
+  smtpPort                 Int?
+  smtpUsername             String?
+  smtpPassword             String?
+  smtpSecure               Boolean?                   @default(true)
+  
   dailySendLimit           Int                        @default(150)
   isActive                 Boolean                    @default(true)
   lastCheckedAt            DateTime?
@@ -158,6 +246,7 @@ model email_identities {
   @@index([customerId])
   @@index([emailAddress])
   @@index([isActive])
+  @@index([provider])
 }
 
 model email_message_metadata {
@@ -207,8 +296,104 @@ enum ProspectStatus {
   pending
   step1_sent
   step2_sent
+  step3_sent
+  step4_sent
+  step5_sent
+  step6_sent
+  step7_sent
+  step8_sent
+  step9_sent
+  step10_sent
   bounced
   unsubscribed
   replied
   completed
+}
+
+/// Per-prospect, per-step scheduling state.
+///
+/// This replaces the old fixed columns on email_campaign_prospects (step1ScheduledAt, step2ScheduledAt, ...),
+/// enabling sequences up to 10 email steps.
+model email_campaign_prospect_steps {
+  id                 String                 @id
+  campaignId         String
+  campaignProspectId String
+  stepNumber         Int
+  scheduledAt        DateTime?
+  sentAt             DateTime?
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime
+  email_campaigns    email_campaigns        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  email_campaign_prospects email_campaign_prospects @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignProspectId, stepNumber])
+  @@index([campaignId, stepNumber])
+  @@index([campaignId, scheduledAt])
+  @@index([campaignProspectId])
+  @@index([scheduledAt])
+}
+
+// Contact Lists (from OpensDoorsV2)
+model contact_lists {
+  id                   String                 @id
+  customerId           String
+  name                 String
+  description          String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime
+  
+  customer             customers              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contact_list_members contact_list_members[]
+  email_campaigns      email_campaigns[]      @relation("CampaignToList")
+
+  @@index([customerId])
+  @@index([customerId, name])
+}
+
+model contact_list_members {
+  id        String        @id
+  listId    String
+  contactId String
+  createdAt DateTime      @default(now())
+  
+  list      contact_lists @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact   contacts      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, contactId])
+  @@index([listId])
+  @@index([contactId])
+}
+
+// Email Sequences (reusable multi-step workflows)
+model email_sequences {
+  id          String                   @id
+  customerId  String
+  name        String
+  description String?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime
+  
+  customer    customers                @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  steps       email_sequence_steps[]
+  campaigns   email_campaigns[]        @relation("CampaignToSequence")
+
+  @@index([customerId])
+  @@index([customerId, name])
+}
+
+model email_sequence_steps {
+  id                    String          @id
+  sequenceId            String
+  stepOrder             Int
+  delayDaysFromPrevious Int             @default(0)
+  subjectTemplate       String
+  bodyTemplateHtml      String
+  bodyTemplateText      String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime
+  
+  sequence              email_sequences @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, stepOrder])
+  @@index([sequenceId])
 }

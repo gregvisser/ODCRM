@@ -817,7 +817,7 @@ function UserAuthorizationTab() {
           gap={4}
           wrap="wrap"
         >
-          <Heading size="md" color="brand.800">
+          <Heading size="md" color="text.muted">
             User Authorization Management
           </Heading>
           <HStack spacing={3} flexWrap="wrap">
@@ -831,7 +831,7 @@ function UserAuthorizationTab() {
             </Button>
             <Button
               leftIcon={<AddIcon />}
-              colorScheme="brand"
+              colorScheme="gray"
               onClick={handleCreate}
               size={{ base: 'sm', md: 'md' }}
             >
@@ -919,12 +919,12 @@ function UserAuthorizationTab() {
                     </Text>
                   </Td>
                   <Td>
-                    <Badge colorScheme="blue" variant="subtle" whiteSpace="nowrap">
+                    <Badge colorScheme="gray" variant="subtle" whiteSpace="nowrap">
                       {user.role}
                     </Badge>
                   </Td>
                   <Td>
-                    <Badge colorScheme="purple" variant="subtle" whiteSpace="nowrap">
+                    <Badge colorScheme="gray" variant="subtle" whiteSpace="nowrap">
                       {user.department}
                     </Badge>
                   </Td>
@@ -949,7 +949,7 @@ function UserAuthorizationTab() {
                         icon={<DeleteIcon />}
                         size="sm"
                         variant="ghost"
-                        colorScheme="red"
+                        colorScheme="gray"
                         onClick={() => handleDelete(user)}
                       />
                     </HStack>
@@ -1173,7 +1173,7 @@ function UserAuthorizationTab() {
             <Button variant="ghost" mr={3} onClick={onClose}>
               Cancel
             </Button>
-            <Button colorScheme="brand" onClick={handleSave}>
+            <Button colorScheme="gray" onClick={handleSave}>
               {isEditing ? 'Update' : 'Create'}
             </Button>
           </ModalFooter>
@@ -1200,7 +1200,7 @@ function UserAuthorizationTab() {
               <Button ref={cancelRef} onClick={onDeleteClose}>
                 Cancel
               </Button>
-              <Button colorScheme="red" onClick={confirmDelete} ml={3}>
+              <Button colorScheme="gray" onClick={confirmDelete} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>
