@@ -65,7 +65,7 @@ import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-i
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData, type CompanyData } from '../services/companyDataService'
-import { getItem, getJson, isStorageAvailable, setItem, setJson } from '../platform/storage'
+import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { useExportImport } from '../utils/exportImport'
 import { api } from '../utils/api'
 
@@ -888,6 +888,50 @@ export function loadAccountsFromStorage(): Account[] {
     return parsed
   }
   return accounts
+}
+
+function loadLatestAccountsBackup(): Account[] | null {
+  try {
+    const backupKeys = keys()
+      .filter((key) => key.startsWith('odcrm_accounts_backup_'))
+      .sort()
+      .reverse()
+    for (const key of backupKeys) {
+      const raw = getItem(key)
+      if (!raw) continue
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed as Account[]
+    }
+  } catch (e) {
+    console.warn('Failed to load accounts backup:', e)
+  }
+  return null
+}
+
+function mergeAccountFromBackup(account: Account, backup: Account): Account {
+  const updates: Partial<Account> = {}
+  if (!account.clientLeadsSheetUrl && backup.clientLeadsSheetUrl) {
+    updates.clientLeadsSheetUrl = backup.clientLeadsSheetUrl
+  }
+  if ((!account.sector || account.sector === 'To be determined') && backup.sector) {
+    updates.sector = backup.sector
+  }
+  if ((!account.targetTitle || !account.targetTitle.trim()) && backup.targetTitle) {
+    updates.targetTitle = backup.targetTitle
+  }
+  if ((account.targetLocation?.length ?? 0) === 0 && (backup.targetLocation?.length ?? 0) > 0) {
+    updates.targetLocation = backup.targetLocation
+  }
+  if ((!account.weeklyTarget || account.weeklyTarget === 0) && backup.weeklyTarget) {
+    updates.weeklyTarget = backup.weeklyTarget
+  }
+  if ((!account.monthlyTarget || account.monthlyTarget === 0) && backup.monthlyTarget) {
+    updates.monthlyTarget = backup.monthlyTarget
+  }
+  if ((!account.monthlySpendGBP || account.monthlySpendGBP === 0) && backup.monthlySpendGBP) {
+    updates.monthlySpendGBP = backup.monthlySpendGBP
+  }
+  return Object.keys(updates).length ? { ...account, ...updates } : account
 }
 
 // Save accounts to storage
@@ -3987,6 +4031,40 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Restore Google Sheets + account details from latest backup (if available).
+  useEffect(() => {
+    if (!isStorageAvailable()) return
+    const current = loadAccountsFromStorage()
+    const hasSheets = current.some((acc) => acc.clientLeadsSheetUrl)
+    if (hasSheets) return
+
+    const backup = loadLatestAccountsBackup()
+    if (!backup || backup.length === 0) return
+
+    const backupMap = new Map(backup.map((acc) => [acc.name, acc]))
+    let changed = false
+    const merged = current.map((acc) => {
+      const fromBackup = backupMap.get(acc.name)
+      if (!fromBackup) return acc
+      const updated = mergeAccountFromBackup(acc, fromBackup)
+      if (updated !== acc) changed = true
+      return updated
+    })
+
+    if (changed) {
+      saveAccountsToStorage(merged)
+      setAccountsData(merged)
+      emit('accountsUpdated', merged)
+      toast({
+        title: 'Accounts restored from backup',
+        description: 'Recovered Google Sheets and account details from the latest local backup.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }, [accountsData, toast])
 
   // Rehydrate account details from backend customers (non-destructive merge)
   useEffect(() => {
