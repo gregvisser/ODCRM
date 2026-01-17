@@ -2,10 +2,16 @@
  * SMTP Email Sending Service
  * Ported from OpensDoorsV2
  * Supports both SMTP and OAuth email sending
+ * NOTE: SMTP functionality disabled - using Microsoft Graph/Outlook instead
  */
 
 // import nodemailer from 'nodemailer'
 import type { EmailIdentity } from '@prisma/client'
+
+// Stub for nodemailer to allow build without dependency
+const nodemailer = {
+  createTransport: () => ({ sendMail: async () => ({}) })
+}
 
 export type SendEmailResult = { ok: true } | { ok: false; error: string }
 
