@@ -1,5 +1,6 @@
 // @ts-nocheck
 import express from 'express'
+import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
@@ -352,6 +353,7 @@ router.get('/callback', async (req, res) => {
           isActive: true
         },
         create: {
+          id: randomUUID(),
           customerId,
           emailAddress,
           displayName: userData.displayName,
