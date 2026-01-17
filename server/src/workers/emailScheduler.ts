@@ -25,7 +25,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
   // Find all running campaigns
-  const runningCampaigns = await prisma.email_campaigns.findMany({
+  const runningCampaigns = await prisma.emailCampaign.findMany({
     where: { status: 'running' },
     include: {
       senderIdentity: true,
@@ -81,7 +81,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
     const todayStart = new Date(now)
     todayStart.setHours(0, 0, 0, 0)
 
-    let emailsSentToday = await prisma.email_events.count({
+    let emailsSentToday = await prisma.emailEvent.count({
       where: {
         campaign: {
           senderIdentityId: campaign.senderIdentityId
@@ -100,7 +100,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
 
     // Customer-level safety: hard cap total sends per 24h (rolling).
     // This reduces blacklist/domain risk when multiple identities/campaigns run.
-    const customerSentLast24h = await prisma.email_events.count({
+    const customerSentLast24h = await prisma.emailEvent.count({
       where: {
         type: 'sent',
         occurredAt: { gte: since24h },
@@ -140,7 +140,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
           if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
 
           // Re-check customer cap as we send in batches
-          const customerSent = await prisma.email_events.count({
+          const customerSent = await prisma.emailEvent.count({
             where: {
               type: 'sent',
               occurredAt: { gte: since24h },
@@ -184,7 +184,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
             })
           } else {
             // No next template; consider sequence done.
-            await prisma.email_campaign_prospects.update({
+            await prisma.emailCampaignProspect.update({
               where: { id: prospect.id },
               data: { lastStatus: 'completed' } as any })
           }
@@ -199,7 +199,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
     if (usedNewStepScheduling) continue
 
     // Legacy fallback: 2-step campaigns using fixed columns.
-    const step1Ready = await prisma.email_campaign_prospects.findMany({
+    const step1Ready = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
         lastStatus: 'pending',
@@ -221,7 +221,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
       emailsSentToday++
     }
 
-    const step2Ready = await prisma.email_campaign_prospects.findMany({
+    const step2Ready = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
         lastStatus: 'step1_sent',
@@ -285,7 +285,7 @@ async function sendCampaignEmail(
 
     if (result.success) {
       // Record sent event
-      await prisma.email_events.create({ data: {
+      await prisma.emailEvent.create({ data: {
           campaignId: campaign.id,
           campaignProspectId: prospect.id,
           type: 'sent',
@@ -304,7 +304,7 @@ async function sendCampaignEmail(
         lastStatus: stepNumber === 1 ? 'step1_sent' : (`step${Math.min(stepNumber, 10)}_sent`)
       }
 
-      await prisma.email_campaign_prospects.update({
+      await prisma.emailCampaignProspect.update({
         where: { id: prospect.id },
         data: updateData
       })
@@ -315,12 +315,12 @@ async function sendCampaignEmail(
           Math.random() * (campaign.followUpDelayDaysMax - campaign.followUpDelayDaysMin)
         const step2ScheduledAt = new Date(Date.now() + delayDays * 24 * 60 * 60 * 1000)
 
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: { step2ScheduledAt } as any })
       } else if (stepNumber === 2) {
         // Legacy: Step 2 sent, mark as completed
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: { lastStatus: 'completed' } as any })
       }
@@ -333,7 +333,7 @@ async function sendCampaignEmail(
       // Check if it's a bounce
       if (result.error?.toLowerCase().includes('bounce') || 
           result.error?.toLowerCase().includes('rejected')) {
-        await prisma.email_events.create({ data: {
+        await prisma.emailEvent.create({ data: {
             campaignId: campaign.id,
             campaignProspectId: prospect.id,
             type: 'bounced',
@@ -342,7 +342,7 @@ async function sendCampaignEmail(
           }
         })
 
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: {
             bouncedAt: new Date(),

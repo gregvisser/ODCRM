@@ -1,6 +1,6 @@
 import { Client } from '@microsoft/microsoft-graph-client'
 import { PrismaClient } from '@prisma/client'
-import type { email_identities, email_message_metadata } from '@prisma/client'
+import type { EmailIdentity, EmailMessageMetadata } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 
 export interface SendEmailParams {
@@ -37,7 +37,7 @@ export interface InboxMessage {
 /**
  * Get a Microsoft Graph client for the given EmailIdentity
  */
-async function getGraphClient(identity: email_identities): Promise<Client> {
+async function getGraphClient(identity: EmailIdentity): Promise<Client> {
   // Check if token needs refresh
   const now = new Date()
   const expiresAt = identity.tokenExpiresAt ? new Date(identity.tokenExpiresAt) : null
@@ -67,7 +67,7 @@ async function getGraphClient(identity: email_identities): Promise<Client> {
 /**
  * Refresh the access token using refresh token
  */
-async function refreshAccessToken(identity: email_identities): Promise<string> {
+async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
   const clientId = process.env.MICROSOFT_CLIENT_ID
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
   const tenantId = identity.outlookTenantId || process.env.MICROSOFT_TENANT_ID || 'common'
@@ -105,7 +105,7 @@ async function refreshAccessToken(identity: email_identities): Promise<string> {
     const data = (await response.json()) as any
 
     // Update identity in database
-    await prisma.email_identities.update({
+    await prisma.emailIdentity.update({
       where: { id: identity.id },
       data: {
         accessToken: data.access_token,
@@ -130,7 +130,7 @@ export async function sendEmail(
 ): Promise<SendEmailResult> {
   try {
     // Load identity
-    const identity = await prisma.email_identities.findUnique({
+    const identity = await prisma.emailIdentity.findUnique({
       where: { id: params.senderIdentityId }
     })
 
@@ -212,7 +212,7 @@ export async function sendEmail(
 
     // Store email metadata
     if (messageId && params.campaignProspectId) {
-      await prisma.email_message_metadata.create({ data: {
+      await prisma.emailMessageMetadata.create({ data: {
           campaignProspectId: params.campaignProspectId,
           senderIdentityId: identity.id,
           providerMessageId: messageId,
@@ -250,7 +250,7 @@ export async function fetchRecentInboxMessages(
   hoursBack: number = 72
 ): Promise<InboxMessage[]> {
   try {
-    const identity = await prisma.email_identities.findUnique({
+    const identity = await prisma.emailIdentity.findUnique({
       where: { id: identityId }
     })
 

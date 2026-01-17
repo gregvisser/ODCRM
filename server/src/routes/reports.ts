@@ -33,11 +33,11 @@ router.get('/emails', async (req, res, next) => {
     const { start, end } = parseRange(dateRangeSchema.parse(req.query))
 
     // Totals by type in range
-    const byType = await prisma.email_events.groupBy({
+    const byType = await prisma.emailEvent.groupBy({
       by: ['type'],
       where: {
         occurredAt: { gte: start, lte: end },
-        email_campaigns: { customerId },
+        campaign: { customerId },
       },
       _count: { _all: true },
     })
@@ -48,23 +48,23 @@ router.get('/emails', async (req, res, next) => {
     }, {})
 
     // By campaign + type
-    const byCampaignType = await prisma.email_events.groupBy({
+    const byCampaignType = await prisma.emailEvent.groupBy({
       by: ['campaignId', 'type'],
       where: {
         occurredAt: { gte: start, lte: end },
-        email_campaigns: { customerId },
+        campaign: { customerId },
       },
       _count: { _all: true },
     })
 
-    const campaignIds = Array.from(new Set(byCampaignType.map((r) => r.campaignId)))
+    const campaignIds = Array.from(new Set(byCampaignType.map((r) => r.campaignId as string)))
     const campaigns = campaignIds.length
-      ? await prisma.email_campaigns.findMany({
+      ? await prisma.emailCampaign.findMany({
           where: { id: { in: campaignIds }, customerId },
           select: {
             id: true,
             name: true,
-            email_identities: { select: { id: true, emailAddress: true, displayName: true } },
+            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
           },
         })
       : []
@@ -80,9 +80,9 @@ router.get('/emails', async (req, res, next) => {
         }, {})
         const c = campaignMap.get(id)
         return {
-          campaignId: id,
+          campaignId: id as string,
           campaignName: c?.name || '(unknown)',
-          email_identities: c?.email_identities || null,
+          senderIdentity: c?.senderIdentity || null,
           counts,
         }
       })
@@ -105,7 +105,7 @@ router.get('/team-performance', async (req, res, next) => {
     const { start, end } = parseRange(dateRangeSchema.parse(req.query))
 
     // Count sent/replied grouped by sender identity via campaigns.
-    const sentByCampaign = await prisma.email_events.groupBy({
+    const sentByCampaign = await prisma.emailEvent.groupBy({
       by: ['campaignId'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -115,7 +115,7 @@ router.get('/team-performance', async (req, res, next) => {
       _count: { _all: true },
     })
 
-    const repliedByCampaign = await prisma.email_events.groupBy({
+    const repliedByCampaign = await prisma.emailEvent.groupBy({
       by: ['campaignId'],
       where: {
         occurredAt: { gte: start, lte: end },
@@ -127,17 +127,17 @@ router.get('/team-performance', async (req, res, next) => {
 
     const campaignIds = Array.from(new Set([...sentByCampaign.map((r) => r.campaignId), ...repliedByCampaign.map((r) => r.campaignId)]))
     const campaigns = campaignIds.length
-      ? await prisma.email_campaigns.findMany({
+      ? await prisma.emailCampaign.findMany({
           where: { id: { in: campaignIds }, customerId },
           select: {
             id: true,
-            email_identities: { select: { id: true, emailAddress: true, displayName: true } },
+            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
           },
         })
       : []
 
-    const sentMap = new Map(sentByCampaign.map((r) => [r.campaignId, r._count._all]))
-    const replyMap = new Map(repliedByCampaign.map((r) => [r.campaignId, r._count._all]))
+    const sentMap = new Map(sentByCampaign.map((r) => [r.campaignId as string, r._count._all as number]))
+    const replyMap = new Map(repliedByCampaign.map((r) => [r.campaignId as string, r._count._all as number]))
 
     const byIdentity = new Map<
       string,
@@ -145,7 +145,7 @@ router.get('/team-performance', async (req, res, next) => {
     >()
 
     for (const c of campaigns) {
-      const identity = c.email_identities
+      const identity = c.senderIdentity
       const key = identity.id
       const prev = byIdentity.get(key) || {
         identityId: identity.id,
@@ -154,8 +154,8 @@ router.get('/team-performance', async (req, res, next) => {
         sent: 0,
         replied: 0,
       }
-      prev.sent += sentMap.get(c.id) || 0
-      prev.replied += replyMap.get(c.id) || 0
+      prev.sent += (sentMap.get(c.id) || 0) as number
+      prev.replied += (replyMap.get(c.id) || 0) as number
       byIdentity.set(key, prev)
     }
 

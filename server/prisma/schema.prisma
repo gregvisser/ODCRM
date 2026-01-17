@@ -7,28 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model contacts {
-  id                       String                     @id
-  customerId               String
-  firstName                String
-  lastName                 String
-  jobTitle                 String?
-  companyName              String
-  email                    String
-  phone                    String?
-  source                   String                     @default("cognism")
-  status                   ContactStatus              @default(active)
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime
-  customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  email_campaign_prospects email_campaign_prospects[]
-  contact_list_members     contact_list_members[]
-
-  @@index([customerId, email])
-  @@index([customerId])
-  @@index([email])
-  @@index([status])
-}
+// ============================================================================
+// ENUMS
+// ============================================================================
 
 enum ContactStatus {
   active
@@ -37,238 +18,11 @@ enum ContactStatus {
   bounced
 }
 
-model customers {
-  id                    String               @id
-  name                  String
-  domain                String?
-  
-  // Business details (from OpensDoorsV2 ClientAccount)
-  leadsReportingUrl     String?
-  sector                String?
-  clientStatus          ClientStatus         @default(active)
-  targetJobTitle        String?
-  prospectingLocation   String?
-  
-  // Financial & performance tracking
-  monthlyIntakeGBP      Decimal?             @db.Decimal(10, 2)
-  defcon                Int?                 // Priority level 1-6
-  
-  // Lead targets & actuals
-  weeklyLeadTarget      Int?
-  weeklyLeadActual      Int?
-  monthlyLeadTarget     Int?
-  monthlyLeadActual     Int?
-  
-  createdAt             DateTime             @default(now())
-  updatedAt             DateTime
-  
-  contacts              contacts[]
-  email_campaigns       email_campaigns[]
-  email_identities      email_identities[]
-  customer_contacts     customer_contacts[]
-  contact_lists         contact_lists[]
-  email_sequences       email_sequences[]
-
-  @@index([id])
-  @@index([domain])
-  @@index([name])
-  @@index([clientStatus])
-}
-
 enum ClientStatus {
   active
   inactive
   onboarding
   win_back
-}
-
-// Client contacts (people at the customer's company - our POCs)
-model customer_contacts {
-  id         String   @id
-  customerId String
-  name       String
-  email      String?
-  phone      String?
-  title      String?
-  isPrimary  Boolean  @default(false)
-  notes      String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime
-  
-  customer   customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([customerId])
-  @@index([email])
-}
-
-model email_campaign_prospects {
-  id                     String                   @id
-  campaignId             String
-  contactId              String
-  senderIdentityId       String
-  step1ScheduledAt       DateTime?
-  step1SentAt            DateTime?
-  step2ScheduledAt       DateTime?
-  step2SentAt            DateTime?
-  lastStatus             ProspectStatus           @default(pending)
-  openCount              Int                      @default(0)
-  lastOpenedAt           DateTime?
-  unsubscribedAt         DateTime?
-  bouncedAt              DateTime?
-  replyDetectedAt        DateTime?
-  replyCount             Int                      @default(0)
-  lastReplySnippet       String?
-  createdAt              DateTime                 @default(now())
-  updatedAt              DateTime
-  email_campaigns        email_campaigns          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  contacts               contacts                 @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  email_identities       email_identities         @relation(fields: [senderIdentityId], references: [id])
-  email_events           email_events[]
-  email_message_metadata email_message_metadata[]
-  email_campaign_prospect_steps email_campaign_prospect_steps[]
-
-  @@index([campaignId])
-  @@index([campaignId, lastStatus])
-  @@index([contactId])
-  @@index([lastStatus])
-  @@index([senderIdentityId])
-  @@index([step1ScheduledAt])
-  @@index([step2ScheduledAt])
-}
-
-model email_campaign_templates {
-  id               String          @id
-  campaignId       String
-  stepNumber       Int
-  /// Delay AFTER the previous step before this step is eligible to send.
-  /// Step 1 should generally be 0/0 ("right away").
-  ///
-  /// If null, the system will fall back to the campaign-level followUpDelayDaysMin/Max.
-  delayDaysMin     Int?
-  delayDaysMax     Int?
-  subjectTemplate  String
-  bodyTemplateHtml String
-  bodyTemplateText String?
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime
-  email_campaigns  email_campaigns @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-
-  @@unique([campaignId, stepNumber])
-  @@index([campaignId])
-}
-
-model email_campaigns {
-  id                       String                     @id
-  customerId               String
-  name                     String
-  description              String?
-  status                   CampaignStatus             @default(draft)
-  senderIdentityId         String
-  
-  // Optional: link to list and sequence (OpensDoorsV2 workflow)
-  listId                   String?
-  sequenceId               String?
-  
-  sendWindowHoursStart     Int                        @default(9)
-  sendWindowHoursEnd       Int                        @default(17)
-  randomizeWithinHours     Int                        @default(24)
-  followUpDelayDaysMin     Int                        @default(3)
-  followUpDelayDaysMax     Int                        @default(5)
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime
-  email_campaign_prospects email_campaign_prospects[]
-  email_campaign_templates email_campaign_templates[]
-  email_campaign_prospect_steps email_campaign_prospect_steps[]
-  customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  email_identities         email_identities           @relation(fields: [senderIdentityId], references: [id])
-  email_events             email_events[]
-  list                     contact_lists?             @relation("CampaignToList", fields: [listId], references: [id])
-  sequence                 email_sequences?           @relation("CampaignToSequence", fields: [sequenceId], references: [id])
-
-  @@index([customerId])
-  @@index([customerId, status])
-  @@index([senderIdentityId])
-  @@index([status])
-  @@index([listId])
-  @@index([sequenceId])
-}
-
-model email_events {
-  id                       String                   @id
-  campaignId               String
-  campaignProspectId       String
-  type                     EventType
-  metadata                 Json?
-  occurredAt               DateTime                 @default(now())
-  createdAt                DateTime                 @default(now())
-  email_campaigns          email_campaigns          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  email_campaign_prospects email_campaign_prospects @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
-
-  @@index([campaignId])
-  @@index([campaignId, type])
-  @@index([campaignProspectId])
-  @@index([occurredAt])
-  @@index([type])
-}
-
-model email_identities {
-  id                       String                     @id
-  customerId               String
-  emailAddress             String
-  displayName              String?
-  provider                 String                     @default("outlook") // "outlook" or "smtp"
-  
-  // OAuth fields (for Outlook)
-  outlookTenantId          String?
-  outlookUserId            String?
-  accessToken              String?
-  refreshToken             String?
-  tokenExpiresAt           DateTime?
-  
-  // SMTP fields (for manual email accounts)
-  smtpHost                 String?
-  smtpPort                 Int?
-  smtpUsername             String?
-  smtpPassword             String?
-  smtpSecure               Boolean?                   @default(true)
-  
-  dailySendLimit           Int                        @default(150)
-  isActive                 Boolean                    @default(true)
-  lastCheckedAt            DateTime?
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime
-  email_campaign_prospects email_campaign_prospects[]
-  email_campaigns          email_campaigns[]
-  customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  email_message_metadata   email_message_metadata[]
-
-  @@unique([customerId, emailAddress])
-  @@index([customerId])
-  @@index([emailAddress])
-  @@index([isActive])
-  @@index([provider])
-}
-
-model email_message_metadata {
-  id                       String                    @id
-  campaignProspectId       String?
-  senderIdentityId         String
-  providerMessageId        String                    @unique
-  threadId                 String?
-  direction                MessageDirection          @default(outbound)
-  fromAddress              String
-  toAddress                String
-  subject                  String
-  rawHeaders               Json?
-  createdAt                DateTime                  @default(now())
-  email_campaign_prospects email_campaign_prospects? @relation(fields: [campaignProspectId], references: [id])
-  email_identities         email_identities          @relation(fields: [senderIdentityId], references: [id], onDelete: Cascade)
-
-  @@index([campaignProspectId])
-  @@index([providerMessageId, threadId])
-  @@index([senderIdentityId])
-  @@index([threadId])
-  @@index([toAddress])
 }
 
 enum CampaignStatus {
@@ -310,11 +64,219 @@ enum ProspectStatus {
   completed
 }
 
-/// Per-prospect, per-step scheduling state.
-///
-/// This replaces the old fixed columns on email_campaign_prospects (step1ScheduledAt, step2ScheduledAt, ...),
-/// enabling sequences up to 10 email steps.
-model email_campaign_prospect_steps {
+// ============================================================================
+// MODELS (PascalCase with @@map to snake_case tables)
+// ============================================================================
+
+model Customer {
+  id                    String               @id
+  name                  String
+  domain                String?
+  
+  // Business details (from OpensDoorsV2 ClientAccount)
+  leadsReportingUrl     String?
+  sector                String?
+  clientStatus          ClientStatus         @default(active)
+  targetJobTitle        String?
+  prospectingLocation   String?
+  
+  // Financial & performance tracking
+  monthlyIntakeGBP      Decimal?             @db.Decimal(10, 2)
+  defcon                Int?                 // Priority level 1-6
+  
+  // Lead targets & actuals
+  weeklyLeadTarget      Int?
+  weeklyLeadActual      Int?
+  monthlyLeadTarget     Int?
+  monthlyLeadActual     Int?
+  
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  
+  // Relations
+  contacts              Contact[]
+  emailCampaigns        EmailCampaign[]
+  emailIdentities       EmailIdentity[]
+  customerContacts      CustomerContact[]
+  contactLists          ContactList[]
+  emailSequences        EmailSequence[]
+
+  @@index([id])
+  @@index([domain])
+  @@index([name])
+  @@index([clientStatus])
+  @@map("customers")
+}
+
+model Contact {
+  id                       String                     @id
+  customerId               String
+  firstName                String
+  lastName                 String
+  jobTitle                 String?
+  companyName              String
+  email                    String
+  phone                    String?
+  source                   String                     @default("cognism")
+  status                   ContactStatus              @default(active)
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  
+  // Relations
+  customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  emailCampaignProspects   EmailCampaignProspect[]
+  contactListMembers       ContactListMember[]
+
+  @@index([customerId, email])
+  @@index([customerId])
+  @@index([email])
+  @@index([status])
+  @@map("contacts")
+}
+
+model EmailIdentity {
+  id                       String                     @id
+  customerId               String
+  emailAddress             String
+  displayName              String?
+  provider                 String                     @default("outlook") // "outlook" or "smtp"
+  
+  // OAuth fields (for Outlook)
+  outlookTenantId          String?
+  outlookUserId            String?
+  accessToken              String?
+  refreshToken             String?
+  tokenExpiresAt           DateTime?
+  
+  // SMTP fields (for manual email accounts)
+  smtpHost                 String?
+  smtpPort                 Int?
+  smtpUsername             String?
+  smtpPassword             String?
+  smtpSecure               Boolean?                   @default(true)
+  
+  dailySendLimit           Int                        @default(150)
+  isActive                 Boolean                    @default(true)
+  lastCheckedAt            DateTime?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  
+  // Relations
+  customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  emailCampaignProspects   EmailCampaignProspect[]
+  emailCampaigns           EmailCampaign[]
+  emailMessageMetadata     EmailMessageMetadata[]
+
+  @@unique([customerId, emailAddress])
+  @@index([customerId])
+  @@index([emailAddress])
+  @@index([isActive])
+  @@index([provider])
+  @@map("email_identities")
+}
+
+model EmailCampaign {
+  id                       String                     @id
+  customerId               String
+  name                     String
+  description              String?
+  status                   CampaignStatus             @default(draft)
+  senderIdentityId         String
+  
+  // Optional: link to list and sequence (OpensDoorsV2 workflow)
+  listId                   String?
+  sequenceId               String?
+  
+  sendWindowHoursStart     Int                        @default(9)
+  sendWindowHoursEnd       Int                        @default(17)
+  randomizeWithinHours     Int                        @default(24)
+  followUpDelayDaysMin     Int                        @default(3)
+  followUpDelayDaysMax     Int                        @default(5)
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  
+  // Relations
+  customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  senderIdentity           EmailIdentity              @relation(fields: [senderIdentityId], references: [id])
+  list                     ContactList?               @relation("CampaignToList", fields: [listId], references: [id])
+  sequence                 EmailSequence?             @relation("CampaignToSequence", fields: [sequenceId], references: [id])
+  emailCampaignProspects   EmailCampaignProspect[]
+  emailCampaignTemplates   EmailCampaignTemplate[]
+  emailCampaignProspectSteps EmailCampaignProspectStep[]
+  emailEvents              EmailEvent[]
+
+  @@index([customerId])
+  @@index([customerId, status])
+  @@index([senderIdentityId])
+  @@index([status])
+  @@index([listId])
+  @@index([sequenceId])
+  @@map("email_campaigns")
+}
+
+model EmailCampaignTemplate {
+  id               String          @id
+  campaignId       String
+  stepNumber       Int
+  /// Delay AFTER the previous step before this step is eligible to send.
+  /// Step 1 should generally be 0/0 ("right away").
+  ///
+  /// If null, the system will fall back to the campaign-level followUpDelayDaysMin/Max.
+  delayDaysMin     Int?
+  delayDaysMax     Int?
+  subjectTemplate  String
+  bodyTemplateHtml String
+  bodyTemplateText String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  
+  // Relations
+  campaign         EmailCampaign   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, stepNumber])
+  @@index([campaignId])
+  @@map("email_campaign_templates")
+}
+
+model EmailCampaignProspect {
+  id                     String                   @id
+  campaignId             String
+  contactId              String
+  senderIdentityId       String
+  step1ScheduledAt       DateTime?
+  step1SentAt            DateTime?
+  step2ScheduledAt       DateTime?
+  step2SentAt            DateTime?
+  lastStatus             ProspectStatus           @default(pending)
+  openCount              Int                      @default(0)
+  lastOpenedAt           DateTime?
+  unsubscribedAt         DateTime?
+  bouncedAt              DateTime?
+  replyDetectedAt        DateTime?
+  replyCount             Int                      @default(0)
+  lastReplySnippet       String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  
+  // Relations
+  campaign               EmailCampaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact                Contact                  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  senderIdentity         EmailIdentity            @relation(fields: [senderIdentityId], references: [id])
+  emailEvents            EmailEvent[]
+  emailMessageMetadata   EmailMessageMetadata[]
+  emailCampaignProspectSteps EmailCampaignProspectStep[]
+
+  @@index([campaignId])
+  @@index([campaignId, lastStatus])
+  @@index([contactId])
+  @@index([lastStatus])
+  @@index([senderIdentityId])
+  @@index([step1ScheduledAt])
+  @@index([step2ScheduledAt])
+  @@map("email_campaign_prospects")
+}
+
+model EmailCampaignProspectStep {
   id                 String                 @id
   campaignId         String
   campaignProspectId String
@@ -322,66 +284,142 @@ model email_campaign_prospect_steps {
   scheduledAt        DateTime?
   sentAt             DateTime?
   createdAt          DateTime               @default(now())
-  updatedAt          DateTime
-  email_campaigns    email_campaigns        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  email_campaign_prospects email_campaign_prospects @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+  updatedAt          DateTime               @updatedAt
+  
+  // Relations
+  campaign           EmailCampaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignProspect   EmailCampaignProspect  @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
 
   @@unique([campaignProspectId, stepNumber])
   @@index([campaignId, stepNumber])
   @@index([campaignId, scheduledAt])
   @@index([campaignProspectId])
   @@index([scheduledAt])
+  @@map("email_campaign_prospect_steps")
+}
+
+model EmailEvent {
+  id                       String                   @id
+  campaignId               String
+  campaignProspectId       String
+  type                     EventType
+  metadata                 Json?
+  occurredAt               DateTime                 @default(now())
+  createdAt                DateTime                 @default(now())
+  
+  // Relations
+  campaign                 EmailCampaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignProspect         EmailCampaignProspect    @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId])
+  @@index([campaignId, type])
+  @@index([campaignProspectId])
+  @@index([occurredAt])
+  @@index([type])
+  @@map("email_events")
+}
+
+model EmailMessageMetadata {
+  id                       String                    @id
+  campaignProspectId       String?
+  senderIdentityId         String
+  providerMessageId        String                    @unique
+  threadId                 String?
+  direction                MessageDirection          @default(outbound)
+  fromAddress              String
+  toAddress                String
+  subject                  String
+  rawHeaders               Json?
+  createdAt                DateTime                  @default(now())
+  
+  // Relations
+  campaignProspect         EmailCampaignProspect?    @relation(fields: [campaignProspectId], references: [id])
+  senderIdentity           EmailIdentity             @relation(fields: [senderIdentityId], references: [id], onDelete: Cascade)
+
+  @@index([campaignProspectId])
+  @@index([providerMessageId, threadId])
+  @@index([senderIdentityId])
+  @@index([threadId])
+  @@index([toAddress])
+  @@map("email_message_metadata")
+}
+
+// Client contacts (people at the customer's company - our POCs)
+model CustomerContact {
+  id         String   @id
+  customerId String
+  name       String
+  email      String?
+  phone      String?
+  title      String?
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([email])
+  @@map("customer_contacts")
 }
 
 // Contact Lists (from OpensDoorsV2)
-model contact_lists {
+model ContactList {
   id                   String                 @id
   customerId           String
   name                 String
   description          String?
   createdAt            DateTime               @default(now())
-  updatedAt            DateTime
+  updatedAt            DateTime               @updatedAt
   
-  customer             customers              @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  contact_list_members contact_list_members[]
-  email_campaigns      email_campaigns[]      @relation("CampaignToList")
+  // Relations
+  customer             Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contactListMembers   ContactListMember[]
+  emailCampaigns       EmailCampaign[]        @relation("CampaignToList")
 
   @@index([customerId])
   @@index([customerId, name])
+  @@map("contact_lists")
 }
 
-model contact_list_members {
+model ContactListMember {
   id        String        @id
   listId    String
   contactId String
   createdAt DateTime      @default(now())
   
-  list      contact_lists @relation(fields: [listId], references: [id], onDelete: Cascade)
-  contact   contacts      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  // Relations
+  list      ContactList   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact   Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@unique([listId, contactId])
   @@index([listId])
   @@index([contactId])
+  @@map("contact_list_members")
 }
 
 // Email Sequences (reusable multi-step workflows)
-model email_sequences {
+model EmailSequence {
   id          String                   @id
   customerId  String
   name        String
   description String?
   createdAt   DateTime                 @default(now())
-  updatedAt   DateTime
+  updatedAt   DateTime                 @updatedAt
   
-  customer    customers                @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  steps       email_sequence_steps[]
-  campaigns   email_campaigns[]        @relation("CampaignToSequence")
+  // Relations
+  customer    Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  steps       EmailSequenceStep[]
+  campaigns   EmailCampaign[]          @relation("CampaignToSequence")
 
   @@index([customerId])
   @@index([customerId, name])
+  @@map("email_sequences")
 }
 
-model email_sequence_steps {
+model EmailSequenceStep {
   id                    String          @id
   sequenceId            String
   stepOrder             Int
@@ -390,10 +428,12 @@ model email_sequence_steps {
   bodyTemplateHtml      String
   bodyTemplateText      String?
   createdAt             DateTime        @default(now())
-  updatedAt             DateTime
+  updatedAt             DateTime        @updatedAt
   
-  sequence              email_sequences @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  // Relations
+  sequence              EmailSequence   @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
 
   @@unique([sequenceId, stepOrder])
   @@index([sequenceId])
+  @@map("email_sequence_steps")
 }

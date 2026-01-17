@@ -35,19 +35,19 @@ router.get('/replies', async (req, res, next) => {
     const { start, end, campaignId, limit } = listRepliesSchema.parse(req.query)
     const { startDate, endDate } = parseRange(start, end)
 
-    const rows = await prisma.email_campaign_prospects.findMany({
+    const rows = await prisma.emailCampaignProspect.findMany({
       where: {
-        email_campaigns: { customerId },
+        campaign: { customerId },
         ...(campaignId ? { campaignId } : {}),
         replyDetectedAt: { not: null, gte: startDate, lte: endDate },
       },
       include: {
-        contacts: true,
-        email_campaigns: {
+        contact: true,
+        campaign: {
           select: {
             id: true,
             name: true,
-            email_identities: { select: { emailAddress: true, displayName: true } },
+            senderIdentity: { select: { emailAddress: true, displayName: true } },
           },
         },
       },
@@ -60,15 +60,15 @@ router.get('/replies', async (req, res, next) => {
       items: rows.map((p) => ({
         prospectId: p.id,
         campaignId: p.campaignId,
-        campaignName: p.email_campaigns?.name,
-        senderEmail: p.email_campaigns?.email_identities?.emailAddress,
-        senderName: p.email_campaigns?.email_identities?.displayName,
-        contacts: {
-          id: p.contacts.id,
-          firstName: p.contacts.firstName,
-          lastName: p.contacts.lastName,
-          companyName: p.contacts.companyName,
-          email: p.contacts.email,
+        campaignName: p.campaign?.name,
+        senderEmail: p.campaign?.senderIdentity?.emailAddress,
+        senderName: p.campaign?.senderIdentity?.displayName,
+        contact: {
+          id: p.contact.id,
+          firstName: p.contact.firstName,
+          lastName: p.contact.lastName,
+          companyName: p.contact.companyName,
+          email: p.contact.email,
         },
         replyDetectedAt: p.replyDetectedAt,
         replyCount: p.replyCount,

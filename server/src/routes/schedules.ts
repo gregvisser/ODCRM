@@ -107,7 +107,7 @@ router.delete('/:id', async (req, res, next) => {
 
     // Set scheduleId null on any campaigns using it (safety).
     // Skip sendSchedule updates - field doesn't exist in database
-    // await prisma.email_campaigns.updateMany({
+    // await prisma.emailCampaign.updateMany({
     //   where: { customerId },
     //   data: {},
     // })

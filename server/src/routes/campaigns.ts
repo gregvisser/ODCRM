@@ -37,7 +37,7 @@ router.post('/', async (req, res, next) => {
     const data = createCampaignSchema.parse(req.body)
 
     // Verify sender identity belongs to customer
-    const identity = await prisma.email_identities.findFirst({
+    const identity = await prisma.emailIdentity.findFirst({
       where: {
         id: data.senderIdentityId,
         customerId
@@ -48,7 +48,7 @@ router.post('/', async (req, res, next) => {
       return res.status(404).json({ error: 'Sender identity not found' })
     }
 
-    const campaign = await prisma.email_campaigns.create({
+    const campaign = await prisma.emailCampaign.create({
       data: {
         ...data,
         customerId,
@@ -70,7 +70,7 @@ router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
 
-    const campaigns = await prisma.email_campaigns.findMany({
+    const campaigns = await prisma.emailCampaign.findMany({
       where: { customerId },
       include: {
         email_identities: {
@@ -103,7 +103,7 @@ router.get('/', async (req, res, next) => {
       const replied = prospects.filter(p => p.replyDetectedAt).length
 
       // Supports N-step sequences: use events to count total emails sent.
-      const emailsSent = await prisma.email_events.count({
+      const emailsSent = await prisma.emailEvent.count({
         where: { campaignId: campaign.id, type: 'sent' }
       })
 
@@ -136,7 +136,7 @@ router.get('/:id', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const { id } = req.params
 
-    const campaign = await prisma.email_campaigns.findFirst({
+    const campaign = await prisma.emailCampaign.findFirst({
       where: {
         id,
         customerId
@@ -173,7 +173,7 @@ router.patch('/:id', async (req, res, next) => {
     const data = req.body
 
     // Verify campaign belongs to customer
-    const existing = await prisma.email_campaigns.findFirst({
+    const existing = await prisma.emailCampaign.findFirst({
       where: { id, customerId }
     })
 
@@ -181,7 +181,7 @@ router.patch('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
-    const campaign = await prisma.email_campaigns.update({
+    const campaign = await prisma.emailCampaign.update({
       where: { id },
       data
     })
@@ -227,7 +227,7 @@ router.post('/:id/templates', async (req, res, next) => {
     const body = req.body as any
 
     // Verify campaign belongs to customer
-    const campaign = await prisma.email_campaigns.findFirst({
+    const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId }
     })
 
@@ -271,12 +271,12 @@ router.post('/:id/templates', async (req, res, next) => {
     }
 
     // Delete existing templates
-    await prisma.email_campaign_templates.deleteMany({
+    await prisma.emailCampaignTemplate.deleteMany({
       where: { campaignId: id }
     })
 
     // Create new templates
-    await prisma.email_campaign_templates.createMany({
+    await prisma.emailCampaignTemplate.createMany({
       data: steps.map((s) => ({
         campaignId: id,
         stepNumber: s.stepNumber,
@@ -289,7 +289,7 @@ router.post('/:id/templates', async (req, res, next) => {
       })) as any
     })
 
-    const templates = await prisma.email_campaign_templates.findMany({
+    const templates = await prisma.emailCampaignTemplate.findMany({
       where: { campaignId: id },
       orderBy: { stepNumber: 'asc' }
     })
@@ -312,7 +312,7 @@ router.post('/:id/prospects', async (req, res, next) => {
     }
 
     // Verify campaign belongs to customer
-    const campaign = await prisma.email_campaigns.findFirst({
+    const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId }
     })
 
@@ -321,7 +321,7 @@ router.post('/:id/prospects', async (req, res, next) => {
     }
 
     // Verify all contacts belong to customer
-    const contacts = await prisma.contacts.findMany({
+    const contacts = await prisma.contact.findMany({
       where: {
         id: { in: contactIds },
         customerId
@@ -333,7 +333,7 @@ router.post('/:id/prospects', async (req, res, next) => {
     }
 
     // Create prospect entries (skip if already exists)
-    const existing = await prisma.email_campaign_prospects.findMany({
+    const existing = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: id,
         contactId: { in: contactIds }
@@ -345,7 +345,7 @@ router.post('/:id/prospects', async (req, res, next) => {
     const newContactIds = contactIds.filter(cid => !existingContactIds.has(cid))
 
     if (newContactIds.length > 0) {
-      await prisma.email_campaign_prospects.createMany({
+      await prisma.emailCampaignProspect.createMany({
         data: newContactIds.map(contactId => ({
           campaignId: id,
           contactId,
@@ -355,7 +355,7 @@ router.post('/:id/prospects', async (req, res, next) => {
       })
     }
 
-    const prospects = await prisma.email_campaign_prospects.findMany({
+    const prospects = await prisma.emailCampaignProspect.findMany({
       where: { campaignId: id },
       include: { contacts: true }
     })
@@ -372,7 +372,7 @@ router.post('/:id/start', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const { id } = req.params
 
-    const campaign = await prisma.email_campaigns.findFirst({
+    const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId },
       include: { email_campaign_templates: true }
     })
@@ -387,13 +387,13 @@ router.post('/:id/start', async (req, res, next) => {
     }
 
     // Update status
-    await prisma.email_campaigns.update({
+    await prisma.emailCampaign.update({
       where: { id },
       data: { status: 'running' }
     })
 
     // Schedule step 1 emails for pending prospects
-    const pendingProspects = await prisma.email_campaign_prospects.findMany({
+    const pendingProspects = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: id,
         lastStatus: 'pending',
@@ -427,7 +427,7 @@ router.post('/:id/start', async (req, res, next) => {
         const randomHours = Math.random() * campaign.randomizeWithinHours
         const scheduledAt = new Date(now.getTime() + randomHours * 60 * 60 * 1000)
 
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: { step1ScheduledAt: scheduledAt }
         })
@@ -446,7 +446,7 @@ router.post('/:id/pause', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const { id } = req.params
 
-    await prisma.email_campaigns.updateMany({
+    await prisma.emailCampaign.updateMany({
       where: { id, customerId },
       data: { status: 'paused' }
     })
@@ -463,7 +463,7 @@ router.post('/:id/complete', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const { id } = req.params
 
-    await prisma.email_campaigns.updateMany({
+    await prisma.emailCampaign.updateMany({
       where: { id, customerId },
       data: { status: 'completed' }
     })
@@ -481,7 +481,7 @@ router.delete('/:id', async (req, res, next) => {
     const { id } = req.params
 
     // Verify campaign belongs to customer
-    const campaign = await prisma.email_campaigns.findFirst({
+    const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId }
     })
 
@@ -491,12 +491,12 @@ router.delete('/:id', async (req, res, next) => {
 
     // Delete related records first (due to foreign key constraints)
     // Delete events
-    await prisma.email_events.deleteMany({
+    await prisma.emailEvent.deleteMany({
       where: { campaignId: id }
     })
 
     // Delete message metadata
-    await prisma.email_message_metadata.deleteMany({
+    await prisma.emailMessageMetadata.deleteMany({
       where: {
         campaignProspect: {
           campaignId: id
@@ -505,17 +505,17 @@ router.delete('/:id', async (req, res, next) => {
     })
 
     // Delete prospects
-    await prisma.email_campaign_prospects.deleteMany({
+    await prisma.emailCampaignProspect.deleteMany({
       where: { campaignId: id }
     })
 
     // Delete templates
-    await prisma.email_campaign_templates.deleteMany({
+    await prisma.emailCampaignTemplate.deleteMany({
       where: { campaignId: id }
     })
 
     // Finally, delete the campaign
-    await prisma.email_campaigns.delete({
+    await prisma.emailCampaign.delete({
       where: { id }
     })
 

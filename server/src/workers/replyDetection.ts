@@ -26,7 +26,7 @@ export function startReplyDetectionWorker(prisma: PrismaClient) {
 
 async function detectReplies(prisma: PrismaClient) {
   // Find all active email identities
-  const identities = await prisma.email_identities.findMany({
+  const identities = await prisma.emailIdentity.findMany({
     where: { isActive: true }
   })
 
@@ -40,7 +40,7 @@ async function detectReplies(prisma: PrismaClient) {
       }
 
       // Update last checked timestamp
-      await prisma.email_identities.update({
+      await prisma.emailIdentity.update({
         where: { id: identity.id },
         data: { lastCheckedAt: new Date() } as any })
     } catch (error) {
@@ -55,7 +55,7 @@ async function processInboundMessage(
   message: any
 ) {
   // Check if we've already processed this message
-  const existing = await prisma.email_message_metadata.findUnique({
+  const existing = await prisma.emailMessageMetadata.findUnique({
     where: { providerMessageId: message.messageId }
   })
 
@@ -79,7 +79,7 @@ async function processInboundMessage(
 
   // Method 2: Try thread/message linkage
   if (!campaignProspectId && message.threadId) {
-    const threadMetadata = await prisma.email_message_metadata.findFirst({
+    const threadMetadata = await prisma.emailMessageMetadata.findFirst({
       where: {
         threadId: message.threadId,
         direction: 'outbound',
@@ -101,7 +101,7 @@ async function processInboundMessage(
 
     if (isReply) {
       // Try to find matching outbound message by to/from addresses
-      const matchingMetadata = await prisma.email_message_metadata.findFirst({
+      const matchingMetadata = await prisma.emailMessageMetadata.findFirst({
         where: {
           senderIdentityId: identityId,
           direction: 'outbound',
@@ -119,7 +119,7 @@ async function processInboundMessage(
   }
 
   // Store inbound message metadata
-  await prisma.email_message_metadata.create({ data: {
+  await prisma.emailMessageMetadata.create({ data: {
       campaignProspectId,
       senderIdentityId: identityId,
       providerMessageId: message.messageId,
@@ -143,7 +143,7 @@ async function processReply(
   message: any
 ) {
   try {
-    const prospect = await prisma.email_campaign_prospects.findUnique({
+    const prospect = await prisma.emailCampaignProspect.findUnique({
       where: { id: campaignProspectId },
       include: { campaign: true }
     })
@@ -155,7 +155,7 @@ async function processReply(
     // Skip if already marked as replied
     if (prospect.replyDetectedAt) {
       // Still record the event if this is a new reply
-      const existingEvent = await prisma.email_events.findFirst({
+      const existingEvent = await prisma.emailEvent.findFirst({
         where: {
           campaignProspectId,
           type: 'replied',
@@ -167,7 +167,7 @@ async function processReply(
       })
 
       if (!existingEvent) {
-        await prisma.email_events.create({ data: {
+        await prisma.emailEvent.create({ data: {
             campaignId: prospect.campaignId,
             campaignProspectId,
             type: 'replied',
@@ -181,7 +181,7 @@ async function processReply(
           }
         })
 
-        await prisma.email_campaign_prospects.update({
+        await prisma.emailCampaignProspect.update({
           where: { id: campaignProspectId },
           data: {
             replyCount: { increment: 1 },
@@ -197,7 +197,7 @@ async function processReply(
     const snippet = extractReplySnippet(message.bodyPreview)
 
     // Record event
-    await prisma.email_events.create({ data: {
+    await prisma.emailEvent.create({ data: {
         campaignId: prospect.campaignId,
         campaignProspectId,
         type: 'replied',
@@ -212,7 +212,7 @@ async function processReply(
     })
 
     // Update prospect
-    await prisma.email_campaign_prospects.update({
+    await prisma.emailCampaignProspect.update({
       where: { id: campaignProspectId },
       data: {
         replyDetectedAt: message.receivedDateTime,
