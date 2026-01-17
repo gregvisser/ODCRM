@@ -260,15 +260,16 @@ async function sendCampaignEmail(
     }
 
     // Render template
-    const rendered = applyTemplatePlaceholders(template.bodyTemplateHtml, {
+    const variables: TemplateVariables = {
       firstName: prospect.contact.firstName,
       lastName: prospect.contact.lastName,
       companyName: prospect.contact.companyName,
       email: prospect.contact.email,
       jobTitle: prospect.contact.jobTitle,
-    })
+    }
     
-    const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, renderedVariables)
+    const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
+    const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
 
     // Inject tracking
     const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN || 'http://localhost:3001'
