@@ -161,7 +161,10 @@ export default function EmailAccountsEnhancedTab() {
     }
 
     try {
-      const response = await fetch('http://${window.location.hostname.includes('localhost') ? 'localhost:3001' : 'odcrm-api.onrender.com'}/api/outlook/identities', {
+      const apiUrl = window.location.hostname.includes('localhost') 
+        ? 'http://localhost:3001' 
+        : 'https://odcrm-api.onrender.com'
+      const response = await fetch(`${apiUrl}/api/outlook/identities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

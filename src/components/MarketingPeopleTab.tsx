@@ -240,7 +240,10 @@ export default function MarketingPeopleTab() {
     const method = editingContact ? 'PUT' : 'POST'
 
     try {
-      const response = await fetch(`http://${window.location.hostname.includes('localhost') ? 'localhost:3001' : 'odcrm-api.onrender.com'}${endpoint}`, {
+      const apiUrl = window.location.hostname.includes('localhost') 
+        ? 'http://localhost:3001' 
+        : 'https://odcrm-api.onrender.com'
+      const response = await fetch(`${apiUrl}${endpoint}`, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -278,7 +281,10 @@ export default function MarketingPeopleTab() {
     if (!contactToDelete) return
 
     try {
-      const response = await fetch(`http://${window.location.hostname.includes('localhost') ? 'localhost:3001' : 'odcrm-api.onrender.com'}/api/contacts/${contactToDelete.id}`, {
+      const apiUrl = window.location.hostname.includes('localhost') 
+        ? 'http://localhost:3001' 
+        : 'https://odcrm-api.onrender.com'
+      const response = await fetch(`${apiUrl}/api/contacts/${contactToDelete.id}`, {
         method: 'DELETE',
       })
 
