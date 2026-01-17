@@ -1,0 +1,42 @@
+RENDER ENVIRONMENT VARIABLES
+========================================
+Copy these one by one into Render's Environment Variables section
+
+DATABASE_URL=postgresql://neondb_owner:npg_oqJvg13NVUBk@ep-silent-salad-ahpgcsne-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+
+MICROSOFT_CLIENT_ID=c4fd4112-e6e0-4a34-a9a3-c1465bf4f90d
+
+MICROSOFT_CLIENT_SECRET=0bdcd959-9595-434e-8a39-00fe2a65e935
+
+MICROSOFT_TENANT_ID=common
+
+PORT=3001
+
+NODE_ENV=production
+
+FRONTEND_URL=https://crm.yourdomain.com
+
+REDIRECT_URI=https://api.yourdomain.com/api/outlook/callback
+
+EMAIL_TRACKING_DOMAIN=https://api.yourdomain.com
+
+========================================
+
+IMPORTANT NOTES:
+- Replace "yourdomain.com" with your actual domain after deployment
+- After backend deploys, update REDIRECT_URI with your Render URL: https://odcrm-api.onrender.com/api/outlook/callback
+- After backend deploys, update EMAIL_TRACKING_DOMAIN with your Render URL: https://odcrm-api.onrender.com
+- After frontend deploys, update FRONTEND_URL with your Vercel URL: https://odcrm.vercel.app (or custom domain)
+
+INITIAL SETUP (Use these first):
+After backend deploys to Render, you'll get a URL like: https://odcrm-api.onrender.com
+Then update these three variables:
+- REDIRECT_URI=https://odcrm-api.onrender.com/api/outlook/callback
+- EMAIL_TRACKING_DOMAIN=https://odcrm-api.onrender.com
+- FRONTEND_URL=https://odcrm.vercel.app (update after frontend deploys)
+
+FINAL PRODUCTION (After DNS setup):
+Once you configure custom domains, update to:
+- REDIRECT_URI=https://api.yourdomain.com/api/outlook/callback
+- EMAIL_TRACKING_DOMAIN=https://api.yourdomain.com
+- FRONTEND_URL=https://crm.yourdomain.com
