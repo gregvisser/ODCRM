@@ -31,7 +31,6 @@ model Customer {
   contacts          Contact[]
   emailIdentities   EmailIdentity[]
   emailCampaigns    EmailCampaign[]
-  emailSendSchedules EmailSendSchedule[]
   customerContacts  CustomerContact[]
   contactLists      ContactList[]
   emailSequences    EmailSequence[]
@@ -115,7 +114,6 @@ model EmailCampaign {
   description          String?
   status               CampaignStatus @default(draft)
   senderIdentityId     String
-  sendScheduleId       String?
   listId               String?
   sequenceId           String?
   sendWindowHoursStart Int      @default(9) // 0-23
@@ -129,7 +127,6 @@ model EmailCampaign {
   // Relations
   customer                Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
   senderIdentity          EmailIdentity           @relation(fields: [senderIdentityId], references: [id])
-  sendSchedule            EmailSendSchedule?      @relation(fields: [sendScheduleId], references: [id], onDelete: SetNull)
   list                    ContactList?            @relation(fields: [listId], references: [id], onDelete: SetNull)
   sequence                EmailSequence?          @relation(fields: [sequenceId], references: [id], onDelete: SetNull)
   templates               EmailCampaignTemplate[]
@@ -141,7 +138,6 @@ model EmailCampaign {
   @@index([status])
   @@index([customerId, status])
   @@index([senderIdentityId])
-  @@index([sendScheduleId])
   @@index([listId])
   @@index([sequenceId])
   @@map("email_campaigns")
