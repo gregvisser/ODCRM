@@ -28,7 +28,9 @@ export async function sendEmailViaSMTP(args: {
   text?: string
   html?: string
 }): Promise<SendEmailResult> {
-  const { account, to, subject, text, html } = args
+  // SMTP functionality disabled
+  return { ok: false, error: 'SMTP not configured - use Outlook instead' }
+  /* const { account, to, subject, text, html } = args
 
   try {
     const transporter = nodemailer.createTransport({
@@ -61,7 +63,7 @@ export async function sendEmailViaSMTP(args: {
     const message = e instanceof Error ? e.message : 'Unknown SMTP error'
     console.error('[SMTP] Send failed:', message)
     return { ok: false, error: message }
-  }
+  } */
 }
 
 /**
