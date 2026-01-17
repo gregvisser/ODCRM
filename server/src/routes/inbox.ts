@@ -60,9 +60,9 @@ router.get('/replies', async (req, res, next) => {
       items: rows.map((p) => ({
         prospectId: p.id,
         campaignId: p.campaignId,
-        campaignName: pemail_campaigns?.name,
-        senderEmail: pemail_campaigns?.email_identities?.emailAddress,
-        senderName: pemail_campaigns?.email_identities?.displayName,
+        campaignName: p.email_campaigns?.name,
+        senderEmail: p.email_campaigns?.email_identities?.emailAddress,
+        senderName: p.email_campaigns?.email_identities?.displayName,
         contacts: {
           id: p.contacts.id,
           firstName: p.contacts.firstName,

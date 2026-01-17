@@ -4,7 +4,7 @@
  * This file is kept for compatibility but all functions return errors
  */
 
-import type { EmailIdentity } from '@prisma/client'
+import type { email_identities } from '@prisma/client'
 
 export type SendEmailResult = { ok: true } | { ok: false; error: string }
 
@@ -70,7 +70,7 @@ export async function sendEmailViaSMTP(args: {
  * Send email using EmailIdentity record (supports both SMTP and OAuth)
  */
 export async function sendEmail(args: {
-  identity: EmailIdentity
+  identity: email_identities
   to: string
   subject: string
   text?: string

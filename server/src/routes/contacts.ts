@@ -74,8 +74,7 @@ router.post('/bulk-upsert', async (req, res, next) => {
         })
         updated++
       } else {
-        await prisma.contacts.create({
-          data: {
+        await prisma.contacts.create({ data: {
             id: randomUUID(),
             customerId,
             firstName: c.firstName || '',

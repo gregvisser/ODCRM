@@ -107,8 +107,7 @@ router.post('/', async (req, res) => {
   try {
     const validated = createListSchema.parse(req.body)
 
-    const list = await prisma.contact_lists.create({
-      data: {
+    const list = await prisma.contact_lists.create({ data: {
         id: `list_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         customerId: validated.customerId,
         name: validated.name,

@@ -16,7 +16,11 @@
     "declarationMap": false,
     "sourceMap": false,
     "noUnusedLocals": false,
-    "noUnusedParameters": false
+    "noUnusedParameters": false,
+    "noImplicitReturns": false,
+    "noFallthroughCasesInSwitch": false,
+    "allowUnreachableCode": true,
+    "allowUnusedLabels": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

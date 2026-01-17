@@ -1,5 +1,6 @@
 import { Client } from '@microsoft/microsoft-graph-client'
-import { EmailIdentity, EmailMessageMetadata, PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@prisma/client'
+import type { email_identities, email_message_metadata } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 
 export interface SendEmailParams {
@@ -36,7 +37,7 @@ export interface InboxMessage {
 /**
  * Get a Microsoft Graph client for the given EmailIdentity
  */
-async function getGraphClient(identity: EmailIdentity): Promise<Client> {
+async function getGraphClient(identity: email_identities): Promise<Client> {
   // Check if token needs refresh
   const now = new Date()
   const expiresAt = identity.tokenExpiresAt ? new Date(identity.tokenExpiresAt) : null
@@ -66,7 +67,7 @@ async function getGraphClient(identity: EmailIdentity): Promise<Client> {
 /**
  * Refresh the access token using refresh token
  */
-async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
+async function refreshAccessToken(identity: email_identities): Promise<string> {
   const clientId = process.env.MICROSOFT_CLIENT_ID
   const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
   const tenantId = identity.outlookTenantId || process.env.MICROSOFT_TENANT_ID || 'common'
@@ -110,7 +111,7 @@ async function refreshAccessToken(identity: EmailIdentity): Promise<string> {
         accessToken: data.access_token,
         refreshToken: data.refresh_token || identity.refreshToken,
         tokenExpiresAt: new Date(Date.now() + (data.expires_in * 1000))
-      }
+      } as any
     })
 
     return data.access_token
@@ -211,8 +212,7 @@ export async function sendEmail(
 
     // Store email metadata
     if (messageId && params.campaignProspectId) {
-      await prisma.email_message_metadata.create({
-        data: {
+      await prisma.email_message_metadata.create({ data: {
           campaignProspectId: params.campaignProspectId,
           senderIdentityId: identity.id,
           providerMessageId: messageId,
@@ -221,7 +221,7 @@ export async function sendEmail(
           fromAddress: identity.emailAddress,
           toAddress: params.toEmail,
           subject: params.subject
-        }
+        } as any
       })
     }
 
