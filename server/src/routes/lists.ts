@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
       where: { customerId },
       include: {
         _count: {
-          select: { contactListMember: true },
+          select: { members: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -45,7 +45,7 @@ router.get('/', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.contactListMember,
+      contactCount: list._count.members,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     }))
@@ -65,7 +65,7 @@ router.get('/:id', async (req, res) => {
     const list = await prisma.contactList.findUnique({
       where: { id },
       include: {
-        contactListMember: {
+        members: {
           include: {
             contact: true,
           },
@@ -84,7 +84,7 @@ router.get('/:id', async (req, res) => {
       description: list.description,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
-      contacts: list.contactListMember.map((member) => ({
+      contacts: list.members.map((member) => ({
         id: member.contact.id,
         firstName: member.contact.firstName,
         lastName: member.contact.lastName,
@@ -149,7 +149,7 @@ router.put('/:id', async (req, res) => {
       },
       include: {
         _count: {
-          select: { contactListMember: true },
+          select: { members: true },
         },
       },
     })
@@ -159,7 +159,7 @@ router.put('/:id', async (req, res) => {
       customerId: list.customerId,
       name: list.name,
       description: list.description,
-      contactCount: list._count.contactListMember,
+      contactCount: list._count.members,
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     })
@@ -202,7 +202,7 @@ router.post('/:id/contacts', async (req, res) => {
 
     // Create list members (skip duplicates)
     const createPromises = validated.contactIds.map((contactId) =>
-      prisma.contactListMember.upsert({
+      prisma.members.upsert({
         where: {
           listId_contactId: {
             listId: id,
@@ -241,7 +241,7 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
   try {
     const { id, contactId } = req.params
 
-    await prisma.contactListMember.deleteMany({
+    await prisma.members.deleteMany({
       where: {
         listId: id,
         contactId,

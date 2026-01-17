@@ -46,7 +46,7 @@ export async function processCampaigns(
   const candidates = await prisma.emailCampaignProspect.findMany({
     where: {
       lastStatus: 'pending',
-      emailCampaign: { status: 'running' },
+      campaign: { status: 'running' },
       // Check if any step is due (we'll use step1ScheduledAt as proxy for now)
       // In a full implementation, check email_campaign_prospect_steps
     },
@@ -58,7 +58,7 @@ export async function processCampaigns(
       contactId: true,
       senderIdentityId: true,
       lastStatus: true,
-      emailCampaign: {
+      campaign: {
         select: {
           id: true,
           sequenceId: true,
@@ -161,7 +161,7 @@ export async function processSequenceBasedCampaigns(
       where: {
         type: 'sent',
         occurredAt: { gte: dayStartUtc },
-        emailCampaign: {
+        campaign: {
           senderIdentityId: identity.id,
         },
       },
