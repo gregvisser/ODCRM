@@ -276,7 +276,7 @@ export async function processSequenceBasedCampaigns(
         }
       } else {
         console.error(
-          `[campaignSender] Failed to send to ${contact.email}: ${result.error}`
+          `[campaignSender] Failed to send to ${contact.email}: ${(result as any).error}`
         )
 
         // Create bounced event if needed
@@ -287,7 +287,7 @@ export async function processSequenceBasedCampaigns(
             campaignProspectId: prospect.id,
             type: 'bounced',
             metadata: {
-              error: result.error,
+              error: (result as any).error,
             },
           },
         })
