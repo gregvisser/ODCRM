@@ -13,6 +13,17 @@ model Customer {
   id        String   @id @default(cuid())
   name      String
   domain    String?
+  leadsReportingUrl String?
+  sector String?
+  clientStatus String @default("active")
+  targetJobTitle String?
+  prospectingLocation String?
+  monthlyIntakeGBP Decimal?
+  defcon Int?
+  weeklyLeadTarget Int?
+  weeklyLeadActual Int?
+  monthlyLeadTarget Int?
+  monthlyLeadActual Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -21,8 +32,14 @@ model Customer {
   emailIdentities   EmailIdentity[]
   emailCampaigns    EmailCampaign[]
   emailSendSchedules EmailSendSchedule[]
+  customerContacts  CustomerContact[]
+  contactLists      ContactList[]
+  emailSequences    EmailSequence[]
 
   @@index([id])
+  @@index([domain])
+  @@index([name])
+  @@index([clientStatus])
   @@map("customers")
 }
 
@@ -37,16 +54,19 @@ model Contact {
   email      String
   phone      String?
   source     String   @default("cognism") // e.g. "cognism"
+  status     String   @default("active")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Relations
   customer              Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
   emailCampaignProspects EmailCampaignProspect[]
+  contactListMembers    ContactListMember[]
 
   @@index([customerId])
   @@index([email])
   @@index([customerId, email])
+  @@index([status])
   @@map("contacts")
 }
 
@@ -65,6 +85,11 @@ model EmailIdentity {
   dailySendLimit  Int       @default(150)
   isActive        Boolean   @default(true)
   lastCheckedAt   DateTime? // For reply detection polling
+  smtpHost        String?
+  smtpPort        Int?
+  smtpUsername    String?
+  smtpPassword    String?
+  smtpSecure      Boolean?  @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -78,6 +103,7 @@ model EmailIdentity {
   @@index([customerId])
   @@index([emailAddress])
   @@index([isActive])
+  @@index([provider])
   @@map("email_identities")
 }
 
@@ -90,6 +116,8 @@ model EmailCampaign {
   status               CampaignStatus @default(draft)
   senderIdentityId     String
   sendScheduleId       String?
+  listId               String?
+  sequenceId           String?
   sendWindowHoursStart Int      @default(9) // 0-23
   sendWindowHoursEnd   Int      @default(17) // 0-23
   randomizeWithinHours Int      @default(24) // spread first emails over this time
@@ -102,6 +130,8 @@ model EmailCampaign {
   customer                Customer                @relation(fields: [customerId], references: [id], onDelete: Cascade)
   senderIdentity          EmailIdentity           @relation(fields: [senderIdentityId], references: [id])
   sendSchedule            EmailSendSchedule?      @relation(fields: [sendScheduleId], references: [id], onDelete: SetNull)
+  list                    ContactList?            @relation(fields: [listId], references: [id], onDelete: SetNull)
+  sequence                EmailSequence?          @relation(fields: [sequenceId], references: [id], onDelete: SetNull)
   templates               EmailCampaignTemplate[]
   prospects               EmailCampaignProspect[]
   prospectSteps           EmailCampaignProspectStep[]
@@ -112,6 +142,8 @@ model EmailCampaign {
   @@index([customerId, status])
   @@index([senderIdentityId])
   @@index([sendScheduleId])
+  @@index([listId])
+  @@index([sequenceId])
   @@map("email_campaigns")
 }
 
@@ -310,4 +342,100 @@ model EmailMessageMetadata {
 enum MessageDirection {
   outbound
   inbound
+}
+
+// CustomerContact (customer's internal contacts)
+model CustomerContact {
+  id         String   @id @default(cuid())
+  customerId String
+  name       String
+  email      String?
+  phone      String?
+  title      String?
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([email])
+  @@map("customer_contacts")
+}
+
+// ContactList (groups of contacts for campaigns)
+model ContactList {
+  id          String   @id @default(cuid())
+  customerId  String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  customer  Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  members   ContactListMember[]
+  campaigns EmailCampaign[]
+
+  @@index([customerId])
+  @@index([customerId, name])
+  @@map("contact_lists")
+}
+
+// ContactListMember (join table)
+model ContactListMember {
+  id        String   @id @default(cuid())
+  listId    String
+  contactId String
+  createdAt DateTime @default(now())
+
+  // Relations
+  list    ContactList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, contactId])
+  @@index([listId])
+  @@index([contactId])
+  @@map("contact_list_members")
+}
+
+// EmailSequence (reusable email templates sequence)
+model EmailSequence {
+  id          String   @id @default(cuid())
+  customerId  String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  customer  Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  steps     EmailSequenceStep[]
+  campaigns EmailCampaign[]
+
+  @@index([customerId])
+  @@index([customerId, name])
+  @@map("email_sequences")
+}
+
+// EmailSequenceStep (individual step in a sequence)
+model EmailSequenceStep {
+  id                    String   @id @default(cuid())
+  sequenceId            String
+  stepOrder             Int
+  delayDaysFromPrevious Int      @default(0)
+  subjectTemplate       String   @db.Text
+  bodyTemplateHtml      String   @db.Text
+  bodyTemplateText      String?  @db.Text
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Relations
+  sequence EmailSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, stepOrder])
+  @@index([sequenceId])
+  @@map("email_sequence_steps")
 }
