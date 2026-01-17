@@ -52,7 +52,7 @@ router.post('/', async (req, res, next) => {
         ...data,
         customerId,
         status: 'draft'
-      },
+      } as any,
       include: {
         senderIdentity: true
       }
