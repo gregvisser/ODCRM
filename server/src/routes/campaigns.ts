@@ -22,7 +22,7 @@ const createCampaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   senderIdentityId: z.string(),
-  sendScheduleId: z.string().optional(),
+  // sendScheduleId: z.string().optional(),
   sendWindowHoursStart: z.number().int().min(0).max(23),
   sendWindowHoursEnd: z.number().int().min(0).max(23),
   randomizeWithinHours: z.number().int().positive().default(24),

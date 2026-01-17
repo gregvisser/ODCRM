@@ -108,8 +108,8 @@ router.delete('/:id', async (req, res, next) => {
 
     // Set scheduleId null on any campaigns using it (safety).
     await prisma.emailCampaign.updateMany({
-      where: { customerId, sendScheduleId: id },
-      data: { sendScheduleId: null },
+      where: { customerId, // sendScheduleId: id },
+      data: { // sendScheduleId: null },
     })
 
     await prisma.emailSendSchedule.delete({ where: { id } })
