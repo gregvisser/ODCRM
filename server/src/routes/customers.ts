@@ -51,7 +51,7 @@ router.get('/', async (req, res) => {
     const customers = await prisma.customer.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        customer_contacts: true,
+        customerContacts: true,
       },
     })
 
@@ -62,8 +62,8 @@ router.get('/', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
-      customer_contacts: customer.customer_contacts.map((contact) => ({
-        ...contacts,
+      customerContacts: customer.customerContacts.map((contact) => ({
+        ...contact,
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       })),
@@ -84,7 +84,7 @@ router.get('/:id', async (req, res) => {
     const customer = await prisma.customer.findUnique({
       where: { id },
       include: {
-        customer_contacts: true,
+        customerContacts: true,
       },
     })
 
@@ -99,8 +99,8 @@ router.get('/:id', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
-      customer_contacts: customer.customer_contacts.map((contact) => ({
-        ...contacts,
+      customerContacts: customer.customerContacts.map((contact) => ({
+        ...contact,
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       })),
