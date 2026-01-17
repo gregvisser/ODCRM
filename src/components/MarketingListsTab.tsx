@@ -97,7 +97,7 @@ export default function MarketingListsTab() {
         setCustomerId((data[0] as any).customerId)
       } else {
         // Default customer ID if none found
-        setCustomerId('default_customer')
+        setCustomerId('prod-customer-1')
       }
     }
     fetchCustomerId()

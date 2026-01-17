@@ -49,8 +49,8 @@ export default function MarketingDashboard() {
     const [customersRes, contactsRes, listsRes, sequencesRes, campaignsRes] = await Promise.all([
       api.get<any[]>('/api/customers'),
       api.get<any[]>('/api/contacts'),
-      api.get<any[]>('/api/lists?customerId=default_customer'),
-      api.get<any[]>('/api/sequences?customerId=default_customer'),
+      api.get<any[]>('/api/lists?customerId=prod-customer-1'),
+      api.get<any[]>('/api/sequences?customerId=prod-customer-1'),
       api.get<any[]>('/api/campaigns'),
     ])
 

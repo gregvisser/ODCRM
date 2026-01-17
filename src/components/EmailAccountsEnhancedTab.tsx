@@ -81,10 +81,10 @@ type SmtpFormState = {
 export default function EmailAccountsEnhancedTab() {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>('default_customer')
+  const [customerId, setCustomerId] = useState<string>('prod-customer-1')
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: 'default_customer',
+    customerId: 'prod-customer-1',
     emailAddress: '',
     displayName: '',
     smtpHost: '',
