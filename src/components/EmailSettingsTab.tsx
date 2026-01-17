@@ -74,7 +74,7 @@ export default function EmailSettingsTab() {
   }
 
   const handleConnectOutlook = () => {
-    const customerId = settingsStore.getCurrentCustomerId('default')
+    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     const apiUrl = window.location.hostname.includes('localhost') 
       ? 'http://localhost:3001' 
       : 'https://odcrm-api.onrender.com'
