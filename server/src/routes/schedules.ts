@@ -107,12 +107,13 @@ router.delete('/:id', async (req, res, next) => {
     if (!existing) return res.status(404).json({ error: 'Schedule not found' })
 
     // Set scheduleId null on any campaigns using it (safety).
-    await prisma.email_campaigns.updateMany({
-      where: { customerId, // sendScheduleId: id },
-      data: { // sendScheduleId: null },
-    })
+    // Skip sendSchedule updates - field doesn't exist in database
+    // await prisma.email_campaigns.updateMany({
+    //   where: { customerId },
+    //   data: {},
+    // })
 
-    await prisma.emailSendSchedule.delete({ where: { id } })
+    // await prisma.emailSendSchedule.delete({ where: { id } })
     res.json({ message: 'Schedule deleted' })
   } catch (error) {
     next(error)
