@@ -970,6 +970,38 @@ function normalizeCustomerWebsite(domain?: string | null): string {
   return `https://${domain}`
 }
 
+function normalizeName(value?: string | null): string {
+  if (!value) return ''
+  return value
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function normalizeDomain(value?: string | null): string {
+  if (!value) return ''
+  try {
+    const withScheme = value.startsWith('http') ? value : `https://${value}`
+    const host = new URL(withScheme).hostname
+    return host.replace(/^www\./, '').toLowerCase()
+  } catch {
+    return value.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase()
+  }
+}
+
+function findCustomerForAccount(account: Account, customers: CustomerApi[]): CustomerApi | undefined {
+  const accountKey = normalizeName(account.name)
+  const accountDomain = normalizeDomain(account.website)
+
+  return customers.find((customer) => {
+    const customerKey = normalizeName(customer.name)
+    const customerDomain = normalizeDomain(customer.domain ?? '')
+    if (accountKey && customerKey && accountKey === customerKey) return true
+    if (accountDomain && customerDomain && accountDomain === customerDomain) return true
+    return false
+  })
+}
+
 function buildAccountFromCustomer(customer: CustomerApi): Account {
   return {
     name: customer.name,
@@ -4077,11 +4109,16 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       if (error || !data || data.length === 0) return
 
       const stored = loadAccountsFromStorage()
-      const byName = new Map(stored.map((acc) => [acc.name, acc]))
+      const byName = new Map<string, Account>()
+      stored.forEach((acc) => {
+        byName.set(acc.name, acc)
+        const normalized = normalizeName(acc.name)
+        if (normalized) byName.set(normalized, acc)
+      })
       let changed = false
 
       const merged = stored.map((acc) => {
-        const customer = data.find((c) => c.name === acc.name)
+        const customer = findCustomerForAccount(acc, data)
         if (!customer) return acc
         const updated = mergeAccountFromCustomer(acc, customer)
         if (updated !== acc) changed = true
@@ -4089,7 +4126,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       })
 
       for (const customer of data) {
-        if (!byName.has(customer.name)) {
+        const customerKey = normalizeName(customer.name)
+        if (!byName.has(customer.name) && !byName.has(customerKey)) {
           merged.push(buildAccountFromCustomer(customer))
           changed = true
         }
