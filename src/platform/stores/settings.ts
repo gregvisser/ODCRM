@@ -2,7 +2,7 @@ import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
 import { getItem, removeItem, setItem } from '../storage'
 
-export function getCurrentCustomerId(fallback = 'test-customer-1'): string {
+export function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
   return v && String(v).trim() ? String(v) : fallback
 }

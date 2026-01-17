@@ -16,7 +16,7 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const customerId = settingsStore.getCurrentCustomerId('test-customer-1')
+    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,

@@ -23,6 +23,7 @@ import {
   Spinner,
   useToast,
 } from '@chakra-ui/react'
+import { settingsStore } from '../platform'
 import { api } from '../utils/api'
 
 type DashboardMetrics = {
@@ -46,11 +47,12 @@ export default function MarketingDashboard() {
     setLoading(true)
 
     // Fetch data from multiple endpoints
+    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     const [customersRes, contactsRes, listsRes, sequencesRes, campaignsRes] = await Promise.all([
       api.get<any[]>('/api/customers'),
       api.get<any[]>('/api/contacts'),
-      api.get<any[]>('/api/lists?customerId=prod-customer-1'),
-      api.get<any[]>('/api/sequences?customerId=prod-customer-1'),
+      api.get<any[]>(`/api/lists?customerId=${customerId}`),
+      api.get<any[]>(`/api/sequences?customerId=${customerId}`),
       api.get<any[]>('/api/campaigns'),
     ])
 

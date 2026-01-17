@@ -47,6 +47,7 @@ import {
   Code,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
+import { settingsStore } from '../platform'
 import { api } from '../utils/api'
 
 interface EmailIdentity {
@@ -81,10 +82,12 @@ type SmtpFormState = {
 export default function EmailAccountsEnhancedTab() {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>('prod-customer-1')
+  const [customerId, setCustomerId] = useState<string>(
+    settingsStore.getCurrentCustomerId('prod-customer-1')
+  )
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: 'prod-customer-1',
+    customerId: settingsStore.getCurrentCustomerId('prod-customer-1'),
     emailAddress: '',
     displayName: '',
     smtpHost: '',
@@ -114,6 +117,17 @@ export default function EmailAccountsEnhancedTab() {
       fetchIdentities()
     }
   }, [customerId])
+
+  useEffect(() => {
+    const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
+      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
+      if (next) {
+        setCustomerId(next)
+        setSmtpForm((prev) => ({ ...prev, customerId: next }))
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   const handleConnectOutlook = () => {
     window.location.href = `http://${window.location.hostname.includes('localhost') ? 'localhost:3001' : 'odcrm-api.onrender.com'}/api/outlook/auth?customerId=${customerId}`

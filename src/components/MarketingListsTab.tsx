@@ -39,6 +39,7 @@ import {
   Stack,
 } from '@chakra-ui/react'
 import { AddIcon, EditIcon, ViewIcon, DeleteIcon } from '@chakra-ui/icons'
+import { settingsStore } from '../platform'
 import { api } from '../utils/api'
 
 type ContactList = {
@@ -97,7 +98,7 @@ export default function MarketingListsTab() {
         setCustomerId((data[0] as any).customerId)
       } else {
         // Default customer ID if none found
-        setCustomerId('prod-customer-1')
+        setCustomerId(settingsStore.getCurrentCustomerId('prod-customer-1'))
       }
     }
     fetchCustomerId()
