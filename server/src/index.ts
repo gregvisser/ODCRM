@@ -63,11 +63,12 @@ const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`)
   
-  // Background workers for email campaigns
-  console.log('📧 Starting email scheduler...')
-  startEmailScheduler(prisma)
-  console.log('📬 Starting reply detection worker...')
-  startReplyDetectionWorker(prisma)
+  // Background workers temporarily disabled - fix Prisma model names first
+  console.log('⚠️  Workers disabled temporarily - fixing schema alignment')
+  // console.log('📧 Starting email scheduler...')
+  // startEmailScheduler(prisma)
+  // console.log('📬 Starting reply detection worker...')
+  // startReplyDetectionWorker(prisma)
 })
 
 // Graceful shutdown
