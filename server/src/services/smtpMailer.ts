@@ -4,7 +4,7 @@
  * Supports both SMTP and OAuth email sending
  */
 
-import nodemailer from 'nodemailer'
+// import nodemailer from 'nodemailer'
 import type { EmailIdentity } from '@prisma/client'
 
 export type SendEmailResult = { ok: true } | { ok: false; error: string }
