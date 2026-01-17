@@ -268,10 +268,7 @@ async function sendCampaignEmail(
       jobTitle: prospect.contact.jobTitle,
     })
     
-    const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, {
-      senderName: campaign.senderIdentity?.displayName || campaign.senderIdentity?.emailAddress || '',
-      senderEmail: campaign.senderIdentity?.emailAddress || ''
-    })
+    const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, renderedVariables)
 
     // Inject tracking
     const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN || 'http://localhost:3001'
@@ -280,9 +277,9 @@ async function sendCampaignEmail(
     const result = await sendEmail(prisma, {
       senderIdentityId: campaign.senderIdentityId,
       toEmail: prospect.contact.email,
-      subject: subjectRendered,
-      htmlBody,
-      textBody: template.bodyTemplateText || htmlBody,
+      subject: renderedSubject,
+      htmlBody: renderedHtml,
+      textBody: template.bodyTemplateText || renderedHtml,
       campaignProspectId: prospect.id
     })
 
