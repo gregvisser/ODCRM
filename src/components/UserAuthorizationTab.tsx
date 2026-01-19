@@ -34,13 +34,10 @@ import {
   AlertDialogOverlay,
   VStack,
   Text,
-  InputGroup,
-  InputRightElement,
   FormHelperText,
-  FormErrorMessage,
   Flex,
 } from '@chakra-ui/react'
-import { AddIcon, DeleteIcon, EditIcon, ViewIcon, ViewOffIcon } from '@chakra-ui/icons'
+import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 
 export type User = {
   id: string
@@ -105,6 +102,7 @@ const loadUsersFromStorage = (): User[] => {
 const saveUsersToStorage = (users: User[]) => {
   try {
     localStorage.setItem('users', JSON.stringify(users))
+    window.dispatchEvent(new Event('usersUpdated'))
   } catch (error) {
     console.error('Error saving users to storage:', error)
   }
@@ -132,23 +130,6 @@ const generateUserId = (): string => {
   } while (existingIds.has(newId))
   
   return newId
-}
-
-// Validate password requirements
-const validatePassword = (password: string): { isValid: boolean; error: string } => {
-  if (password.length < 8) {
-    return { isValid: false, error: 'Password must be at least 8 characters long' }
-  }
-  if (!/[A-Z]/.test(password)) {
-    return { isValid: false, error: 'Password must contain at least 1 capital letter' }
-  }
-  if (!/[0-9]/.test(password)) {
-    return { isValid: false, error: 'Password must contain at least 1 number' }
-  }
-  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
-    return { isValid: false, error: 'Password must contain at least 1 special character' }
-  }
-  return { isValid: true, error: '' }
 }
 
 function UserAuthorizationTab() {
@@ -179,8 +160,6 @@ function UserAuthorizationTab() {
     createdDate: new Date().toISOString().split('T')[0],
     profilePhoto: '',
   })
-  const [showPassword, setShowPassword] = useState(false)
-  const [passwordError, setPasswordError] = useState('')
 
   // Reset form when modal opens/closes
   useEffect(() => {
@@ -202,8 +181,6 @@ function UserAuthorizationTab() {
       })
       setSelectedUser(null)
       setIsEditing(false)
-      setShowPassword(false)
-      setPasswordError('')
     }
   }, [isOpen])
 
@@ -232,8 +209,6 @@ function UserAuthorizationTab() {
     })
     setIsEditing(false)
     setSelectedUser(null)
-    setShowPassword(false)
-    setPasswordError('')
     onOpen()
   }
 
@@ -245,7 +220,7 @@ function UserAuthorizationTab() {
       lastName: user.lastName,
       email: user.email,
       username: user.username || user.email,
-      password: user.password || '',
+      password: '',
       phoneNumber: user.phoneNumber || '',
       role: user.role,
       department: user.department || '',
@@ -255,8 +230,6 @@ function UserAuthorizationTab() {
       profilePhoto: user.profilePhoto || '',
     })
     setIsEditing(true)
-    setShowPassword(false)
-    setPasswordError('')
     onOpen()
   }
 
@@ -326,45 +299,7 @@ function UserAuthorizationTab() {
       return
     }
 
-    // Password validation (required for new users, optional for editing)
-    if (!isEditing) {
-      if (!formData.password) {
-        toast({
-          title: 'Validation Error',
-          description: 'Password is required for new users.',
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-      const passwordValidation = validatePassword(formData.password)
-      if (!passwordValidation.isValid) {
-        setPasswordError(passwordValidation.error)
-        toast({
-          title: 'Password Validation Error',
-          description: passwordValidation.error,
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-    } else if (formData.password) {
-      // If editing and password is provided, validate it
-      const passwordValidation = validatePassword(formData.password)
-      if (!passwordValidation.isValid) {
-        setPasswordError(passwordValidation.error)
-        toast({
-          title: 'Password Validation Error',
-          description: passwordValidation.error,
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-    }
+    // Passwords are managed by Microsoft SSO and are not stored here.
 
     if (isEditing && selectedUser) {
       // Update existing user
@@ -377,7 +312,7 @@ function UserAuthorizationTab() {
               lastName: formData.lastName || '',
               email: formData.email || '',
               username: formData.username || formData.email || '',
-              password: formData.password || u.password,
+              password: '',
               phoneNumber: formData.phoneNumber || '',
               role: formData.role || '',
               department: formData.department || '',
@@ -406,7 +341,7 @@ function UserAuthorizationTab() {
         lastName: formData.lastName || '',
         email: formData.email || '',
         username: formData.username || formData.email || '',
-        password: formData.password || '',
+        password: '',
         phoneNumber: formData.phoneNumber || '',
         role: formData.role || '',
         department: formData.department || '',
@@ -1043,40 +978,12 @@ function UserAuthorizationTab() {
                 <FormHelperText>Username will be used for login (defaults to email address)</FormHelperText>
               </FormControl>
 
-              <FormControl isRequired={!isEditing} isInvalid={!!passwordError}>
-                <FormLabel>Password {isEditing && '(leave blank to keep current)'}</FormLabel>
-                <InputGroup>
-                  <Input
-                    type={showPassword ? 'text' : 'password'}
-                    value={formData.password}
-                    onChange={(e) => {
-                      setFormData({ ...formData, password: e.target.value })
-                      if (e.target.value) {
-                        const validation = validatePassword(e.target.value)
-                        setPasswordError(validation.error)
-                      } else {
-                        setPasswordError('')
-                      }
-                    }}
-                    placeholder={isEditing ? 'Enter new password or leave blank' : 'Enter password'}
-                  />
-                  <InputRightElement width="4.5rem">
-                    <Button
-                      h="1.75rem"
-                      size="sm"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
-                      {showPassword ? <ViewOffIcon /> : <ViewIcon />}
-                    </Button>
-                  </InputRightElement>
-                </InputGroup>
-                {passwordError ? (
-                  <FormErrorMessage>{passwordError}</FormErrorMessage>
-                ) : (
-                  <FormHelperText>
-                    Must have 1 capital letter, 1 number, 8+ characters, and 1 special character
-                  </FormHelperText>
-                )}
+              <FormControl>
+                <FormLabel>Password</FormLabel>
+                <Input type="text" value="Managed by Microsoft SSO" isReadOnly isDisabled />
+                <FormHelperText>
+                  Passwords are not stored here. Microsoft account MFA controls access.
+                </FormHelperText>
               </FormControl>
 
               <FormControl>

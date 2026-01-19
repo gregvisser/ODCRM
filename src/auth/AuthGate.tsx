@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Box, Button, Flex, Heading, Stack, Text } from '@chakra-ui/react'
 import { InteractionStatus } from '@azure/msal-browser'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
@@ -17,29 +17,59 @@ const parseList = (value?: string): string[] =>
         .filter(Boolean)
     : []
 
-const allowedEmails = parseList(import.meta.env.VITE_AUTH_ALLOWED_EMAILS)
-const allowedDomains = parseList(import.meta.env.VITE_AUTH_ALLOWED_DOMAINS)
+const envAllowedEmails = parseList(import.meta.env.VITE_AUTH_ALLOWED_EMAILS)
+const envAllowedDomains = parseList(import.meta.env.VITE_AUTH_ALLOWED_DOMAINS)
 
-const isAllowlistConfigured = allowedEmails.length > 0 || allowedDomains.length > 0
-
-const isEmailAllowed = (email: string): boolean => {
-  if (!isAllowlistConfigured) return false
-  if (allowedEmails.includes(email)) return true
-  const domain = email.split('@')[1]
-  return Boolean(domain && allowedDomains.includes(domain))
+const loadUserEmailsFromStorage = (): string[] => {
+  try {
+    const stored = localStorage.getItem('users')
+    if (!stored) return []
+    const users = JSON.parse(stored) as Array<{ email?: string }>
+    return users
+      .map((user) => user.email?.toLowerCase().trim())
+      .filter((email): email is string => Boolean(email))
+  } catch {
+    return []
+  }
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
   const { instance, accounts, inProgress } = useMsal()
   const isAuthenticated = useIsAuthenticated()
+  const [userEmails, setUserEmails] = useState<string[]>(() => loadUserEmailsFromStorage())
 
   const activeEmail = useMemo(() => accounts[0]?.username?.toLowerCase() || '', [accounts])
+
+  const effectiveAllowedEmails = userEmails.length > 0 ? userEmails : envAllowedEmails
+  const effectiveAllowedDomains = userEmails.length > 0 ? [] : envAllowedDomains
+  const isAllowlistConfigured =
+    effectiveAllowedEmails.length > 0 || effectiveAllowedDomains.length > 0
+
+  const isEmailAllowed = (email: string): boolean => {
+    if (!isAllowlistConfigured) return false
+    if (effectiveAllowedEmails.includes(email)) return true
+    const domain = email.split('@')[1]
+    return Boolean(domain && effectiveAllowedDomains.includes(domain))
+  }
 
   useEffect(() => {
     if (accounts[0]) {
       instance.setActiveAccount(accounts[0])
     }
   }, [accounts, instance])
+
+  useEffect(() => {
+    const refreshUsers = () => setUserEmails(loadUserEmailsFromStorage())
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === 'users') refreshUsers()
+    }
+    window.addEventListener('usersUpdated', refreshUsers)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('usersUpdated', refreshUsers)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [])
 
   const handleSignIn = async () => {
     if (!authConfigReady) return
@@ -80,8 +110,8 @@ export default function AuthGate({ children }: AuthGateProps) {
           <Stack spacing={4} textAlign="center">
             <Heading size="md">Access not configured</Heading>
             <Text color="gray.600">
-              Your account signed in successfully, but the allowlist is not configured yet. Add
-              allowed emails or domains to continue.
+              Your account signed in successfully, but no authorized users are configured yet. Add
+              users in Operations → User Authorization or set allowlist environment variables.
             </Text>
             <Button colorScheme="gray" onClick={handleSignOut}>
               Sign out
