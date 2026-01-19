@@ -7,6 +7,7 @@ import App from './App.tsx'
 import AuthGate from './auth/AuthGate'
 import LoginPage from './auth/LoginPage'
 import { msalConfig } from './auth/msalConfig'
+import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
 import theme from './theme'
 
@@ -21,15 +22,17 @@ try {
   createRoot(rootElement).render(
     <StrictMode>
       <ChakraProvider theme={theme}>
-        {msalInstance ? (
-          <MsalProvider instance={msalInstance}>
-            <AuthGate>
-              <App />
-            </AuthGate>
-          </MsalProvider>
-        ) : (
-          <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
-        )}
+        <ErrorBoundary>
+          {msalInstance ? (
+            <MsalProvider instance={msalInstance}>
+              <AuthGate>
+                <App />
+              </AuthGate>
+            </MsalProvider>
+          ) : (
+            <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
+          )}
+        </ErrorBoundary>
       </ChakraProvider>
     </StrictMode>,
   )
