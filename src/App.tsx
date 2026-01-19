@@ -5,6 +5,7 @@ import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { CrmTopTabs } from './components/nav/CrmTopTabs'
 import { DataPortability } from './components/DataPortability'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
+import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import SalesHomePage from './tabs/sales/SalesHomePage'
 import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/MarketingHomePage'
@@ -129,6 +130,8 @@ function App() {
 
   const page = (() => {
     switch (activeTab) {
+      case 'dashboards-home':
+        return <DashboardsHomePage />
       case 'customers-home':
         return (
           <CustomersHomePage

@@ -1,10 +1,11 @@
 import { Box, Button, Text, VStack } from '@chakra-ui/react'
-import { 
+import {
+  AddIcon,
   AtSignIcon,
   ChatIcon,
   EmailIcon,
   SettingsIcon,
-  AddIcon,
+  ViewIcon,
 } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from '../../contracts/nav'
 import type { ComponentType } from 'react'
@@ -12,6 +13,7 @@ import type { ComponentType } from 'react'
 // Icon mapping for each tab
 const getTabIcon = (tabId: CrmTopTabId): ComponentType<any> => {
   const iconMap: Record<CrmTopTabId, ComponentType<any>> = {
+    'dashboards-home': ViewIcon,
     'customers-home': AtSignIcon,
     'sales-home': ChatIcon,
     'marketing-home': EmailIcon,
