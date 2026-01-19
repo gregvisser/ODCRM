@@ -56,6 +56,51 @@ export type User = {
   profilePhoto?: string
 }
 
+const parseAllowlistEmails = (): string[] => {
+  const raw = import.meta.env.VITE_AUTH_ALLOWED_EMAILS
+  if (!raw) return []
+  return raw
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean)
+}
+
+const toDisplayName = (email: string): { firstName: string; lastName: string } => {
+  const local = email.split('@')[0] || ''
+  const parts = local.split(/[._-]+/).filter(Boolean)
+  if (parts.length === 0) return { firstName: 'User', lastName: '' }
+  const [first, ...rest] = parts
+  const cap = (value: string) => value.charAt(0).toUpperCase() + value.slice(1)
+  return {
+    firstName: cap(first),
+    lastName: rest.map(cap).join(' ') || '',
+  }
+}
+
+const buildSeedUsers = (emails: string[]): User[] => {
+  const createdDate = new Date().toISOString().split('T')[0]
+  return emails.map((email, index) => {
+    const name = toDisplayName(email)
+    const seedId = `ODS${String(Date.now() + index).slice(-8).padStart(8, '0')}`
+    return {
+      id: seedId,
+      userId: seedId,
+      firstName: name.firstName,
+      lastName: name.lastName,
+      email,
+      username: email,
+      password: '',
+      phoneNumber: '',
+      role: 'Operations',
+      department: 'Operations',
+      accountStatus: 'Active',
+      lastLoginDate: 'Never',
+      createdDate,
+      profilePhoto: '',
+    }
+  })
+}
+
 // Load users from localStorage and remove duplicates
 const loadUsersFromStorage = (): User[] => {
   try {
@@ -94,6 +139,12 @@ const loadUsersFromStorage = (): User[] => {
     }
   } catch (error) {
     console.error('Error loading users from storage:', error)
+  }
+  const allowlist = parseAllowlistEmails()
+  if (allowlist.length > 0) {
+    const seeded = buildSeedUsers(allowlist)
+    saveUsersToStorage(seeded)
+    return seeded
   }
   return []
 }
