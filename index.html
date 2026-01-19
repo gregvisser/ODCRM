@@ -8,6 +8,24 @@
   </head>
   <body>
     <script>
+      // Basic boot guard to avoid a blank screen if JS fails to run.
+      window.__odcrm_loaded = false
+      setTimeout(() => {
+        if (window.__odcrm_loaded) return
+        const root = document.getElementById('root')
+        if (!root) return
+        root.innerHTML = `
+          <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f7fafc; font-family: sans-serif; padding: 24px;">
+            <div style="background: white; padding: 24px 28px; border-radius: 16px; border: 1px solid #e2e8f0; max-width: 520px; text-align: center;">
+              <h1 style="margin: 0 0 8px; font-size: 18px;">ODCRM is taking longer than expected</h1>
+              <p style="margin: 0 0 16px; color: #4a5568;">Please refresh the page. If the issue persists, share this screen with support.</p>
+              <button onclick="window.location.reload()" style="padding: 10px 16px; border-radius: 8px; border: 1px solid #2f855a; background: #38a169; color: white; cursor: pointer;">Reload</button>
+            </div>
+          </div>
+        `
+      }, 6000)
+    </script>
+    <script>
       // ColorModeScript - prevents flash of wrong color mode
       (function() {
         const colorMode = localStorage.getItem('chakra-ui-color-mode') || 'light';
@@ -16,7 +34,14 @@
         }
       })();
     </script>
-    <div id="root"></div>
+    <div id="root">
+      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #f7fafc; font-family: sans-serif; padding: 24px;">
+        <div style="background: white; padding: 24px 28px; border-radius: 16px; border: 1px solid #e2e8f0; max-width: 520px; text-align: center;">
+          <h1 style="margin: 0 0 8px; font-size: 18px;">Loading ODCRM…</h1>
+          <p style="margin: 0; color: #4a5568;">If this takes more than a few seconds, refresh the page.</p>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

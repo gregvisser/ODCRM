@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ChakraProvider } from '@chakra-ui/react'
 import { PublicClientApplication } from '@azure/msal-browser'
@@ -19,19 +19,28 @@ if (!rootElement) {
 try {
   const msalInstance = msalConfig ? new PublicClientApplication(msalConfig) : null
 
+  const BootFlag = ({ children }: { children: React.ReactNode }) => {
+    useEffect(() => {
+      window.__odcrm_loaded = true
+    }, [])
+    return <>{children}</>
+  }
+
   createRoot(rootElement).render(
     <StrictMode>
       <ChakraProvider theme={theme}>
         <ErrorBoundary>
-          {msalInstance ? (
-            <MsalProvider instance={msalInstance}>
-              <AuthGate>
-                <App />
-              </AuthGate>
-            </MsalProvider>
-          ) : (
-            <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
-          )}
+          <BootFlag>
+            {msalInstance ? (
+              <MsalProvider instance={msalInstance}>
+                <AuthGate>
+                  <App />
+                </AuthGate>
+              </MsalProvider>
+            ) : (
+              <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
+            )}
+          </BootFlag>
         </ErrorBoundary>
       </ChakraProvider>
     </StrictMode>,
