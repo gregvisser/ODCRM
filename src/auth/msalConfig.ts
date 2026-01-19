@@ -16,7 +16,6 @@ export const msalConfig: Configuration | null =
         },
         cache: {
           cacheLocation: 'localStorage',
-          storeAuthStateInCookie: false,
         },
       }
     : null
