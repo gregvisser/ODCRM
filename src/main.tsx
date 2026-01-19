@@ -1,7 +1,12 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ChakraProvider } from '@chakra-ui/react'
+import { PublicClientApplication } from '@azure/msal-browser'
+import { MsalProvider } from '@azure/msal-react'
 import App from './App.tsx'
+import AuthGate from './auth/AuthGate'
+import LoginPage from './auth/LoginPage'
+import { msalConfig } from './auth/msalConfig'
 import './index.css'
 import theme from './theme'
 
@@ -11,13 +16,23 @@ if (!rootElement) {
 }
 
 try {
+  const msalInstance = msalConfig ? new PublicClientApplication(msalConfig) : null
+
   createRoot(rootElement).render(
-  <StrictMode>
-    <ChakraProvider theme={theme}>
-      <App />
-    </ChakraProvider>
-  </StrictMode>,
-)
+    <StrictMode>
+      <ChakraProvider theme={theme}>
+        {msalInstance ? (
+          <MsalProvider instance={msalInstance}>
+            <AuthGate>
+              <App />
+            </AuthGate>
+          </MsalProvider>
+        ) : (
+          <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
+        )}
+      </ChakraProvider>
+    </StrictMode>,
+  )
 } catch (error) {
   console.error('❌ Failed to render app:', error)
   rootElement.innerHTML = `
