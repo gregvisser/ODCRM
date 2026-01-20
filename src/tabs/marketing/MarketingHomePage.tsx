@@ -1,4 +1,13 @@
-import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
+import {
+  Box,
+  Flex,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
+  useBreakpointValue,
+} from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
 import EmailSettingsTab from '../../components/EmailSettingsTab'
 import MarketingInboxTab from '../../components/MarketingInboxTab'
@@ -79,6 +88,8 @@ export default function MarketingHomePage({
                           ? 10
                           : 11
 
+  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+
   return (
     <Tabs
       index={tabIndex}
@@ -112,7 +123,7 @@ export default function MarketingHomePage({
       isLazy
       variant="soft-rounded"
       colorScheme="gray"
-      orientation={{ base: 'horizontal', md: 'vertical' }}
+      orientation={orientation}
     >
       <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
         <Box

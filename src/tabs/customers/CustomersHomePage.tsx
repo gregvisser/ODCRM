@@ -1,4 +1,13 @@
-import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
+import {
+  Box,
+  Flex,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
+  useBreakpointValue,
+} from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
 
@@ -21,6 +30,8 @@ export default function CustomersHomePage({
   const activeView = coerceCustomersViewId(view)
   const tabIndex = activeView === 'accounts' ? 0 : 1
 
+  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+
   return (
     <Tabs
       index={tabIndex}
@@ -31,7 +42,7 @@ export default function CustomersHomePage({
       isLazy
       variant="soft-rounded"
       colorScheme="gray"
-      orientation={{ base: 'horizontal', md: 'vertical' }}
+      orientation={orientation}
     >
       <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
         <Box

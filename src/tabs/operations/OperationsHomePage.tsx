@@ -9,6 +9,7 @@ import {
   Tabs,
   Text,
   UnorderedList,
+  useBreakpointValue,
 } from '@chakra-ui/react'
 import UserAuthorizationTab from '../../components/UserAuthorizationTab'
 import { PlaceholderPage } from '../../components/PlaceholderPage'
@@ -31,6 +32,8 @@ export default function OperationsHomePage({
   const activeView = coerceOperationsViewId(view)
   const tabIndex = activeView === 'overview' ? 0 : 1
 
+  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+
   return (
     <Tabs
       index={tabIndex}
@@ -41,7 +44,7 @@ export default function OperationsHomePage({
       isLazy
       variant="soft-rounded"
       colorScheme="gray"
-      orientation={{ base: 'horizontal', md: 'vertical' }}
+      orientation={orientation}
     >
       <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
         <Box
