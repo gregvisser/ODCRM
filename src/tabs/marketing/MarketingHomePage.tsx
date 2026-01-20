@@ -1,4 +1,4 @@
-import { Box, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
+import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
 import EmailSettingsTab from '../../components/EmailSettingsTab'
 import MarketingInboxTab from '../../components/MarketingInboxTab'
@@ -110,93 +110,105 @@ export default function MarketingHomePage({
         onNavigate?.(nextView)
       }}
       isLazy
-      variant="enclosed"
-      colorScheme="teal"
+      variant="soft-rounded"
+      colorScheme="gray"
+      orientation={{ base: 'horizontal', md: 'vertical' }}
     >
-      <Box
-        position="sticky"
-        top={0}
-        zIndex={5}
-        bg="bg.surface"
-        borderTopRadius="md"
-        pt={2}
-        pb={1}
-      >
-        <TabList overflowX="auto" whiteSpace="nowrap">
-          <Tab>Overview</Tab>
-          <Tab>Campaigns</Tab>
-          <Tab>Sequences</Tab>
-          <Tab>People</Tab>
-          <Tab>Lists</Tab>
-          <Tab>Inbox</Tab>
-          <Tab>Reports</Tab>
-          <Tab>Templates</Tab>
-          <Tab>Email Accounts</Tab>
-          <Tab>Schedules</Tab>
-          <Tab>Cognism Prospects</Tab>
-          <Tab>Leads</Tab>
-        </TabList>
-      </Box>
-      <TabPanels pt={4}>
-        <TabPanel px={0}>
-          <MarketingDashboard />
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <EmailCampaignsTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingSequencesTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingPeopleTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingListsTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingInboxTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingReportsTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingEmailTemplatesTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <EmailSettingsTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingSchedulesTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingCognismProspectsTab />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <MarketingLeadsTab focusAccountName={focusAccountName} />
-          </Box>
-        </TabPanel>
-      </TabPanels>
+      <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
+        <Box
+          position={{ base: 'static', md: 'sticky' }}
+          top={{ md: 16 }}
+          alignSelf="flex-start"
+          bg="bg.surface"
+          border="1px solid"
+          borderColor="border.subtle"
+          borderRadius="lg"
+          p={2}
+          minW={{ md: '220px' }}
+          maxW={{ md: '240px' }}
+          w={{ base: '100%', md: '240px' }}
+        >
+          <TabList
+            flexDirection={{ base: 'row', md: 'column' }}
+            overflowX={{ base: 'auto', md: 'visible' }}
+            whiteSpace={{ base: 'nowrap', md: 'normal' }}
+          >
+            <Tab justifyContent={{ md: 'flex-start' }}>Overview</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Campaigns</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Sequences</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>People</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Lists</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Inbox</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Reports</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Templates</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Email Accounts</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Schedules</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Cognism Prospects</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Leads</Tab>
+          </TabList>
+        </Box>
+
+        <TabPanels flex="1" pt={{ base: 0, md: 1 }}>
+          <TabPanel px={0}>
+            <MarketingDashboard />
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <EmailCampaignsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingSequencesTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingPeopleTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingListsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingInboxTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingReportsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingEmailTemplatesTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <EmailSettingsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingSchedulesTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingCognismProspectsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <MarketingLeadsTab focusAccountName={focusAccountName} />
+            </Box>
+          </TabPanel>
+        </TabPanels>
+      </Flex>
     </Tabs>
   )
 }

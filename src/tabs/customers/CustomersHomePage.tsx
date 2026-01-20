@@ -1,4 +1,4 @@
-import { Box, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
+import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
 
@@ -29,35 +29,42 @@ export default function CustomersHomePage({
         onNavigate?.(nextView)
       }}
       isLazy
-      variant="enclosed"
-      colorScheme="teal"
+      variant="soft-rounded"
+      colorScheme="gray"
+      orientation={{ base: 'horizontal', md: 'vertical' }}
     >
-      <Box
-        position="sticky"
-        top={0}
-        zIndex={5}
-        bg="bg.surface"
-        borderTopRadius="md"
-        pt={2}
-        pb={1}
-      >
-        <TabList>
-          <Tab>Accounts</Tab>
-          <Tab>Contacts</Tab>
-        </TabList>
-      </Box>
-      <TabPanels pt={4}>
-        <TabPanel px={0}>
-          <Box>
-            <AccountsTab focusAccountName={focusAccountName} />
-          </Box>
-        </TabPanel>
-        <TabPanel px={0}>
-          <Box>
-            <ContactsTab />
-          </Box>
-        </TabPanel>
-      </TabPanels>
+      <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
+        <Box
+          position={{ base: 'static', md: 'sticky' }}
+          top={{ md: 16 }}
+          alignSelf="flex-start"
+          bg="bg.surface"
+          border="1px solid"
+          borderColor="border.subtle"
+          borderRadius="lg"
+          p={2}
+          minW={{ md: '200px' }}
+          maxW={{ md: '220px' }}
+          w={{ base: '100%', md: '220px' }}
+        >
+          <TabList flexDirection={{ base: 'row', md: 'column' }}>
+            <Tab justifyContent={{ md: 'flex-start' }}>Accounts</Tab>
+            <Tab justifyContent={{ md: 'flex-start' }}>Contacts</Tab>
+          </TabList>
+        </Box>
+        <TabPanels flex="1" pt={{ base: 0, md: 1 }}>
+          <TabPanel px={0}>
+            <Box>
+              <AccountsTab focusAccountName={focusAccountName} />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <ContactsTab />
+            </Box>
+          </TabPanel>
+        </TabPanels>
+      </Flex>
     </Tabs>
   )
 }
