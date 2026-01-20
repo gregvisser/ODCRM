@@ -15,6 +15,7 @@ const upsertCustomerSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
   domain: z.string().optional(),
+  accountData: z.unknown().optional().nullable(),
   
   // Business details
   leadsReportingUrl: z.string().url().optional().nullable(),
@@ -122,6 +123,7 @@ router.post('/', async (req, res) => {
         id: `cust_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: validated.name,
         domain: validated.domain,
+        accountData: validated.accountData ?? null,
         leadsReportingUrl: validated.leadsReportingUrl,
         sector: validated.sector,
         clientStatus: validated.clientStatus || 'active',
@@ -161,6 +163,7 @@ router.put('/:id', async (req, res) => {
       data: {
         name: validated.name,
         domain: validated.domain,
+        accountData: validated.accountData ?? null,
         leadsReportingUrl: validated.leadsReportingUrl,
         sector: validated.sector,
         clientStatus: validated.clientStatus,

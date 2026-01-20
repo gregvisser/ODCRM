@@ -12,7 +12,7 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import { RepeatIcon } from '@chakra-ui/icons'
-import { accounts as defaultAccounts, type Account } from '../../components/AccountsTab'
+import { type Account } from '../../components/AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { OdcrmStorageKeys } from '../../platform/keys'
@@ -29,6 +29,7 @@ type CustomerApi = {
   id: string
   name: string
   domain?: string | null
+  accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
   sector?: string | null
   clientStatus?: string | null
@@ -111,108 +112,83 @@ function normalizeCustomerWebsite(domain?: string | null): string {
   return `https://${domain}`
 }
 
-function normalizeName(value?: string | null): string {
-  if (!value) return ''
-  return value
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[^a-z0-9]/g, '')
+function coerceAccountData(value: unknown): Partial<Account> | null {
+  if (!value || typeof value !== 'object') return null
+  return value as Partial<Account>
 }
 
-function normalizeDomain(value?: string | null): string {
-  if (!value) return ''
-  try {
-    const withScheme = value.startsWith('http') ? value : `https://${value}`
-    const host = new URL(withScheme).hostname
-    return host.replace(/^www\./, '').toLowerCase()
-  } catch {
-    return value.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase()
+function normalizeAccountDefaults(raw: Partial<Account>): Account {
+  return {
+    name: raw.name || '',
+    website: raw.website || '',
+    aboutSections: { ...DEFAULT_ABOUT_SECTIONS, ...(raw.aboutSections || {}) },
+    sector: raw.sector || 'To be determined',
+    socialMedia: Array.isArray(raw.socialMedia) ? raw.socialMedia : [],
+    status: raw.status || 'Active',
+    targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
+    targetTitle: raw.targetTitle || '',
+    monthlySpendGBP: Number(raw.monthlySpendGBP || 0),
+    agreements: Array.isArray(raw.agreements) ? raw.agreements : [],
+    defcon: typeof raw.defcon === 'number' ? raw.defcon : 3,
+    contractStart: raw.contractStart || '',
+    contractEnd: raw.contractEnd || '',
+    days: typeof raw.days === 'number' ? raw.days : 0,
+    contacts: typeof raw.contacts === 'number' ? raw.contacts : 0,
+    leads: typeof raw.leads === 'number' ? raw.leads : 0,
+    weeklyTarget: typeof raw.weeklyTarget === 'number' ? raw.weeklyTarget : 0,
+    weeklyActual: typeof raw.weeklyActual === 'number' ? raw.weeklyActual : 0,
+    monthlyTarget: typeof raw.monthlyTarget === 'number' ? raw.monthlyTarget : 0,
+    monthlyActual: typeof raw.monthlyActual === 'number' ? raw.monthlyActual : 0,
+    weeklyReport: raw.weeklyReport || '',
+    users: Array.isArray(raw.users) ? raw.users : [],
+    clientLeadsSheetUrl: raw.clientLeadsSheetUrl || '',
+    notes: Array.isArray(raw.notes) ? raw.notes : undefined,
   }
 }
 
-function findCustomerForAccount(account: Account, customers: CustomerApi[]): CustomerApi | undefined {
-  const accountKey = normalizeName(account.name)
-  const accountDomain = normalizeDomain(account.website)
-
-  return customers.find((customer) => {
-    const customerKey = normalizeName(customer.name)
-    const customerDomain = normalizeDomain(customer.domain ?? '')
-    if (accountKey && customerKey && accountKey === customerKey) return true
-    if (accountDomain && customerDomain && accountDomain === customerDomain) return true
-    return false
-  })
+function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): Account {
+  const updated: Account = { ...account }
+  if (customer.name) updated.name = customer.name
+  if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
+  if (customer.sector) updated.sector = customer.sector
+  if (customer.clientStatus) updated.status = mapClientStatusToAccountStatus(customer.clientStatus)
+  if (customer.prospectingLocation) updated.targetLocation = [customer.prospectingLocation]
+  if (customer.targetJobTitle) updated.targetTitle = customer.targetJobTitle
+  if (customer.monthlyIntakeGBP) updated.monthlySpendGBP = Number(customer.monthlyIntakeGBP || 0)
+  if (typeof customer.defcon === 'number') updated.defcon = customer.defcon
+  if (typeof customer.weeklyLeadTarget === 'number') updated.weeklyTarget = customer.weeklyLeadTarget
+  if (typeof customer.weeklyLeadActual === 'number') updated.weeklyActual = customer.weeklyLeadActual
+  if (typeof customer.monthlyLeadTarget === 'number') updated.monthlyTarget = customer.monthlyLeadTarget
+  if (typeof customer.monthlyLeadActual === 'number') updated.monthlyActual = customer.monthlyLeadActual
+  if (customer.leadsReportingUrl) updated.clientLeadsSheetUrl = customer.leadsReportingUrl
+  return updated
 }
 
 function buildAccountFromCustomer(customer: CustomerApi): Account {
-  return {
+  const fallback = normalizeAccountDefaults({
     name: customer.name,
     website: normalizeCustomerWebsite(customer.domain),
-    aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
     sector: customer.sector || 'To be determined',
-    socialMedia: [],
     status: mapClientStatusToAccountStatus(customer.clientStatus),
     targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
     targetTitle: customer.targetJobTitle || '',
     monthlySpendGBP: Number(customer.monthlyIntakeGBP || 0),
-    agreements: [],
     defcon: customer.defcon ?? 3,
-    contractStart: '',
-    contractEnd: '',
-    days: 0,
-    contacts: 0,
-    leads: 0,
     weeklyTarget: customer.weeklyLeadTarget ?? 0,
     weeklyActual: customer.weeklyLeadActual ?? 0,
     monthlyTarget: customer.monthlyLeadTarget ?? 0,
     monthlyActual: customer.monthlyLeadActual ?? 0,
-    weeklyReport: '',
-    users: [],
     clientLeadsSheetUrl: customer.leadsReportingUrl || '',
-  }
-}
-
-function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Account {
-  const updates: Partial<Account> = {}
-  if (!account.clientLeadsSheetUrl && customer.leadsReportingUrl) {
-    updates.clientLeadsSheetUrl = customer.leadsReportingUrl
-  }
-  if ((!account.sector || account.sector === 'To be determined') && customer.sector) {
-    updates.sector = customer.sector
-  }
-  if ((!account.targetTitle || !account.targetTitle.trim()) && customer.targetJobTitle) {
-    updates.targetTitle = customer.targetJobTitle
-  }
-  if ((account.targetLocation?.length ?? 0) === 0 && customer.prospectingLocation) {
-    updates.targetLocation = [customer.prospectingLocation]
-  }
-  if ((!account.defcon || account.defcon === 0) && customer.defcon) {
-    updates.defcon = customer.defcon
-  }
-  if ((!account.weeklyTarget || account.weeklyTarget === 0) && customer.weeklyLeadTarget) {
-    updates.weeklyTarget = customer.weeklyLeadTarget
-  }
-  if ((!account.weeklyActual || account.weeklyActual === 0) && customer.weeklyLeadActual) {
-    updates.weeklyActual = customer.weeklyLeadActual
-  }
-  if ((!account.monthlyTarget || account.monthlyTarget === 0) && customer.monthlyLeadTarget) {
-    updates.monthlyTarget = customer.monthlyLeadTarget
-  }
-  if ((!account.monthlyActual || account.monthlyActual === 0) && customer.monthlyLeadActual) {
-    updates.monthlyActual = customer.monthlyLeadActual
-  }
-  if ((!account.monthlySpendGBP || account.monthlySpendGBP === 0) && customer.monthlyIntakeGBP) {
-    updates.monthlySpendGBP = Number(customer.monthlyIntakeGBP || 0)
-  }
-  if (!account.website && customer.domain) {
-    updates.website = normalizeCustomerWebsite(customer.domain)
-  }
-  return Object.keys(updates).length ? { ...account, ...updates } : account
+  })
+  const accountData = coerceAccountData(customer.accountData)
+  const base = accountData ? normalizeAccountDefaults({ ...fallback, ...accountData }) : fallback
+  return applyCustomerFieldsToAccount(base, customer)
 }
 
 function loadAccountsFromStorage(): Account[] {
   const parsed = getJson<Account[]>(OdcrmStorageKeys.accounts)
   if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed
-  return defaultAccounts
+  return []
 }
 
 function loadLeadsFromStorage(): Lead[] {
@@ -287,37 +263,11 @@ export default function DashboardsHomePage() {
       const { data, error } = await api.get<CustomerApi[]>('/api/customers')
       if (error || !data || data.length === 0) return
 
-      const stored = loadAccountsFromStorage()
-      const byName = new Map<string, Account>()
-      stored.forEach((acc) => {
-        byName.set(acc.name, acc)
-        const normalized = normalizeName(acc.name)
-        if (normalized) byName.set(normalized, acc)
-      })
-      let changed = false
-
-      const merged = stored.map((acc) => {
-        const customer = findCustomerForAccount(acc, data)
-        if (!customer) return acc
-        const updated = mergeAccountFromCustomer(acc, customer)
-        if (updated !== acc) changed = true
-        return updated
-      })
-
-      for (const customer of data) {
-        const customerKey = normalizeName(customer.name)
-        if (!byName.has(customer.name) && !byName.has(customerKey)) {
-          merged.push(buildAccountFromCustomer(customer))
-          changed = true
-        }
-      }
-
-      if (changed) {
-        setJson(OdcrmStorageKeys.accounts, merged)
-        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-        setAccountsData(merged)
-        emit('accountsUpdated', merged)
-      }
+      const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
+      setJson(OdcrmStorageKeys.accounts, hydrated)
+      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      setAccountsData(hydrated)
+      emit('accountsUpdated', hydrated)
     }
 
     const init = async () => {

@@ -74,6 +74,7 @@ model Customer {
   id                    String               @id
   name                  String
   domain                String?
+  accountData           Json?
   
   // Business details (from OpensDoorsV2 ClientAccount)
   leadsReportingUrl     String?

@@ -133,6 +133,7 @@ type CustomerApi = {
   id: string
   name: string
   domain?: string | null
+  accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
   sector?: string | null
   clientStatus?: string | null
@@ -734,7 +735,7 @@ export function loadAccountsFromStorage(): Account[] {
     console.log('✅ Loaded accounts from storage:', parsed.length)
     return parsed
   }
-  return accounts
+  return []
 }
 
 function loadLatestAccountsBackup(): Account[] | null {
@@ -847,6 +848,23 @@ function normalizeDomain(value?: string | null): string {
   }
 }
 
+type AccountSnapshot = Omit<Account, 'leads' | 'weeklyActual' | 'monthlyActual' | 'contacts'> & {
+  leads?: number
+  weeklyActual?: number
+  monthlyActual?: number
+  contacts?: number
+}
+
+function sanitizeAccountForStorage(account: Account): AccountSnapshot {
+  const { leads, weeklyActual, monthlyActual, contacts, ...rest } = account
+  return rest
+}
+
+function coerceAccountData(value: unknown): Partial<Account> | null {
+  if (!value || typeof value !== 'object') return null
+  return value as Partial<Account>
+}
+
 function computeAccountsSyncHash(accountsData: Account[]): string {
   const normalized = accountsData
     .slice()
@@ -854,17 +872,7 @@ function computeAccountsSyncHash(accountsData: Account[]): string {
     .map((account) => ({
       name: account.name,
       website: account.website,
-      clientLeadsSheetUrl: account.clientLeadsSheetUrl,
-      sector: account.sector,
-      status: account.status,
-      targetLocation: account.targetLocation,
-      targetTitle: account.targetTitle,
-      monthlySpendGBP: account.monthlySpendGBP,
-      defcon: account.defcon,
-      weeklyTarget: account.weeklyTarget,
-      weeklyActual: account.weeklyActual,
-      monthlyTarget: account.monthlyTarget,
-      monthlyActual: account.monthlyActual,
+      snapshot: sanitizeAccountForStorage(account),
     }))
   return JSON.stringify(normalized)
 }
@@ -872,6 +880,7 @@ function computeAccountsSyncHash(accountsData: Account[]): string {
 function buildCustomerPayloadFromAccount(account: Account): {
   name: string
   domain?: string
+  accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
   sector?: string | null
   clientStatus?: string | null
@@ -884,9 +893,10 @@ function buildCustomerPayloadFromAccount(account: Account): {
   monthlyLeadTarget?: number | null
   monthlyLeadActual?: number | null
 } {
-  const payload: Record<string, string | number | null | undefined> = {
+  const payload: Record<string, string | number | null | undefined | Record<string, unknown>> = {
     name: account.name,
   }
+  payload.accountData = sanitizeAccountForStorage(account) as unknown as Record<string, unknown>
 
   const domain = normalizeDomain(account.website)
   if (domain) payload.domain = domain
@@ -901,13 +911,12 @@ function buildCustomerPayloadFromAccount(account: Account): {
   }
   if (account.defcon && account.defcon > 0) payload.defcon = account.defcon
   if (account.weeklyTarget && account.weeklyTarget > 0) payload.weeklyLeadTarget = account.weeklyTarget
-  if (account.weeklyActual && account.weeklyActual > 0) payload.weeklyLeadActual = account.weeklyActual
   if (account.monthlyTarget && account.monthlyTarget > 0) payload.monthlyLeadTarget = account.monthlyTarget
-  if (account.monthlyActual && account.monthlyActual > 0) payload.monthlyLeadActual = account.monthlyActual
 
   return payload as {
     name: string
     domain?: string
+    accountData?: Record<string, unknown> | null
     leadsReportingUrl?: string | null
     sector?: string | null
     clientStatus?: string | null
@@ -930,13 +939,20 @@ function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPaylo
 function diffCustomerPayload(
   customer: CustomerApi,
   payload: ReturnType<typeof buildCustomerPayloadFromAccount>,
-): Record<string, string | number | null> {
-  const updates: Record<string, string | number | null> = {}
+): Record<string, string | number | null | Record<string, unknown>> {
+  const updates: Record<string, string | number | null | Record<string, unknown>> = {}
   const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
   const normalizeNumber = (value: unknown) => {
     if (value === null || value === undefined || value === '') return null
     const parsed = Number(value)
     return Number.isNaN(parsed) ? null : parsed
+  }
+  const normalizeJson = (value: unknown) => {
+    try {
+      return JSON.stringify(value ?? null)
+    } catch {
+      return ''
+    }
   }
 
   if (payload.name && normalizeValue(payload.name) !== normalizeValue(customer.name)) {
@@ -968,6 +984,12 @@ function diffCustomerPayload(
     normalizeValue(payload.prospectingLocation) !== normalizeValue(customer.prospectingLocation)
   ) {
     updates.prospectingLocation = payload.prospectingLocation
+  }
+  if (
+    payload.accountData &&
+    normalizeJson(payload.accountData) !== normalizeJson(customer.accountData)
+  ) {
+    updates.accountData = payload.accountData
   }
 
   const monthlyIntake = normalizeNumber(payload.monthlyIntakeGBP)
@@ -1016,35 +1038,78 @@ function findCustomerForAccount(account: Account, customers: CustomerApi[]): Cus
   })
 }
 
-function buildAccountFromCustomer(customer: CustomerApi): Account {
+function normalizeAccountDefaults(raw: Partial<Account>): Account {
   return {
+    name: raw.name || '',
+    website: raw.website || '',
+    aboutSections: { ...DEFAULT_ABOUT_SECTIONS, ...(raw.aboutSections || {}) },
+    sector: raw.sector || 'To be determined',
+    socialMedia: Array.isArray(raw.socialMedia) ? raw.socialMedia : [],
+    status: raw.status || 'Active',
+    targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
+    targetTitle: raw.targetTitle || '',
+    monthlySpendGBP: Number(raw.monthlySpendGBP || 0),
+    agreements: Array.isArray(raw.agreements) ? raw.agreements : [],
+    defcon: typeof raw.defcon === 'number' ? raw.defcon : 3,
+    contractStart: raw.contractStart || '',
+    contractEnd: raw.contractEnd || '',
+    days: typeof raw.days === 'number' ? raw.days : 0,
+    contacts: typeof raw.contacts === 'number' ? raw.contacts : 0,
+    leads: typeof raw.leads === 'number' ? raw.leads : 0,
+    weeklyTarget: typeof raw.weeklyTarget === 'number' ? raw.weeklyTarget : 0,
+    weeklyActual: typeof raw.weeklyActual === 'number' ? raw.weeklyActual : 0,
+    monthlyTarget: typeof raw.monthlyTarget === 'number' ? raw.monthlyTarget : 0,
+    monthlyActual: typeof raw.monthlyActual === 'number' ? raw.monthlyActual : 0,
+    weeklyReport: raw.weeklyReport || '',
+    users: Array.isArray(raw.users) ? raw.users : [],
+    clientLeadsSheetUrl: raw.clientLeadsSheetUrl || '',
+    notes: Array.isArray(raw.notes) ? raw.notes : undefined,
+  }
+}
+
+function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): Account {
+  const updated: Account = { ...account }
+  if (customer.name) updated.name = customer.name
+  if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
+  if (customer.sector) updated.sector = customer.sector
+  if (customer.clientStatus) updated.status = mapClientStatusToAccountStatus(customer.clientStatus)
+  if (customer.prospectingLocation) updated.targetLocation = [customer.prospectingLocation]
+  if (customer.targetJobTitle) updated.targetTitle = customer.targetJobTitle
+  if (customer.monthlyIntakeGBP) updated.monthlySpendGBP = Number(customer.monthlyIntakeGBP || 0)
+  if (typeof customer.defcon === 'number') updated.defcon = customer.defcon
+  if (typeof customer.weeklyLeadTarget === 'number') updated.weeklyTarget = customer.weeklyLeadTarget
+  if (typeof customer.weeklyLeadActual === 'number') updated.weeklyActual = customer.weeklyLeadActual
+  if (typeof customer.monthlyLeadTarget === 'number') updated.monthlyTarget = customer.monthlyLeadTarget
+  if (typeof customer.monthlyLeadActual === 'number') updated.monthlyActual = customer.monthlyLeadActual
+  if (customer.leadsReportingUrl) updated.clientLeadsSheetUrl = customer.leadsReportingUrl
+  return updated
+}
+
+function buildAccountFromCustomer(customer: CustomerApi): Account {
+  const fallback = normalizeAccountDefaults({
     name: customer.name,
     website: normalizeCustomerWebsite(customer.domain),
-    aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
     sector: customer.sector || 'To be determined',
-    socialMedia: [],
     status: mapClientStatusToAccountStatus(customer.clientStatus),
     targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
     targetTitle: customer.targetJobTitle || '',
     monthlySpendGBP: Number(customer.monthlyIntakeGBP || 0),
-    agreements: [],
     defcon: customer.defcon ?? 3,
-    contractStart: '',
-    contractEnd: '',
-    days: 0,
-    contacts: 0,
-    leads: 0,
     weeklyTarget: customer.weeklyLeadTarget ?? 0,
     weeklyActual: customer.weeklyLeadActual ?? 0,
     monthlyTarget: customer.monthlyLeadTarget ?? 0,
     monthlyActual: customer.monthlyLeadActual ?? 0,
-    weeklyReport: '',
-    users: [],
     clientLeadsSheetUrl: customer.leadsReportingUrl || '',
-  }
+  })
+  const accountData = coerceAccountData(customer.accountData)
+  const base = accountData ? normalizeAccountDefaults({ ...fallback, ...accountData }) : fallback
+  return applyCustomerFieldsToAccount(base, customer)
 }
 
 function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Account {
+  if (customer.accountData) {
+    return buildAccountFromCustomer(customer)
+  }
   const updates: Partial<Account> = {}
   if (!account.clientLeadsSheetUrl && customer.leadsReportingUrl) {
     updates.clientLeadsSheetUrl = customer.leadsReportingUrl
@@ -3203,99 +3268,19 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Load initial data from localStorage or use defaults
+  // Load initial data from localStorage only (backend is the source of truth).
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
     try {
-    const loaded = loadAccountsFromStorage()
-      
-      // Create a map of stored accounts by name to preserve Google Sheets URLs
-      const storedAccountsMap = new Map<string, Account>()
-      if (loaded && Array.isArray(loaded)) {
-        loaded.forEach(acc => {
-          if (acc && acc.name) {
-            storedAccountsMap.set(acc.name, acc)
-          }
-        })
-      }
-      
-      // If loaded is empty or invalid, use default accounts but preserve ALL stored user data
-      if (!loaded || !Array.isArray(loaded) || loaded.length === 0) {
-        console.log('⚠️ No accounts in storage, restoring defaults')
-        const defaultAccounts = accounts.map(acc => {
-          const stored = storedAccountsMap.get(acc.name)
-          // Preserve ALL user-modified data from stored account if it exists
-          if (stored) {
-            return { ...acc, ...stored }
-          }
-          return acc
-        })
-        try {
-          saveAccountsToStorage(defaultAccounts)
-        } catch (e) {
-          console.error('Failed to save accounts:', e)
-        }
-        return defaultAccounts
-      }
-      
-    // Exclude any accounts that have been explicitly deleted
-    const deletedAccountsSet = loadDeletedAccountsFromStorage()
-      
-      // If all accounts are deleted, clear the deleted list and restore defaults (but preserve ALL user data)
-      if (deletedAccountsSet.size > 0 && deletedAccountsSet.size >= accounts.length) {
-        console.log('⚠️ All accounts are marked as deleted, restoring defaults')
-        const defaultAccounts = accounts.map(acc => {
-          const stored = storedAccountsMap.get(acc.name)
-          // Preserve ALL user-modified data from stored account if it exists
-          if (stored) {
-            return { ...acc, ...stored }
-          }
-          return acc
-        })
-        try {
-          saveAccountsToStorage(defaultAccounts)
-          saveDeletedAccountsToStorage(new Set())
-        } catch (e) {
-          console.error('Failed to save accounts:', e)
-        }
-        return defaultAccounts
-      }
-    
-    // CRITICAL: If user has stored data, use ONLY that data - never merge with defaults
-    // This prevents old accounts from coming back and preserves all user data
-    const filtered = loaded.filter(acc => !deletedAccountsSet.has(acc.name))
-    console.log('✅ Using ONLY stored accounts - no merging with defaults to preserve user data')
-    return filtered
+      const loaded = loadAccountsFromStorage()
+      if (!loaded || loaded.length === 0) return []
+
+      const deletedAccountsSet = loadDeletedAccountsFromStorage()
+      if (deletedAccountsSet.size === 0) return loaded
+
+      return loaded.filter((acc) => !deletedAccountsSet.has(acc.name))
     } catch (error) {
-      console.error('❌ Error loading accounts, using defaults:', error)
-      // On any error, try to preserve ALL user data from localStorage
-      try {
-        const stored = loadAccountsFromStorage()
-        const storedAccountsMap = new Map<string, Account>()
-        if (stored && Array.isArray(stored)) {
-          stored.forEach(acc => {
-            if (acc && acc.name) {
-              storedAccountsMap.set(acc.name, acc)
-            }
-          })
-        }
-        const defaultAccounts = accounts.map(acc => {
-          const stored = storedAccountsMap.get(acc.name)
-          // Preserve ALL user-modified data from stored account if it exists
-          if (stored) {
-            return { ...acc, ...stored }
-          }
-          return acc
-        })
-        try {
-          saveAccountsToStorage(defaultAccounts)
-        } catch (e) {
-          console.error('Failed to save accounts:', e)
-        }
-        return defaultAccounts
-      } catch (e) {
-        // Final fallback - just return defaults
-        return [...accounts]
-      }
+      console.error('❌ Error loading accounts from storage:', error)
+      return []
     }
   })
 
@@ -3362,6 +3347,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [accountsData])
 
   useEffect(() => {
+    if (!hasSyncedCustomersRef.current) return
     if (!isStorageAvailable()) return
     if (lastSyncedHashRef.current === null) {
       lastSyncedHashRef.current = getItem(OdcrmStorageKeys.accountsBackendSyncHash) || null
@@ -4148,6 +4134,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   // Restore Google Sheets + account details from latest backup (if available).
   useEffect(() => {
+    if (hasSyncedCustomersRef.current) return
     if (!isStorageAvailable()) return
     const current = loadAccountsFromStorage()
     const hasSheets = current.some((acc) => acc.clientLeadsSheetUrl)
@@ -4215,18 +4202,19 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       }
 
-      if (changed) {
-        saveAccountsToStorage(merged)
-        setAccountsData(merged)
-        emit('accountsUpdated', merged)
-        toast({
-          title: 'Accounts updated',
-          description: 'Restored account details from the customer database.',
-          status: 'success',
-          duration: 3000,
-          isClosable: true,
-        })
-      }
+      if (!changed) return
+
+      saveAccountsToStorage(merged)
+      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      setAccountsData(merged)
+      emit('accountsUpdated', merged)
+      toast({
+        title: 'Accounts updated',
+        description: 'Loaded account details from the customer database.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
     }
 
     void syncFromCustomers()

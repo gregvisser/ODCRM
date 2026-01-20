@@ -26,7 +26,7 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { MdArrowUpward, MdArrowDownward } from 'react-icons/md'
-import { accounts as defaultAccounts, type Account } from './AccountsTab'
+import { type Account } from './AccountsTab'
 import { ExportImportButtons } from './ExportImportButtons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
@@ -38,7 +38,7 @@ import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 function loadAccountsFromStorage(): Account[] {
   const parsed = getJson<Account[]>(OdcrmStorageKeys.accounts)
   if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed
-  return defaultAccounts // fallback if storage empty or invalid
+  return []
 }
 
 type Lead = {
