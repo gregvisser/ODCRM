@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
@@ -17,10 +17,28 @@ import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import { getItem, getJson, setItem, setJson } from '../../platform/storage'
+import { api } from '../../utils/api'
 
 type Lead = {
   [key: string]: string
   accountName: string
+}
+
+type CustomerApi = {
+  id: string
+  name: string
+  domain?: string | null
+  leadsReportingUrl?: string | null
+  sector?: string | null
+  clientStatus?: string | null
+  targetJobTitle?: string | null
+  prospectingLocation?: string | null
+  monthlyIntakeGBP?: number | string | null
+  defcon?: number | null
+  weeklyLeadTarget?: number | null
+  weeklyLeadActual?: number | null
+  monthlyLeadTarget?: number | null
+  monthlyLeadActual?: number | null
 }
 
 const LEAD_SOURCE_CATEGORIES = [
@@ -45,6 +63,17 @@ const LEAD_SOURCE_KEYWORDS: Record<string, string[]> = {
   'CRM Email': ['crm email'],
 }
 
+const DEFAULT_ABOUT_SECTIONS: Account['aboutSections'] = {
+  whatTheyDo: 'Information will be populated via AI research.',
+  accreditations: 'Information will be populated via AI research.',
+  keyLeaders: 'Information will be populated via AI research.',
+  companyProfile: 'Information will be populated via AI research.',
+  recentNews: 'Information will be populated via AI research.',
+  companySize: '',
+  headquarters: '',
+  foundingYear: '',
+}
+
 const normalizeLeadSource = (value: string | undefined): string | null => {
   if (!value) return null
   const cleaned = value.trim().toLowerCase()
@@ -61,6 +90,122 @@ const normalizeLeadSource = (value: string | undefined): string | null => {
   }
 
   return null
+}
+
+function mapClientStatusToAccountStatus(status?: string | null): Account['status'] {
+  switch (status) {
+    case 'inactive':
+      return 'Inactive'
+    case 'onboarding':
+    case 'win_back':
+      return 'On Hold'
+    default:
+      return 'Active'
+  }
+}
+
+function normalizeCustomerWebsite(domain?: string | null): string {
+  if (!domain) return ''
+  if (domain.startsWith('http://') || domain.startsWith('https://')) return domain
+  return `https://${domain}`
+}
+
+function normalizeName(value?: string | null): string {
+  if (!value) return ''
+  return value
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]/g, '')
+}
+
+function normalizeDomain(value?: string | null): string {
+  if (!value) return ''
+  try {
+    const withScheme = value.startsWith('http') ? value : `https://${value}`
+    const host = new URL(withScheme).hostname
+    return host.replace(/^www\./, '').toLowerCase()
+  } catch {
+    return value.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase()
+  }
+}
+
+function findCustomerForAccount(account: Account, customers: CustomerApi[]): CustomerApi | undefined {
+  const accountKey = normalizeName(account.name)
+  const accountDomain = normalizeDomain(account.website)
+
+  return customers.find((customer) => {
+    const customerKey = normalizeName(customer.name)
+    const customerDomain = normalizeDomain(customer.domain ?? '')
+    if (accountKey && customerKey && accountKey === customerKey) return true
+    if (accountDomain && customerDomain && accountDomain === customerDomain) return true
+    return false
+  })
+}
+
+function buildAccountFromCustomer(customer: CustomerApi): Account {
+  return {
+    name: customer.name,
+    website: normalizeCustomerWebsite(customer.domain),
+    aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
+    sector: customer.sector || 'To be determined',
+    socialMedia: [],
+    status: mapClientStatusToAccountStatus(customer.clientStatus),
+    targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
+    targetTitle: customer.targetJobTitle || '',
+    monthlySpendGBP: Number(customer.monthlyIntakeGBP || 0),
+    agreements: [],
+    defcon: customer.defcon ?? 3,
+    contractStart: '',
+    contractEnd: '',
+    days: 0,
+    contacts: 0,
+    leads: 0,
+    weeklyTarget: customer.weeklyLeadTarget ?? 0,
+    weeklyActual: customer.weeklyLeadActual ?? 0,
+    monthlyTarget: customer.monthlyLeadTarget ?? 0,
+    monthlyActual: customer.monthlyLeadActual ?? 0,
+    weeklyReport: '',
+    users: [],
+    clientLeadsSheetUrl: customer.leadsReportingUrl || '',
+  }
+}
+
+function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Account {
+  const updates: Partial<Account> = {}
+  if (!account.clientLeadsSheetUrl && customer.leadsReportingUrl) {
+    updates.clientLeadsSheetUrl = customer.leadsReportingUrl
+  }
+  if ((!account.sector || account.sector === 'To be determined') && customer.sector) {
+    updates.sector = customer.sector
+  }
+  if ((!account.targetTitle || !account.targetTitle.trim()) && customer.targetJobTitle) {
+    updates.targetTitle = customer.targetJobTitle
+  }
+  if ((account.targetLocation?.length ?? 0) === 0 && customer.prospectingLocation) {
+    updates.targetLocation = [customer.prospectingLocation]
+  }
+  if ((!account.defcon || account.defcon === 0) && customer.defcon) {
+    updates.defcon = customer.defcon
+  }
+  if ((!account.weeklyTarget || account.weeklyTarget === 0) && customer.weeklyLeadTarget) {
+    updates.weeklyTarget = customer.weeklyLeadTarget
+  }
+  if ((!account.weeklyActual || account.weeklyActual === 0) && customer.weeklyLeadActual) {
+    updates.weeklyActual = customer.weeklyLeadActual
+  }
+  if ((!account.monthlyTarget || account.monthlyTarget === 0) && customer.monthlyLeadTarget) {
+    updates.monthlyTarget = customer.monthlyLeadTarget
+  }
+  if ((!account.monthlyActual || account.monthlyActual === 0) && customer.monthlyLeadActual) {
+    updates.monthlyActual = customer.monthlyLeadActual
+  }
+  if ((!account.monthlySpendGBP || account.monthlySpendGBP === 0) && customer.monthlyIntakeGBP) {
+    updates.monthlySpendGBP = Number(customer.monthlyIntakeGBP || 0)
+  }
+  if (!account.website && customer.domain) {
+    updates.website = normalizeCustomerWebsite(customer.domain)
+  }
+  return Object.keys(updates).length ? { ...account, ...updates } : account
 }
 
 function loadAccountsFromStorage(): Account[] {
@@ -236,6 +381,7 @@ export default function DashboardsHomePage() {
   const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
   const [loading, setLoading] = useState(leads.length === 0)
   const [lastRefresh, setLastRefresh] = useState<Date>(() => loadLastRefreshFromStorage() || new Date())
+  const hasSyncedCustomersRef = useRef(false)
 
   const refreshLeads = async (forceRefresh: boolean) => {
     if (!forceRefresh && !shouldRefresh(leads)) return
@@ -290,7 +436,51 @@ export default function DashboardsHomePage() {
   }
 
   useEffect(() => {
-    void refreshLeads(false)
+    const syncFromCustomers = async () => {
+      if (hasSyncedCustomersRef.current) return
+      hasSyncedCustomersRef.current = true
+      const { data, error } = await api.get<CustomerApi[]>('/api/customers')
+      if (error || !data || data.length === 0) return
+
+      const stored = loadAccountsFromStorage()
+      const byName = new Map<string, Account>()
+      stored.forEach((acc) => {
+        byName.set(acc.name, acc)
+        const normalized = normalizeName(acc.name)
+        if (normalized) byName.set(normalized, acc)
+      })
+      let changed = false
+
+      const merged = stored.map((acc) => {
+        const customer = findCustomerForAccount(acc, data)
+        if (!customer) return acc
+        const updated = mergeAccountFromCustomer(acc, customer)
+        if (updated !== acc) changed = true
+        return updated
+      })
+
+      for (const customer of data) {
+        const customerKey = normalizeName(customer.name)
+        if (!byName.has(customer.name) && !byName.has(customerKey)) {
+          merged.push(buildAccountFromCustomer(customer))
+          changed = true
+        }
+      }
+
+      if (changed) {
+        setJson(OdcrmStorageKeys.accounts, merged)
+        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+        setAccountsData(merged)
+        emit('accountsUpdated', merged)
+      }
+    }
+
+    const init = async () => {
+      await syncFromCustomers()
+      await refreshLeads(false)
+    }
+
+    void init()
 
     const offAccountsUpdated = on('accountsUpdated', () => {
       setAccountsData(loadAccountsFromStorage())

@@ -937,6 +937,17 @@ function mapClientStatusToAccountStatus(status?: string | null): Account['status
   }
 }
 
+function mapAccountStatusToClientStatus(status?: Account['status']): CustomerApi['clientStatus'] {
+  switch (status) {
+    case 'Inactive':
+      return 'inactive'
+    case 'On Hold':
+      return 'onboarding'
+    default:
+      return 'active'
+  }
+}
+
 function normalizeCustomerWebsite(domain?: string | null): string {
   if (!domain) return ''
   if (domain.startsWith('http://') || domain.startsWith('https://')) return domain
@@ -960,6 +971,162 @@ function normalizeDomain(value?: string | null): string {
   } catch {
     return value.replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase()
   }
+}
+
+function computeAccountsSyncHash(accountsData: Account[]): string {
+  const normalized = accountsData
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((account) => ({
+      name: account.name,
+      website: account.website,
+      clientLeadsSheetUrl: account.clientLeadsSheetUrl,
+      sector: account.sector,
+      status: account.status,
+      targetLocation: account.targetLocation,
+      targetTitle: account.targetTitle,
+      monthlySpendGBP: account.monthlySpendGBP,
+      defcon: account.defcon,
+      weeklyTarget: account.weeklyTarget,
+      weeklyActual: account.weeklyActual,
+      monthlyTarget: account.monthlyTarget,
+      monthlyActual: account.monthlyActual,
+    }))
+  return JSON.stringify(normalized)
+}
+
+function buildCustomerPayloadFromAccount(account: Account): {
+  name: string
+  domain?: string
+  leadsReportingUrl?: string | null
+  sector?: string | null
+  clientStatus?: string | null
+  targetJobTitle?: string | null
+  prospectingLocation?: string | null
+  monthlyIntakeGBP?: number | null
+  defcon?: number | null
+  weeklyLeadTarget?: number | null
+  weeklyLeadActual?: number | null
+  monthlyLeadTarget?: number | null
+  monthlyLeadActual?: number | null
+} {
+  const payload: Record<string, string | number | null | undefined> = {
+    name: account.name,
+  }
+
+  const domain = normalizeDomain(account.website)
+  if (domain) payload.domain = domain
+  if (account.clientLeadsSheetUrl) payload.leadsReportingUrl = account.clientLeadsSheetUrl
+  if (account.sector && account.sector !== 'To be determined') payload.sector = account.sector
+  if (account.status) payload.clientStatus = mapAccountStatusToClientStatus(account.status) || 'active'
+  if (account.targetTitle) payload.targetJobTitle = account.targetTitle
+  if (account.targetLocation?.length) payload.prospectingLocation = account.targetLocation[0]
+
+  if (account.monthlySpendGBP && account.monthlySpendGBP > 0) {
+    payload.monthlyIntakeGBP = Number(account.monthlySpendGBP)
+  }
+  if (account.defcon && account.defcon > 0) payload.defcon = account.defcon
+  if (account.weeklyTarget && account.weeklyTarget > 0) payload.weeklyLeadTarget = account.weeklyTarget
+  if (account.weeklyActual && account.weeklyActual > 0) payload.weeklyLeadActual = account.weeklyActual
+  if (account.monthlyTarget && account.monthlyTarget > 0) payload.monthlyLeadTarget = account.monthlyTarget
+  if (account.monthlyActual && account.monthlyActual > 0) payload.monthlyLeadActual = account.monthlyActual
+
+  return payload as {
+    name: string
+    domain?: string
+    leadsReportingUrl?: string | null
+    sector?: string | null
+    clientStatus?: string | null
+    targetJobTitle?: string | null
+    prospectingLocation?: string | null
+    monthlyIntakeGBP?: number | null
+    defcon?: number | null
+    weeklyLeadTarget?: number | null
+    weeklyLeadActual?: number | null
+    monthlyLeadTarget?: number | null
+    monthlyLeadActual?: number | null
+  }
+}
+
+function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPayloadFromAccount>): boolean {
+  const { name, ...rest } = payload
+  return Object.values(rest).some((value) => value !== undefined && value !== null && value !== '')
+}
+
+function diffCustomerPayload(
+  customer: CustomerApi,
+  payload: ReturnType<typeof buildCustomerPayloadFromAccount>,
+): Record<string, string | number | null> {
+  const updates: Record<string, string | number | null> = {}
+  const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
+  const normalizeNumber = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return null
+    const parsed = Number(value)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+
+  if (payload.name && normalizeValue(payload.name) !== normalizeValue(customer.name)) {
+    updates.name = payload.name
+  }
+  if (payload.domain && normalizeValue(payload.domain) !== normalizeValue(customer.domain)) {
+    updates.domain = payload.domain
+  }
+  if (
+    payload.leadsReportingUrl &&
+    normalizeValue(payload.leadsReportingUrl) !== normalizeValue(customer.leadsReportingUrl)
+  ) {
+    updates.leadsReportingUrl = payload.leadsReportingUrl
+  }
+  if (payload.sector && normalizeValue(payload.sector) !== normalizeValue(customer.sector)) {
+    updates.sector = payload.sector
+  }
+  if (payload.clientStatus && normalizeValue(payload.clientStatus) !== normalizeValue(customer.clientStatus)) {
+    updates.clientStatus = payload.clientStatus
+  }
+  if (
+    payload.targetJobTitle &&
+    normalizeValue(payload.targetJobTitle) !== normalizeValue(customer.targetJobTitle)
+  ) {
+    updates.targetJobTitle = payload.targetJobTitle
+  }
+  if (
+    payload.prospectingLocation &&
+    normalizeValue(payload.prospectingLocation) !== normalizeValue(customer.prospectingLocation)
+  ) {
+    updates.prospectingLocation = payload.prospectingLocation
+  }
+
+  const monthlyIntake = normalizeNumber(payload.monthlyIntakeGBP)
+  if (monthlyIntake !== null && monthlyIntake !== normalizeNumber(customer.monthlyIntakeGBP)) {
+    updates.monthlyIntakeGBP = monthlyIntake
+  }
+  if (payload.defcon && payload.defcon !== customer.defcon) updates.defcon = payload.defcon
+  if (
+    payload.weeklyLeadTarget &&
+    payload.weeklyLeadTarget !== normalizeNumber(customer.weeklyLeadTarget)
+  ) {
+    updates.weeklyLeadTarget = payload.weeklyLeadTarget
+  }
+  if (
+    payload.weeklyLeadActual &&
+    payload.weeklyLeadActual !== normalizeNumber(customer.weeklyLeadActual)
+  ) {
+    updates.weeklyLeadActual = payload.weeklyLeadActual
+  }
+  if (
+    payload.monthlyLeadTarget &&
+    payload.monthlyLeadTarget !== normalizeNumber(customer.monthlyLeadTarget)
+  ) {
+    updates.monthlyLeadTarget = payload.monthlyLeadTarget
+  }
+  if (
+    payload.monthlyLeadActual &&
+    payload.monthlyLeadActual !== normalizeNumber(customer.monthlyLeadActual)
+  ) {
+    updates.monthlyLeadActual = payload.monthlyLeadActual
+  }
+
+  return updates
 }
 
 function findCustomerForAccount(account: Account, customers: CustomerApi[]): CustomerApi | undefined {
@@ -3032,6 +3199,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
   const hasSyncedCustomersRef = useRef(false)
+  const syncInFlightRef = useRef(false)
+  const pendingSyncRef = useRef(false)
+  const lastSyncedHashRef = useRef<string | null>(null)
+  const latestAccountsRef = useRef<Account[]>([])
   const [newAccountForm, setNewAccountForm] = useState<Partial<Account>>({
     name: '',
     website: '',
@@ -3311,6 +3482,70 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
+
+  useEffect(() => {
+    latestAccountsRef.current = accountsData
+  }, [accountsData])
+
+  useEffect(() => {
+    if (!isStorageAvailable()) return
+    if (lastSyncedHashRef.current === null) {
+      lastSyncedHashRef.current = getItem(OdcrmStorageKeys.accountsBackendSyncHash) || null
+    }
+
+    const nextHash = computeAccountsSyncHash(accountsData)
+    if (nextHash === lastSyncedHashRef.current) return
+
+    const syncAccountsToBackend = async (accountsToSync: Account[], hash: string) => {
+      if (syncInFlightRef.current) {
+        pendingSyncRef.current = true
+        return
+      }
+      syncInFlightRef.current = true
+
+      try {
+        const { data, error } = await api.get<CustomerApi[]>('/api/customers')
+        if (error || !data) return
+
+        for (const account of accountsToSync) {
+          const payload = buildCustomerPayloadFromAccount(account)
+          if (!hasSyncableCustomerFields(payload)) continue
+
+          const customer = findCustomerForAccount(account, data)
+          if (customer) {
+            const updates = diffCustomerPayload(customer, payload)
+            if (Object.keys(updates).length > 0) {
+              await api.put(`/api/customers/${customer.id}`, { ...updates, name: payload.name })
+            }
+          } else {
+            await api.post('/api/customers', payload)
+          }
+        }
+
+        setItem(OdcrmStorageKeys.accountsBackendSyncHash, hash)
+        lastSyncedHashRef.current = hash
+      } catch (err) {
+        console.warn('Failed to sync accounts to backend:', err)
+      } finally {
+        syncInFlightRef.current = false
+        if (pendingSyncRef.current) {
+          pendingSyncRef.current = false
+          const latest = latestAccountsRef.current
+          const latestHash = computeAccountsSyncHash(latest)
+          if (latestHash !== lastSyncedHashRef.current) {
+            void syncAccountsToBackend(latest, latestHash)
+          }
+        }
+      }
+    }
+
+    const timer = window.setTimeout(() => {
+      void syncAccountsToBackend(accountsData, nextHash)
+    }, 1200)
+
+    return () => window.clearTimeout(timer)
+  }, [accountsData])
+
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
