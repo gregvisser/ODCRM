@@ -711,8 +711,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               setLeads(importedLeads)
               saveLeadsToStorage(importedLeads)
               syncAccountLeadCountsFromLeads(importedLeads)
-              // Dispatch event to update accounts with new actuals
-              emit('leadsUpdated')
               toast({
                 title: 'Leads imported',
                 description: `${importedLeads.length} leads loaded successfully.`,

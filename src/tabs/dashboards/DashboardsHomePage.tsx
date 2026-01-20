@@ -16,7 +16,7 @@ import { accounts as defaultAccounts, type Account } from '../../components/Acco
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { OdcrmStorageKeys } from '../../platform/keys'
-import { getItem, getJson } from '../../platform/storage'
+import { getItem, getJson, setItem, setJson } from '../../platform/storage'
 import { api } from '../../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../../utils/leadsApi'
 
