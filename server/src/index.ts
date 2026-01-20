@@ -19,11 +19,38 @@ dotenv.config()
 
 const app = express()
 
+const parseAllowedOrigins = () => {
+  const raw = [process.env.FRONTEND_URLS, process.env.FRONTEND_URL]
+    .filter(Boolean)
+    .join(',')
+  const fromEnv = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  const defaults = [
+    'http://localhost:5173',
+    'https://bidlow.co.uk',
+    'https://www.bidlow.co.uk',
+  ]
+
+  return Array.from(new Set([...fromEnv, ...defaults]))
+}
+
+const allowedOrigins = parseAllowedOrigins()
+
 // Middleware
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
-}))
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true)
+      if (allowedOrigins.includes(origin)) return callback(null, true)
+      if (origin.endsWith('.vercel.app')) return callback(null, true)
+      return callback(new Error('Not allowed by CORS'))
+    },
+    credentials: true,
+  }),
+)
 app.use(express.json())
 
 // Health check
