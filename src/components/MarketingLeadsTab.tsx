@@ -254,29 +254,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     }
   }, [])
 
-  if (loading && leads.length === 0) {
-    return (
-      <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="brand.700" thickness="4px" />
-        <Text mt={4} color="gray.600">
-          Loading leads data from the server...
-        </Text>
-      </Box>
-    )
-  }
-
-  if (error && leads.length === 0) {
-    return (
-      <Alert status="error" borderRadius="lg">
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Box>
-      </Alert>
-    )
-  }
-
   // Get all unique column headers from all leads (excluding accountName)
   const allColumns = new Set<string>()
   leads.forEach((lead) => {
@@ -687,6 +664,29 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     }
 
     return <Text fontSize="sm">{value}</Text>
+  }
+
+  if (loading && leads.length === 0) {
+    return (
+      <Box textAlign="center" py={12}>
+        <Spinner size="xl" color="brand.700" thickness="4px" />
+        <Text mt={4} color="gray.600">
+          Loading leads data from the server...
+        </Text>
+      </Box>
+    )
+  }
+
+  if (error && leads.length === 0) {
+    return (
+      <Alert status="error" borderRadius="lg">
+        <AlertIcon />
+        <Box>
+          <AlertTitle>Error loading leads</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Box>
+      </Alert>
+    )
   }
 
   return (
