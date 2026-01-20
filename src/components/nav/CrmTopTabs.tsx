@@ -1,4 +1,4 @@
-import { Box, Button, Text, VStack } from '@chakra-ui/react'
+import { Box, Button, HStack, Icon, Text, VStack, useBreakpointValue } from '@chakra-ui/react'
 import {
   AddIcon,
   AtSignIcon,
@@ -30,8 +30,10 @@ export function CrmTopTabs({
   activeTab: CrmTopTabId
   onTabClick: (tabId: CrmTopTabId) => void
 }) {
+  const showLabels = useBreakpointValue({ base: false, md: true })
+
   return (
-    <VStack align="stretch" spacing={2} w="100%">
+    <VStack align="stretch" spacing={1} w="100%">
       {CRM_TOP_TABS.map((tab) => {
         const isActive = activeTab === tab.id
         const IconComponent = getTabIcon(tab.id)
@@ -40,25 +42,29 @@ export function CrmTopTabs({
             key={tab.id}
             size="md"
             onClick={() => onTabClick(tab.id)}
-            justifyContent="flex-start"
-            px={4}
-            py={3}
-            borderRadius="lg"
+            justifyContent="center"
+            px={showLabels ? 3 : 0}
+            py={2}
+            borderRadius="md"
             position="relative"
-            bg={isActive ? 'bg.subtle' : 'transparent'}
-            color={isActive ? 'text.primary' : 'text.muted'}
+            bg={isActive ? 'sidebar.itemActive' : 'transparent'}
+            color={isActive ? 'sidebar.textActive' : 'sidebar.text'}
             border="1px solid"
-            borderColor={isActive ? 'border.subtle' : 'transparent'}
+            borderColor={isActive ? 'sidebar.itemActive' : 'transparent'}
             _hover={{
-              bg: 'bg.subtle',
-              color: 'text.primary',
-              borderColor: 'border.subtle',
+              bg: 'sidebar.itemHover',
+              color: 'sidebar.textActive',
+              borderColor: 'sidebar.itemHover',
             }}
-            leftIcon={<IconComponent boxSize="18px" />}
           >
-            <Text fontSize="sm" fontWeight={isActive ? 'semibold' : 'normal'}>
-              {tab.label}
-            </Text>
+            <HStack spacing={showLabels ? 3 : 0} w="100%" justify={showLabels ? 'flex-start' : 'center'}>
+              <Icon as={IconComponent} boxSize="18px" />
+              {showLabels ? (
+                <Text fontSize="sm" fontWeight={isActive ? 'semibold' : 'normal'}>
+                  {tab.label}
+                </Text>
+              ) : null}
+            </HStack>
           </Button>
         )
       })}

@@ -1,52 +1,35 @@
 import { extendTheme, type ThemeConfig } from '@chakra-ui/react'
 
 const brand = {
-  50: '#effae9',
-  100: '#d7f2e4',
-  200: '#bce4d6',
-  300: '#a1d5c8',
-  400: '#87c7b8',
-  500: '#75a99a', // primary brand color (#75a99a)
-  600: '#5f857b',
-  700: '#4a695f',
-  800: '#334d44',
-  900: '#1f322b',
+  50: '#f5f8fa',
+  100: '#e1eaf0',
+  200: '#cbd6e2',
+  300: '#a7b8c8',
+  400: '#8696a8',
+  500: '#66788a',
+  600: '#4d5c6d',
+  700: '#33475b',
+  800: '#243747',
+  900: '#1b2a38',
 }
 
 const accent = {
-  50: '#effdf5',
-  100: '#cdf7e6',
-  200: '#a7f0d4',
-  300: '#7fe6c0',
-  400: '#57dba9',
-  500: '#3eb489', // accent highlight (#3eb489)
-  600: '#2c8b68',
-  700: '#1f624a',
-  800: '#103b2b',
-  900: '#072116',
-}
-
-const sage = {
-  50: '#effae9',
-  100: '#e2f3e3',
-  200: '#cce7d4',
-  300: '#b6d6c6',
-  400: '#9ec5b3',
-  500: '#75a99a',
-  600: '#5d867a',
-  700: '#46685e',
-  800: '#2f4a42',
-  900: '#1f322b',
+  50: '#fff3ef',
+  100: '#ffd9cc',
+  200: '#ffb8a1',
+  300: '#ff9b7a',
+  400: '#ff855f',
+  500: '#ff7a59',
+  600: '#f25c3c',
+  700: '#d94d30',
+  800: '#b63b26',
+  900: '#8f2a1b',
 }
 
 const colors = {
   brand,
   accent,
-  mist: {
-    50: '#effae9', // soft background (#effae9)
-  },
-  gray: sage,
-  teal: accent,
+  gray: brand,
 }
 
 const config: ThemeConfig = {
@@ -57,20 +40,20 @@ const config: ThemeConfig = {
 
 const formFieldOutlined = {
   field: {
-    borderRadius: 'xl',
+    borderRadius: 'md',
     borderWidth: '1px',
-    borderColor: 'brand.100',
+    borderColor: 'brand.200',
     bg: 'white',
     transition: 'all 0.2s ease',
     _placeholder: {
       color: 'brand.400',
     },
     _hover: {
-      borderColor: 'brand.200',
+      borderColor: 'brand.300',
     },
     _focusVisible: {
-      borderColor: 'accent.400',
-      boxShadow: '0 0 0 1px var(--chakra-colors-accent-400)',
+      borderColor: 'accent.500',
+      boxShadow: '0 0 0 1px var(--chakra-colors-accent-500)',
     },
     _dark: {
       borderColor: 'brand.700',
@@ -83,8 +66,8 @@ const formFieldOutlined = {
         borderColor: 'brand.600',
       },
       _focusVisible: {
-        borderColor: 'brand.700',
-        boxShadow: '0 0 0 1px var(--chakra-colors-brand-700)',
+        borderColor: 'brand.500',
+        boxShadow: '0 0 0 1px var(--chakra-colors-brand-500)',
       },
     },
   },
@@ -103,24 +86,24 @@ const theme = extendTheme({
   },
   semanticTokens: {
     colors: {
-      'bg.canvas': { 
-        default: 'mist.50',
+      'bg.canvas': {
+        default: 'brand.50',
         _dark: 'brand.900',
       },
-      'bg.surface': { 
+      'bg.surface': {
         default: 'white',
         _dark: 'brand.800',
       },
-      'bg.subtle': { 
-        default: 'brand.50',
+      'bg.subtle': {
+        default: 'brand.100',
         _dark: 'brand.700',
       },
-      'border.subtle': { 
-        default: 'brand.100',
-        _dark: 'brand.600',
+      'border.subtle': {
+        default: 'brand.200',
+        _dark: 'brand.700',
       },
-      'text.muted': { 
-        default: 'brand.600',
+      'text.muted': {
+        default: 'brand.500',
         _dark: 'brand.300',
       },
       'text.primary': {
@@ -128,8 +111,32 @@ const theme = extendTheme({
         _dark: 'brand.50',
       },
       'text.secondary': {
-        default: 'brand.700',
+        default: 'brand.600',
         _dark: 'brand.200',
+      },
+      'sidebar.bg': {
+        default: 'brand.700',
+        _dark: 'brand.800',
+      },
+      'sidebar.border': {
+        default: 'brand.800',
+        _dark: 'brand.900',
+      },
+      'sidebar.text': {
+        default: 'whiteAlpha.700',
+        _dark: 'whiteAlpha.700',
+      },
+      'sidebar.textActive': {
+        default: 'white',
+        _dark: 'white',
+      },
+      'sidebar.itemHover': {
+        default: 'whiteAlpha.200',
+        _dark: 'whiteAlpha.200',
+      },
+      'sidebar.itemActive': {
+        default: 'whiteAlpha.300',
+        _dark: 'whiteAlpha.300',
       },
     },
   },
@@ -137,25 +144,25 @@ const theme = extendTheme({
     pill: '999px',
   },
   fonts: {
-    heading: `'Playfair Display', serif`,
+    heading: `'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`,
     body: `'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`,
   },
   styles: {
     global: (props: any) => ({
       'html, body': {
-        bg: props.colorMode === 'dark' ? 'brand.900' : 'mist.50',
+        bg: props.colorMode === 'dark' ? 'brand.900' : 'brand.50',
         color: props.colorMode === 'dark' ? 'brand.50' : 'brand.900',
         minHeight: '100%',
         transition: 'background-color 0.2s, color 0.2s',
       },
       body: {
-        bg: props.colorMode === 'dark' ? 'brand.900' : 'mist.50',
+        bg: props.colorMode === 'dark' ? 'brand.900' : 'brand.50',
       },
       '#root': {
         minHeight: '100vh',
       },
       '::selection': {
-        background: props.colorMode === 'dark' ? 'brand.700' : 'mist.50',
+        background: props.colorMode === 'dark' ? 'brand.700' : 'brand.100',
         color: props.colorMode === 'dark' ? 'white' : 'brand.900',
       },
     }),
@@ -163,50 +170,50 @@ const theme = extendTheme({
   components: {
     Button: {
       baseStyle: {
-        borderRadius: 'full',
+        borderRadius: 'md',
         fontWeight: '600',
-        letterSpacing: '0.02em',
+        letterSpacing: '0.01em',
         transition: 'all 0.2s ease',
       },
       variants: {
         solid: {
-          bg: 'brand.900',
+          bg: 'accent.500',
           color: 'white',
           boxShadow: 'sm',
           _hover: {
-            bg: 'brand.800',
+            bg: 'accent.600',
             boxShadow: 'md',
             transform: 'translateY(-1px)',
           },
           _active: {
-            bg: 'brand.700',
+            bg: 'accent.700',
             boxShadow: 'sm',
             transform: 'translateY(0)',
           },
           _dark: {
-            bg: 'brand.700',
+            bg: 'accent.600',
             _hover: {
-              bg: 'brand.600',
+              bg: 'accent.700',
             },
             _active: {
-              bg: 'brand.500',
+              bg: 'accent.800',
             },
           },
         },
         outline: {
           borderColor: 'brand.200',
           color: 'brand.700',
-          bg: 'whiteAlpha.700',
+          bg: 'white',
           _hover: {
             borderColor: 'brand.400',
             color: 'brand.800',
-            bg: 'white',
+            bg: 'brand.50',
             boxShadow: 'xs',
           },
           _active: {
             borderColor: 'brand.500',
             color: 'brand.900',
-            bg: 'brand.50',
+            bg: 'brand.100',
           },
           _dark: {
             borderColor: 'brand.600',
@@ -214,7 +221,7 @@ const theme = extendTheme({
             bg: 'brand.800',
             _hover: {
               borderColor: 'brand.500',
-              color: 'brand.100',
+              color: 'brand.50',
               bg: 'brand.700',
             },
             _active: {
@@ -228,11 +235,11 @@ const theme = extendTheme({
           color: 'brand.700',
           bg: 'transparent',
           _hover: {
-            bg: 'brand.50',
+            bg: 'brand.100',
             color: 'brand.900',
           },
           _active: {
-            bg: 'brand.100',
+            bg: 'brand.200',
           },
           _dark: {
             color: 'brand.200',
@@ -269,15 +276,15 @@ const theme = extendTheme({
       variants: {
         softRounded: {
           tab: {
-            borderRadius: 'full',
+            borderRadius: 'md',
             px: 4,
             py: 2,
             _selected: {
-              bg: 'brand.900',
+              bg: 'brand.700',
               color: 'white',
               boxShadow: 'sm',
               _dark: {
-                bg: 'brand.700',
+                bg: 'brand.600',
               },
             },
           },
@@ -310,7 +317,7 @@ const theme = extendTheme({
           },
           tr: {
             _hover: {
-              bg: 'bg.subtle',
+              bg: 'brand.50',
             },
           },
         },

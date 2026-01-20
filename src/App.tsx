@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Box, Divider, Flex, VStack, IconButton, useColorMode } from '@chakra-ui/react'
-import { MoonIcon, SunIcon } from '@chakra-ui/icons'
+import {
+  Avatar,
+  Box,
+  Button,
+  Divider,
+  Flex,
+  HStack,
+  IconButton,
+  Input,
+  InputGroup,
+  InputLeftElement,
+  Text,
+  VStack,
+  useColorMode,
+} from '@chakra-ui/react'
+import { AddIcon, MoonIcon, SearchIcon, SunIcon } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { CrmTopTabs } from './components/nav/CrmTopTabs'
 import { DataPortability } from './components/DataPortability'
@@ -19,6 +33,10 @@ function App() {
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const [uxToolsEnabled, setUxToolsEnabled] = useState<boolean>(false)
   const { colorMode, toggleColorMode } = useColorMode()
+  const activeTabLabel = useMemo(
+    () => CRM_TOP_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Overview',
+    [activeTab],
+  )
 
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
@@ -178,18 +196,18 @@ function App() {
   return (
     <Flex
       minH="100vh"
-      bg="mist.50"
+      bg="bg.canvas"
       direction="row"
       position="relative"
       overflow="hidden"
     >
       {/* Left Sidebar Navigation */}
       <Box
-        w={{ base: '60px', md: '240px' }}
-        minW={{ base: '60px', md: '240px' }}
-        bg="bg.surface"
+        w={{ base: '64px', md: '240px' }}
+        minW={{ base: '64px', md: '240px' }}
+        bg="sidebar.bg"
         borderRight="1px solid"
-        borderColor="border.subtle"
+        borderColor="sidebar.border"
         p={{ base: 2, md: 4 }}
         display="flex"
         flexDirection="column"
@@ -201,11 +219,11 @@ function App() {
         zIndex={10}
       >
         {/* Logo - only show on larger screens */}
-        <Box display={{ base: 'none', md: 'block' }} mb={4}>
+        <Box display={{ base: 'none', md: 'block' }} mb={2}>
           <VStack spacing={2} align="flex-start" w="100%">
-            <HeaderImagePicker 
-              variant="logo" 
-              maxHeightPx={120} 
+            <HeaderImagePicker
+              variant="logo"
+              maxHeightPx={110}
               lockEdits={false}
               storageKey="odcrm_sidebar_logo_data_url"
             />
@@ -231,9 +249,11 @@ function App() {
             icon={colorMode === 'light' ? <MoonIcon /> : <SunIcon />}
             onClick={toggleColorMode}
             variant="ghost"
-            colorScheme="gray"
+            color="sidebar.text"
             size="md"
             w="100%"
+            _hover={{ bg: 'sidebar.itemHover', color: 'sidebar.textActive' }}
+            _active={{ bg: 'sidebar.itemActive' }}
           />
           {uxToolsEnabled ? <Box mt={2}><DataPortability /></Box> : null}
         </Box>
@@ -259,14 +279,54 @@ function App() {
           position="relative"
           zIndex={1}
         >
+          {/* Top Bar */}
+          <Box
+            bg="bg.surface"
+            borderRadius="xl"
+            border="1px solid"
+            borderColor="border.subtle"
+            px={{ base: 4, md: 6 }}
+            py={{ base: 3, md: 4 }}
+            boxShadow="sm"
+          >
+            <Flex
+              direction={{ base: 'column', md: 'row' }}
+              gap={{ base: 3, md: 6 }}
+              align={{ base: 'stretch', md: 'center' }}
+              justify="space-between"
+            >
+              <VStack spacing={1} align="flex-start">
+                <Text fontSize="xs" letterSpacing="0.08em" color="text.muted" textTransform="uppercase">
+                  OpenDoors CRM
+                </Text>
+                <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="600" color="text.primary">
+                  {activeTabLabel}
+                </Text>
+              </VStack>
+
+              <HStack spacing={3} flexWrap="wrap" justify={{ base: 'flex-start', md: 'flex-end' }}>
+                <InputGroup maxW={{ base: '100%', md: '360px' }}>
+                  <InputLeftElement pointerEvents="none">
+                    <SearchIcon color="text.muted" boxSize="14px" />
+                  </InputLeftElement>
+                  <Input placeholder="Search CRM" size="sm" />
+                </InputGroup>
+                <Button leftIcon={<AddIcon />} size="sm">
+                  Create
+                </Button>
+                <Avatar name="Bidlow" size="sm" bg="accent.500" color="white" />
+              </HStack>
+            </Flex>
+          </Box>
+
           {/* Main Content */}
           <Box
             bg="bg.surface"
-            borderRadius="3xl"
+            borderRadius="xl"
             border="1px solid"
             borderColor="border.subtle"
             p={{ base: 4, md: 6, lg: 8 }}
-            boxShadow="2xl"
+            boxShadow="sm"
             w="100%"
             minW={0}
             overflowX="auto"
