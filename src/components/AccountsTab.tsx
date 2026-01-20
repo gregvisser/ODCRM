@@ -68,6 +68,7 @@ import { fetchCompanyData, refreshCompanyData, type CompanyData } from '../servi
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { useExportImport } from '../utils/exportImport'
 import { api } from '../utils/api'
+import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
 type Contact = {
   name: string
@@ -236,133 +237,6 @@ function shouldRefreshMarketingLeads(leads: Lead[]): boolean {
   const now = new Date()
   const sixHoursInMs = 6 * 60 * 60 * 1000
   return now.getTime() - lastRefreshTime.getTime() >= sixHoursInMs
-}
-
-function extractSheetId(url: string): string | null {
-  try {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
-    return match ? match[1] : null
-  } catch {
-    return null
-  }
-}
-
-function extractGid(url: string): string | null {
-  try {
-    const gidMatch = url.match(/(?:[?&#])gid=(\d+)/i)
-    return gidMatch ? gidMatch[1] : null
-  } catch {
-    return null
-  }
-}
-
-function parseCsv(csvText: string): string[][] {
-  const lines: string[][] = []
-  let currentLine: string[] = []
-  let currentField = ''
-  let inQuotes = false
-
-  for (let i = 0; i < csvText.length; i++) {
-    const char = csvText[i]
-    const nextChar = csvText[i + 1]
-
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        currentField += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (char === ',' && !inQuotes) {
-      currentLine.push(currentField.trim())
-      currentField = ''
-    } else if (char === '\n' && !inQuotes) {
-      currentLine.push(currentField.trim())
-      currentField = ''
-      if (currentLine.length > 0) {
-        lines.push(currentLine)
-        currentLine = []
-      }
-    } else {
-      currentField += char
-    }
-  }
-
-  if (currentField || currentLine.length > 0) {
-    currentLine.push(currentField.trim())
-    lines.push(currentLine)
-  }
-
-  return lines
-}
-
-async function fetchLeadsFromSheet(sheetUrl: string, accountName: string): Promise<Lead[]> {
-  const sheetId = extractSheetId(sheetUrl)
-  if (!sheetId) {
-    throw new Error('Invalid Google Sheets URL format')
-  }
-
-  const extractedGid = extractGid(sheetUrl)
-  const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
-  let lastError: Error | null = null
-
-  for (const gid of gidsToTry) {
-    try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
-      const response = await fetch(csvUrl, {
-        mode: 'cors',
-        headers: { Accept: 'text/csv, text/plain, */*' },
-        credentials: 'omit',
-      })
-
-      if (!response.ok) {
-        lastError = new Error(`Failed to fetch: ${response.status} ${response.statusText}`)
-        continue
-      }
-
-      const csvText = await response.text()
-      if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
-        lastError = new Error('Received HTML instead of CSV. Check sheet sharing settings.')
-        continue
-      }
-
-      const rows = parseCsv(csvText)
-      if (rows.length < 2) return []
-
-      const headers = rows[0].map((h) => h.trim())
-      const leads: Lead[] = []
-
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i]
-        if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
-          continue
-        }
-
-        const lead: Lead = { accountName }
-        headers.forEach((header, index) => {
-          const value = row[index] || ''
-          if (header) lead[header] = value
-        })
-
-        const containsWcOrWv = Object.values(lead).some((value) => {
-          const lowerValue = value ? String(value).toLowerCase() : ''
-          return lowerValue.includes('w/c') || lowerValue.includes('w/v')
-        })
-        if (containsWcOrWv) continue
-
-        const nonEmptyFields = Object.keys(lead).filter(
-          (key) => key !== 'accountName' && lead[key] && lead[key].trim() !== '',
-        )
-        if (nonEmptyFields.length >= 2) leads.push(lead)
-      }
-
-      return leads
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error('Failed to parse CSV data')
-    }
-  }
-
-  throw lastError || new Error('Failed to fetch leads from Google Sheet')
 }
 
 // Load deleted contacts from storage
@@ -4374,26 +4248,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     let cancelled = false
     const refreshLeads = async () => {
       try {
-        const accountsToUse = loadAccountsFromStorage()
-        const allLeads: Lead[] = []
-
-        for (const account of accountsToUse) {
-          if (!account.clientLeadsSheetUrl) continue
-          try {
-            const accountLeads = await fetchLeadsFromSheet(account.clientLeadsSheetUrl, account.name)
-            allLeads.push(...accountLeads)
-          } catch (err) {
-            console.warn(`Failed to load leads for ${account.name}:`, err)
-          }
-        }
-
+        const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
         if (cancelled) return
-
-        setJson(OdcrmStorageKeys.marketingLeads, allLeads)
-        setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, new Date().toISOString())
-        setJson(OdcrmStorageKeys.leads, allLeads)
-        setItem(OdcrmStorageKeys.leadsLastRefresh, new Date().toISOString())
-        emit('leadsUpdated')
+        persistLeadsToStorage(allLeads, lastSyncAt)
       } catch (err) {
         console.warn('Failed to refresh leads:', err)
       }

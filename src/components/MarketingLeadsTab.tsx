@@ -29,9 +29,10 @@ import { MdArrowUpward, MdArrowDownward } from 'react-icons/md'
 import { accounts as defaultAccounts, type Account } from './AccountsTab'
 import { ExportImportButtons } from './ExportImportButtons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
-import { emit, on } from '../platform/events'
+import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
-import { getItem, getJson, setItem, setJson } from '../platform/storage'
+import { getItem, getJson } from '../platform/storage'
+import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -96,15 +97,8 @@ function loadLeadsFromStorage(): Lead[] {
 }
 
 // Save leads to storage
-function saveLeadsToStorage(leads: Lead[]) {
-  setJson(OdcrmStorageKeys.marketingLeads, leads)
-  const nowIso = new Date().toISOString()
-  setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, nowIso)
-
-  // Keep the shared leads store in sync so Accounts tab / account cards can read the same data.
-  // (AccountsTab reads `odcrm_leads` for per-account lead counts + weekly/monthly actuals.)
-  setJson(OdcrmStorageKeys.leads, leads)
-  setItem(OdcrmStorageKeys.leadsLastRefresh, nowIso)
+function saveLeadsToStorage(leads: Lead[], lastSyncAt?: string | null): Date {
+  return persistLeadsToStorage(leads, lastSyncAt)
 }
 
 // Load last refresh time from storage
@@ -113,203 +107,6 @@ function loadLastRefreshFromStorage(): Date | null {
   if (!stored) return null
   const d = new Date(stored)
   return isNaN(d.getTime()) ? null : d
-}
-
-// Extract sheet ID from Google Sheets URL
-function extractSheetId(url: string): string | null {
-  try {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
-    return match ? match[1] : null
-  } catch {
-    return null
-  }
-}
-
-// Extract gid (sheet tab ID) from Google Sheets URL
-function extractGid(url: string): string | null {
-  try {
-    // Try to extract gid from URL parameters or hash
-    // Format can be: ?gid=123 or &gid=123 or #gid=0
-    const gidMatch = url.match(/(?:[?&#])gid=(\d+)/i)
-    return gidMatch ? gidMatch[1] : null
-  } catch {
-    return null
-  }
-}
-
-// Parse CSV data
-function parseCsv(csvText: string): string[][] {
-  const lines: string[][] = []
-  let currentLine: string[] = []
-  let currentField = ''
-  let inQuotes = false
-
-  for (let i = 0; i < csvText.length; i++) {
-    const char = csvText[i]
-    const nextChar = csvText[i + 1]
-
-    if (char === '"') {
-      if (inQuotes && nextChar === '"') {
-        currentField += '"'
-        i++ // Skip next quote
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (char === ',' && !inQuotes) {
-      currentLine.push(currentField.trim())
-      currentField = ''
-    } else if (char === '\n' && !inQuotes) {
-      currentLine.push(currentField.trim())
-      currentField = ''
-      if (currentLine.length > 0) {
-        lines.push(currentLine)
-        currentLine = []
-      }
-    } else {
-      currentField += char
-    }
-  }
-
-  if (currentField || currentLine.length > 0) {
-    currentLine.push(currentField.trim())
-    lines.push(currentLine)
-  }
-
-  return lines
-}
-
-// Fetch leads from a Google Sheet
-async function fetchLeadsFromSheet(
-  sheetUrl: string,
-  accountName: string,
-): Promise<Lead[]> {
-  const sheetId = extractSheetId(sheetUrl)
-  if (!sheetId) {
-    throw new Error('Invalid Google Sheets URL format')
-  }
-
-  // Try to extract gid from URL, otherwise use '0'
-  const extractedGid = extractGid(sheetUrl)
-  const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
-  
-  let lastError: Error | null = null
-  
-  // Try with extracted gid first, then fallback to '0'
-  for (const gid of gidsToTry) {
-    try {
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
-      
-      let response: Response
-      try {
-        response = await fetch(csvUrl, {
-          mode: 'cors',
-          headers: {
-            'Accept': 'text/csv, text/plain, */*',
-          },
-          credentials: 'omit', // Don't send credentials for public sheets
-        })
-      } catch (networkError) {
-        // Handle network errors (CORS, connection issues, etc.)
-        if (networkError instanceof TypeError && networkError.message.includes('Failed to fetch')) {
-          lastError = new Error('Network error: Sheet may not be publicly accessible or CORS is blocked. Please ensure the sheet is shared as "Anyone with the link can view"')
-          continue // Try next gid
-        }
-        lastError = new Error(`Network error: ${networkError instanceof Error ? networkError.message : 'Unknown network error'}`)
-        continue
-      }
-
-      if (!response.ok) {
-        if (response.status === 403) {
-          lastError = new Error('Sheet is not publicly accessible. Please set sharing to "Anyone with the link can view"')
-          continue
-        } else if (response.status === 404) {
-          lastError = new Error('Sheet not found. Please check the URL is correct')
-          continue
-        } else {
-          lastError = new Error(`Failed to fetch: ${response.status} ${response.statusText}`)
-          continue
-        }
-      }
-
-      const csvText = await response.text()
-      
-      // Check if we got an HTML error page instead of CSV
-      if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
-        lastError = new Error('Received HTML instead of CSV. The sheet may not be publicly accessible. Please ensure the sheet is shared as "Anyone with the link can view"')
-        continue
-      }
-      
-      const rows = parseCsv(csvText)
-
-      if (rows.length < 2) {
-        return [] // No data rows
-      }
-
-      const headers = rows[0].map((h) => h.trim())
-      const leads: Lead[] = []
-
-      for (let i = 1; i < rows.length; i++) {
-        const row = rows[i]
-        if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
-          continue // Skip empty rows
-        }
-
-        const lead: Lead = {
-          accountName,
-        }
-
-        // Map all columns dynamically using original header names
-        headers.forEach((header, index) => {
-          const value = row[index] || ''
-          // Use original header name as key, preserving exact field names
-          if (header) {
-            lead[header] = value
-          }
-        })
-
-        // Skip rows that contain "w/c" or "w/v" in any field (case-insensitive)
-        const containsWcOrWv = Object.values(lead).some(
-          (value) => {
-            const lowerValue = value ? String(value).toLowerCase() : ''
-            return lowerValue.includes('w/c') || lowerValue.includes('w/v')
-          }
-        )
-        if (containsWcOrWv) {
-          continue // Skip this row
-        }
-
-        // Skip rows where both Name and Company columns are empty
-        const nameValue = lead['Name'] || lead['name'] || ''
-        const companyValue = lead['Company'] || lead['company'] || ''
-        const hasName = nameValue && nameValue.trim() !== ''
-        const hasCompany = companyValue && companyValue.trim() !== ''
-        if (!hasName && !hasCompany) {
-          continue
-        }
-
-        // Check if row has any meaningful data (at least 2 non-empty fields besides accountName)
-        const nonEmptyFields = Object.keys(lead).filter(
-          (key) => key !== 'accountName' && lead[key] && lead[key].trim() !== '',
-        )
-
-        // Only include rows with at least 2 fields of data (to filter out mostly empty rows)
-        if (nonEmptyFields.length >= 2) {
-          leads.push(lead)
-        }
-      }
-
-      // Success! Return the leads
-      return leads
-    } catch (parseError) {
-      // If parsing failed, try next gid
-      lastError = parseError instanceof Error ? parseError : new Error('Failed to parse CSV data')
-      continue
-    }
-  }
-  
-  // If we get here, all attempts failed
-  console.error(`Error fetching leads for ${accountName}:`, lastError)
-  throw lastError || new Error('Failed to fetch leads from Google Sheet')
 }
 
 type LeadWithDate = {
@@ -393,82 +190,23 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     setError(null)
 
     try {
-      // Load accounts from localStorage to get the latest data including any Google Sheets URLs added through UI
-      const accountsToUse = loadAccountsFromStorage()
-      const allLeads: Lead[] = []
-
-      const failedAccounts: Array<{ name: string; error: string }> = []
-      
-      for (const account of accountsToUse) {
-        if (account.clientLeadsSheetUrl) {
-          try {
-            console.log(`📊 Fetching leads for account: ${account.name} from ${account.clientLeadsSheetUrl}`)
-            const accountLeads = await fetchLeadsFromSheet(
-              account.clientLeadsSheetUrl,
-              account.name,
-            )
-            console.log(`✅ Loaded ${accountLeads.length} leads for ${account.name}`)
-            allLeads.push(...accountLeads)
-          } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : 'Unknown error'
-            console.error(`❌ Failed to load leads for ${account.name}:`, err)
-            failedAccounts.push({ name: account.name, error: errorMessage })
-          }
-        } else {
-          console.log(`⏭️ Skipping ${account.name} - no Google Sheet URL configured`)
-        }
-      }
-      
-      // Show summary toast if there were any failures
-      if (failedAccounts.length > 0) {
-        const failedNames = failedAccounts.map(a => a.name).join(', ')
-        toast({
-          title: `Failed to load leads for ${failedAccounts.length} account${failedAccounts.length !== 1 ? 's' : ''}`,
-          description: `${failedNames}. Please ensure the Google Sheets are publicly accessible (File > Share > Anyone with the link can view).`,
-          status: 'error',
-          duration: 8000,
-          isClosable: true,
-        })
-      }
-
+      // Load accounts from localStorage to sync with account metadata
+      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
       setLeads(allLeads)
-      const refreshTime = new Date()
+      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
       setLastRefresh(refreshTime)
-      
-      // Save to localStorage
-      saveLeadsToStorage(allLeads)
 
       // Keep account lead counts in sync (so "Leads: X" badges update across the app).
       syncAccountLeadCountsFromLeads(allLeads)
-      
-      // Dispatch event to update accounts with new actuals
-      emit('leadsUpdated')
-      
-      const accountsWithSheets = accountsToUse.filter(a => a.clientLeadsSheetUrl)
-      const accountsWithoutSheets = accountsToUse.filter(a => !a.clientLeadsSheetUrl)
-      
-      // Log summary for debugging
-      console.log(`📊 Lead Loading Summary:`)
-      console.log(`   Total accounts: ${accountsToUse.length}`)
-      console.log(`   Accounts with Google Sheets: ${accountsWithSheets.length}`)
-      console.log(`   Accounts without Google Sheets: ${accountsWithoutSheets.length}`)
-      console.log(`   Total leads loaded: ${allLeads.length}`)
-      if (accountsWithoutSheets.length > 0) {
-        console.log(`   Accounts without sheets: ${accountsWithoutSheets.map(a => a.name).join(', ')}`)
-      }
-      
+
       // Group leads by account for summary
       const leadsByAccount: Record<string, number> = {}
       allLeads.forEach(lead => {
         leadsByAccount[lead.accountName] = (leadsByAccount[lead.accountName] || 0) + 1
       })
       console.log(`   Leads by account:`, leadsByAccount)
-      
-      let description = `Loaded ${allLeads.length} leads from ${accountsWithSheets.length} account${accountsWithSheets.length !== 1 ? 's' : ''}`
-      if (accountsWithoutSheets.length > 0) {
-        description += `. ${accountsWithoutSheets.length} account${accountsWithoutSheets.length !== 1 ? 's' : ''} without Google Sheets configured.`
-      }
-      
+
+      const description = `Loaded ${allLeads.length} leads from the server.`
       toast({
         title: 'Leads loaded successfully',
         description,
@@ -477,11 +215,11 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         isClosable: true,
       })
     } catch (err) {
-      setError('Failed to load leads data. Please check that the Google Sheets are publicly accessible.')
+      setError('Failed to load leads data from the server.')
       console.error('Error loading leads:', err)
       toast({
         title: 'Error loading leads',
-        description: 'Failed to fetch data from Google Sheets. Please try again.',
+        description: 'Failed to fetch data from the server. Please try again.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -496,11 +234,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     // Otherwise, use cached data
     loadLeads(false)
 
-    // Listen for account updates (when new accounts are created or Google Sheets URLs are added/updated)
+    // Listen for account updates (when new accounts are created or metadata changes)
     const handleAccountsUpdated = (event?: Event) => {
       console.log('📥 Accounts updated event received - refreshing leads...', event)
-      // Force refresh when accounts are updated to pick up new Google Sheets
-      // This ensures newly created accounts with Google Sheets URLs are immediately loaded
+      // Force refresh when accounts are updated to keep lead counts current
       loadLeads(true)
     }
 
@@ -522,7 +259,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       <Box textAlign="center" py={12}>
         <Spinner size="xl" color="brand.700" thickness="4px" />
         <Text mt={4} color="gray.600">
-          Loading leads data from Google Sheets...
+          Loading leads data from the server...
         </Text>
       </Box>
     )
@@ -960,7 +697,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             Marketing Leads
           </Heading>
           <Text color="gray.600">
-            All leads from customer Google Sheets ({filteredLeads.length} of {leads.length} leads)
+            All leads from customer data ({filteredLeads.length} of {leads.length} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 6 hours

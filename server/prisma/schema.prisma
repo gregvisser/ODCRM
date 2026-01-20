@@ -102,6 +102,8 @@ model Customer {
   customerContacts      CustomerContact[]
   contactLists          ContactList[]
   emailSequences        EmailSequence[]
+  leadRecords           LeadRecord[]
+  leadSyncState         LeadSyncState?
 
   @@index([id])
   @@index([domain])
@@ -438,4 +440,42 @@ model EmailSequenceStep {
   @@unique([sequenceId, stepOrder])
   @@index([sequenceId])
   @@map("email_sequence_steps")
+}
+
+// Marketing leads imported from customer Google Sheets
+model LeadRecord {
+  id         String   @id
+  customerId String
+  accountName String
+  data       Json
+  sourceUrl  String?
+  sheetGid   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([accountName])
+  @@index([updatedAt])
+  @@map("lead_records")
+}
+
+model LeadSyncState {
+  id            String   @id
+  customerId    String   @unique
+  lastSyncAt    DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?
+  rowCount      Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([lastSyncAt])
+  @@map("lead_sync_states")
 }
