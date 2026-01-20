@@ -3289,6 +3289,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   // CRITICAL: Create backup before any save operations
   const accountsAutosaveTimerRef = useRef<number | null>(null)
   const accountsLastSavedJsonRef = useRef<string>('')
+  const forcedAccountDataSyncRef = useRef(false)
 
   useEffect(() => {
     try {
@@ -4209,7 +4210,20 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       }
 
-      if (!changed) return
+      const hasAccountData = data.some((customer) => customer.accountData)
+      const shouldForceAccountDataSync = !hasAccountData && !forcedAccountDataSyncRef.current
+      if (shouldForceAccountDataSync) {
+        forcedAccountDataSyncRef.current = true
+        setItem(OdcrmStorageKeys.accountsBackendSyncHash, '')
+        lastSyncedHashRef.current = null
+      }
+
+      if (!changed) {
+        if (shouldForceAccountDataSync) {
+          setAccountsData((prev) => prev.slice())
+        }
+        return
+      }
 
       saveAccountsToStorage(merged)
       setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
