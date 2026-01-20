@@ -3349,6 +3349,13 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   useEffect(() => {
     if (!hasSyncedCustomersRef.current) return
     if (!isStorageAvailable()) return
+    const syncVersion = 'v2-account-data'
+    const storedVersion = getItem(OdcrmStorageKeys.accountsBackendSyncVersion)
+    if (storedVersion !== syncVersion) {
+      setItem(OdcrmStorageKeys.accountsBackendSyncHash, '')
+      setItem(OdcrmStorageKeys.accountsBackendSyncVersion, syncVersion)
+      lastSyncedHashRef.current = null
+    }
     if (lastSyncedHashRef.current === null) {
       lastSyncedHashRef.current = getItem(OdcrmStorageKeys.accountsBackendSyncHash) || null
     }

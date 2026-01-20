@@ -21,6 +21,7 @@ export const OdcrmStorageKeys = {
   marketingLeads: 'odcrm_marketing_leads',
   marketingLeadsLastRefresh: 'odcrm_marketing_leads_last_refresh',
   accountsBackendSyncHash: 'odcrm_accounts_backend_sync_hash',
+  accountsBackendSyncVersion: 'odcrm_accounts_backend_sync_version',
   cognismProspects: 'odcrm_cognism_prospects',
   cognismProspectsLastUpdated: 'odcrm_cognism_prospects_last_updated',
   campaignWorkflows: 'odcrm_campaign_workflows',
