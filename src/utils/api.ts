@@ -17,12 +17,13 @@ async function apiRequest<T>(
 ): Promise<ApiResponse<T>> {
   try {
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const normalizedCustomerId = customerId && customerId !== 'prod-customer-1' ? customerId : ''
     
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
+        ...(normalizedCustomerId ? { 'X-Customer-Id': normalizedCustomerId } : {}),
         ...options.headers
       }
     })
