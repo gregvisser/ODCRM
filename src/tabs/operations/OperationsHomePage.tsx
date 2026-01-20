@@ -32,7 +32,9 @@ export default function OperationsHomePage({
   const activeView = coerceOperationsViewId(view)
   const tabIndex = activeView === 'overview' ? 0 : 1
 
-  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+  const orientation =
+    useBreakpointValue<'horizontal' | 'vertical'>({ base: 'horizontal', md: 'vertical' }) ??
+    'horizontal'
 
   return (
     <Tabs

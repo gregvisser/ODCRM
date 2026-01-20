@@ -88,7 +88,9 @@ export default function MarketingHomePage({
                           ? 10
                           : 11
 
-  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+  const orientation =
+    useBreakpointValue<'horizontal' | 'vertical'>({ base: 'horizontal', md: 'vertical' }) ??
+    'horizontal'
 
   return (
     <Tabs

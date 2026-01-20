@@ -30,7 +30,9 @@ export default function CustomersHomePage({
   const activeView = coerceCustomersViewId(view)
   const tabIndex = activeView === 'accounts' ? 0 : 1
 
-  const orientation = useBreakpointValue({ base: 'horizontal', md: 'vertical' }) ?? 'horizontal'
+  const orientation =
+    useBreakpointValue<'horizontal' | 'vertical'>({ base: 'horizontal', md: 'vertical' }) ??
+    'horizontal'
 
   return (
     <Tabs
