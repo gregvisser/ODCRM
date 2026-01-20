@@ -10,13 +10,15 @@ import {
   Input,
   InputGroup,
   InputLeftElement,
+  Tab,
+  TabList,
+  Tabs,
   Text,
   VStack,
   useColorMode,
 } from '@chakra-ui/react'
 import { AddIcon, MoonIcon, SearchIcon, SunIcon } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
-import { CrmTopTabs } from './components/nav/CrmTopTabs'
 import { DataPortability } from './components/DataPortability'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
@@ -230,17 +232,8 @@ function App() {
           </VStack>
         </Box>
 
-        {/* Navigation Tabs */}
-        <Box flex={1}>
-          <CrmTopTabs
-            activeTab={activeTab}
-            onTabClick={(tabId) => {
-              setActiveTab(tabId)
-              setActiveView('overview')
-              setFocusAccountName(undefined)
-            }}
-          />
-        </Box>
+        {/* Spacer to keep footer tools at bottom */}
+        <Box flex={1} />
 
         {/* Dark mode toggle at bottom */}
         <Box>
@@ -317,6 +310,25 @@ function App() {
                 <Avatar name="Bidlow" size="sm" bg="accent.500" color="white" />
               </HStack>
             </Flex>
+            <Tabs
+              index={CRM_TOP_TABS.findIndex((tab) => tab.id === activeTab)}
+              onChange={(nextIndex) => {
+                const nextTab = CRM_TOP_TABS[nextIndex]
+                if (!nextTab) return
+                setActiveTab(nextTab.id)
+                setActiveView('overview')
+                setFocusAccountName(undefined)
+              }}
+              variant="soft-rounded"
+              colorScheme="gray"
+              mt={{ base: 3, md: 4 }}
+            >
+              <TabList overflowX="auto" whiteSpace="nowrap">
+                {CRM_TOP_TABS.map((tab) => (
+                  <Tab key={tab.id}>{tab.label}</Tab>
+                ))}
+              </TabList>
+            </Tabs>
           </Box>
 
           {/* Main Content */}
