@@ -258,27 +258,25 @@ function App() {
         display="flex"
         flexDirection="column"
         minW={0}
-        px={{ base: 3, md: 6 }}
-        py={{ base: 4, md: 8 }}
+        px={{ base: 3, md: 5, xl: 6 }}
+        py={{ base: 3, md: 5, xl: 6 }}
       >
         <Box
           w="100%"
-          maxW="1440px"
-          mx="auto"
           flex="1"
           display="flex"
           flexDirection="column"
-          gap={{ base: 4, md: 6 }}
+          gap={{ base: 3, md: 4 }}
           position="relative"
           zIndex={1}
         >
           {/* Top Bar */}
           <Box
             bg="bg.surface"
-            borderRadius="xl"
+            borderRadius="lg"
             border="1px solid"
             borderColor="border.subtle"
-            px={{ base: 4, md: 6 }}
+            px={{ base: 3, md: 5 }}
             py={{ base: 3, md: 4 }}
             boxShadow="sm"
           >
@@ -334,11 +332,11 @@ function App() {
           {/* Main Content */}
           <Box
             bg="bg.surface"
-            borderRadius="xl"
+            borderRadius="lg"
             border="1px solid"
             borderColor="border.subtle"
-            p={{ base: 4, md: 6, lg: 8 }}
-            boxShadow="sm"
+            p={{ base: 3, md: 5, lg: 6 }}
+            boxShadow="md"
             w="100%"
             minW={0}
             overflowX="auto"
@@ -346,7 +344,7 @@ function App() {
           >
             {page}
           </Box>
-          <Divider mt={8} opacity={0} />
+          <Divider mt={6} opacity={0} />
         </Box>
       </Box>
     </Flex>
