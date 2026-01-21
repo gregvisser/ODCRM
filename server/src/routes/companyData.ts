@@ -96,6 +96,19 @@ const validateUrl = async (url: string) => {
   return false
 }
 
+const getClearbitLogo = async (website?: string) => {
+  if (!website) return null
+  try {
+    const hostname = new URL(website).hostname.replace(/^www\./, '')
+    if (!hostname) return null
+    const logoUrl = `https://logo.clearbit.com/${hostname}`
+    const ok = await validateUrl(logoUrl)
+    return ok ? logoUrl : null
+  } catch {
+    return null
+  }
+}
+
 const fetchOpenCorporates = async (name?: string) => {
   if (!name) return null
   const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(name)}`
@@ -132,7 +145,9 @@ router.post('/lookup', async (req, res) => {
     const ogImage = html ? (extractMeta(html, 'og:image') || extractMeta(html, 'twitter:image')) : ''
     const icon = html ? (extractLinkRel(html, 'icon') || extractLinkRel(html, 'shortcut icon') || extractLinkRel(html, 'apple-touch-icon')) : ''
     const logoCandidate = ogImage || icon
-    const logoUrl = logoCandidate && normalizedWebsite ? absoluteUrl(normalizedWebsite, logoCandidate) : null
+    const clearbitLogo = await getClearbitLogo(normalizedWebsite || website || '')
+    const fallbackLogo = logoCandidate && normalizedWebsite ? absoluteUrl(normalizedWebsite, logoCandidate) : null
+    const logoUrl = clearbitLogo || fallbackLogo
 
     const jsonLd = html ? extractJsonLd(html) : []
     const org = pickOrganization(jsonLd) || {}
