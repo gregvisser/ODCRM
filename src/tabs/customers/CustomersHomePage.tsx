@@ -1,4 +1,4 @@
-import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
+import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
 
@@ -47,6 +47,9 @@ export default function CustomersHomePage({
           maxW="220px"
           w="220px"
         >
+          <Text fontSize="xs" textTransform="uppercase" color="text.muted" mb={2} letterSpacing="0.08em">
+            Sections
+          </Text>
           <TabList flexDirection="column" gap={1}>
             <Tab
               justifyContent={{ md: 'flex-start' }}

@@ -57,6 +57,9 @@ export default function OperationsHomePage({
           maxW="240px"
           w="240px"
         >
+          <Text fontSize="xs" textTransform="uppercase" color="text.muted" mb={2} letterSpacing="0.08em">
+            Sections
+          </Text>
           <TabList flexDirection="column" gap={1}>
             <Tab
               justifyContent={{ md: 'flex-start' }}

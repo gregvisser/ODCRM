@@ -190,6 +190,9 @@ function App() {
             px={{ base: 3, md: 5 }}
             py={{ base: 3, md: 4 }}
             boxShadow="sm"
+            position="sticky"
+            top={0}
+            zIndex={5}
           >
             <Flex
               direction={{ base: 'column', md: 'row' }}
@@ -236,7 +239,7 @@ function App() {
                 whiteSpace="nowrap"
                 borderBottom="1px solid"
                 borderColor="border.subtle"
-                gap={1}
+                gap={2}
                 pb={2}
               >
                 {CRM_TOP_TABS.map((tab) => (
