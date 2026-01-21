@@ -4313,7 +4313,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
             Accounts
           </Heading>
           <Text fontSize="sm" color="gray.500">
-            Total monthly customer spend: {currencyFormatter.format(totals.spend)}
+            Total monthly customer revenue: {currencyFormatter.format(totals.spend)}
           </Text>
         </Box>
         <HStack>
@@ -4399,7 +4399,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                 _hover={{ bg: 'bg.subtle' }}
               >
                 <HStack spacing={1} justify="flex-end">
-                  <Text>Spend</Text>
+                  <Text>Revenue</Text>
                   {renderSortIndicator('spend')}
                 </HStack>
                 <Box
