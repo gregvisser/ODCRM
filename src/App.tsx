@@ -212,11 +212,11 @@ function App() {
                 alignItems="center"
               >
                 <Box
-                  minW={{ base: '140px', md: '200px' }}
-                  maxW={{ base: '200px', md: '260px' }}
+                  minW={{ base: '180px', md: '260px' }}
+                  maxW={{ base: '240px', md: '320px' }}
                   mr={{ base: 1, md: 2 }}
                 >
-                  <HeaderImagePicker variant="logo" maxHeightPx={56} lockEdits={false} />
+                  <HeaderImagePicker variant="logo" maxHeightPx={72} lockEdits={false} />
                 </Box>
                 {CRM_TOP_TABS.map((tab) => (
                   <Tab

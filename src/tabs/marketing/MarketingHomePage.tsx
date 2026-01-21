@@ -1,4 +1,6 @@
-import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
+import { useState } from 'react'
+import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { Box, Flex, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
 import EmailSettingsTab from '../../components/EmailSettingsTab'
 import MarketingInboxTab from '../../components/MarketingInboxTab'
@@ -54,6 +56,7 @@ export default function MarketingHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceMarketingViewId(view)
+  const [isPanelOpen, setIsPanelOpen] = useState(true)
   const tabIndex =
     activeView === 'overview'
       ? 0
@@ -114,24 +117,34 @@ export default function MarketingHomePage({
       orientation="vertical"
     >
       <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
-        <Box
-          position="sticky"
-          top={16}
-          alignSelf="flex-start"
-          bg="bg.subtle"
-          border="1px solid"
-          borderColor="border.subtle"
-          borderRadius="xl"
-          p={3}
-          boxShadow="sm"
-          minW="220px"
-          maxW="240px"
-          w="240px"
-        >
-          <Text fontSize="xs" textTransform="uppercase" color="text.muted" mb={2} letterSpacing="0.08em">
-            Sections
-          </Text>
-          <TabList flexDirection="column" overflowX="visible" whiteSpace="normal" gap={1}>
+        {isPanelOpen ? (
+          <Box
+            position="sticky"
+            top={16}
+            alignSelf="flex-start"
+            bg="bg.subtle"
+            border="1px solid"
+            borderColor="border.subtle"
+            borderRadius="xl"
+            p={3}
+            boxShadow="sm"
+            minW="220px"
+            maxW="240px"
+            w="240px"
+          >
+            <Flex align="center" justify="space-between" mb={2}>
+              <Text fontSize="xs" textTransform="uppercase" color="text.muted" letterSpacing="0.08em">
+                Sections
+              </Text>
+              <IconButton
+                aria-label="Hide sections panel"
+                icon={<ChevronLeftIcon />}
+                size="xs"
+                variant="ghost"
+                onClick={() => setIsPanelOpen(false)}
+              />
+            </Flex>
+            <TabList flexDirection="column" overflowX="visible" whiteSpace="normal" gap={1}>
             <Tab
               justifyContent={{ md: 'flex-start' }}
               fontSize="sm"
@@ -265,7 +278,28 @@ export default function MarketingHomePage({
               Leads
             </Tab>
           </TabList>
-        </Box>
+          </Box>
+        ) : (
+          <Box
+            position="sticky"
+            top={16}
+            alignSelf="flex-start"
+            bg="bg.subtle"
+            border="1px solid"
+            borderColor="border.subtle"
+            borderRadius="xl"
+            p={1}
+            boxShadow="sm"
+          >
+            <IconButton
+              aria-label="Show sections panel"
+              icon={<ChevronRightIcon />}
+              size="xs"
+              variant="ghost"
+              onClick={() => setIsPanelOpen(true)}
+            />
+          </Box>
+        )}
 
         <TabPanels flex="1" pt={1}>
           <TabPanel px={0}>

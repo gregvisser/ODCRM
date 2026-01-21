@@ -1,6 +1,9 @@
+import { useState } from 'react'
+import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import {
   Box,
   Flex,
+  IconButton,
   ListItem,
   Tab,
   TabList,
@@ -30,6 +33,7 @@ export default function OperationsHomePage({
 }) {
   const activeView = coerceOperationsViewId(view)
   const tabIndex = activeView === 'overview' ? 0 : 1
+  const [isPanelOpen, setIsPanelOpen] = useState(true)
 
   return (
     <Tabs
@@ -43,48 +47,79 @@ export default function OperationsHomePage({
       orientation="vertical"
     >
       <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
-        <Box
-          position="sticky"
-          top={16}
-          alignSelf="flex-start"
-          bg="bg.subtle"
-          border="1px solid"
-          borderColor="border.subtle"
-          borderRadius="xl"
-          p={3}
-          boxShadow="sm"
-          minW="220px"
-          maxW="240px"
-          w="240px"
-        >
-          <Text fontSize="xs" textTransform="uppercase" color="text.muted" mb={2} letterSpacing="0.08em">
-            Sections
-          </Text>
-          <TabList flexDirection="column" gap={1}>
-            <Tab
-              justifyContent={{ md: 'flex-start' }}
-              fontSize="sm"
-              fontWeight="600"
-              borderRadius="md"
-              color="text.muted"
-              _hover={{ bg: 'white', color: 'text.primary' }}
-              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
-            >
-              Overview
-            </Tab>
-            <Tab
-              justifyContent={{ md: 'flex-start' }}
-              fontSize="sm"
-              fontWeight="600"
-              borderRadius="md"
-              color="text.muted"
-              _hover={{ bg: 'white', color: 'text.primary' }}
-              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
-            >
-              User Authorization
-            </Tab>
-          </TabList>
-        </Box>
+        {isPanelOpen ? (
+          <Box
+            position="sticky"
+            top={16}
+            alignSelf="flex-start"
+            bg="bg.subtle"
+            border="1px solid"
+            borderColor="border.subtle"
+            borderRadius="xl"
+            p={3}
+            boxShadow="sm"
+            minW="220px"
+            maxW="240px"
+            w="240px"
+          >
+            <Flex align="center" justify="space-between" mb={2}>
+              <Text fontSize="xs" textTransform="uppercase" color="text.muted" letterSpacing="0.08em">
+                Sections
+              </Text>
+              <IconButton
+                aria-label="Hide sections panel"
+                icon={<ChevronLeftIcon />}
+                size="xs"
+                variant="ghost"
+                onClick={() => setIsPanelOpen(false)}
+              />
+            </Flex>
+            <TabList flexDirection="column" gap={1}>
+              <Tab
+                justifyContent={{ md: 'flex-start' }}
+                fontSize="sm"
+                fontWeight="600"
+                borderRadius="md"
+                color="text.muted"
+                _hover={{ bg: 'white', color: 'text.primary' }}
+                _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+              >
+                Overview
+              </Tab>
+              <Tab
+                justifyContent={{ md: 'flex-start' }}
+                fontSize="sm"
+                fontWeight="600"
+                borderRadius="md"
+                color="text.muted"
+                _hover={{ bg: 'white', color: 'text.primary' }}
+                _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+              >
+                User Authorization
+              </Tab>
+            </TabList>
+          </Box>
+        ) : (
+          <Box
+            position="sticky"
+            top={16}
+            alignSelf="flex-start"
+            bg="bg.subtle"
+            border="1px solid"
+            borderColor="border.subtle"
+            borderRadius="xl"
+            p={1}
+            boxShadow="sm"
+          >
+            <IconButton
+              aria-label="Show sections panel"
+              icon={<ChevronRightIcon />}
+              size="xs"
+              variant="ghost"
+              onClick={() => setIsPanelOpen(true)}
+            />
+          </Box>
+        )}
         <TabPanels flex="1" pt={1}>
           <TabPanel px={0}>
             <PlaceholderPage title="Operations" ownerAgent="Operations Agent">
