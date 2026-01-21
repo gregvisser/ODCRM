@@ -264,6 +264,11 @@ function App() {
                 ))}
               </TabList>
             </Tabs>
+            <Flex justify="flex-end" mt={2}>
+              <Text fontSize="xs" color="text.muted">
+                Build {__BUILD_STAMP__}
+              </Text>
+            </Flex>
           </Box>
 
           {/* Main Content */}
