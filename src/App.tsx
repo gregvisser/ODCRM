@@ -190,18 +190,6 @@ function App() {
             top={0}
             zIndex={5}
           >
-            <Flex
-              direction={{ base: 'column', md: 'row' }}
-              gap={{ base: 3, md: 6 }}
-              align={{ base: 'stretch', md: 'center' }}
-              justify="space-between"
-            >
-              <HStack spacing={3} align="center">
-                <Box minW={{ base: '120px', md: '160px' }} maxW={{ base: '160px', md: '200px' }}>
-                  <HeaderImagePicker variant="logo" maxHeightPx={40} lockEdits={false} />
-                </Box>
-              </HStack>
-            </Flex>
             <Tabs
               index={CRM_TOP_TABS.findIndex((tab) => tab.id === activeTab)}
               onChange={(nextIndex) => {
@@ -219,9 +207,17 @@ function App() {
                 whiteSpace="nowrap"
                 borderBottom="1px solid"
                 borderColor="border.subtle"
-                gap={1}
+                gap={2}
                 pb={1}
+                alignItems="center"
               >
+                <Box
+                  minW={{ base: '140px', md: '200px' }}
+                  maxW={{ base: '200px', md: '260px' }}
+                  mr={{ base: 1, md: 2 }}
+                >
+                  <HeaderImagePicker variant="logo" maxHeightPx={56} lockEdits={false} />
+                </Box>
                 {CRM_TOP_TABS.map((tab) => (
                   <Tab
                     key={tab.id}
