@@ -216,7 +216,7 @@ function App() {
                   maxW={{ base: '240px', md: '320px' }}
                   mr={{ base: 1, md: 2 }}
                 >
-                  <HeaderImagePicker variant="logo" maxHeightPx={72} lockEdits={false} />
+                  <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
                 </Box>
                 {CRM_TOP_TABS.map((tab) => (
                   <Tab

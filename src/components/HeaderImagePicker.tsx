@@ -16,6 +16,7 @@ export function HeaderImagePicker({
   storageKey = DEFAULT_STORAGE_KEY,
   variant = 'logo',
   maxHeightPx = 120,
+  enableEdits = true,
   /**
    * Hide edit controls from normal UI. Toggle with Ctrl+Shift+L (stored in localStorage).
    * This is UI/UX gating only (not security). True enforcement requires auth/roles.
@@ -29,6 +30,7 @@ export function HeaderImagePicker({
   storageKey?: string
   variant?: 'logo' | 'default'
   maxHeightPx?: number
+  enableEdits?: boolean
   lockEdits?: boolean
   showLockedHint?: boolean
 }) {
@@ -51,6 +53,10 @@ export function HeaderImagePicker({
   // NOTE: We intentionally keep this session-only (sessionStorage) so "Change Logo"
   // never appears by default after refresh, even on shared machines.
   useEffect(() => {
+    if (!enableEdits) {
+      setIsEditing(false)
+      return
+    }
     if (!lockEdits) {
       setIsEditing(true)
       return
@@ -88,7 +94,7 @@ export function HeaderImagePicker({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [lockEdits, storageKey])
+  }, [enableEdits, lockEdits, storageKey])
 
   const clear = () => {
     setDataUrl(null)
