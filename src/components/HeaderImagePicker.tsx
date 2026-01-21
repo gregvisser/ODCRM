@@ -130,21 +130,25 @@ export function HeaderImagePicker({
     }
   }
 
+  const canEdit = enableEdits && isEditing
+
   return (
     <VStack align="center" spacing={2} w="100%" maxW="520px">
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          void handlePick(e.target.files?.[0])
-          // allow selecting the same file again later
-          e.currentTarget.value = ''
-        }}
-      />
+      {enableEdits ? (
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            void handlePick(e.target.files?.[0])
+            // allow selecting the same file again later
+            e.currentTarget.value = ''
+          }}
+        />
+      ) : null}
 
-      {isEditing && !dataUrl ? (
+      {canEdit && !dataUrl ? (
         <Button size="sm" variant={variant === 'logo' ? 'ghost' : 'outline'} onClick={() => inputRef.current?.click()}>
           Add Logo
         </Button>
@@ -172,13 +176,9 @@ export function HeaderImagePicker({
             maxW="100%"
             objectFit="contain"
             borderRadius="md"
-            cursor={isEditing ? 'pointer' : 'default'}
-            onClick={() => {
-              if (isEditing) {
-                inputRef.current?.click()
-              }
-            }}
-            _hover={isEditing ? {
+            cursor={canEdit ? 'pointer' : 'default'}
+            onClick={canEdit ? () => inputRef.current?.click() : undefined}
+            _hover={canEdit ? {
               opacity: 0.8,
             } : {}}
           />
