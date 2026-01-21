@@ -2,20 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Avatar,
   Box,
-  Button,
   Divider,
   Flex,
   HStack,
-  Input,
-  InputGroup,
-  InputLeftElement,
+  Image,
   Tab,
   TabList,
   Tabs,
   Text,
   VStack,
 } from '@chakra-ui/react'
-import { AddIcon, SearchIcon } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
@@ -24,6 +20,7 @@ import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/Market
 import OperationsHomePage, { type OperationsViewId } from './tabs/operations/OperationsHomePage'
 import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
 import './App.css'
+import openDoorsLogo from './assets/opendoors-logo.svg'
 
 function App() {
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
@@ -188,7 +185,7 @@ function App() {
             border="1px solid"
             borderColor="border.subtle"
             px={{ base: 3, md: 5 }}
-            py={{ base: 3, md: 4 }}
+            py={{ base: 2, md: 2 }}
             boxShadow="sm"
             position="sticky"
             top={0}
@@ -200,25 +197,32 @@ function App() {
               align={{ base: 'stretch', md: 'center' }}
               justify="space-between"
             >
-              <VStack spacing={1} align="flex-start">
-                <Text fontSize="xs" letterSpacing="0.08em" color="text.muted" textTransform="uppercase">
-                  OpenDoors CRM
-                </Text>
-                <Text fontSize={{ base: 'lg', md: 'xl' }} fontWeight="600" color="text.primary">
-                  {activeTabLabel}
-                </Text>
-              </VStack>
+              <HStack spacing={3} align="center">
+                <Box
+                  border="1px solid"
+                  borderColor="border.subtle"
+                  bg="white"
+                  borderRadius="md"
+                  w={{ base: '40px', md: '48px' }}
+                  h={{ base: '40px', md: '48px' }}
+                  display="flex"
+                  alignItems="center"
+                  justifyContent="center"
+                  p={1}
+                >
+                  <Image src={openDoorsLogo} alt="OpenDoors logo" maxH="100%" maxW="100%" objectFit="contain" />
+                </Box>
+                <VStack spacing={0.5} align="flex-start">
+                  <Text fontSize="xs" letterSpacing="0.08em" color="text.muted" textTransform="uppercase">
+                    OpenDoors CRM
+                  </Text>
+                  <Text fontSize={{ base: 'sm', md: 'md' }} fontWeight="600" color="text.primary">
+                    {activeTabLabel}
+                  </Text>
+                </VStack>
+              </HStack>
 
               <HStack spacing={3} flexWrap="wrap" justify={{ base: 'flex-start', md: 'flex-end' }}>
-                <InputGroup maxW={{ base: '100%', md: '360px' }}>
-                  <InputLeftElement pointerEvents="none">
-                    <SearchIcon color="text.muted" boxSize="14px" />
-                  </InputLeftElement>
-                  <Input placeholder="Search CRM" size="sm" />
-                </InputGroup>
-                <Button leftIcon={<AddIcon />} size="sm">
-                  Create
-                </Button>
                 <Avatar name="Bidlow" size="sm" bg="accent.500" color="white" />
               </HStack>
             </Flex>
@@ -232,22 +236,22 @@ function App() {
                 setFocusAccountName(undefined)
               }}
               variant="unstyled"
-              mt={{ base: 3, md: 4 }}
+              mt={{ base: 1, md: 2 }}
             >
               <TabList
                 overflowX="auto"
                 whiteSpace="nowrap"
                 borderBottom="1px solid"
                 borderColor="border.subtle"
-                gap={2}
-                pb={2}
+                gap={1}
+                pb={1}
               >
                 {CRM_TOP_TABS.map((tab) => (
                   <Tab
                     key={tab.id}
-                    px={4}
-                    py={2}
-                    fontSize="sm"
+                    px={3}
+                    py={1}
+                    fontSize="xs"
                     fontWeight="600"
                     color="text.muted"
                     borderBottom="2px solid"
