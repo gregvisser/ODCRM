@@ -6,7 +6,6 @@ import {
   Divider,
   Flex,
   HStack,
-  IconButton,
   Input,
   InputGroup,
   InputLeftElement,
@@ -15,12 +14,9 @@ import {
   Tabs,
   Text,
   VStack,
-  useColorMode,
 } from '@chakra-ui/react'
-import { AddIcon, MoonIcon, SearchIcon, SunIcon } from '@chakra-ui/icons'
+import { AddIcon, SearchIcon } from '@chakra-ui/icons'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
-import { DataPortability } from './components/DataPortability'
-import { HeaderImagePicker } from './components/HeaderImagePicker'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import SalesHomePage from './tabs/sales/SalesHomePage'
@@ -33,8 +29,6 @@ function App() {
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('overview')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
-  const [uxToolsEnabled, setUxToolsEnabled] = useState<boolean>(false)
-  const { colorMode, toggleColorMode } = useColorMode()
   const activeTabLabel = useMemo(
     () => CRM_TOP_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Overview',
     [activeTab],
@@ -120,34 +114,6 @@ function App() {
     }
   }, [])
 
-  // UX tools toggle (owner-only-ish): Ctrl+Shift+U to show/hide power tools in the header.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('odcrm_ux_tools_enabled')
-      if (stored === 'true') setUxToolsEnabled(true)
-    } catch {
-      // ignore
-    }
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && (e.key === 'U' || e.key === 'u')) {
-        e.preventDefault()
-        setUxToolsEnabled((prev) => {
-          const next = !prev
-          try {
-            localStorage.setItem('odcrm_ux_tools_enabled', String(next))
-          } catch {
-            // ignore
-          }
-          return next
-        })
-      }
-    }
-
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
-
   const page = (() => {
     switch (activeTab) {
       case 'dashboards-home':
@@ -196,62 +162,7 @@ function App() {
   })()
 
   return (
-    <Flex
-      minH="100vh"
-      bg="bg.canvas"
-      direction="row"
-      position="relative"
-      overflow="hidden"
-    >
-      {/* Left Sidebar Navigation */}
-      <Box
-        w={{ base: '64px', md: '240px' }}
-        minW={{ base: '64px', md: '240px' }}
-        bg="sidebar.bg"
-        borderRight="1px solid"
-        borderColor="sidebar.border"
-        p={{ base: 2, md: 4 }}
-        display="flex"
-        flexDirection="column"
-        gap={4}
-        position="sticky"
-        top={0}
-        h="100vh"
-        overflowY="auto"
-        zIndex={10}
-      >
-        {/* Logo - only show on larger screens */}
-        <Box display={{ base: 'none', md: 'block' }} mb={2}>
-          <VStack spacing={2} align="flex-start" w="100%">
-            <HeaderImagePicker
-              variant="logo"
-              maxHeightPx={110}
-              lockEdits={false}
-              storageKey="odcrm_sidebar_logo_data_url"
-            />
-          </VStack>
-        </Box>
-
-        {/* Spacer to keep footer tools at bottom */}
-        <Box flex={1} />
-
-        {/* Dark mode toggle at bottom */}
-        <Box>
-          <IconButton
-            aria-label="Toggle color mode"
-            icon={colorMode === 'light' ? <MoonIcon /> : <SunIcon />}
-            onClick={toggleColorMode}
-            variant="ghost"
-            color="sidebar.text"
-            size="md"
-            w="100%"
-            _hover={{ bg: 'sidebar.itemHover', color: 'sidebar.textActive' }}
-            _active={{ bg: 'sidebar.itemActive' }}
-          />
-          {uxToolsEnabled ? <Box mt={2}><DataPortability /></Box> : null}
-        </Box>
-      </Box>
-
+    <Flex minH="100vh" bg="bg.canvas" direction="column" position="relative">
       {/* Main Content Area */}
       <Box
         flex="1"

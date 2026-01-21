@@ -1,13 +1,4 @@
-import {
-  Box,
-  Flex,
-  Tab,
-  TabList,
-  TabPanel,
-  TabPanels,
-  Tabs,
-  useBreakpointValue,
-} from '@chakra-ui/react'
+import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
 import EmailSettingsTab from '../../components/EmailSettingsTab'
 import MarketingInboxTab from '../../components/MarketingInboxTab'
@@ -88,10 +79,6 @@ export default function MarketingHomePage({
                           ? 10
                           : 11
 
-  const orientation =
-    useBreakpointValue<'horizontal' | 'vertical'>({ base: 'horizontal', md: 'vertical' }) ??
-    'horizontal'
-
   return (
     <Tabs
       index={tabIndex}
@@ -125,26 +112,26 @@ export default function MarketingHomePage({
       isLazy
       variant="soft-rounded"
       colorScheme="gray"
-      orientation={orientation}
+      orientation="vertical"
     >
-      <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
+      <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
         <Box
-          position={{ base: 'static', md: 'sticky' }}
-          top={{ md: 16 }}
+          position="sticky"
+          top={16}
           alignSelf="flex-start"
           bg="bg.surface"
           border="1px solid"
           borderColor="border.subtle"
           borderRadius="lg"
           p={2}
-          minW={{ md: '220px' }}
-          maxW={{ md: '240px' }}
-          w={{ base: '100%', md: '240px' }}
+          minW="220px"
+          maxW="240px"
+          w="240px"
         >
           <TabList
-            flexDirection={{ base: 'row', md: 'column' }}
-            overflowX={{ base: 'auto', md: 'visible' }}
-            whiteSpace={{ base: 'nowrap', md: 'normal' }}
+            flexDirection="column"
+            overflowX="visible"
+            whiteSpace="normal"
           >
             <Tab justifyContent={{ md: 'flex-start' }}>Overview</Tab>
             <Tab justifyContent={{ md: 'flex-start' }}>Campaigns</Tab>
@@ -161,7 +148,7 @@ export default function MarketingHomePage({
           </TabList>
         </Box>
 
-        <TabPanels flex="1" pt={{ base: 0, md: 1 }}>
+        <TabPanels flex="1" pt={1}>
           <TabPanel px={0}>
             <MarketingDashboard />
           </TabPanel>

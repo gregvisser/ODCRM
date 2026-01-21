@@ -1,13 +1,4 @@
-import {
-  Box,
-  Flex,
-  Tab,
-  TabList,
-  TabPanel,
-  TabPanels,
-  Tabs,
-  useBreakpointValue,
-} from '@chakra-ui/react'
+import { Box, Flex, Tab, TabList, TabPanel, TabPanels, Tabs } from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
 
@@ -30,10 +21,6 @@ export default function CustomersHomePage({
   const activeView = coerceCustomersViewId(view)
   const tabIndex = activeView === 'accounts' ? 0 : 1
 
-  const orientation =
-    useBreakpointValue<'horizontal' | 'vertical'>({ base: 'horizontal', md: 'vertical' }) ??
-    'horizontal'
-
   return (
     <Tabs
       index={tabIndex}
@@ -44,28 +31,28 @@ export default function CustomersHomePage({
       isLazy
       variant="soft-rounded"
       colorScheme="gray"
-      orientation={orientation}
+      orientation="vertical"
     >
-      <Flex direction={{ base: 'column', md: 'row' }} gap={{ base: 4, md: 6 }}>
+      <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
         <Box
-          position={{ base: 'static', md: 'sticky' }}
-          top={{ md: 16 }}
+          position="sticky"
+          top={16}
           alignSelf="flex-start"
           bg="bg.surface"
           border="1px solid"
           borderColor="border.subtle"
           borderRadius="lg"
           p={2}
-          minW={{ md: '200px' }}
-          maxW={{ md: '220px' }}
-          w={{ base: '100%', md: '220px' }}
+          minW="200px"
+          maxW="220px"
+          w="220px"
         >
-          <TabList flexDirection={{ base: 'row', md: 'column' }}>
+          <TabList flexDirection="column">
             <Tab justifyContent={{ md: 'flex-start' }}>Accounts</Tab>
             <Tab justifyContent={{ md: 'flex-start' }}>Contacts</Tab>
           </TabList>
         </Box>
-        <TabPanels flex="1" pt={{ base: 0, md: 1 }}>
+        <TabPanels flex="1" pt={1}>
           <TabPanel px={0}>
             <Box>
               <AccountsTab focusAccountName={focusAccountName} />
