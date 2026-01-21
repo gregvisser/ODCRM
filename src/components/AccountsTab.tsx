@@ -5253,6 +5253,45 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   <Heading size="md" mb={4} color="gray.700">
                     About
                   </Heading>
+                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
+                    <EditableField
+                      value={selectedAccount.website || ''}
+                      onSave={(value) => {
+                        const normalized = normalizeCustomerWebsite(String(value))
+                        updateAccount(selectedAccount.name, { website: normalized })
+                        stopEditing(selectedAccount.name, 'website')
+                        if (normalized) {
+                          void populateAccountData({ ...selectedAccount, website: normalized }).then((populated) => {
+                            if (populated.aboutSource === 'web') {
+                              updateAccountSilent(selectedAccount.name, populated)
+                            }
+                          })
+                        }
+                      }}
+                      onCancel={() => stopEditing(selectedAccount.name, 'website')}
+                      isEditing={isFieldEditing(selectedAccount.name, 'website')}
+                      onEdit={() => startEditing(selectedAccount.name, 'website')}
+                      label="Company website"
+                      type="url"
+                      placeholder="https://example.com"
+                      renderDisplay={(value) =>
+                        value ? (
+                          <Link
+                            href={String(value)}
+                            isExternal
+                            color="text.muted"
+                            fontWeight="medium"
+                          >
+                            {String(value)}
+                          </Link>
+                        ) : (
+                          <Text fontSize="sm" color="text.muted">
+                            Add website to pull company info
+                          </Text>
+                        )
+                      }
+                    />
+                  </SimpleGrid>
                   <Box
                     p={4}
                     borderRadius="lg"
