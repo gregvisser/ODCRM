@@ -66,7 +66,6 @@ import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData, type CompanyData } from '../services/companyDataService'
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
-import { useExportImport } from '../utils/exportImport'
 import { api } from '../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
@@ -3209,8 +3208,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const [editValue, setEditValue] = useState<string>('')
   
   // Sorting state
-  const [sortColumn, setSortColumn] = useState<string | null>(null)
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [sortColumn, setSortColumn] = useState<string | null>('spend')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   
   // Save column widths to localStorage
   useEffect(() => {
@@ -3764,6 +3763,16 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }
 
   // Handle column sort
+  const numericSortColumns = new Set([
+    'spend',
+    'weeklyLeads',
+    'weeklyTarget',
+    'monthlyLeads',
+    'monthlyTarget',
+    'percentToTarget',
+    'defcon',
+  ])
+
   const handleSort = (column: string) => {
     if (sortColumn === column) {
       // Toggle direction if same column
@@ -3771,19 +3780,69 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     } else {
       // Set new column and default to ascending
       setSortColumn(column)
-      setSortDirection('asc')
+      setSortDirection(numericSortColumns.has(column) ? 'desc' : 'asc')
     }
   }
-  
+
+  const renderSortIndicator = (column: string) => {
+    if (sortColumn !== column) return <Box boxSize={4} />
+    return sortDirection === 'asc' ? <ChevronUpIcon boxSize={4} /> : <ChevronDownIcon boxSize={4} />
+  }
+
   // Sort accounts based on selected column
   const filteredAndSortedAccounts = [...accountsData].sort((a, b) => {
-    if (sortColumn === 'spend') {
-      const aValue = a.monthlySpendGBP || 0
-      const bValue = b.monthlySpendGBP || 0
-      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+    const column = sortColumn || 'spend'
+    const aValue = (() => {
+      switch (column) {
+        case 'account':
+          return a.name.toLowerCase()
+        case 'spend':
+          return a.monthlySpendGBP || 0
+        case 'weeklyLeads':
+          return a.weeklyActual || 0
+        case 'weeklyTarget':
+          return a.weeklyTarget || 0
+        case 'monthlyLeads':
+          return a.monthlyActual || 0
+        case 'monthlyTarget':
+          return a.monthlyTarget || 0
+        case 'percentToTarget':
+          return a.monthlyTarget ? (a.monthlyActual || 0) / a.monthlyTarget : 0
+        case 'defcon':
+          return a.defcon || 0
+        default:
+          return a.name.toLowerCase()
+      }
+    })()
+    const bValue = (() => {
+      switch (column) {
+        case 'account':
+          return b.name.toLowerCase()
+        case 'spend':
+          return b.monthlySpendGBP || 0
+        case 'weeklyLeads':
+          return b.weeklyActual || 0
+        case 'weeklyTarget':
+          return b.weeklyTarget || 0
+        case 'monthlyLeads':
+          return b.monthlyActual || 0
+        case 'monthlyTarget':
+          return b.monthlyTarget || 0
+        case 'percentToTarget':
+          return b.monthlyTarget ? (b.monthlyActual || 0) / b.monthlyTarget : 0
+        case 'defcon':
+          return b.defcon || 0
+        default:
+          return b.name.toLowerCase()
+      }
+    })()
+
+    if (typeof aValue === 'string' || typeof bValue === 'string') {
+      const compare = String(aValue).localeCompare(String(bValue), undefined, { sensitivity: 'base' })
+      return sortDirection === 'asc' ? compare : -compare
     }
-    // Default: sort alphabetically by name
-    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+
+    return sortDirection === 'asc' ? Number(aValue) - Number(bValue) : Number(bValue) - Number(aValue)
   })
   
   // Calculate total spend (must be after accountsData is defined)
@@ -3801,32 +3860,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const totalPercentToTarget = totals.monthlyTarget > 0 
     ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
     : '0.0'
-
-  const accountsCsvRows = useMemo(() => {
-    return (filteredAndSortedAccounts || []).map((a) => ({
-      name: a.name,
-      website: a.website,
-      sector: a.sector,
-      status: a.status,
-      targetTitle: a.targetTitle,
-      targetLocation: (a.targetLocation || []).join('; '),
-      monthlySpendGBP: a.monthlySpendGBP,
-      defcon: a.defcon,
-      contractStart: a.contractStart,
-      contractEnd: a.contractEnd,
-      weeklyTarget: a.weeklyTarget,
-      weeklyActual: a.weeklyActual,
-      monthlyTarget: a.monthlyTarget,
-      monthlyActual: a.monthlyActual,
-      leadsSheetUrl: a.clientLeadsSheetUrl || '',
-    }))
-  }, [filteredAndSortedAccounts])
-
-  const { exportData: exportAccountsData } = useExportImport({
-    data: accountsCsvRows as any,
-    filename: 'accounts',
-    toast,
-  })
 
   const isDrawerOpen = Boolean(selectedAccount)
 
@@ -4280,18 +4313,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
             Accounts
           </Heading>
           <Text fontSize="sm" color="gray.500">
-            Manage account targets, spend, and sheet links.
+            Total monthly customer spend: {currencyFormatter.format(totals.spend)}
           </Text>
         </Box>
         <HStack>
-          <Button
-            variant="outline"
-            onClick={() => exportAccountsData('csv')}
-            isDisabled={filteredAndSortedAccounts.length === 0}
-            size="sm"
-          >
-            Export CSV
-          </Button>
           <Button
             colorScheme="gray"
             leftIcon={<CheckIcon />}
@@ -4339,8 +4364,17 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
             boxShadow="sm"
           >
             <Tr>
-              <Th position="relative" style={{ width: columnWidths.account || 250, minWidth: 150 }}>
-                Account
+              <Th
+                position="relative"
+                style={{ width: columnWidths.account || 250, minWidth: 150 }}
+                cursor="pointer"
+                onClick={() => handleSort('account')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-start">
+                  <Text>Account</Text>
+                  {renderSortIndicator('account')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4366,15 +4400,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
               >
                 <HStack spacing={1} justify="flex-end">
                   <Text>Spend</Text>
-                  {sortColumn === 'spend' ? (
-                    sortDirection === 'asc' ? (
-                      <ChevronUpIcon boxSize={4} />
-                    ) : (
-                      <ChevronDownIcon boxSize={4} />
-                    )
-                  ) : (
-                    <Box boxSize={4} />
-                  )}
+                  {renderSortIndicator('spend')}
                 </HStack>
                 <Box
                   position="absolute"
@@ -4391,8 +4417,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.weeklyLeads || 100, minWidth: 80 }}>
-                Weekly Leads
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.weeklyLeads || 100, minWidth: 80 }}
+                cursor="pointer"
+                onClick={() => handleSort('weeklyLeads')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>Weekly Leads</Text>
+                  {renderSortIndicator('weeklyLeads')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4408,8 +4444,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.weeklyTarget || 120, minWidth: 100 }}>
-                Weekly Target
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.weeklyTarget || 120, minWidth: 100 }}
+                cursor="pointer"
+                onClick={() => handleSort('weeklyTarget')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>Weekly Target</Text>
+                  {renderSortIndicator('weeklyTarget')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4425,8 +4471,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.monthlyLeads || 100, minWidth: 80 }}>
-                Monthly Leads
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.monthlyLeads || 100, minWidth: 80 }}
+                cursor="pointer"
+                onClick={() => handleSort('monthlyLeads')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>Monthly Leads</Text>
+                  {renderSortIndicator('monthlyLeads')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4442,8 +4498,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.monthlyTarget || 120, minWidth: 100 }}>
-                Monthly Target
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.monthlyTarget || 120, minWidth: 100 }}
+                cursor="pointer"
+                onClick={() => handleSort('monthlyTarget')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>Monthly Target</Text>
+                  {renderSortIndicator('monthlyTarget')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4459,8 +4525,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.percentToTarget || 120, minWidth: 100 }}>
-                % of Monthly Target
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.percentToTarget || 120, minWidth: 100 }}
+                cursor="pointer"
+                onClick={() => handleSort('percentToTarget')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>% of Monthly Target</Text>
+                  {renderSortIndicator('percentToTarget')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4476,8 +4552,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   }}
                 />
               </Th>
-              <Th isNumeric position="relative" style={{ width: columnWidths.defcon || 100, minWidth: 80 }}>
-                DEFCON
+              <Th
+                isNumeric
+                position="relative"
+                style={{ width: columnWidths.defcon || 100, minWidth: 80 }}
+                cursor="pointer"
+                onClick={() => handleSort('defcon')}
+                _hover={{ bg: 'bg.subtle' }}
+              >
+                <HStack spacing={1} justify="flex-end">
+                  <Text>DEFCON</Text>
+                  {renderSortIndicator('defcon')}
+                </HStack>
                 <Box
                   position="absolute"
                   right={0}
@@ -4760,7 +4846,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
               <Tr bg="bg.subtle" fontWeight="bold">
                 <Td colSpan={1}>
                   <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    Totals
+                    Totals ({filteredAndSortedAccounts.length} accounts)
                   </Text>
                 </Td>
                 <Td isNumeric>

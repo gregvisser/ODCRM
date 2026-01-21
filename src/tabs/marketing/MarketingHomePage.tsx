@@ -1,6 +1,21 @@
 import { useState } from 'react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
-import { Box, Flex, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
+import {
+  AttachmentIcon,
+  ChatIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CopyIcon,
+  EmailIcon,
+  InfoIcon,
+  RepeatIcon,
+  SearchIcon,
+  SettingsIcon,
+  StarIcon,
+  TimeIcon,
+  ViewIcon,
+  AtSignIcon,
+} from '@chakra-ui/icons'
+import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
 import EmailCampaignsTab from '../../components/EmailCampaignsTab'
 import EmailSettingsTab from '../../components/EmailSettingsTab'
 import MarketingInboxTab from '../../components/MarketingInboxTab'
@@ -154,7 +169,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Overview
+              <HStack spacing={2}>
+                <Icon as={InfoIcon} boxSize={4} />
+                <Text>Overview</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -165,7 +183,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Campaigns
+              <HStack spacing={2}>
+                <Icon as={EmailIcon} boxSize={4} />
+                <Text>Campaigns</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -176,7 +197,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Sequences
+              <HStack spacing={2}>
+                <Icon as={RepeatIcon} boxSize={4} />
+                <Text>Sequences</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -187,7 +211,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              People
+              <HStack spacing={2}>
+                <Icon as={AtSignIcon} boxSize={4} />
+                <Text>People</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -198,7 +225,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Lists
+              <HStack spacing={2}>
+                <Icon as={ViewIcon} boxSize={4} />
+                <Text>Lists</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -209,7 +239,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Inbox
+              <HStack spacing={2}>
+                <Icon as={ChatIcon} boxSize={4} />
+                <Text>Inbox</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -220,7 +253,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Reports
+              <HStack spacing={2}>
+                <Icon as={SearchIcon} boxSize={4} />
+                <Text>Reports</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -231,7 +267,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Templates
+              <HStack spacing={2}>
+                <Icon as={CopyIcon} boxSize={4} />
+                <Text>Templates</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -242,7 +281,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Email Accounts
+              <HStack spacing={2}>
+                <Icon as={SettingsIcon} boxSize={4} />
+                <Text>Email Accounts</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -253,7 +295,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Schedules
+              <HStack spacing={2}>
+                <Icon as={TimeIcon} boxSize={4} />
+                <Text>Schedules</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -264,7 +309,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Cognism Prospects
+              <HStack spacing={2}>
+                <Icon as={StarIcon} boxSize={4} />
+                <Text>Cognism Prospects</Text>
+              </HStack>
             </Tab>
             <Tab
               justifyContent={{ md: 'flex-start' }}
@@ -275,7 +323,10 @@ export default function MarketingHomePage({
               _hover={{ bg: 'white', color: 'text.primary' }}
               _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
             >
-              Leads
+              <HStack spacing={2}>
+                <Icon as={AttachmentIcon} boxSize={4} />
+                <Text>Leads</Text>
+              </HStack>
             </Tab>
           </TabList>
           </Box>

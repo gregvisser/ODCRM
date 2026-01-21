@@ -226,28 +226,29 @@ function App() {
                     fontSize="xs"
                     fontWeight="600"
                     color="text.muted"
-                    borderBottom="2px solid"
-                    borderColor="transparent"
+                    border="1px solid"
+                    borderColor="border.subtle"
+                    borderRadius="md"
+                    bg="white"
                     _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
                     _selected={{
-                      color: 'accent.600',
+                      color: 'accent.700',
                       borderColor: 'accent.500',
-                      bg: 'transparent',
+                      bg: 'accent.50',
                     }}
                   >
                     {tab.label}
                   </Tab>
                 ))}
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="xs"
                   px={3}
                   py={1}
                   fontSize="xs"
                   fontWeight="600"
                   color="text.muted"
-                  borderBottom="2px solid"
-                  borderColor="transparent"
+                  borderColor="border.subtle"
                   _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
                   onClick={() => void handleSignOut()}
                 >
@@ -255,11 +256,6 @@ function App() {
                 </Button>
               </TabList>
             </Tabs>
-            <Flex justify="flex-end" mt={2}>
-              <Text fontSize="xs" color="text.muted">
-                Build {__BUILD_STAMP__}
-              </Text>
-            </Flex>
           </Box>
 
           {/* Main Content */}
@@ -279,6 +275,11 @@ function App() {
           </Box>
           <Divider mt={6} opacity={0} />
         </Box>
+      </Box>
+      <Box px={{ base: 3, md: 5, xl: 6 }} pb={{ base: 3, md: 5 }}>
+        <Text fontSize="xs" color="text.muted" textAlign="center">
+          Build {__BUILD_STAMP__}
+        </Text>
       </Box>
     </Flex>
   )

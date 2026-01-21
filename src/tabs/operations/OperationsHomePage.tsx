@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon, InfoIcon, UnlockIcon } from '@chakra-ui/icons'
 import {
   Box,
   Flex,
+  HStack,
+  Icon,
   IconButton,
   ListItem,
   Tab,
@@ -84,7 +86,10 @@ export default function OperationsHomePage({
                 _hover={{ bg: 'white', color: 'text.primary' }}
                 _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
               >
-                Overview
+                <HStack spacing={2}>
+                  <Icon as={InfoIcon} boxSize={4} />
+                  <Text>Overview</Text>
+                </HStack>
               </Tab>
               <Tab
                 justifyContent={{ md: 'flex-start' }}
@@ -95,7 +100,10 @@ export default function OperationsHomePage({
                 _hover={{ bg: 'white', color: 'text.primary' }}
                 _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
               >
-                User Authorization
+                <HStack spacing={2}>
+                  <Icon as={UnlockIcon} boxSize={4} />
+                  <Text>User Authorization</Text>
+                </HStack>
               </Tab>
             </TabList>
           </Box>

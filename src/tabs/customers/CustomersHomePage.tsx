@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
-import { Box, Flex, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
+import { ChevronLeftIcon, ChevronRightIcon, EmailIcon, ViewIcon } from '@chakra-ui/icons'
+import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
 import AccountsTab from '../../components/AccountsTab'
 import ContactsTab from '../../components/ContactsTab'
 
@@ -73,7 +73,10 @@ export default function CustomersHomePage({
                 _hover={{ bg: 'white', color: 'text.primary' }}
                 _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
               >
-                Accounts
+                <HStack spacing={2}>
+                  <Icon as={ViewIcon} boxSize={4} />
+                  <Text>Accounts</Text>
+                </HStack>
               </Tab>
               <Tab
                 justifyContent={{ md: 'flex-start' }}
@@ -84,7 +87,10 @@ export default function CustomersHomePage({
                 _hover={{ bg: 'white', color: 'text.primary' }}
                 _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
               >
-                Contacts
+                <HStack spacing={2}>
+                  <Icon as={EmailIcon} boxSize={4} />
+                  <Text>Contacts</Text>
+                </HStack>
               </Tab>
             </TabList>
           </Box>
