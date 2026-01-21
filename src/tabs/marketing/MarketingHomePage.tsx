@@ -110,8 +110,7 @@ export default function MarketingHomePage({
         onNavigate?.(nextView)
       }}
       isLazy
-      variant="soft-rounded"
-      colorScheme="gray"
+      variant="unstyled"
       orientation="vertical"
     >
       <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
@@ -119,32 +118,149 @@ export default function MarketingHomePage({
           position="sticky"
           top={16}
           alignSelf="flex-start"
-          bg="bg.surface"
+          bg="bg.subtle"
           border="1px solid"
           borderColor="border.subtle"
-          borderRadius="lg"
-          p={2}
+          borderRadius="xl"
+          p={3}
+          boxShadow="sm"
           minW="220px"
           maxW="240px"
           w="240px"
         >
-          <TabList
-            flexDirection="column"
-            overflowX="visible"
-            whiteSpace="normal"
-          >
-            <Tab justifyContent={{ md: 'flex-start' }}>Overview</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Campaigns</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Sequences</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>People</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Lists</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Inbox</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Reports</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Templates</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Email Accounts</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Schedules</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Cognism Prospects</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Leads</Tab>
+          <TabList flexDirection="column" overflowX="visible" whiteSpace="normal" gap={1}>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Overview
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Campaigns
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Sequences
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              People
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Lists
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Inbox
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Reports
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Templates
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Email Accounts
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Schedules
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Cognism Prospects
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Leads
+            </Tab>
           </TabList>
         </Box>
 

@@ -29,8 +29,7 @@ export default function CustomersHomePage({
         onNavigate?.(nextView)
       }}
       isLazy
-      variant="soft-rounded"
-      colorScheme="gray"
+      variant="unstyled"
       orientation="vertical"
     >
       <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
@@ -38,18 +37,39 @@ export default function CustomersHomePage({
           position="sticky"
           top={16}
           alignSelf="flex-start"
-          bg="bg.surface"
+          bg="bg.subtle"
           border="1px solid"
           borderColor="border.subtle"
-          borderRadius="lg"
-          p={2}
+          borderRadius="xl"
+          p={3}
+          boxShadow="sm"
           minW="200px"
           maxW="220px"
           w="220px"
         >
-          <TabList flexDirection="column">
-            <Tab justifyContent={{ md: 'flex-start' }}>Accounts</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>Contacts</Tab>
+          <TabList flexDirection="column" gap={1}>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Accounts
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Contacts
+            </Tab>
           </TabList>
         </Box>
         <TabPanels flex="1" pt={1}>

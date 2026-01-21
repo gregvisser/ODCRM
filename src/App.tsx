@@ -228,13 +228,36 @@ function App() {
                 setActiveView('overview')
                 setFocusAccountName(undefined)
               }}
-              variant="soft-rounded"
-              colorScheme="gray"
+              variant="unstyled"
               mt={{ base: 3, md: 4 }}
             >
-              <TabList overflowX="auto" whiteSpace="nowrap">
+              <TabList
+                overflowX="auto"
+                whiteSpace="nowrap"
+                borderBottom="1px solid"
+                borderColor="border.subtle"
+                gap={1}
+                pb={2}
+              >
                 {CRM_TOP_TABS.map((tab) => (
-                  <Tab key={tab.id}>{tab.label}</Tab>
+                  <Tab
+                    key={tab.id}
+                    px={4}
+                    py={2}
+                    fontSize="sm"
+                    fontWeight="600"
+                    color="text.muted"
+                    borderBottom="2px solid"
+                    borderColor="transparent"
+                    _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
+                    _selected={{
+                      color: 'accent.600',
+                      borderColor: 'accent.500',
+                      bg: 'transparent',
+                    }}
+                  >
+                    {tab.label}
+                  </Tab>
                 ))}
               </TabList>
             </Tabs>

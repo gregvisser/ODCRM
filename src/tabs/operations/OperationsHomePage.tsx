@@ -39,8 +39,7 @@ export default function OperationsHomePage({
         onNavigate?.(nextView)
       }}
       isLazy
-      variant="soft-rounded"
-      colorScheme="gray"
+      variant="unstyled"
       orientation="vertical"
     >
       <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start">
@@ -48,18 +47,39 @@ export default function OperationsHomePage({
           position="sticky"
           top={16}
           alignSelf="flex-start"
-          bg="bg.surface"
+          bg="bg.subtle"
           border="1px solid"
           borderColor="border.subtle"
-          borderRadius="lg"
-          p={2}
+          borderRadius="xl"
+          p={3}
+          boxShadow="sm"
           minW="220px"
           maxW="240px"
           w="240px"
         >
-          <TabList flexDirection="column">
-            <Tab justifyContent={{ md: 'flex-start' }}>Overview</Tab>
-            <Tab justifyContent={{ md: 'flex-start' }}>User Authorization</Tab>
+          <TabList flexDirection="column" gap={1}>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              Overview
+            </Tab>
+            <Tab
+              justifyContent={{ md: 'flex-start' }}
+              fontSize="sm"
+              fontWeight="600"
+              borderRadius="md"
+              color="text.muted"
+              _hover={{ bg: 'white', color: 'text.primary' }}
+              _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+            >
+              User Authorization
+            </Tab>
           </TabList>
         </Box>
         <TabPanels flex="1" pt={1}>
