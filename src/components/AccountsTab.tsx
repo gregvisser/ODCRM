@@ -152,6 +152,9 @@ export type Account = {
   aboutSections: AboutSections
   sector: string
   socialMedia: SocialProfile[]
+  logoUrl?: string
+  aboutSource?: 'web' | 'manual' | 'web_failed'
+  aboutLocked?: boolean
   status: 'Active' | 'Inactive' | 'On Hold'
   targetLocation: string[]
   targetTitle: string
@@ -760,7 +763,7 @@ function mergeAccountFromBackup(account: Account, backup: Account): Account {
   if (!account.clientLeadsSheetUrl && backup.clientLeadsSheetUrl) {
     updates.clientLeadsSheetUrl = backup.clientLeadsSheetUrl
   }
-  if ((!account.sector || account.sector === 'To be determined') && backup.sector) {
+  if (!account.sector && backup.sector) {
     updates.sector = backup.sector
   }
   if ((!account.targetTitle || !account.targetTitle.trim()) && backup.targetTitle) {
@@ -789,11 +792,11 @@ function saveAccountsToStorage(accountsData: Account[]) {
 }
 
 const DEFAULT_ABOUT_SECTIONS: AboutSections = {
-  whatTheyDo: 'Information will be populated via AI research.',
-  accreditations: 'Information will be populated via AI research.',
-  keyLeaders: 'Information will be populated via AI research.',
-  companyProfile: 'Information will be populated via AI research.',
-  recentNews: 'Information will be populated via AI research.',
+  whatTheyDo: '',
+  accreditations: '',
+  keyLeaders: '',
+  companyProfile: '',
+  recentNews: '',
   companySize: '',
   headquarters: '',
   foundingYear: '',
@@ -900,7 +903,7 @@ function buildCustomerPayloadFromAccount(account: Account): {
   const domain = normalizeDomain(account.website)
   if (domain) payload.domain = domain
   if (account.clientLeadsSheetUrl) payload.leadsReportingUrl = account.clientLeadsSheetUrl
-  if (account.sector && account.sector !== 'To be determined') payload.sector = account.sector
+  if (account.sector) payload.sector = account.sector
   if (account.status) payload.clientStatus = mapAccountStatusToClientStatus(account.status) || 'active'
   if (account.targetTitle) payload.targetJobTitle = account.targetTitle
   if (account.targetLocation?.length) payload.prospectingLocation = account.targetLocation[0]
@@ -1042,7 +1045,7 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     name: raw.name || '',
     website: raw.website || '',
     aboutSections: { ...DEFAULT_ABOUT_SECTIONS, ...(raw.aboutSections || {}) },
-    sector: raw.sector || 'To be determined',
+    sector: raw.sector || '',
     socialMedia: Array.isArray(raw.socialMedia) ? raw.socialMedia : [],
     status: raw.status || 'Active',
     targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
@@ -1088,7 +1091,7 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   const fallback = normalizeAccountDefaults({
     name: customer.name,
     website: normalizeCustomerWebsite(customer.domain),
-    sector: customer.sector || 'To be determined',
+    sector: customer.sector || '',
     status: mapClientStatusToAccountStatus(customer.clientStatus),
     targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
     targetTitle: customer.targetJobTitle || '',
@@ -1113,7 +1116,7 @@ function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Acco
   if (!account.clientLeadsSheetUrl && customer.leadsReportingUrl) {
     updates.clientLeadsSheetUrl = customer.leadsReportingUrl
   }
-  if ((!account.sector || account.sector === 'To be determined') && customer.sector) {
+  if (!account.sector && customer.sector) {
     updates.sector = customer.sector
   }
   if ((!account.targetTitle || !account.targetTitle.trim()) && customer.targetJobTitle) {
@@ -1150,7 +1153,10 @@ function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Acco
 async function populateAccountData(account: Account): Promise<Account> {
   const companyData = await fetchCompanyData(account.name, account.website)
   if (!companyData) {
-    return account // Return unchanged if no data found
+    return {
+      ...account,
+      aboutSource: account.aboutSource ?? 'web_failed',
+    }
   }
   
   // Build company profile from available data
@@ -1163,18 +1169,21 @@ async function populateAccountData(account: Account): Promise<Account> {
   // Use company data, prioritizing it over existing account data
   return {
     ...account,
-    sector: companyData.sector && companyData.sector !== 'To be determined' ? companyData.sector : account.sector,
+    sector: companyData.sector || account.sector,
     aboutSections: {
-      whatTheyDo: companyData.whatTheyDo && !companyData.whatTheyDo.includes('Information will be populated') ? companyData.whatTheyDo : (account.aboutSections?.whatTheyDo || companyData.whatTheyDo),
-      accreditations: companyData.accreditations && !companyData.accreditations.includes('Information will be populated') ? companyData.accreditations : (account.aboutSections?.accreditations || companyData.accreditations),
-      keyLeaders: companyData.keyLeaders && !companyData.keyLeaders.includes('Information will be populated') ? companyData.keyLeaders : (account.aboutSections?.keyLeaders || companyData.keyLeaders),
-      companyProfile: companyProfile || account.aboutSections?.companyProfile || '',
-      recentNews: companyData.recentNews && !companyData.recentNews.includes('Information will be populated') ? companyData.recentNews : (account.aboutSections?.recentNews || companyData.recentNews),
-      companySize: companyData.companySize && !companyData.companySize.includes('Information will be populated') ? companyData.companySize : (account.aboutSections?.companySize || companyData.companySize),
-      headquarters: companyData.headquarters && !companyData.headquarters.includes('Information will be populated') ? companyData.headquarters : (account.aboutSections?.headquarters || companyData.headquarters),
-      foundingYear: companyData.foundingYear && !companyData.foundingYear.includes('Information will be populated') ? companyData.foundingYear : (account.aboutSections?.foundingYear || companyData.foundingYear),
+      whatTheyDo: companyData.whatTheyDo || '',
+      accreditations: companyData.accreditations || '',
+      keyLeaders: companyData.keyLeaders || '',
+      companyProfile: companyProfile || '',
+      recentNews: companyData.recentNews || '',
+      companySize: companyData.companySize || '',
+      headquarters: companyData.headquarters || '',
+      foundingYear: companyData.foundingYear || '',
     },
-    socialMedia: companyData.socialMedia && companyData.socialMedia.length > 0 ? companyData.socialMedia : (account.socialMedia || []),
+    socialMedia: companyData.socialMedia && companyData.socialMedia.length > 0 ? companyData.socialMedia : [],
+    logoUrl: companyData.logoUrl || account.logoUrl,
+    aboutSource: 'web',
+    aboutLocked: true,
   }
 }
 
@@ -1200,7 +1209,7 @@ function saveTargetLocationsToStorage(locations: Record<string, string[]>) {
   setJson(STORAGE_KEY_TARGET_LOCATIONS, locations)
 }
 
-export const accounts: Account[] = [
+const seededAccounts: Account[] = [
   {
     name: 'OCS',
     website: 'https://ocs.com/',
@@ -1709,6 +1718,16 @@ export const accounts: Account[] = [
   },
 ]
 
+export const accounts: Account[] = seededAccounts.map((account) => ({
+  ...account,
+  aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
+  sector: '',
+  socialMedia: [],
+  logoUrl: account.logoUrl,
+  aboutSource: undefined,
+  aboutLocked: false,
+}))
+
 // UK Areas for Target Location
 const UK_AREAS = [
   'United Kingdom',
@@ -1737,59 +1756,22 @@ const UK_AREAS = [
   'Broadland', 'Ipswich', 'Babergh', 'East Suffolk', 'Mid Suffolk', 'West Suffolk',
 ].sort()
 
-// Some customer logos don't resolve reliably via Clearbit/favicon (or their sites block hotlinking/fetching).
-// We hard-pin the official logo assets for those customers here.
-const HARDCODED_ACCOUNT_LOGOS: Record<string, string> = {
-  Beauparc: 'https://beauparc.ie/wp-content/uploads/2017/12/logo.png',
-  'Seven Clean Seas':
-    'https://cdn.prod.website-files.com/64f7de2bc62f55fed197d14a/6763c26d6c9bf69e5e988fae_SCS-logo-white-animated.gif',
-  Legionella: 'https://legionellacontrol.com/wp-content/uploads/2018/02/legionella-control-logo2x.png',
-  'MaxSpace Projects':
-    'https://maxspaceprojects.co.uk/wp-content/uploads/MaxSpace-Projects-Logo-Main-e1738719394741.webp',
-  MaxSpace:
-    'https://maxspaceprojects.co.uk/wp-content/uploads/MaxSpace-Projects-Logo-Main-e1738719394741.webp',
-  'My Purchasing Partner': 'https://www.mypurchasingpartner.co.uk/wp-content/uploads/logo.svg',
-  OCS: 'https://ocs.com/app/uploads/2024/09/OCS-Group-Logo-300x116.png',
-  'Octavian Security':
-    'https://www.octaviansecurity.com/wp-content/uploads/2020/07/octavian-logo-R-256x45-FINAL-e1593692669215.png',
-  Papaya: 'https://www.papayaglobal.com/wp-content/uploads/2023/02/papaya-new-logo.svg',
-  'P&R Morson FM': 'https://www.morsonfm.co.uk/wp-content/uploads/2021/12/PR-Morson-Logo.png',
-  'Protech Roofing': 'https://protechroofing.co.uk/wp-content/uploads/2023/07/Protech-Roofing_Logo_Whitegold.svg',
-  'Renewable Temp Power': 'https://renewabletemporarypower.co.uk/wp-content/uploads/2022/05/rtp-logo.svg',
-  'Shield Pest Control':
-    'https://shieldpestcontrol.co.uk/wp-content/uploads/2025/03/Updated-Shield-Company-Logo.webp',
-  'Thomas Franks': 'https://thomasfranks.com/wp-content/uploads/2024/08/thomas-franks-logo.svg',
-  'Be Safe Technologies': 'https://be-safetech.com/wp-content/uploads/2023/03/Besafe-logo-2.png',
-  GreenTheUK: 'https://greentheuk.com/assets/images/assets/green-the-uk-logo.png',
-  FusionTek: 'https://fusiontek.co.uk/wp-content/uploads/2023/01/2000-%D0%BF%D0%B8%D0%BA%D1%81%D0%B5%D0%BB%D0%B5%D0%B9.png',
-  Vendease: 'https://www.google.com/s2/favicons?sz=128&domain=vendease.com',
-  'Verve Connect': 'https://verveconnect.co.uk/wp-content/uploads/2018/11/verve-connect-footer-logo.svg',
-}
-
 const getAccountLogo = (
   account: Account,
   failedLogos?: Set<string>,
 ) => {
   const dicebearFallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(account.name)}`
 
-  // Prefer hard-pinned customer logos (unless they've failed to load).
-  const hardcoded = HARDCODED_ACCOUNT_LOGOS[account.name]
-  if (hardcoded && !failedLogos?.has(account.name)) {
-    return hardcoded.startsWith('//') ? `https:${hardcoded}` : hardcoded
+  if (account.logoUrl && !failedLogos?.has(account.name)) {
+    return account.logoUrl
   }
 
   try {
     const hostname = new URL(account.website).hostname
     if (!hostname) return dicebearFallback
 
-    // Remove 'www.' prefix if present for better Clearbit matching
     const cleanHostname = hostname.replace(/^www\./, '')
-    // If Clearbit failed, fall back to Google's favicon service (usually still a recognizable logo mark).
-    if (failedLogos?.has(account.name)) {
-      return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(cleanHostname)}`
-    }
-
-    return `https://logo.clearbit.com/${cleanHostname}`
+    return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(cleanHostname)}`
   } catch (error) {
     console.warn('Unable to derive logo from website', { account, error })
     return dicebearFallback
@@ -1806,7 +1788,6 @@ function extractDomain(website: string): string | null {
   }
 }
 
-// Fetch company data from Clearbit Enrichment API
 const sectionsToPlainText = (sections: AboutSections) =>
   [
     `What they do: ${sections.whatTheyDo}`,
@@ -1822,31 +1803,34 @@ const truncateText = (text: string, maxLength = 240) =>
 const hasExtendedAbout = (sections: AboutSections) =>
   sectionsToPlainText(sections).length > 480
 
-const socialPresenceBlock = (socialMedia: SocialProfile[]) => (
-  <Stack spacing={2}>
-    <Text fontSize="sm" fontWeight="semibold" color="gray.600">
-      Social presence
-    </Text>
-    <Wrap spacing={2}>
-      {socialMedia.map((profile) => (
-        <WrapItem key={profile.label}>
-          <Link 
-            href={profile.url} 
-            isExternal 
-            color="text.muted" 
-            fontWeight="medium"
-            _hover={{ color: 'teal.700', textDecoration: 'underline' }}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {profile.label}
-            <ExternalLinkIcon ml={1} />
-          </Link>
-        </WrapItem>
-      ))}
-    </Wrap>
-  </Stack>
-)
+const socialPresenceBlock = (socialMedia: SocialProfile[]) => {
+  if (!socialMedia || socialMedia.length === 0) return null
+  return (
+    <Stack spacing={2}>
+      <Text fontSize="sm" fontWeight="semibold" color="gray.600">
+        Social presence
+      </Text>
+      <Wrap spacing={2}>
+        {socialMedia.map((profile) => (
+          <WrapItem key={profile.label}>
+            <Link 
+              href={profile.url} 
+              isExternal 
+              color="text.muted" 
+              fontWeight="medium"
+              _hover={{ color: 'teal.700', textDecoration: 'underline' }}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {profile.label}
+              <ExternalLinkIcon ml={1} />
+            </Link>
+          </WrapItem>
+        ))}
+      </Wrap>
+    </Stack>
+  )
+}
 
 const detailedSections = (sections: AboutSections) => [
   { heading: 'What the company does', value: sections.whatTheyDo },
@@ -1966,6 +1950,12 @@ const renderAboutField = (
       newsItems: formatted.newsItems
     }
   })
+  const visibleSections = sectionItems.filter((item) => {
+    if (item.heading === 'Recent news') {
+      return item.newsItems && item.newsItems.length > 0
+    }
+    return Boolean(item.value && item.value.trim())
+  })
   const shouldShowToggle = hasExtendedAbout(sections)
 
   if (!expanded && shouldShowToggle) {
@@ -1987,7 +1977,7 @@ const renderAboutField = (
 
   return (
     <Stack spacing={5}>
-      {sectionItems.map((item) => {
+      {visibleSections.map((item) => {
         // Special handling for Recent news section with links
         if (item.heading === 'Recent news' && item.newsItems && item.newsItems.length > 0) {
           return (
@@ -2000,11 +1990,11 @@ const renderAboutField = (
                   <Box key={index}>
                     {news.url ? (
                       <Link href={news.url} isExternal color="text.muted" fontSize="sm">
-                        {news.date}: {news.headline}
+                        {news.date ? `${news.date}: ` : ''}{news.headline}
                       </Link>
                     ) : (
                       <Text fontSize="sm" color="gray.700">
-                        {news.date}: {news.headline}
+                        {news.date ? `${news.date}: ` : ''}{news.headline}
                       </Text>
                     )}
                   </Box>
@@ -3141,11 +3131,12 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const pendingSyncRef = useRef(false)
   const lastSyncedHashRef = useRef<string | null>(null)
   const latestAccountsRef = useRef<Account[]>([])
+  const hasAutoEnrichedRef = useRef(false)
   const [newAccountForm, setNewAccountForm] = useState<Partial<Account>>({
     name: '',
     website: '',
     status: 'Active',
-    sector: 'To be determined',
+    sector: '',
     targetLocation: [],
     targetTitle: '',
     monthlySpendGBP: 0,
@@ -3159,13 +3150,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     monthlyActual: 0,
     weeklyReport: '',
     clientLeadsSheetUrl: '',
-    aboutSections: {
-      whatTheyDo: 'Information will be populated via AI research.',
-      accreditations: 'Information will be populated via AI research.',
-      keyLeaders: 'Information will be populated via AI research.',
-      companyProfile: 'Information will be populated via AI research.',
-      recentNews: 'Information will be populated via AI research.',
-    },
+    aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
     socialMedia: [],
     agreements: [],
     users: [],
@@ -3282,6 +3267,42 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       return []
     }
   })
+
+  // Auto-enrich existing accounts with verified web data (no AI).
+  useEffect(() => {
+    if (hasAutoEnrichedRef.current) return
+    if (!accountsData || accountsData.length === 0) return
+    hasAutoEnrichedRef.current = true
+
+    const sanitized = accountsData.map((account) => {
+      if (account.aboutSource === 'web') return account
+      return {
+        ...account,
+        aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
+        sector: '',
+        socialMedia: [],
+        logoUrl: account.logoUrl,
+        aboutSource: undefined,
+        aboutLocked: false,
+      }
+    })
+
+    setAccountsData(sanitized)
+    saveAccountsToStorage(sanitized)
+    emit('accountsUpdated', sanitized)
+
+    const run = async () => {
+      for (const account of sanitized) {
+        if (!account.website) continue
+        const populated = await populateAccountData(account)
+        if (populated.aboutSource === 'web') {
+          updateAccountSilent(account.name, populated)
+        }
+      }
+    }
+
+    void run()
+  }, [accountsData])
 
   // Ensure account changes are persisted immediately (guards against missed save paths and prevents "reverts")
   // Also keeps multiple tabs in sync via the native `storage` event.
@@ -3592,6 +3613,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       isClosable: true,
     })
   }
+
+  const updateAccountSilent = (accountName: string, updates: Partial<Account>) => {
+    setAccountsData((prev) => {
+      const updated = prev.map((acc) => (acc.name === accountName ? { ...acc, ...updates } : acc))
+      saveAccountsToStorage(updated)
+      emit('accountsUpdated', updated)
+      return updated
+    })
+    if (selectedAccount?.name === accountName) {
+      setSelectedAccount((prev) => (prev ? { ...prev, ...updates } : null))
+    }
+  }
   
   // Handle inline edit save (defined after updateAccount)
   const handleCellSave = () => {
@@ -3637,26 +3670,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       const refreshedData = await refreshCompanyData(accountToRefresh.name, accountToRefresh.website)
       if (refreshedData) {
         const updatedAccount = await populateAccountData(accountToRefresh)
-        // Update sector in sectorsMap as well
         setSectorsMap((prev) => ({
           ...prev,
-          [accountToRefresh.name]: refreshedData.sector,
+          [accountToRefresh.name]: updatedAccount.sector,
         }))
-        updateAccount(accountToRefresh.name, {
-          sector: refreshedData.sector,
-          aboutSections: {
-            ...accountToRefresh.aboutSections,
-            whatTheyDo: refreshedData.whatTheyDo,
-            accreditations: refreshedData.accreditations,
-            keyLeaders: refreshedData.keyLeaders,
-            companyProfile: `${refreshedData.headquarters ? `Headquarters: ${refreshedData.headquarters}. ` : ''}${refreshedData.foundingYear ? `Founded: ${refreshedData.foundingYear}. ` : ''}${refreshedData.companySize ? `Company Size: ${refreshedData.companySize}.` : ''}`,
-            recentNews: refreshedData.recentNews,
-            companySize: refreshedData.companySize,
-            headquarters: refreshedData.headquarters,
-            foundingYear: refreshedData.foundingYear,
-          },
-          socialMedia: refreshedData.socialMedia,
-        })
+        updateAccount(accountToRefresh.name, updatedAccount)
         toast({
           title: 'Company data refreshed',
           description: `Company information for ${accountToRefresh.name} has been updated from web search`,
@@ -3893,15 +3911,12 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     let initialAccount: Account = {
       name: newAccountForm.name.trim(),
       website: newAccountForm.website || '',
-      aboutSections: newAccountForm.aboutSections || {
-        whatTheyDo: 'Information will be populated via AI research.',
-        accreditations: 'Information will be populated via AI research.',
-        keyLeaders: 'Information will be populated via AI research.',
-        companyProfile: 'Information will be populated via AI research.',
-        recentNews: 'Information will be populated via AI research.',
-      },
-      sector: newAccountForm.sector || 'To be determined',
+      aboutSections: newAccountForm.aboutSections || { ...DEFAULT_ABOUT_SECTIONS },
+      sector: newAccountForm.sector || '',
       socialMedia: newAccountForm.socialMedia || [],
+      logoUrl: newAccountForm.logoUrl,
+      aboutSource: newAccountForm.aboutSource,
+      aboutLocked: newAccountForm.aboutLocked,
       status: newAccountForm.status || 'Active',
       targetLocation: newAccountForm.targetLocation || [],
       targetTitle: newAccountForm.targetTitle || '',
@@ -3964,7 +3979,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       name: '',
       website: '',
       status: 'Active',
-      sector: 'To be determined',
+      sector: '',
       targetLocation: [],
       targetTitle: '',
       monthlySpendGBP: 0,
@@ -3978,13 +3993,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       monthlyActual: 0,
       weeklyReport: '',
       clientLeadsSheetUrl: '',
-      aboutSections: {
-        whatTheyDo: 'Information will be populated via AI research.',
-        accreditations: 'Information will be populated via AI research.',
-        keyLeaders: 'Information will be populated via AI research.',
-        companyProfile: 'Information will be populated via AI research.',
-        recentNews: 'Information will be populated via AI research.',
-      },
+      aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
       socialMedia: [],
       agreements: [],
       users: [],
@@ -4008,7 +4017,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     setExpandedAbout((prev) => ({ ...prev, [accountName]: !prev[accountName] }))
   }
 
-  // Refresh AI data for a single account
+  // Refresh verified web data for a single account
   // Listen for navigation to account from contacts tab
   useEffect(() => {
     const handleNavigateToAccount = (detail: { accountName?: string } | undefined) => {
@@ -4977,7 +4986,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
               <SimpleGrid columns={2} gap={4}>
                 <FormControl>
-                  <FormLabel>Monthly Spend (GBP)</FormLabel>
+                  <FormLabel>Monthly Revenue (GBP)</FormLabel>
                   <NumberInput
                     value={newAccountForm.monthlySpendGBP || 0}
                     onChange={(_, value) => setNewAccountForm({ ...newAccountForm, monthlySpendGBP: value || 0 })}
@@ -5200,7 +5209,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         onCancel={() => stopEditing(selectedAccount.name, 'monthlySpendGBP')}
                         isEditing={isFieldEditing(selectedAccount.name, 'monthlySpendGBP')}
                         onEdit={() => startEditing(selectedAccount.name, 'monthlySpendGBP')}
-                        label="Monthly Spend"
+                        label="Monthly Revenue"
                         type="number"
                         placeholder="0"
                         renderDisplay={(value) => (

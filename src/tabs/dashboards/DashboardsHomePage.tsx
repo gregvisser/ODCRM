@@ -66,11 +66,11 @@ const LEAD_SOURCE_KEYWORDS: Record<string, string[]> = {
 }
 
 const DEFAULT_ABOUT_SECTIONS: Account['aboutSections'] = {
-  whatTheyDo: 'Information will be populated via AI research.',
-  accreditations: 'Information will be populated via AI research.',
-  keyLeaders: 'Information will be populated via AI research.',
-  companyProfile: 'Information will be populated via AI research.',
-  recentNews: 'Information will be populated via AI research.',
+  whatTheyDo: '',
+  accreditations: '',
+  keyLeaders: '',
+  companyProfile: '',
+  recentNews: '',
   companySize: '',
   headquarters: '',
   foundingYear: '',
@@ -122,8 +122,11 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     name: raw.name || '',
     website: raw.website || '',
     aboutSections: { ...DEFAULT_ABOUT_SECTIONS, ...(raw.aboutSections || {}) },
-    sector: raw.sector || 'To be determined',
+    sector: raw.sector || '',
     socialMedia: Array.isArray(raw.socialMedia) ? raw.socialMedia : [],
+    logoUrl: raw.logoUrl,
+    aboutSource: raw.aboutSource,
+    aboutLocked: raw.aboutLocked,
     status: raw.status || 'Active',
     targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
     targetTitle: raw.targetTitle || '',
@@ -168,7 +171,7 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   const fallback = normalizeAccountDefaults({
     name: customer.name,
     website: normalizeCustomerWebsite(customer.domain),
-    sector: customer.sector || 'To be determined',
+    sector: customer.sector || '',
     status: mapClientStatusToAccountStatus(customer.clientStatus),
     targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
     targetTitle: customer.targetJobTitle || '',
