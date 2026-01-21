@@ -12,7 +12,7 @@ export type CompanyData = {
   recentNews: string
   socialMedia: Array<{ label: string; url: string }>
   logoUrl?: string | null
-  source?: 'web'
+  source?: 'opencorporates' | 'web'
   verified?: boolean
 }
 

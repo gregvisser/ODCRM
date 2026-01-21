@@ -153,7 +153,7 @@ export type Account = {
   sector: string
   socialMedia: SocialProfile[]
   logoUrl?: string
-  aboutSource?: 'web' | 'manual' | 'web_failed'
+  aboutSource?: 'opencorporates' | 'web' | 'manual' | 'web_failed'
   aboutLocked?: boolean
   status: 'Active' | 'Inactive' | 'On Hold'
   targetLocation: string[]
@@ -1182,7 +1182,7 @@ async function populateAccountData(account: Account): Promise<Account> {
     },
     socialMedia: companyData.socialMedia && companyData.socialMedia.length > 0 ? companyData.socialMedia : [],
     logoUrl: companyData.logoUrl || account.logoUrl,
-    aboutSource: 'web',
+    aboutSource: companyData.source || 'web',
     aboutLocked: true,
   }
 }

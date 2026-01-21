@@ -5,7 +5,7 @@ const router = Router()
 
 const lookupSchema = z.object({
   name: z.string().min(1).optional(),
-  website: z.string().min(1),
+  website: z.string().min(1).optional(),
 })
 
 const SOCIAL_DOMAINS = [
@@ -96,37 +96,63 @@ const validateUrl = async (url: string) => {
   return false
 }
 
+const fetchOpenCorporates = async (name?: string) => {
+  if (!name) return null
+  const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(name)}`
+  const response = await fetchWithTimeout(url, { method: 'GET' }, 12000)
+  if (!response.ok) return null
+  const json = await response.json()
+  const first = json?.results?.companies?.[0]?.company
+  if (!first) return null
+  return {
+    name: first.name as string,
+    jurisdiction: first.jurisdiction_code as string,
+    companyNumber: first.company_number as string,
+    incorporationDate: first.incorporation_date as string,
+    registeredAddress: first.registered_address_in_full as string,
+  }
+}
+
 router.post('/lookup', async (req, res) => {
   try {
     const { name, website } = lookupSchema.parse(req.body)
-    const normalizedWebsite = website.startsWith('http') ? website : `https://${website}`
-    const response = await fetchWithTimeout(normalizedWebsite, { method: 'GET' }, 12000)
-    if (!response.ok) {
-      return res.status(404).json({ error: 'Website not reachable' })
+    const oc = await fetchOpenCorporates(name)
+
+    let normalizedWebsite = ''
+    let html = ''
+    if (website) {
+      normalizedWebsite = website.startsWith('http') ? website : `https://${website}`
+      const response = await fetchWithTimeout(normalizedWebsite, { method: 'GET' }, 12000)
+      if (response.ok) {
+        html = await response.text()
+      }
     }
 
-    const html = await response.text()
-    const description = extractMeta(html, 'description') || extractMeta(html, 'og:description') || ''
-    const ogImage = extractMeta(html, 'og:image') || extractMeta(html, 'twitter:image')
-    const icon = extractLinkRel(html, 'icon') || extractLinkRel(html, 'shortcut icon') || extractLinkRel(html, 'apple-touch-icon')
+    const description = html ? (extractMeta(html, 'description') || extractMeta(html, 'og:description') || '') : ''
+    const ogImage = html ? (extractMeta(html, 'og:image') || extractMeta(html, 'twitter:image')) : ''
+    const icon = html ? (extractLinkRel(html, 'icon') || extractLinkRel(html, 'shortcut icon') || extractLinkRel(html, 'apple-touch-icon')) : ''
     const logoCandidate = ogImage || icon
-    const logoUrl = logoCandidate ? absoluteUrl(normalizedWebsite, logoCandidate) : null
+    const logoUrl = logoCandidate && normalizedWebsite ? absoluteUrl(normalizedWebsite, logoCandidate) : null
 
-    const jsonLd = extractJsonLd(html)
+    const jsonLd = html ? extractJsonLd(html) : []
     const org = pickOrganization(jsonLd) || {}
 
-    const foundingDate = org.foundingDate ? String(org.foundingDate).slice(0, 4) : ''
+    const foundingDate = oc?.incorporationDate ? String(oc.incorporationDate).slice(0, 4) : (org.foundingDate ? String(org.foundingDate).slice(0, 4) : '')
     const founders = Array.isArray(org.founder) ? org.founder : org.founder ? [org.founder] : []
     const keyLeaders = founders
       .map((f: any) => f?.name || f)
       .filter(Boolean)
       .join(', ')
 
-    const address = org.address || {}
-    const headquartersParts = [address.addressLocality, address.addressRegion, address.addressCountry]
-      .filter(Boolean)
-      .map((part: string) => sanitizeText(part))
-    const headquarters = headquartersParts.join(', ')
+    const headquarters = oc?.registeredAddress
+      ? sanitizeText(oc.registeredAddress)
+      : (() => {
+        const address = org.address || {}
+        const headquartersParts = [address.addressLocality, address.addressRegion, address.addressCountry]
+          .filter(Boolean)
+          .map((part: string) => sanitizeText(part))
+        return headquartersParts.join(', ')
+      })()
 
     const companySize = (() => {
       if (org.numberOfEmployees) {
@@ -136,12 +162,12 @@ router.post('/lookup', async (req, res) => {
       return ''
     })()
 
-    const accreditations = extractAccreditations(html)
+    const accreditations = html ? extractAccreditations(html) : []
 
-    const linkMatches = [...html.matchAll(/href=["']([^"']+)["']/gi)].map((m) => m[1])
-    const socialCandidates = linkMatches
-      .map((href) => absoluteUrl(normalizedWebsite, href))
-      .filter(Boolean) as string[]
+    const linkMatches = html ? [...html.matchAll(/href=["']([^"']+)["']/gi)].map((m) => m[1]) : []
+    const socialCandidates = normalizedWebsite
+      ? linkMatches.map((href) => absoluteUrl(normalizedWebsite, href)).filter(Boolean) as string[]
+      : []
 
     const socialMediaRaw = SOCIAL_DOMAINS.map((provider) => {
       const match = socialCandidates.find((url) => provider.match.test(url))
@@ -168,12 +194,12 @@ router.post('/lookup', async (req, res) => {
       accreditations: accreditations.join(', '),
       keyLeaders,
       companySize,
-      headquarters,
-      foundingYear: foundingDate,
+      headquarters: headquarters || '',
+      foundingYear: foundingDate || '',
       recentNews: newsItems.length ? JSON.stringify(newsItems) : '',
       socialMedia,
       logoUrl,
-      source: 'web',
+      source: oc ? 'opencorporates' : 'web',
       verified: true,
     })
   } catch (error) {
