@@ -310,6 +310,9 @@ const theme = extendTheme({
             bg: 'bg.subtle',
             color: 'text.primary',
             fontWeight: '600',
+            position: 'sticky',
+            top: 0,
+            zIndex: 1,
           },
           td: {
             borderBottomColor: 'border.subtle',

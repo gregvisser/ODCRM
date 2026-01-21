@@ -1,17 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Avatar,
   Box,
   Divider,
   Flex,
   HStack,
-  Image,
   Tab,
   TabList,
   Tabs,
   Text,
-  VStack,
+  Button,
 } from '@chakra-ui/react'
+import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
@@ -20,17 +19,13 @@ import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/Market
 import OperationsHomePage, { type OperationsViewId } from './tabs/operations/OperationsHomePage'
 import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
 import './App.css'
-import openDoorsLogo from './assets/opendoors-logo.svg'
+import { HeaderImagePicker } from './components/HeaderImagePicker'
 
 function App() {
+  const { instance } = useMsal()
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('overview')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
-  const activeTabLabel = useMemo(
-    () => CRM_TOP_TABS.find((tab) => tab.id === activeTab)?.label ?? 'Overview',
-    [activeTab],
-  )
-
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
   const legacyTabMap = useMemo(() => {
@@ -110,6 +105,10 @@ function App() {
       window.removeEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
     }
   }, [])
+
+  const handleSignOut = async () => {
+    await instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
+  }
 
   const page = (() => {
     switch (activeTab) {
@@ -198,32 +197,9 @@ function App() {
               justify="space-between"
             >
               <HStack spacing={3} align="center">
-                <Box
-                  border="1px solid"
-                  borderColor="border.subtle"
-                  bg="white"
-                  borderRadius="md"
-                  w={{ base: '40px', md: '48px' }}
-                  h={{ base: '40px', md: '48px' }}
-                  display="flex"
-                  alignItems="center"
-                  justifyContent="center"
-                  p={1}
-                >
-                  <Image src={openDoorsLogo} alt="OpenDoors logo" maxH="100%" maxW="100%" objectFit="contain" />
+                <Box minW={{ base: '120px', md: '160px' }} maxW={{ base: '160px', md: '200px' }}>
+                  <HeaderImagePicker variant="logo" maxHeightPx={40} lockEdits={false} />
                 </Box>
-                <VStack spacing={0.5} align="flex-start">
-                  <Text fontSize="xs" letterSpacing="0.08em" color="text.muted" textTransform="uppercase">
-                    OpenDoors CRM
-                  </Text>
-                  <Text fontSize={{ base: 'sm', md: 'md' }} fontWeight="600" color="text.primary">
-                    {activeTabLabel}
-                  </Text>
-                </VStack>
-              </HStack>
-
-              <HStack spacing={3} flexWrap="wrap" justify={{ base: 'flex-start', md: 'flex-end' }}>
-                <Avatar name="Bidlow" size="sm" bg="accent.500" color="white" />
               </HStack>
             </Flex>
             <Tabs
@@ -266,6 +242,21 @@ function App() {
                     {tab.label}
                   </Tab>
                 ))}
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  px={3}
+                  py={1}
+                  fontSize="xs"
+                  fontWeight="600"
+                  color="text.muted"
+                  borderBottom="2px solid"
+                  borderColor="transparent"
+                  _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
+                  onClick={() => void handleSignOut()}
+                >
+                  Sign out
+                </Button>
               </TabList>
             </Tabs>
             <Flex justify="flex-end" mt={2}>

@@ -152,11 +152,6 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   return (
     <>
-      <Box position="fixed" top="16px" right="16px" zIndex={1000}>
-        <Button size="sm" variant="outline" colorScheme="gray" onClick={handleSignOut}>
-          Sign out
-        </Button>
-      </Box>
       {children}
     </>
   )
