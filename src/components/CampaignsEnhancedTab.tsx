@@ -4,7 +4,7 @@
  * Adapted to Chakra UI and ODCRM database schema
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Box,
   Button,
@@ -80,7 +80,7 @@ export default function CampaignsEnhancedTab() {
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure()
   const toast = useToast()
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true)
     
     // Fetch all necessary data
@@ -101,7 +101,7 @@ export default function CampaignsEnhancedTab() {
     }
 
     setLoading(false)
-  }
+  }, [form.customerId])
 
   // Load lists and sequences when customer changes
   useEffect(() => {
@@ -120,7 +120,7 @@ export default function CampaignsEnhancedTab() {
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
 
   const handleCreateCampaign = async () => {
     if (!form.name || !form.customerId || !form.listId || !form.sequenceId || !form.senderIdentityId) {

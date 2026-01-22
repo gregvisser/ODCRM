@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -104,7 +104,7 @@ export default function MarketingListsTab() {
     fetchCustomerId()
   }, [])
 
-  const fetchLists = async () => {
+  const fetchLists = useCallback(async () => {
     if (!customerId) return
     
     setLoading(true)
@@ -120,23 +120,23 @@ export default function MarketingListsTab() {
       setLists(data)
     }
     setLoading(false)
-  }
+  }, [customerId, toast])
 
-  const fetchAllContacts = async () => {
+  const fetchAllContacts = useCallback(async () => {
     if (!customerId) return
     
     const { data } = await api.get<Contact[]>('/api/contacts')
     if (data) {
       setAllContacts(data)
     }
-  }
+  }, [customerId])
 
   useEffect(() => {
     if (customerId) {
       fetchLists()
       fetchAllContacts()
     }
-  }, [customerId])
+  }, [customerId, fetchAllContacts, fetchLists])
 
   const handleCreateList = async () => {
     if (!formData.name.trim()) {

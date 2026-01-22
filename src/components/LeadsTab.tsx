@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -89,7 +89,7 @@ function LeadsTab() {
   }
 
   // Check if 6 hours have passed since last refresh
-  const shouldRefresh = (): boolean => {
+  const shouldRefresh = useCallback((): boolean => {
     const lastRefreshTime = loadLastRefreshFromStorage()
     if (!lastRefreshTime) return true // No previous refresh, allow refresh
     
@@ -98,9 +98,9 @@ function LeadsTab() {
     const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime()
     
     return timeSinceLastRefresh >= sixHoursInMs
-  }
+  }, [])
 
-  const loadLeads = async (forceRefresh: boolean = false) => {
+  const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
     // Check if we should refresh (unless forced)
     if (!forceRefresh && !shouldRefresh()) {
       console.log('Skipping refresh - less than 6 hours since last refresh')
@@ -122,7 +122,7 @@ function LeadsTab() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [shouldRefresh])
 
   useEffect(() => {
     // Only load fresh data on mount if 6 hours have passed since last refresh
@@ -162,7 +162,7 @@ function LeadsTab() {
       offNavigate()
       offAccountsUpdated()
     }
-  }, [toast, lastRefresh])
+  }, [lastRefresh, loadLeads, toast])
 
   if (loading) {
     return (

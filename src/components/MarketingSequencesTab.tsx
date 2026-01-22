@@ -4,7 +4,7 @@
  * Adapted to Chakra UI
  */
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -110,7 +110,7 @@ export default function MarketingSequencesTab() {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const toast = useToast()
 
-  const fetchSequences = async () => {
+  const fetchSequences = useCallback(async () => {
     setLoading(true)
     const { data, error } = await api.get<Sequence[]>(`/api/sequences?customerId=${customerId}`)
     if (error) {
@@ -124,13 +124,13 @@ export default function MarketingSequencesTab() {
       setSequences(data)
     }
     setLoading(false)
-  }
+  }, [customerId, toast])
 
   useEffect(() => {
     if (customerId) {
       fetchSequences()
     }
-  }, [customerId])
+  }, [customerId, fetchSequences])
 
   const handleCreateSequence = async () => {
     if (!sequenceForm.name.trim()) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -155,7 +155,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   }
 
   // Check if 6 hours have passed since last refresh
-  const shouldRefresh = (): boolean => {
+  const shouldRefresh = useCallback((): boolean => {
     const lastRefreshTime = loadLastRefreshFromStorage()
     if (!lastRefreshTime) return true // No previous refresh, allow refresh
 
@@ -177,9 +177,9 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime()
     
     return timeSinceLastRefresh >= sixHoursInMs
-  }
+  }, [])
 
-  const loadLeads = async (forceRefresh: boolean = false) => {
+  const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
     const accountsData = loadAccountsFromStorage()
     const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
     if (!hasSheets) {
@@ -252,7 +252,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     } finally {
       setLoading(false)
     }
-  }
+  }, [cachedLeads, shouldRefresh, toast])
 
   useEffect(() => {
     // Only load fresh data on mount if 6 hours have passed since last refresh
@@ -285,7 +285,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       offAccountsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [])
+  }, [loadLeads])
 
   // Get all unique column headers from all leads (excluding accountName)
   const allColumns = new Set<string>()

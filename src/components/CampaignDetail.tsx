@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Box,
   Button,
@@ -97,14 +97,7 @@ export default function CampaignDetail({
   const toast = useToast()
   const { isOpen: isWizardOpen, onOpen: onWizardOpen, onClose: onWizardClose } = useDisclosure()
 
-  useEffect(() => {
-    fetchCampaign()
-    // Refresh every 30 seconds to get latest stats
-    const interval = setInterval(fetchCampaign, 30000)
-    return () => clearInterval(interval)
-  }, [campaignId])
-
-  const fetchCampaign = async () => {
+  const fetchCampaign = useCallback(async () => {
     const { data, error } = await api.get<CampaignDetail>(`/api/campaigns/${campaignId}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
@@ -112,7 +105,14 @@ export default function CampaignDetail({
       setCampaign(data)
     }
     setLoading(false)
-  }
+  }, [campaignId, toast])
+
+  useEffect(() => {
+    fetchCampaign()
+    // Refresh every 30 seconds to get latest stats
+    const interval = setInterval(fetchCampaign, 30000)
+    return () => clearInterval(interval)
+  }, [fetchCampaign])
 
   const handleWizardClose = () => {
     onWizardClose()

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -122,25 +122,7 @@ export default function CampaignWizard({
     selectedProspectEmails: [] as string[]
   })
 
-  useEffect(() => {
-    fetchIdentities()
-    fetchSchedules()
-    fetchContacts()
-    if (campaignId) {
-      fetchCampaign(campaignId)
-    } else {
-      // Prefill last selections to speed up workflow for OpenDoors users.
-      const lastIdentity = getItem('odcrm_last_sender_identity_id') || ''
-      const lastAccount = getItem('odcrm_last_campaign_account') || ''
-      setFormData((prev) => ({
-        ...prev,
-        senderIdentityId: prev.senderIdentityId || lastIdentity,
-        customerAccountName: prev.customerAccountName || lastAccount,
-      }))
-    }
-  }, [campaignId])
-
-  const fetchIdentities = async () => {
+  const fetchIdentities = useCallback(async () => {
     // Use the same customerId that was used for OAuth connection
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
@@ -150,9 +132,9 @@ export default function CampaignWizard({
     } else if (data) {
       setIdentities(data)
     }
-  }
+  }, [toast])
 
-  const fetchSchedules = async () => {
+  const fetchSchedules = useCallback(async () => {
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailSendSchedule[]>(`/api/schedules?customerId=${customerId}`)
     if (error) {
@@ -168,15 +150,15 @@ export default function CampaignWizard({
         }))
       }
     }
-  }
+  }, [])
 
-  const fetchContacts = async () => {
+  const fetchContacts = useCallback(async () => {
     // TODO: Fetch from contacts API when available
     // For now, using placeholder
     setContacts([])
-  }
+  }, [])
 
-  const fetchCampaign = async (id: string) => {
+  const fetchCampaign = useCallback(async (id: string) => {
     const { data } = await api.get<any>(`/api/campaigns/${id}`)
     if (data) {
       const rawTemplates = Array.isArray(data.templates) ? data.templates : []
@@ -211,7 +193,25 @@ export default function CampaignWizard({
         selectedProspectEmails: []
       })
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    fetchIdentities()
+    fetchSchedules()
+    fetchContacts()
+    if (campaignId) {
+      fetchCampaign(campaignId)
+    } else {
+      // Prefill last selections to speed up workflow for OpenDoors users.
+      const lastIdentity = getItem('odcrm_last_sender_identity_id') || ''
+      const lastAccount = getItem('odcrm_last_campaign_account') || ''
+      setFormData((prev) => ({
+        ...prev,
+        senderIdentityId: prev.senderIdentityId || lastIdentity,
+        customerAccountName: prev.customerAccountName || lastAccount,
+      }))
+    }
+  }, [campaignId, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules])
 
   const availableAccounts = useMemo(() => {
     const accounts = accountsStore.getAccounts<{ name: string }>()

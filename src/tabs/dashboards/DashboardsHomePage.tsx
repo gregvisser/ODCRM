@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
@@ -236,7 +236,7 @@ export default function DashboardsHomePage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(() => loadLastRefreshFromStorage() || new Date())
   const hasSyncedCustomersRef = useRef(false)
 
-  const refreshLeads = async (forceRefresh: boolean) => {
+  const refreshLeads = useCallback(async (forceRefresh: boolean) => {
     if (!forceRefresh && !shouldRefresh(leads)) return
 
     setLoading(true)
@@ -257,7 +257,7 @@ export default function DashboardsHomePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [leads, toast])
 
   useEffect(() => {
     const syncFromCustomers = async () => {
@@ -298,7 +298,7 @@ export default function DashboardsHomePage() {
       offLeadsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [])
+  }, [refreshLeads])
 
   const unifiedAnalytics = useMemo(() => {
     const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)

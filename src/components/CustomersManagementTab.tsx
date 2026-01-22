@@ -4,7 +4,7 @@
  * Adapted to Chakra UI
  */
 
-import { useEffect, useState, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -151,7 +151,7 @@ export default function CustomersManagementTab() {
 
   const isEditing = !!form.id
 
-  const fetchCustomers = async () => {
+  const fetchCustomers = useCallback(async () => {
     setLoading(true)
     const { data, error } = await api.get<Customer[]>('/api/customers')
     if (error) {
@@ -165,11 +165,11 @@ export default function CustomersManagementTab() {
       setCustomers(data)
     }
     setLoading(false)
-  }
+  }, [toast])
 
   useEffect(() => {
     fetchCustomers()
-  }, [])
+  }, [fetchCustomers])
 
   const handleCreate = () => {
     setForm(emptyForm())

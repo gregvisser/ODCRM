@@ -4,7 +4,7 @@
  * Ported from OpensDoorsV2 email-accounts/ui.tsx
  */
 
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -101,7 +101,7 @@ export default function EmailAccountsEnhancedTab() {
   const { isOpen: isSmtpOpen, onOpen: onSmtpOpen, onClose: onSmtpClose } = useDisclosure()
   const toast = useToast()
 
-  const fetchIdentities = async () => {
+  const fetchIdentities = useCallback(async () => {
     setLoading(true)
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
@@ -110,13 +110,13 @@ export default function EmailAccountsEnhancedTab() {
       setIdentities(data)
     }
     setLoading(false)
-  }
+  }, [customerId, toast])
 
   useEffect(() => {
     if (customerId) {
       fetchIdentities()
     }
-  }, [customerId])
+  }, [customerId, fetchIdentities])
 
   useEffect(() => {
     const unsubscribe = settingsStore.onSettingsUpdated((detail) => {

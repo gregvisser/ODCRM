@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -71,7 +71,7 @@ export default function EmailCampaignsTab() {
   const cancelRef = useRef<HTMLButtonElement>(null)
   const toast = useToast()
 
-  const fetchCampaigns = async () => {
+  const fetchCampaigns = useCallback(async () => {
     setLoading(true)
     const { data, error } = await api.get<EmailCampaign[]>('/api/campaigns')
     if (error) {
@@ -85,11 +85,11 @@ export default function EmailCampaignsTab() {
       setCampaigns(data)
     }
     setLoading(false)
-  }
+  }, [toast])
 
   useEffect(() => {
     fetchCampaigns()
-  }, [])
+  }, [fetchCampaigns])
 
   const handleStartCampaign = async (id: string) => {
     const { error } = await api.post(`/api/campaigns/${id}/start`, {})

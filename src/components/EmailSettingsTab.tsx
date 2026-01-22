@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Box,
   Button,
@@ -56,11 +56,7 @@ export default function EmailSettingsTab() {
   const [dailyLimit, setDailyLimit] = useState(150)
   const toast = useToast()
 
-  useEffect(() => {
-    fetchIdentities()
-  }, [])
-
-  const fetchIdentities = async () => {
+  const fetchIdentities = useCallback(async () => {
     setLoading(true)
     // Use the same customerId that was used for OAuth connection
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
@@ -71,7 +67,11 @@ export default function EmailSettingsTab() {
       setIdentities(data)
     }
     setLoading(false)
-  }
+  }, [toast])
+
+  useEffect(() => {
+    fetchIdentities()
+  }, [fetchIdentities])
 
   const handleConnectOutlook = () => {
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')

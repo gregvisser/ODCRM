@@ -1,5 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
-import { useEffect, useState, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react'
 import {
   Avatar,
   AvatarGroup,
@@ -3254,47 +3253,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   useEffect(() => {
     seedContactsIfEmpty()
     setContactsData(loadContactsFromStorage())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Load initial data from localStorage only (backend is the source of truth).
   const [accountsData, setAccountsData] = useState<Account[]>([])
-
-  // Auto-enrich existing accounts with verified web data (no AI).
-  useEffect(() => {
-    if (hasAutoEnrichedRef.current) return
-    if (!accountsData || accountsData.length === 0) return
-    hasAutoEnrichedRef.current = true
-
-    const sanitized = accountsData.map((account) => {
-      if (account.aboutSource === 'web') return account
-      return {
-        ...account,
-        aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
-        sector: '',
-        socialMedia: [],
-        logoUrl: account.logoUrl,
-        aboutSource: undefined,
-        aboutLocked: false,
-      }
-    })
-
-    setAccountsData(sanitized)
-    saveAccountsToStorage(sanitized)
-    emit('accountsUpdated', sanitized)
-
-    const run = async () => {
-      for (const account of sanitized) {
-        if (!account.website) continue
-        const populated = await populateAccountData(account)
-        if (populated.aboutSource === 'web') {
-          updateAccountSilent(account.name, populated)
-        }
-      }
-    }
-
-    void run()
-  }, [accountsData])
 
   useEffect(() => {
     if (!isStorageAvailable()) return
@@ -3488,7 +3450,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       }
       return prevAccounts
     })
-  }, [contactsData]) // Sync whenever contacts change
+  }, [accountsData.length, contactsData]) // Sync whenever contacts change
   const [expandedAbout, setExpandedAbout] = useState<Record<string, boolean>>({})
   const [sectorsMap, setSectorsMap] = useState<Record<string, string>>(() => {
     const stored = loadSectorsFromStorage()
@@ -3623,7 +3585,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     return () => off()
   }, [selectedAccount])
 
-  const updateAccount = (accountName: string, updates: Partial<Account>) => {
+  const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
       // Create backup before updating (critical data protection)
       try {
@@ -3657,9 +3619,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       duration: 2000,
       isClosable: true,
     })
-  }
+  }, [selectedAccount?.name, toast])
 
-  const updateAccountSilent = (accountName: string, updates: Partial<Account>) => {
+  const updateAccountSilent = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
       const updated = prev.map((acc) => (acc.name === accountName ? { ...acc, ...updates } : acc))
       saveAccountsToStorage(updated)
@@ -3669,7 +3631,43 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     if (selectedAccount?.name === accountName) {
       setSelectedAccount((prev) => (prev ? { ...prev, ...updates } : null))
     }
-  }
+  }, [selectedAccount?.name])
+
+  // Auto-enrich existing accounts with verified web data (no AI).
+  useEffect(() => {
+    if (hasAutoEnrichedRef.current) return
+    if (!accountsData || accountsData.length === 0) return
+    hasAutoEnrichedRef.current = true
+
+    const sanitized = accountsData.map((account) => {
+      if (account.aboutSource === 'web') return account
+      return {
+        ...account,
+        aboutSections: { ...DEFAULT_ABOUT_SECTIONS },
+        sector: '',
+        socialMedia: [],
+        logoUrl: account.logoUrl,
+        aboutSource: undefined,
+        aboutLocked: false,
+      }
+    })
+
+    setAccountsData(sanitized)
+    saveAccountsToStorage(sanitized)
+    emit('accountsUpdated', sanitized)
+
+    const run = async () => {
+      for (const account of sanitized) {
+        if (!account.website) continue
+        const populated = await populateAccountData(account)
+        if (populated.aboutSource === 'web') {
+          updateAccountSilent(account.name, populated)
+        }
+      }
+    }
+
+    void run()
+  }, [accountsData, updateAccountSilent])
   
   // Handle inline edit save (defined after updateAccount)
   const handleCellSave = () => {
@@ -4225,8 +4223,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         emit('accountsUpdated', defaultAccounts)
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [accountsData, isServerSourceOfTruth])
 
   // Restore Google Sheets + account details from latest backup (if available).
   useEffect(() => {
@@ -4262,7 +4259,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         isClosable: true,
       })
     }
-  }, [accountsData, toast])
+  }, [accountsData, isServerSourceOfTruth, toast])
 
   // Rehydrate account details from backend customers (server source of truth).
   useEffect(() => {
@@ -4336,7 +4333,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [accountsData])
 
   // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
