@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useRef, type ReactNode } from 'react'
+/* eslint-disable react-refresh/only-export-components */
+import { useEffect, useState, useRef, type ReactNode } from 'react'
 import {
   Avatar,
   AvatarGroup,
@@ -22,7 +23,6 @@ import {
   Tr,
   SimpleGrid,
   Stack,
-  VStack,
   Text,
   Wrap,
   WrapItem,
@@ -37,17 +37,12 @@ import {
   Select,
   NumberInput,
   NumberInputField,
-  NumberInputStepper,
-  NumberIncrementStepper,
-  NumberDecrementStepper,
   IconButton,
   useToast,
   Alert,
   AlertIcon,
-  AlertTitle,
   AlertDescription,
   HStack,
-  Spinner,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -64,7 +59,7 @@ import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, Che
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
-import { fetchCompanyData, refreshCompanyData, type CompanyData } from '../services/companyDataService'
+import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { api } from '../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
@@ -627,7 +622,7 @@ export function calculateActualsFromLeads(accountName: string, leads: Lead[]): {
   let weeklyActual = 0
   let monthlyActual = 0
   let leadsWithoutDates = 0
-  let dateFieldsFound: string[] = []
+  const dateFieldsFound: string[] = []
 
   // Debug: Log date ranges and sample leads
   if (accountLeads.length > 0) {
@@ -859,8 +854,12 @@ type AccountSnapshot = Omit<Account, 'leads' | 'weeklyActual' | 'monthlyActual' 
 }
 
 function sanitizeAccountForStorage(account: Account): AccountSnapshot {
-  const { leads, weeklyActual, monthlyActual, contacts, ...rest } = account
-  return rest
+  const sanitized: AccountSnapshot = { ...account }
+  delete sanitized.leads
+  delete sanitized.weeklyActual
+  delete sanitized.monthlyActual
+  delete sanitized.contacts
+  return sanitized
 }
 
 function coerceAccountData(value: unknown): Partial<Account> | null {
@@ -940,8 +939,9 @@ function buildCustomerPayloadFromAccount(account: Account): {
 }
 
 function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPayloadFromAccount>): boolean {
-  const { name, ...rest } = payload
-  return Object.values(rest).some((value) => value !== undefined && value !== null && value !== '')
+  return Object.entries(payload).some(
+    ([key, value]) => key !== 'name' && value !== undefined && value !== null && value !== '',
+  )
 }
 
 function diffCustomerPayload(
@@ -1788,16 +1788,6 @@ const getAccountLogo = (
   } catch (error) {
     console.warn('Unable to derive logo from website', { account, error })
     return dicebearFallback
-  }
-}
-
-// Helper to extract domain from website URL
-function extractDomain(website: string): string | null {
-  try {
-    const url = new URL(website)
-    return url.hostname.replace(/^www\./, '')
-  } catch {
-    return null
   }
 }
 
@@ -3543,21 +3533,39 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   // Update accounts with actuals from marketing leads
   useEffect(() => {
     const leads = loadLeadsFromStorage()
-    if (leads.length === 0) return
 
     setAccountsData((prev) => {
       const updated = prev.map((account) => {
+        if (leads.length === 0) {
+          if ((account.weeklyActual || 0) !== 0 || (account.monthlyActual || 0) !== 0 || (account.leads || 0) !== 0) {
+            return { ...account, weeklyActual: 0, monthlyActual: 0, leads: 0 }
+          }
+          return account
+        }
+
         const actuals = calculateActualsFromLeads(account.name, leads)
+        const leadCount = leads.filter((l) => l.accountName === account.name).length
         // Only update if values have changed to avoid unnecessary re-renders
-        if (account.weeklyActual !== actuals.weeklyActual || account.monthlyActual !== actuals.monthlyActual) {
-          return { ...account, weeklyActual: actuals.weeklyActual, monthlyActual: actuals.monthlyActual }
+        if (
+          account.weeklyActual !== actuals.weeklyActual ||
+          account.monthlyActual !== actuals.monthlyActual ||
+          account.leads !== leadCount
+        ) {
+          return {
+            ...account,
+            weeklyActual: actuals.weeklyActual,
+            monthlyActual: actuals.monthlyActual,
+            leads: leadCount,
+          }
         }
         return account
       })
       
       // Save to localStorage if any changes were made
       const hasChanges = updated.some((acc, idx) => 
-        acc.weeklyActual !== prev[idx].weeklyActual || acc.monthlyActual !== prev[idx].monthlyActual
+        acc.weeklyActual !== prev[idx].weeklyActual ||
+        acc.monthlyActual !== prev[idx].monthlyActual ||
+        acc.leads !== prev[idx].leads
       )
       if (hasChanges) {
         saveAccountsToStorage(updated)
@@ -3571,10 +3579,16 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   useEffect(() => {
     const handleLeadsUpdated = () => {
       const leads = loadLeadsFromStorage()
-      if (leads.length === 0) return
 
       setAccountsData((prev) => {
         const updated = prev.map((account) => {
+          if (leads.length === 0) {
+            if ((account.weeklyActual || 0) !== 0 || (account.monthlyActual || 0) !== 0 || (account.leads || 0) !== 0) {
+              return { ...account, weeklyActual: 0, monthlyActual: 0, leads: 0 }
+            }
+            return account
+          }
+
           const actuals = calculateActualsFromLeads(account.name, leads)
           const leadCount = leads.filter((l) => l.accountName === account.name).length
           if (

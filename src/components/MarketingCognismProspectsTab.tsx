@@ -64,7 +64,7 @@ function normalizeHeader(h: string): string {
     .trim()
     .replace(/^"|"$/g, '')
     .toLowerCase()
-    .replace(/[_\-]+/g, ' ')
+    .replace(/[_-]+/g, ' ')
     .replace(/[()]/g, ' ')
     .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')

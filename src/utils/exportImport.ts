@@ -16,7 +16,8 @@ export interface ExportImportOptions<T> {
 export function useExportImport<T extends Record<string, any>>(
   options: ExportImportOptions<T>
 ) {
-  const toast = options.toast || useToast()
+  const fallbackToast = useToast()
+  const toast = options.toast ?? fallbackToast
 
   const exportData = (format: 'json' | 'csv' = 'json') => {
     try {
