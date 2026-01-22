@@ -79,6 +79,17 @@ model customers {
   id                  String              @id
   name                String
   domain              String?
+  website             String?
+  whatTheyDo          String?
+  accreditations      String?
+  keyLeaders          String?
+  companyProfile      String?
+  recentNews          String?
+  companySize         String?
+  headquarters        String?
+  foundingYear        String?
+  socialPresence      Json?
+  lastEnrichedAt      DateTime?
   createdAt           DateTime            @default(now())
   updatedAt           DateTime
   leadsReportingUrl   String?

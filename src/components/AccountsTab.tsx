@@ -126,6 +126,7 @@ type CustomerApi = {
   id: string
   name: string
   domain?: string | null
+  website?: string | null
   accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
   sector?: string | null
@@ -139,9 +140,11 @@ type CustomerApi = {
   monthlyLeadTarget?: number | null
   monthlyLeadActual?: number | null
   // About section fields (from DB)
-  website?: string | null
   whatTheyDo?: string | null
   accreditations?: string | null
+  keyLeaders?: string | null
+  companyProfile?: string | null
+  recentNews?: string | null
   companySize?: string | null
   headquarters?: string | null
   foundingYear?: string | null
@@ -887,9 +890,10 @@ function computeAccountsSyncHash(accountsData: Account[]): string {
   return JSON.stringify(normalized)
 }
 
-function buildCustomerPayloadFromAccount(account: Account): {
+type CustomerPayload = {
   name: string
   domain?: string
+  website?: string
   accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
   sector?: string | null
@@ -902,14 +906,26 @@ function buildCustomerPayloadFromAccount(account: Account): {
   weeklyLeadActual?: number | null
   monthlyLeadTarget?: number | null
   monthlyLeadActual?: number | null
-} {
-  const payload: Record<string, string | number | null | undefined | Record<string, unknown>> = {
+  whatTheyDo?: string | null
+  accreditations?: string | null
+  keyLeaders?: string | null
+  companyProfile?: string | null
+  recentNews?: string | null
+  companySize?: string | null
+  headquarters?: string | null
+  foundingYear?: string | null
+  socialPresence?: Array<{ label: string; url: string }> | null
+}
+
+function buildCustomerPayloadFromAccount(account: Account): CustomerPayload {
+  const payload: CustomerPayload = {
     name: account.name,
   }
   payload.accountData = sanitizeAccountForStorage(account) as unknown as Record<string, unknown>
 
   const domain = normalizeDomain(account.website)
   if (domain) payload.domain = domain
+  if (account.website) payload.website = account.website
   const trimmedLeadsUrl = account.clientLeadsSheetUrl?.trim()
   if (trimmedLeadsUrl) {
     payload.leadsReportingUrl = trimmedLeadsUrl
@@ -928,22 +944,17 @@ function buildCustomerPayloadFromAccount(account: Account): {
   if (account.weeklyTarget && account.weeklyTarget > 0) payload.weeklyLeadTarget = account.weeklyTarget
   if (account.monthlyTarget && account.monthlyTarget > 0) payload.monthlyLeadTarget = account.monthlyTarget
 
-  return payload as {
-    name: string
-    domain?: string
-    accountData?: Record<string, unknown> | null
-    leadsReportingUrl?: string | null
-    sector?: string | null
-    clientStatus?: string | null
-    targetJobTitle?: string | null
-    prospectingLocation?: string | null
-    monthlyIntakeGBP?: number | null
-    defcon?: number | null
-    weeklyLeadTarget?: number | null
-    weeklyLeadActual?: number | null
-    monthlyLeadTarget?: number | null
-    monthlyLeadActual?: number | null
-  }
+  if (account.aboutSections.whatTheyDo) payload.whatTheyDo = account.aboutSections.whatTheyDo
+  if (account.aboutSections.accreditations) payload.accreditations = account.aboutSections.accreditations
+  if (account.aboutSections.keyLeaders) payload.keyLeaders = account.aboutSections.keyLeaders
+  if (account.aboutSections.companyProfile) payload.companyProfile = account.aboutSections.companyProfile
+  if (account.aboutSections.recentNews) payload.recentNews = account.aboutSections.recentNews
+  if (account.aboutSections.companySize) payload.companySize = account.aboutSections.companySize
+  if (account.aboutSections.headquarters) payload.headquarters = account.aboutSections.headquarters
+  if (account.aboutSections.foundingYear) payload.foundingYear = account.aboutSections.foundingYear
+  if (account.socialMedia.length > 0) payload.socialPresence = account.socialMedia
+
+  return payload
 }
 
 function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPayloadFromAccount>): boolean {
@@ -955,8 +966,8 @@ function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPaylo
 function diffCustomerPayload(
   customer: CustomerApi,
   payload: ReturnType<typeof buildCustomerPayloadFromAccount>,
-): Record<string, string | number | null | Record<string, unknown>> {
-  const updates: Record<string, string | number | null | Record<string, unknown>> = {}
+): Record<string, string | number | null | Record<string, unknown> | Array<{ label: string; url: string }>> {
+  const updates: Record<string, string | number | null | Record<string, unknown> | Array<{ label: string; url: string }>> = {}
   const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
   const normalizeNumber = (value: unknown) => {
     if (value === null || value === undefined || value === '') return null
@@ -976,6 +987,9 @@ function diffCustomerPayload(
   }
   if (payload.domain && normalizeValue(payload.domain) !== normalizeValue(customer.domain)) {
     updates.domain = payload.domain
+  }
+  if (payload.website && normalizeValue(payload.website) !== normalizeValue(customer.website)) {
+    updates.website = payload.website
   }
   if (payload.leadsReportingUrl !== undefined) {
     const normalizedPayload =
@@ -1010,6 +1024,49 @@ function diffCustomerPayload(
     normalizeJson(payload.accountData) !== normalizeJson(customer.accountData)
   ) {
     updates.accountData = payload.accountData
+  }
+
+  if (payload.whatTheyDo && normalizeValue(payload.whatTheyDo) !== normalizeValue(customer.whatTheyDo)) {
+    updates.whatTheyDo = payload.whatTheyDo
+  }
+  if (
+    payload.accreditations &&
+    normalizeValue(payload.accreditations) !== normalizeValue(customer.accreditations)
+  ) {
+    updates.accreditations = payload.accreditations
+  }
+  if (payload.keyLeaders && normalizeValue(payload.keyLeaders) !== normalizeValue(customer.keyLeaders)) {
+    updates.keyLeaders = payload.keyLeaders
+  }
+  if (
+    payload.companyProfile &&
+    normalizeValue(payload.companyProfile) !== normalizeValue(customer.companyProfile)
+  ) {
+    updates.companyProfile = payload.companyProfile
+  }
+  if (payload.recentNews && normalizeValue(payload.recentNews) !== normalizeValue(customer.recentNews)) {
+    updates.recentNews = payload.recentNews
+  }
+  if (payload.companySize && normalizeValue(payload.companySize) !== normalizeValue(customer.companySize)) {
+    updates.companySize = payload.companySize
+  }
+  if (
+    payload.headquarters &&
+    normalizeValue(payload.headquarters) !== normalizeValue(customer.headquarters)
+  ) {
+    updates.headquarters = payload.headquarters
+  }
+  if (
+    payload.foundingYear &&
+    normalizeValue(payload.foundingYear) !== normalizeValue(customer.foundingYear)
+  ) {
+    updates.foundingYear = payload.foundingYear
+  }
+  if (
+    payload.socialPresence &&
+    normalizeJson(payload.socialPresence) !== normalizeJson(customer.socialPresence)
+  ) {
+    updates.socialPresence = payload.socialPresence
   }
 
   const monthlyIntake = normalizeNumber(payload.monthlyIntakeGBP)
@@ -1106,11 +1163,23 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
   if (customer.leadsReportingUrl) updated.clientLeadsSheetUrl = customer.leadsReportingUrl
   if (customer.leadsReportingUrl === null) updated.clientLeadsSheetUrl = ''
   // Update About sections from DB fields if available
-  if (customer.whatTheyDo || customer.accreditations || customer.companySize || customer.headquarters || customer.foundingYear) {
+  if (
+    customer.whatTheyDo ||
+    customer.accreditations ||
+    customer.keyLeaders ||
+    customer.companyProfile ||
+    customer.recentNews ||
+    customer.companySize ||
+    customer.headquarters ||
+    customer.foundingYear
+  ) {
     updated.aboutSections = {
       ...updated.aboutSections,
       whatTheyDo: customer.whatTheyDo || updated.aboutSections.whatTheyDo,
       accreditations: customer.accreditations || updated.aboutSections.accreditations,
+      keyLeaders: customer.keyLeaders || updated.aboutSections.keyLeaders,
+      companyProfile: customer.companyProfile || updated.aboutSections.companyProfile,
+      recentNews: customer.recentNews || updated.aboutSections.recentNews,
       companySize: customer.companySize || updated.aboutSections.companySize,
       headquarters: customer.headquarters || updated.aboutSections.headquarters,
       foundingYear: customer.foundingYear || updated.aboutSections.foundingYear,
@@ -1128,13 +1197,20 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   const website = customer.website || normalizeCustomerWebsite(customer.domain)
   
   // Build About sections from DB fields if available
-  const aboutSectionsFromDb = customer.whatTheyDo || customer.accreditations || customer.companySize || customer.headquarters || customer.foundingYear
+  const aboutSectionsFromDb = customer.whatTheyDo ||
+    customer.accreditations ||
+    customer.keyLeaders ||
+    customer.companyProfile ||
+    customer.recentNews ||
+    customer.companySize ||
+    customer.headquarters ||
+    customer.foundingYear
     ? {
         whatTheyDo: customer.whatTheyDo || '',
         accreditations: customer.accreditations || '',
-        keyLeaders: '', // Not stored in DB yet
-        companyProfile: '', // Will be built from separate fields
-        recentNews: '', // Not stored in DB yet
+        keyLeaders: customer.keyLeaders || '',
+        companyProfile: customer.companyProfile || '',
+        recentNews: customer.recentNews || '',
         companySize: customer.companySize || '',
         headquarters: customer.headquarters || '',
         foundingYear: customer.foundingYear || '',
@@ -1825,6 +1901,9 @@ const UK_AREAS = [
 const sectionsToPlainText = (sections: AboutSections) =>
   [
     `What they do: ${sections.whatTheyDo}`,
+    `Company size: ${sections.companySize}`,
+    `Headquarters: ${sections.headquarters}`,
+    `Founded: ${sections.foundingYear}`,
     `Accreditations: ${sections.accreditations}`,
     `Key leaders: ${sections.keyLeaders}`,
     `Company profile: ${sections.companyProfile}`,
@@ -1868,20 +1947,20 @@ const socialPresenceBlock = (socialMedia: SocialProfile[]) => {
 
 const detailedSections = (sections: AboutSections) => {
   const sectionsList: Array<{ heading: string; value: string }> = [
-    { heading: 'What the company does', value: sections.whatTheyDo },
+    { heading: 'What they do', value: sections.whatTheyDo },
   ]
-  
-  // Add separate fields for company size, headquarters, and founding year
-  const companyDetails: string[] = []
-  if (sections.companySize) companyDetails.push(`Company size: ${sections.companySize}`)
-  if (sections.headquarters) companyDetails.push(`Headquarters: ${sections.headquarters}`)
-  if (sections.foundingYear) companyDetails.push(`Founded: ${sections.foundingYear}`)
-  
-  // If we have separate fields, use them; otherwise fall back to companyProfile
-  if (companyDetails.length > 0) {
-    sectionsList.push({ heading: 'Company size, headquarters & founding year', value: companyDetails.join('. ') })
-  } else if (sections.companyProfile) {
-    sectionsList.push({ heading: 'Company size, headquarters & founding year', value: sections.companyProfile })
+
+  if (sections.companySize) {
+    sectionsList.push({ heading: 'Company size', value: sections.companySize })
+  }
+  if (sections.headquarters) {
+    sectionsList.push({ heading: 'Headquarters', value: sections.headquarters })
+  }
+  if (sections.foundingYear) {
+    sectionsList.push({ heading: 'Founded', value: sections.foundingYear })
+  }
+  if (!sections.companySize && !sections.headquarters && !sections.foundingYear && sections.companyProfile) {
+    sectionsList.push({ heading: 'Company profile', value: sections.companyProfile })
   }
   
   if (sections.accreditations) {
@@ -1889,6 +1968,9 @@ const detailedSections = (sections: AboutSections) => {
   }
   if (sections.keyLeaders) {
     sectionsList.push({ heading: 'Key leaders', value: sections.keyLeaders })
+  }
+  if (sections.companyProfile && (sections.companySize || sections.headquarters || sections.foundingYear)) {
+    sectionsList.push({ heading: 'Company profile', value: sections.companyProfile })
   }
   if (sections.recentNews) {
     sectionsList.push({ heading: 'Recent news', value: sections.recentNews })
@@ -2020,7 +2102,7 @@ const renderAboutField = (
     return (
       <Stack spacing={3}>
         <Text fontSize="sm" fontWeight="semibold" color="gray.600">
-          What the company does
+          What they do
         </Text>
         <Text fontSize="sm" color="gray.700">
           {truncateText(whatTheyDoFormatted.text, 320)}
@@ -3689,6 +3771,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   // Auto-enrich existing accounts with verified web data (no AI).
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     if (hasAutoEnrichedRef.current) return
     if (!accountsData || accountsData.length === 0) return
     hasAutoEnrichedRef.current = true
@@ -3721,7 +3804,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     void run()
-  }, [accountsData, updateAccountSilent])
+  }, [accountsData, isServerSourceOfTruth, updateAccountSilent])
   
   // Handle inline edit save (defined after updateAccount)
   const handleCellSave = () => {
@@ -5349,7 +5432,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         const normalized = normalizeCustomerWebsite(String(value))
                         updateAccount(selectedAccount.name, { website: normalized })
                         stopEditing(selectedAccount.name, 'website')
-                        if (normalized) {
+                        if (normalized && !isServerSourceOfTruth) {
                           void populateAccountData({ ...selectedAccount, website: normalized }).then((populated) => {
                             if (populated.aboutSource === 'web') {
                               updateAccountSilent(selectedAccount.name, populated)
