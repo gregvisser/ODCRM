@@ -4355,7 +4355,15 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       try {
         const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
         if (cancelled) return
-        persistLeadsToStorage(allLeads, lastSyncAt)
+        const sheetAccounts = new Set(
+          accountsData
+            .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+            .map((account) => account.name),
+        )
+        const filteredLeads = sheetAccounts.size
+          ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
+          : []
+        persistLeadsToStorage(filteredLeads, lastSyncAt)
       } catch (err) {
         console.warn('Failed to refresh leads:', err)
       }

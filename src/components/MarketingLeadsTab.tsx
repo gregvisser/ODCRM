@@ -201,21 +201,29 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     try {
       // Load accounts from localStorage to sync with account metadata
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-      setLeads(allLeads)
-      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
+      const sheetAccounts = new Set(
+        accountsData
+          .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+          .map((account) => account.name),
+      )
+      const filteredLeads = sheetAccounts.size
+        ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
+        : []
+      setLeads(filteredLeads)
+      const refreshTime = saveLeadsToStorage(filteredLeads, lastSyncAt)
       setLastRefresh(refreshTime)
 
       // Keep account lead counts in sync (so "Leads: X" badges update across the app).
-      syncAccountLeadCountsFromLeads(allLeads)
+      syncAccountLeadCountsFromLeads(filteredLeads)
 
       // Group leads by account for summary
       const leadsByAccount: Record<string, number> = {}
-      allLeads.forEach(lead => {
+      filteredLeads.forEach(lead => {
         leadsByAccount[lead.accountName] = (leadsByAccount[lead.accountName] || 0) + 1
       })
       console.log(`   Leads by account:`, leadsByAccount)
 
-      const description = `Loaded ${allLeads.length} leads from the server.`
+      const description = `Loaded ${filteredLeads.length} leads from the server.`
       toast({
         title: 'Leads loaded successfully',
         description,
