@@ -21,7 +21,11 @@ router.get('/', async (req, res) => {
     }
     const since = req.query.since ? new Date(String(req.query.since)) : null
 
-    const where: any = {}
+    const where: any = {
+      customer: {
+        leadsReportingUrl: { not: null },
+      },
+    }
     if (customerId) {
       where.customerId = customerId
     }

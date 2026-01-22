@@ -180,6 +180,15 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   }
 
   const loadLeads = async (forceRefresh: boolean = false) => {
+    const accountsData = loadAccountsFromStorage()
+    const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+    if (!hasSheets) {
+      setLeads([])
+      const refreshTime = saveLeadsToStorage([], null)
+      setLastRefresh(refreshTime)
+      return
+    }
+
     // Check if we should refresh (unless forced)
     if (!forceRefresh && !shouldRefresh()) {
       console.log('Skipping refresh - less than 6 hours since last refresh')
@@ -237,6 +246,14 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     // Listen for account updates (when new accounts are created or metadata changes)
     const handleAccountsUpdated = (event?: Event) => {
       console.log('📥 Accounts updated event received - refreshing leads...', event)
+      const accountsData = loadAccountsFromStorage()
+      const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+      if (!hasSheets) {
+        setLeads([])
+        const refreshTime = saveLeadsToStorage([], null)
+        setLastRefresh(refreshTime)
+        return
+      }
       // Force refresh when accounts are updated to keep lead counts current
       loadLeads(true)
     }
