@@ -1768,28 +1768,6 @@ const UK_AREAS = [
   'Broadland', 'Ipswich', 'Babergh', 'East Suffolk', 'Mid Suffolk', 'West Suffolk',
 ].sort()
 
-const getAccountLogo = (
-  account: Account,
-  failedLogos?: Set<string>,
-) => {
-  const dicebearFallback = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(account.name)}`
-
-  if (account.logoUrl && !failedLogos?.has(account.name)) {
-    return account.logoUrl
-  }
-
-  try {
-    const hostname = new URL(account.website).hostname
-    if (!hostname) return dicebearFallback
-
-    const cleanHostname = hostname.replace(/^www\./, '')
-    return `https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(cleanHostname)}`
-  } catch (error) {
-    console.warn('Unable to derive logo from website', { account, error })
-    return dicebearFallback
-  }
-}
-
 const sectionsToPlainText = (sections: AboutSections) =>
   [
     `What they do: ${sections.whatTheyDo}`,
@@ -3480,7 +3458,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     })
     return merged
   })
-  const [failedLogos, setFailedLogos] = useState<Set<string>>(new Set())
   const [editingFields, setEditingFields] = useState<Record<string, string>>({}) // Track which fields are being edited: { "accountName:fieldName": "value" }
 
   // Update accounts with actuals from marketing leads
@@ -4622,56 +4599,25 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   onClick={(e) => handleAccountClick(account.name, e)}
                 >
                   <Td>
-                    <HStack spacing={3}>
-                      <Box
-                        w="48px"
-                        h="48px"
-                        minW="48px"
-                        minH="48px"
-                        bg="bg.subtle"
-                        border="1px solid"
-                        borderColor="border.subtle"
-                        borderRadius="md"
-                        display="flex"
-                        alignItems="center"
-                        justifyContent="center"
-                        overflow="hidden"
-                        flexShrink={0}
-                      >
-                        <Box
-                          as="img"
-                          src={getAccountLogo(account, failedLogos)}
-                          alt={account.name}
-                          w="100%"
-                          h="100%"
-                          objectFit="contain"
-                          p={2}
-                          onError={() => {
-                            // Mark Clearbit as failed so we immediately fall back to favicon.
-                            setFailedLogos((prev) => new Set(prev).add(account.name))
-                          }}
-                        />
-                      </Box>
-                      <HStack spacing={2} align="center" flex={1}>
-                        <Text fontWeight="semibold" color="text.primary">
-                          {account.name}
-                        </Text>
-                        <IconButton
-                          aria-label={`Refresh ${account.name} data`}
-                          icon={<RepeatIcon />}
-                          size="xs"
-                          variant="ghost"
-                          colorScheme="gray"
-                          isLoading={refreshingAccounts.has(account.name)}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRefreshCompanyData(account.name)
-                          }}
-                          minW="auto"
-                          w="auto"
-                          h="auto"
-                        />
-                      </HStack>
+                    <HStack spacing={2} align="center">
+                      <Text fontWeight="semibold" color="text.primary">
+                        {account.name}
+                      </Text>
+                      <IconButton
+                        aria-label={`Refresh ${account.name} data`}
+                        icon={<RepeatIcon />}
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="gray"
+                        isLoading={refreshingAccounts.has(account.name)}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRefreshCompanyData(account.name)
+                        }}
+                        minW="auto"
+                        w="auto"
+                        h="auto"
+                      />
                     </HStack>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
@@ -5132,36 +5078,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
               <Stack spacing={4}>
                 <Stack direction="row" justify="space-between" align="flex-start">
                   <HStack spacing={4} align="center" flex="1">
-                  <Box
-                    w="80px"
-                    h="80px"
-                    minW="80px"
-                    minH="80px"
-                    bg="bg.subtle"
-                    border="2px solid"
-                    borderColor="border.subtle"
-                    borderRadius="xl"
-                    display="flex"
-                    alignItems="center"
-                    justifyContent="center"
-                    overflow="hidden"
-                    flexShrink={0}
-                  >
-                    <Box
-                      as="img"
-                      src={selectedAccount ? getAccountLogo(selectedAccount, failedLogos) : ''}
-                      alt={selectedAccount?.name || 'Account'}
-                      w="100%"
-                      h="100%"
-                      objectFit="contain"
-                      p={3}
-                      onError={() => {
-                        if (selectedAccount) {
-                          setFailedLogos((prev) => new Set(prev).add(selectedAccount.name))
-                        }
-                      }}
-                    />
-                  </Box>
                     <Stack spacing={1} flex="1">
                       <Heading size="xl" color="gray.800" fontWeight="bold">
                         {selectedAccount.name}
@@ -5207,7 +5123,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
               </Stack>
             </DrawerHeader>
             <DrawerBody bg="gray.50" p={6}>
-              <Stack spacing={6} maxW="1200px" mx="auto">
+              <Stack spacing={6} w="full">
                 {/* Quick Info Section */}
                 <Box
                   bg="white"
