@@ -114,7 +114,11 @@ const fetchOpenCorporates = async (name?: string) => {
   const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(name)}`
   const response = await fetchWithTimeout(url, { method: 'GET' }, 12000)
   if (!response.ok) return null
-  const json = await response.json()
+  const json = (await response.json()) as {
+    results?: {
+      companies?: Array<{ company?: Record<string, unknown> }>
+    }
+  }
   const first = json?.results?.companies?.[0]?.company
   if (!first) return null
   return {

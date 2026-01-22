@@ -110,7 +110,7 @@ router.get('/team-performance', async (req, res, next) => {
       where: {
         occurredAt: { gte: start, lte: end },
         type: 'sent',
-        email_campaigns: { customerId },
+        campaign: { customerId },
       },
       _count: { _all: true },
     })
@@ -120,7 +120,7 @@ router.get('/team-performance', async (req, res, next) => {
       where: {
         occurredAt: { gte: start, lte: end },
         type: 'replied',
-        email_campaigns: { customerId },
+        campaign: { customerId },
       },
       _count: { _all: true },
     })

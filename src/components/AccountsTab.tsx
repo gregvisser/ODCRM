@@ -3130,6 +3130,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
   const hasSyncedCustomersRef = useRef(false)
+  const hasHydratedFromServerRef = useRef(false)
+  const isServerSourceOfTruth = true
   const syncInFlightRef = useRef(false)
   const pendingSyncRef = useRef(false)
   const lastSyncedHashRef = useRef<string | null>(null)
@@ -3256,20 +3258,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [])
 
   // Load initial data from localStorage only (backend is the source of truth).
-  const [accountsData, setAccountsData] = useState<Account[]>(() => {
-    try {
-      const loaded = loadAccountsFromStorage()
-      if (!loaded || loaded.length === 0) return []
-
-      const deletedAccountsSet = loadDeletedAccountsFromStorage()
-      if (deletedAccountsSet.size === 0) return loaded
-
-      return loaded.filter((acc) => !deletedAccountsSet.has(acc.name))
-    } catch (error) {
-      console.error('❌ Error loading accounts from storage:', error)
-      return []
-    }
-  })
+  const [accountsData, setAccountsData] = useState<Account[]>([])
 
   // Auto-enrich existing accounts with verified web data (no AI).
   useEffect(() => {
@@ -3329,9 +3318,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   // CRITICAL: Create backup before any save operations
   const accountsAutosaveTimerRef = useRef<number | null>(null)
   const accountsLastSavedJsonRef = useRef<string>('')
-  const forcedAccountDataSyncRef = useRef(false)
 
   useEffect(() => {
+    if (!hasHydratedFromServerRef.current) return
     try {
       const json = JSON.stringify(accountsData)
       if (json === accountsLastSavedJsonRef.current) return
@@ -3369,6 +3358,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY_ACCOUNTS && e.key !== STORAGE_KEY_ACCOUNTS_LAST_UPDATED) return
+      if (!hasHydratedFromServerRef.current) return
 
       // CRITICAL: Only use stored data, never merge with defaults
       // This prevents old accounts from coming back
@@ -3389,6 +3379,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   useEffect(() => {
     if (!hasSyncedCustomersRef.current) return
+    if (!hasHydratedFromServerRef.current) return
     if (!isStorageAvailable()) return
     const syncVersion = 'v2-account-data'
     const storedVersion = getItem(OdcrmStorageKeys.accountsBackendSyncVersion)
@@ -4173,6 +4164,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   // Auto-restore accounts if empty on mount, preserving Google Sheets URLs
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     if ((!accountsData || accountsData.length === 0) && isStorageAvailable()) {
       const stored = getItem(STORAGE_KEY_ACCOUNTS)
       const deletedAccountsSet = loadDeletedAccountsFromStorage()
@@ -4238,6 +4230,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
   // Restore Google Sheets + account details from latest backup (if available).
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     if (hasSyncedCustomersRef.current) return
     if (!isStorageAvailable()) return
     const current = loadAccountsFromStorage()
@@ -4271,60 +4264,30 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
   }, [accountsData, toast])
 
-  // Rehydrate account details from backend customers (non-destructive merge)
+  // Rehydrate account details from backend customers (server source of truth).
   useEffect(() => {
     if (hasSyncedCustomersRef.current) return
-    if (!isStorageAvailable()) return
 
     const syncFromCustomers = async () => {
-      hasSyncedCustomersRef.current = true
       const { data, error } = await api.get<CustomerApi[]>('/api/customers')
-      if (error || !data || data.length === 0) return
-
-      const stored = loadAccountsFromStorage()
-      const byName = new Map<string, Account>()
-      stored.forEach((acc) => {
-        byName.set(acc.name, acc)
-        const normalized = normalizeName(acc.name)
-        if (normalized) byName.set(normalized, acc)
-      })
-      let changed = false
-
-      const merged = stored.map((acc) => {
-        const customer = findCustomerForAccount(acc, data)
-        if (!customer) return acc
-        const updated = mergeAccountFromCustomer(acc, customer)
-        if (updated !== acc) changed = true
-        return updated
-      })
-
-      for (const customer of data) {
-        const customerKey = normalizeName(customer.name)
-        if (!byName.has(customer.name) && !byName.has(customerKey)) {
-          merged.push(buildAccountFromCustomer(customer))
-          changed = true
-        }
-      }
-
-      const hasAccountData = data.some((customer) => customer.accountData)
-      const shouldForceAccountDataSync = !hasAccountData && !forcedAccountDataSyncRef.current
-      if (shouldForceAccountDataSync) {
-        forcedAccountDataSyncRef.current = true
-        setItem(OdcrmStorageKeys.accountsBackendSyncHash, '')
-        lastSyncedHashRef.current = null
-      }
-
-      if (!changed) {
-        if (shouldForceAccountDataSync) {
-          setAccountsData((prev) => prev.slice())
-        }
+      if (error || !data) {
+        console.warn('Failed to load accounts from the customer database.')
         return
       }
 
-      saveAccountsToStorage(merged)
-      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-      setAccountsData(merged)
-      emit('accountsUpdated', merged)
+      const serverAccounts = data.map(buildAccountFromCustomer)
+      const nextHash = computeAccountsSyncHash(serverAccounts)
+      if (isStorageAvailable()) {
+        setItem(OdcrmStorageKeys.accountsBackendSyncHash, nextHash)
+        setItem(OdcrmStorageKeys.accountsBackendSyncVersion, 'v2-account-data')
+        saveDeletedAccountsToStorage(new Set())
+        saveAccountsToStorage(serverAccounts)
+      }
+      lastSyncedHashRef.current = nextHash
+      hasSyncedCustomersRef.current = true
+      hasHydratedFromServerRef.current = true
+      setAccountsData(serverAccounts)
+      emit('accountsUpdated', serverAccounts)
       toast({
         title: 'Accounts updated',
         description: 'Loaded account details from the customer database.',
@@ -4335,7 +4298,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     void syncFromCustomers()
-  }, [accountsData, toast])
+  }, [toast])
 
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.

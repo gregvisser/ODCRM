@@ -117,8 +117,8 @@ type LeadWithDate = {
 function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) {
   // Load initial leads from localStorage
   const cachedLeads = loadLeadsFromStorage()
-  const [leads, setLeads] = useState<Lead[]>(cachedLeads)
-  const [loading, setLoading] = useState(cachedLeads.length === 0) // Show loading if no cached data
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date>(() => {
     const stored = loadLastRefreshFromStorage()
@@ -186,12 +186,17 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       setLeads([])
       const refreshTime = saveLeadsToStorage([], null)
       setLastRefresh(refreshTime)
+      setLoading(false)
       return
     }
 
     // Check if we should refresh (unless forced)
     if (!forceRefresh && !shouldRefresh()) {
       console.log('Skipping refresh - less than 6 hours since last refresh')
+      if (cachedLeads.length > 0) {
+        setLeads(cachedLeads)
+      }
+      setLoading(false)
       return
     }
 
@@ -232,6 +237,9 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         isClosable: true,
       })
     } catch (err) {
+      if (cachedLeads.length > 0) {
+        setLeads(cachedLeads)
+      }
       setError('Failed to load leads data from the server.')
       console.error('Error loading leads:', err)
       toast({
