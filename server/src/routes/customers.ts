@@ -157,26 +157,58 @@ router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params
     const validated = upsertCustomerSchema.parse(req.body)
+    const shouldClearLeads = validated.leadsReportingUrl === null
+    const updateData = {
+      name: validated.name,
+      domain: validated.domain,
+      accountData: validated.accountData ?? null,
+      leadsReportingUrl: validated.leadsReportingUrl,
+      sector: validated.sector,
+      clientStatus: validated.clientStatus,
+      targetJobTitle: validated.targetJobTitle,
+      prospectingLocation: validated.prospectingLocation,
+      monthlyIntakeGBP: validated.monthlyIntakeGBP,
+      defcon: validated.defcon,
+      weeklyLeadTarget: validated.weeklyLeadTarget,
+      weeklyLeadActual: validated.weeklyLeadActual,
+      monthlyLeadTarget: validated.monthlyLeadTarget,
+      monthlyLeadActual: validated.monthlyLeadActual,
+      updatedAt: new Date(),
+    }
+    if (shouldClearLeads) {
+      updateData.weeklyLeadActual = 0
+      updateData.monthlyLeadActual = 0
+    }
 
-    const customer = await prisma.customer.update({
-      where: { id },
-      data: {
-        name: validated.name,
-        domain: validated.domain,
-        accountData: validated.accountData ?? null,
-        leadsReportingUrl: validated.leadsReportingUrl,
-        sector: validated.sector,
-        clientStatus: validated.clientStatus,
-        targetJobTitle: validated.targetJobTitle,
-        prospectingLocation: validated.prospectingLocation,
-        monthlyIntakeGBP: validated.monthlyIntakeGBP,
-        defcon: validated.defcon,
-        weeklyLeadTarget: validated.weeklyLeadTarget,
-        weeklyLeadActual: validated.weeklyLeadActual,
-        monthlyLeadTarget: validated.monthlyLeadTarget,
-        monthlyLeadActual: validated.monthlyLeadActual,
-        updatedAt: new Date(),
-      },
+    const customer = await prisma.$transaction(async (tx) => {
+      const updatedCustomer = await tx.customer.update({
+        where: { id },
+        data: updateData,
+      })
+
+      if (shouldClearLeads) {
+        const clearedAt = new Date()
+        await tx.leadRecord.deleteMany({ where: { customerId: id } })
+        await tx.leadSyncState.upsert({
+          where: { customerId: id },
+          create: {
+            id: `lead_sync_${id}`,
+            customerId: id,
+            lastSyncAt: clearedAt,
+            lastSuccessAt: clearedAt,
+            rowCount: 0,
+            lastError: null,
+          },
+          update: {
+            lastSyncAt: clearedAt,
+            lastSuccessAt: clearedAt,
+            rowCount: 0,
+            lastError: null,
+          },
+        })
+      }
+
+      return updatedCustomer
     })
 
     return res.json({

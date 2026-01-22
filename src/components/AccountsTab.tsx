@@ -3420,6 +3420,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         return
       }
       syncInFlightRef.current = true
+      let needsLeadsRefresh = false
 
       try {
         const { data, error } = await api.get<CustomerApi[]>('/api/customers')
@@ -3433,15 +3434,24 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
           if (customer) {
             const updates = diffCustomerPayload(customer, payload)
             if (Object.keys(updates).length > 0) {
+              if ('leadsReportingUrl' in updates) {
+                needsLeadsRefresh = true
+              }
               await api.put(`/api/customers/${customer.id}`, { ...updates, name: payload.name })
             }
           } else {
+            if (payload.leadsReportingUrl !== undefined) {
+              needsLeadsRefresh = true
+            }
             await api.post('/api/customers', payload)
           }
         }
 
         setItem(OdcrmStorageKeys.accountsBackendSyncHash, hash)
         lastSyncedHashRef.current = hash
+        if (needsLeadsRefresh) {
+          emit('accountsUpdated', accountsToSync)
+        }
       } catch (err) {
         console.warn('Failed to sync accounts to backend:', err)
       } finally {
