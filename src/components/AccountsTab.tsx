@@ -195,6 +195,7 @@ const STORAGE_KEY_SECTORS = OdcrmStorageKeys.sectors
 const STORAGE_KEY_TARGET_LOCATIONS = OdcrmStorageKeys.targetLocations
 const STORAGE_KEY_LEADS = OdcrmStorageKeys.leads
 const STORAGE_KEY_DELETED_ACCOUNTS = OdcrmStorageKeys.deletedAccounts
+const STORAGE_KEY_GOOGLE_SHEETS_CLEARED = 'odcrm_accounts_google_sheets_cleared_v1'
 
 // Lead type for marketing leads
 export type Lead = {
@@ -760,7 +761,7 @@ function loadLatestAccountsBackup(): Account[] | null {
 
 function mergeAccountFromBackup(account: Account, backup: Account): Account {
   const updates: Partial<Account> = {}
-  if (!account.clientLeadsSheetUrl && backup.clientLeadsSheetUrl) {
+  if (account.clientLeadsSheetUrl === undefined && backup.clientLeadsSheetUrl) {
     updates.clientLeadsSheetUrl = backup.clientLeadsSheetUrl
   }
   if (!account.sector && backup.sector) {
@@ -902,7 +903,12 @@ function buildCustomerPayloadFromAccount(account: Account): {
 
   const domain = normalizeDomain(account.website)
   if (domain) payload.domain = domain
-  if (account.clientLeadsSheetUrl) payload.leadsReportingUrl = account.clientLeadsSheetUrl
+  const trimmedLeadsUrl = account.clientLeadsSheetUrl?.trim()
+  if (trimmedLeadsUrl) {
+    payload.leadsReportingUrl = trimmedLeadsUrl
+  } else if (account.clientLeadsSheetUrl === '') {
+    payload.leadsReportingUrl = null
+  }
   if (account.sector) payload.sector = account.sector
   if (account.status) payload.clientStatus = mapAccountStatusToClientStatus(account.status) || 'active'
   if (account.targetTitle) payload.targetJobTitle = account.targetTitle
@@ -963,11 +969,15 @@ function diffCustomerPayload(
   if (payload.domain && normalizeValue(payload.domain) !== normalizeValue(customer.domain)) {
     updates.domain = payload.domain
   }
-  if (
-    payload.leadsReportingUrl &&
-    normalizeValue(payload.leadsReportingUrl) !== normalizeValue(customer.leadsReportingUrl)
-  ) {
-    updates.leadsReportingUrl = payload.leadsReportingUrl
+  if (payload.leadsReportingUrl !== undefined) {
+    const normalizedPayload =
+      payload.leadsReportingUrl === null ? null : normalizeValue(payload.leadsReportingUrl)
+    const normalizedCustomer = customer.leadsReportingUrl
+      ? normalizeValue(customer.leadsReportingUrl)
+      : null
+    if (normalizedPayload !== normalizedCustomer) {
+      updates.leadsReportingUrl = payload.leadsReportingUrl
+    }
   }
   if (payload.sector && normalizeValue(payload.sector) !== normalizeValue(customer.sector)) {
     updates.sector = payload.sector
@@ -1064,7 +1074,7 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     monthlyActual: typeof raw.monthlyActual === 'number' ? raw.monthlyActual : 0,
     weeklyReport: raw.weeklyReport || '',
     users: Array.isArray(raw.users) ? raw.users : [],
-    clientLeadsSheetUrl: raw.clientLeadsSheetUrl || '',
+    clientLeadsSheetUrl: raw.clientLeadsSheetUrl ?? undefined,
     notes: Array.isArray(raw.notes) ? raw.notes : undefined,
   }
 }
@@ -1084,6 +1094,7 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
   if (typeof customer.monthlyLeadTarget === 'number') updated.monthlyTarget = customer.monthlyLeadTarget
   if (typeof customer.monthlyLeadActual === 'number') updated.monthlyActual = customer.monthlyLeadActual
   if (customer.leadsReportingUrl) updated.clientLeadsSheetUrl = customer.leadsReportingUrl
+  if (customer.leadsReportingUrl === null) updated.clientLeadsSheetUrl = ''
   return updated
 }
 
@@ -1113,7 +1124,10 @@ function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Acco
     return buildAccountFromCustomer(customer)
   }
   const updates: Partial<Account> = {}
-  if (!account.clientLeadsSheetUrl && customer.leadsReportingUrl) {
+  if (customer.leadsReportingUrl === null && account.clientLeadsSheetUrl) {
+    updates.clientLeadsSheetUrl = ''
+  }
+  if (account.clientLeadsSheetUrl === undefined && customer.leadsReportingUrl) {
     updates.clientLeadsSheetUrl = customer.leadsReportingUrl
   }
   if (!account.sector && customer.sector) {
@@ -1462,7 +1476,6 @@ const seededAccounts: Account[] = [
     monthlyActual: 0,
     weeklyReport: '',
     users: [],
-    clientLeadsSheetUrl: 'https://docs.google.com/spreadsheets/d/1yat8uQsfaqSyu4C6TSbICurSqm-S3gLpvjwVufdvdt8/edit?gid=0#gid=0',
   },
   {
     name: 'Renewable Temp Power',
@@ -3302,6 +3315,23 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     void run()
+  }, [accountsData])
+
+  useEffect(() => {
+    if (!isStorageAvailable()) return
+    if (!accountsData || accountsData.length === 0) return
+    if (getItem(STORAGE_KEY_GOOGLE_SHEETS_CLEARED)) return
+
+    const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl))
+    setItem(STORAGE_KEY_GOOGLE_SHEETS_CLEARED, 'true')
+    if (!hasSheets) return
+
+    const cleared = accountsData.map((account) =>
+      account.clientLeadsSheetUrl ? { ...account, clientLeadsSheetUrl: '' } : account,
+    )
+    setAccountsData(cleared)
+    saveAccountsToStorage(cleared)
+    emit('accountsUpdated', cleared)
   }, [accountsData])
 
   // Ensure account changes are persisted immediately (guards against missed save paths and prevents "reverts")
@@ -5359,8 +5389,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       <EditableField
                         value={selectedAccount.clientLeadsSheetUrl || ''}
                         onSave={(value) => {
+                          const nextValue = typeof value === 'string' ? value.trim() : ''
                           updateAccount(selectedAccount.name, {
-                            clientLeadsSheetUrl: String(value) || undefined,
+                            clientLeadsSheetUrl: nextValue,
                           })
                           stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')
                         }}
