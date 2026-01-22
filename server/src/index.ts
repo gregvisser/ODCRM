@@ -17,6 +17,7 @@ import companyDataRoutes from './routes/companyData.js'
 import { startEmailScheduler } from './workers/emailScheduler.js'
 import { startReplyDetectionWorker } from './workers/replyDetection.js'
 import { startLeadsSyncWorker } from './workers/leadsSync.js'
+import { startAboutEnrichmentWorker } from './workers/aboutEnrichment.js'
 
 dotenv.config()
 
@@ -108,6 +109,14 @@ app.listen(PORT, () => {
     startLeadsSyncWorker(prisma)
   } else {
     console.log('⚠️  Leads sync worker disabled via LEADS_SYNC_DISABLED')
+  }
+
+  const aboutEnrichmentDisabled = process.env.ABOUT_ENRICHMENT_DISABLED === 'true'
+  if (!aboutEnrichmentDisabled) {
+    console.log('🤖 Starting About enrichment worker...')
+    startAboutEnrichmentWorker(prisma)
+  } else {
+    console.log('⚠️  About enrichment worker disabled via ABOUT_ENRICHMENT_DISABLED')
   }
 })
 

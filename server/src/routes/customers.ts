@@ -332,4 +332,39 @@ router.delete('/:customerId/contacts/:contactId', async (req, res) => {
   }
 })
 
+// POST /api/customers/:id/enrich-about - Manually trigger About section enrichment
+router.post('/:id/enrich-about', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const website = customer.website || customer.domain
+    if (!website) {
+      return res.status(400).json({ error: 'Customer must have a website or domain to enrich' })
+    }
+
+    const { enrichCompanyAbout } = await import('../services/aboutEnrichment.js')
+    const result = await enrichCompanyAbout(prisma, id, customer.name, website)
+
+    if (!result) {
+      return res.status(500).json({ error: 'Failed to enrich company data' })
+    }
+
+    return res.json({
+      success: true,
+      data: result,
+    })
+  } catch (error) {
+    console.error('Error enriching customer About:', error)
+    return res.status(500).json({ error: 'Failed to enrich customer About' })
+  }
+})
+
 export default router

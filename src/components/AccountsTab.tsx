@@ -138,6 +138,15 @@ type CustomerApi = {
   weeklyLeadActual?: number | null
   monthlyLeadTarget?: number | null
   monthlyLeadActual?: number | null
+  // About section fields (from DB)
+  website?: string | null
+  whatTheyDo?: string | null
+  accreditations?: string | null
+  companySize?: string | null
+  headquarters?: string | null
+  foundingYear?: string | null
+  socialPresence?: Array<{ label: string; url: string }> | null
+  lastEnrichedAt?: string | null
 }
 
 export type Account = {
@@ -1081,7 +1090,9 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
 function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): Account {
   const updated: Account = { ...account }
   if (customer.name) updated.name = customer.name
-  if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
+  // Prioritize website from DB field
+  if (customer.website) updated.website = customer.website
+  else if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
   if (customer.sector) updated.sector = customer.sector
   if (customer.clientStatus) updated.status = mapClientStatusToAccountStatus(customer.clientStatus)
   if (customer.prospectingLocation) updated.targetLocation = [customer.prospectingLocation]
@@ -1094,13 +1105,45 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
   if (typeof customer.monthlyLeadActual === 'number') updated.monthlyActual = customer.monthlyLeadActual
   if (customer.leadsReportingUrl) updated.clientLeadsSheetUrl = customer.leadsReportingUrl
   if (customer.leadsReportingUrl === null) updated.clientLeadsSheetUrl = ''
+  // Update About sections from DB fields if available
+  if (customer.whatTheyDo || customer.accreditations || customer.companySize || customer.headquarters || customer.foundingYear) {
+    updated.aboutSections = {
+      ...updated.aboutSections,
+      whatTheyDo: customer.whatTheyDo || updated.aboutSections.whatTheyDo,
+      accreditations: customer.accreditations || updated.aboutSections.accreditations,
+      companySize: customer.companySize || updated.aboutSections.companySize,
+      headquarters: customer.headquarters || updated.aboutSections.headquarters,
+      foundingYear: customer.foundingYear || updated.aboutSections.foundingYear,
+    }
+  }
+  // Update social media from DB
+  if (customer.socialPresence && Array.isArray(customer.socialPresence)) {
+    updated.socialMedia = customer.socialPresence
+  }
   return updated
 }
 
 function buildAccountFromCustomer(customer: CustomerApi): Account {
+  // Prioritize website from DB field, fallback to domain
+  const website = customer.website || normalizeCustomerWebsite(customer.domain)
+  
+  // Build About sections from DB fields if available
+  const aboutSectionsFromDb = customer.whatTheyDo || customer.accreditations || customer.companySize || customer.headquarters || customer.foundingYear
+    ? {
+        whatTheyDo: customer.whatTheyDo || '',
+        accreditations: customer.accreditations || '',
+        keyLeaders: '', // Not stored in DB yet
+        companyProfile: '', // Will be built from separate fields
+        recentNews: '', // Not stored in DB yet
+        companySize: customer.companySize || '',
+        headquarters: customer.headquarters || '',
+        foundingYear: customer.foundingYear || '',
+      }
+    : undefined
+
   const fallback = normalizeAccountDefaults({
     name: customer.name,
-    website: normalizeCustomerWebsite(customer.domain),
+    website,
     sector: customer.sector || '',
     status: mapClientStatusToAccountStatus(customer.clientStatus),
     targetLocation: customer.prospectingLocation ? [customer.prospectingLocation] : [],
@@ -1112,9 +1155,20 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
     monthlyTarget: customer.monthlyLeadTarget ?? 0,
     monthlyActual: customer.monthlyLeadActual ?? 0,
     clientLeadsSheetUrl: customer.leadsReportingUrl || '',
+    aboutSections: aboutSectionsFromDb,
+    socialMedia: customer.socialPresence && Array.isArray(customer.socialPresence) ? customer.socialPresence : [],
   })
   const accountData = coerceAccountData(customer.accountData)
   const base = accountData ? normalizeAccountDefaults({ ...fallback, ...accountData }) : fallback
+  
+  // If DB has About data, merge it (DB takes precedence)
+  if (aboutSectionsFromDb) {
+    base.aboutSections = {
+      ...base.aboutSections,
+      ...aboutSectionsFromDb,
+    }
+  }
+  
   return applyCustomerFieldsToAccount(base, customer)
 }
 
@@ -1812,13 +1866,36 @@ const socialPresenceBlock = (socialMedia: SocialProfile[]) => {
   )
 }
 
-const detailedSections = (sections: AboutSections) => [
-  { heading: 'What the company does', value: sections.whatTheyDo },
-  { heading: 'Accreditations', value: sections.accreditations },
-  { heading: 'Key leaders', value: sections.keyLeaders },
-  { heading: 'Company size, headquarters & founding year', value: sections.companyProfile },
-  { heading: 'Recent news', value: sections.recentNews },
-]
+const detailedSections = (sections: AboutSections) => {
+  const sectionsList: Array<{ heading: string; value: string }> = [
+    { heading: 'What the company does', value: sections.whatTheyDo },
+  ]
+  
+  // Add separate fields for company size, headquarters, and founding year
+  const companyDetails: string[] = []
+  if (sections.companySize) companyDetails.push(`Company size: ${sections.companySize}`)
+  if (sections.headquarters) companyDetails.push(`Headquarters: ${sections.headquarters}`)
+  if (sections.foundingYear) companyDetails.push(`Founded: ${sections.foundingYear}`)
+  
+  // If we have separate fields, use them; otherwise fall back to companyProfile
+  if (companyDetails.length > 0) {
+    sectionsList.push({ heading: 'Company size, headquarters & founding year', value: companyDetails.join('. ') })
+  } else if (sections.companyProfile) {
+    sectionsList.push({ heading: 'Company size, headquarters & founding year', value: sections.companyProfile })
+  }
+  
+  if (sections.accreditations) {
+    sectionsList.push({ heading: 'Accreditations', value: sections.accreditations })
+  }
+  if (sections.keyLeaders) {
+    sectionsList.push({ heading: 'Key leaders', value: sections.keyLeaders })
+  }
+  if (sections.recentNews) {
+    sectionsList.push({ heading: 'Recent news', value: sections.recentNews })
+  }
+  
+  return sectionsList
+}
 
 // Helper to format stored JSON strings into readable text and extract structured data
 const formatStoredValue = (value: string): { text: string; newsItems?: Array<{ date: string; headline: string; url?: string }> } => {
@@ -5188,9 +5265,83 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   borderColor="gray.200"
                   boxShadow="sm"
                 >
-                  <Heading size="md" mb={4} color="gray.700">
-                    About
-                  </Heading>
+                  <HStack justify="space-between" align="center" mb={4}>
+                    <Heading size="md" color="gray.700">
+                      About
+                    </Heading>
+                    <Button
+                      size="sm"
+                      colorScheme="teal"
+                      leftIcon={<RepeatIcon />}
+                      onClick={async () => {
+                        if (!selectedAccount.website) {
+                          toast({
+                            title: 'Website required',
+                            description: 'Please add a company website first',
+                            status: 'warning',
+                            duration: 3000,
+                            isClosable: true,
+                          })
+                          return
+                        }
+                        try {
+                          // Find customer ID from accountsData
+                          const customer = accountsData.find((a) => a.name === selectedAccount.name)
+                          if (!customer) {
+                            toast({
+                              title: 'Error',
+                              description: 'Could not find customer record',
+                              status: 'error',
+                              duration: 3000,
+                              isClosable: true,
+                            })
+                            return
+                          }
+                          // Get customer ID from API
+                          const customersResponse = await api.get<CustomerApi[]>('/api/customers')
+                          if (customersResponse.error || !customersResponse.data) {
+                            throw new Error('Failed to fetch customers')
+                          }
+                          const customerApi = customersResponse.data.find((c) => c.name === selectedAccount.name)
+                          if (!customerApi) {
+                            throw new Error('Customer not found')
+                          }
+                          // Call enrichment endpoint
+                          const enrichResponse = await api.post(`/api/customers/${customerApi.id}/enrich-about`, {})
+                          if (enrichResponse.error) {
+                            throw new Error(enrichResponse.error || 'Enrichment failed')
+                          }
+                          toast({
+                            title: 'About data refreshed',
+                            description: 'Company information has been updated',
+                            status: 'success',
+                            duration: 3000,
+                            isClosable: true,
+                          })
+                          // Reload account data from server
+                          const updatedCustomersResponse = await api.get<CustomerApi[]>('/api/customers')
+                          if (!updatedCustomersResponse.error && updatedCustomersResponse.data) {
+                            const updatedCustomer = updatedCustomersResponse.data.find((c) => c.id === customerApi.id)
+                            if (updatedCustomer) {
+                              const updatedAccount = buildAccountFromCustomer(updatedCustomer)
+                              updateAccountSilent(selectedAccount.name, updatedAccount)
+                              setSelectedAccount(updatedAccount)
+                            }
+                          }
+                        } catch (error: any) {
+                          toast({
+                            title: 'Enrichment failed',
+                            description: error.message || 'Failed to refresh About data',
+                            status: 'error',
+                            duration: 5000,
+                            isClosable: true,
+                          })
+                        }
+                      }}
+                    >
+                      Refresh About
+                    </Button>
+                  </HStack>
                   <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
                     <EditableField
                       value={selectedAccount.website || ''}
@@ -5217,10 +5368,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                           <Link
                             href={String(value)}
                             isExternal
-                            color="text.muted"
+                            color="teal.600"
                             fontWeight="medium"
+                            textDecoration="underline"
                           >
-                            {String(value)}
+                            Company website
                           </Link>
                         ) : (
                           <Text fontSize="sm" color="text.muted">
