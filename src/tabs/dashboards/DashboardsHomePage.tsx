@@ -512,11 +512,11 @@ export default function DashboardsHomePage() {
   }
 
   return (
-    <VStack spacing={6} align="stretch">
+    <VStack spacing={3} align="stretch">
       {/* Header Stats */}
-      <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
-        <HStack justify="space-between" mb={4} flexWrap="wrap">
-          <Heading size="lg" color="gray.700">
+      <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
+        <HStack justify="space-between" mb={2} flexWrap="wrap">
+          <Heading size="md" color="gray.700">
             Client Lead Generation Dashboard
           </Heading>
           <IconButton
@@ -529,27 +529,27 @@ export default function DashboardsHomePage() {
           />
         </HStack>
 
-        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
           <Stat>
-            <StatLabel>Total Leads This Week</StatLabel>
-            <StatNumber fontSize="3xl" color="orange.500">
+            <StatLabel fontSize="xs">Total Leads This Week</StatLabel>
+            <StatNumber fontSize="2xl" color="orange.500">
               {weekTotal}
             </StatNumber>
-            <StatHelpText>Week {weekNumber} Target: {totalWeeklyTarget}</StatHelpText>
+            <StatHelpText fontSize="xs">Week {weekNumber} Target: {totalWeeklyTarget}</StatHelpText>
           </Stat>
 
           <Stat>
-            <StatLabel>Current Month</StatLabel>
-            <StatNumber fontSize="2xl">{currentMonth}</StatNumber>
-            <StatHelpText>Target: {totalMonthlyTarget}</StatHelpText>
+            <StatLabel fontSize="xs">Current Month</StatLabel>
+            <StatNumber fontSize="lg">{currentMonth}</StatNumber>
+            <StatHelpText fontSize="xs">Target: {totalMonthlyTarget}</StatHelpText>
           </Stat>
 
           <Stat>
-            <StatLabel>Month-to-Date</StatLabel>
-            <StatNumber fontSize="3xl" color="orange.500">
+            <StatLabel fontSize="xs">Month-to-Date</StatLabel>
+            <StatNumber fontSize="2xl" color="orange.500">
               {monthTotal}
             </StatNumber>
-            <StatHelpText>
+            <StatHelpText fontSize="xs">
               {totalMonthlyTarget > 0 
                 ? `${((monthTotal / totalMonthlyTarget) * 100).toFixed(1)}% of target`
                 : 'No target set'}
@@ -559,30 +559,30 @@ export default function DashboardsHomePage() {
       </Box>
 
       {/* Main Client Table */}
-      <Box bg="white" borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200" overflow="hidden">
+      <Box bg="white" borderRadius="md" shadow="sm" border="1px" borderColor="gray.200" overflow="hidden">
         <Box overflowX="auto">
-          <Table size="sm" variant="simple">
+          <Table size="sm" variant="simple" sx={{ 'td, th': { py: 1, px: 2 } }}>
             <Thead bg="gray.100">
               <Tr>
-                <Th>Client</Th>
-                <Th isNumeric>Spend (£)</Th>
-                <Th isNumeric>Current Week Actual</Th>
-                <Th isNumeric>Current Week Target</Th>
-                <Th isNumeric>Month Actual</Th>
-                <Th isNumeric>Month Target</Th>
-                <Th isNumeric>% of Target</Th>
-                <Th textAlign="center">DEFCON</Th>
+                <Th fontSize="xs">Client</Th>
+                <Th isNumeric fontSize="xs">Spend (£)</Th>
+                <Th isNumeric fontSize="xs">Week Actual</Th>
+                <Th isNumeric fontSize="xs">Week Target</Th>
+                <Th isNumeric fontSize="xs">Month Actual</Th>
+                <Th isNumeric fontSize="xs">Month Target</Th>
+                <Th isNumeric fontSize="xs">% Target</Th>
+                <Th textAlign="center" fontSize="xs">DEFCON</Th>
               </Tr>
             </Thead>
             <Tbody>
               {accountsWithPercentages.map((account) => (
                 <Tr key={account.name} _hover={{ bg: 'gray.50' }}>
-                  <Td fontWeight="medium">{account.name}</Td>
-                  <Td isNumeric>{account.monthlySpendGBP.toLocaleString()}</Td>
-                  <Td isNumeric>{account.weeklyActual || 0}</Td>
-                  <Td isNumeric>{account.weeklyTarget || 0}</Td>
-                  <Td isNumeric>{account.monthlyActual || 0}</Td>
-                  <Td isNumeric>{account.monthlyTarget || 0}</Td>
+                  <Td fontWeight="medium" fontSize="sm">{account.name}</Td>
+                  <Td isNumeric fontSize="sm">{account.monthlySpendGBP.toLocaleString()}</Td>
+                  <Td isNumeric fontSize="sm">{account.weeklyActual || 0}</Td>
+                  <Td isNumeric fontSize="sm">{account.weeklyTarget || 0}</Td>
+                  <Td isNumeric fontSize="sm">{account.monthlyActual || 0}</Td>
+                  <Td isNumeric fontSize="sm">{account.monthlyTarget || 0}</Td>
                   <Td isNumeric>
                     <Text 
                       color={
@@ -591,6 +591,7 @@ export default function DashboardsHomePage() {
                         'red.600'
                       }
                       fontWeight="semibold"
+                      fontSize="sm"
                     >
                       {account.monthlyPercentage.toFixed(1)}%
                     </Text>
@@ -603,18 +604,16 @@ export default function DashboardsHomePage() {
                         account.defcon >= 4 && account.defcon <= 5 ? 'green' : 
                         'blue'
                       }
-                      fontSize="md"
-                      px={3}
-                      py={1}
-                      borderRadius="md"
+                      fontSize="sm"
+                      px={2}
                     >
                       {account.defcon}
                     </Badge>
                   </Td>
                 </Tr>
               ))}
-              <Tr bg="gray.100" fontWeight="bold" fontSize="md">
-                <Td>Totals ({accountsData.length} accounts)</Td>
+              <Tr bg="gray.100" fontWeight="bold" fontSize="sm">
+                <Td>Totals ({accountsData.length})</Td>
                 <Td isNumeric>{accountsData.reduce((sum, a) => sum + a.monthlySpendGBP, 0).toLocaleString()}</Td>
                 <Td isNumeric>{accountsData.reduce((sum, a) => sum + (a.weeklyActual || 0), 0)}</Td>
                 <Td isNumeric>{totalWeeklyTarget}</Td>
@@ -633,29 +632,29 @@ export default function DashboardsHomePage() {
       </Box>
 
       {/* Channel Breakdown & Progress */}
-      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
+      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
         {/* Channel Breakdown */}
-        <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
-          <Heading size="md" mb={4}>Channel</Heading>
-          <VStack align="stretch" spacing={3}>
+        <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
+          <Heading size="sm" mb={2}>Channel</Heading>
+          <VStack align="stretch" spacing={2}>
             {Object.entries(channelBreakdown)
               .sort((a, b) => b[1] - a[1])
               .map(([channel, count]) => (
                 <HStack key={channel} justify="space-between">
-                  <Text>{channel}</Text>
-                  <Badge colorScheme="blue" fontSize="md" px={3}>
+                  <Text fontSize="sm">{channel}</Text>
+                  <Badge colorScheme="blue" fontSize="sm" px={2}>
                     {count}
                   </Badge>
                 </HStack>
               ))}
             {Object.keys(channelBreakdown).length === 0 && (
-              <Text color="gray.400">No leads this week</Text>
+              <Text color="gray.400" fontSize="sm">No leads this week</Text>
             )}
           </VStack>
 
-          <Box mt={6} p={4} bg="gray.50" borderRadius="md">
-            <Text fontWeight="semibold" fontSize="lg" mb={2}>Month-to-Date</Text>
-            <Text fontSize="3xl" fontWeight="bold" color="blue.600">{monthTotal}</Text>
+          <Box mt={3} p={3} bg="gray.50" borderRadius="md">
+            <Text fontWeight="semibold" fontSize="sm" mb={1}>Month-to-Date</Text>
+            <Text fontSize="2xl" fontWeight="bold" color="blue.600">{monthTotal}</Text>
             {Object.entries(channelBreakdown).map(([channel, count]) => {
               const percentage = monthTotal > 0 ? (count / monthTotal) * 100 : 0
               return (
@@ -669,55 +668,54 @@ export default function DashboardsHomePage() {
         </Box>
 
         {/* Week Progress - INCH BY INCH */}
-        <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
-          <Heading size="md" mb={4} color="purple.700">INCH BY INCH</Heading>
+        <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
+          <Heading size="sm" mb={2} color="purple.700">INCH BY INCH</Heading>
           
-          <Box mb={6}>
-            <HStack justify="space-between" mb={2}>
-              <Text fontWeight="semibold">This Week's Target</Text>
+          <Box mb={3}>
+            <HStack justify="space-between" mb={1}>
+              <Text fontWeight="semibold" fontSize="sm">This Week's Target</Text>
               <Badge 
                 colorScheme={isWeekOnTrack ? 'green' : 'orange'} 
-                fontSize="md" 
-                px={3}
-                py={1}
+                fontSize="xs" 
+                px={2}
               >
                 {isWeekOnTrack ? '✓ On Track' : '○ Behind'}
               </Badge>
             </HStack>
-            <Text fontSize="4xl" fontWeight="bold" color="blue.600">{totalWeeklyTarget}</Text>
+            <Text fontSize="3xl" fontWeight="bold" color="blue.600">{totalWeeklyTarget}</Text>
             <Progress 
               value={weekProgress} 
               colorScheme={weekProgress >= 80 ? 'green' : weekProgress >= 50 ? 'yellow' : 'red'}
-              size="lg"
+              size="md"
               borderRadius="md"
-              mt={2}
+              mt={1}
               hasStripe
               isAnimated
             />
-            <Text fontSize="sm" color="gray.600" mt={1}>{weekProgress.toFixed(0)}% Complete ({weekTotal}/{totalWeeklyTarget})</Text>
+            <Text fontSize="xs" color="gray.600" mt={1}>{weekProgress.toFixed(0)}% Complete ({weekTotal}/{totalWeeklyTarget})</Text>
           </Box>
 
-          <VStack align="stretch" spacing={3}>
-            <HStack justify="space-between" p={3} bg="blue.50" borderRadius="md">
-              <Text fontWeight="medium">Daily Target</Text>
-              <Text fontSize="xl" fontWeight="bold">{dailyTarget}</Text>
+          <VStack align="stretch" spacing={2}>
+            <HStack justify="space-between" p={2} bg="blue.50" borderRadius="md">
+              <Text fontWeight="medium" fontSize="sm">Daily Target</Text>
+              <Text fontSize="lg" fontWeight="bold">{dailyTarget}</Text>
             </HStack>
             
-            <HStack justify="space-between" p={3} bg="green.50" borderRadius="md">
-              <Text fontWeight="medium">Today's Leads</Text>
+            <HStack justify="space-between" p={2} bg="green.50" borderRadius="md">
+              <Text fontWeight="medium" fontSize="sm">Today's Leads</Text>
               <HStack>
-                <Text fontSize="xl" fontWeight="bold">{todayTotal}</Text>
+                <Text fontSize="lg" fontWeight="bold">{todayTotal}</Text>
                 {todayTotal >= dailyTarget ? (
-                  <CheckCircleIcon color="green.500" />
+                  <CheckCircleIcon color="green.500" boxSize={4} />
                 ) : (
-                  <WarningIcon color="orange.500" />
+                  <WarningIcon color="orange.500" boxSize={4} />
                 )}
               </HStack>
             </HStack>
 
-            <HStack justify="space-between" p={3} bg="orange.50" borderRadius="md">
-              <Text fontWeight="medium">Left to Go</Text>
-              <Text fontSize="xl" fontWeight="bold" color="orange.600">
+            <HStack justify="space-between" p={2} bg="orange.50" borderRadius="md">
+              <Text fontWeight="medium" fontSize="sm">Left to Go</Text>
+              <Text fontSize="lg" fontWeight="bold" color="orange.600">
                 {Math.max(0, totalWeeklyTarget - weekTotal)}
               </Text>
             </HStack>
@@ -726,18 +724,18 @@ export default function DashboardsHomePage() {
       </SimpleGrid>
 
       {/* Sales Leaderboard */}
-      <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
-        <HStack justify="space-between" mb={4}>
-          <Heading size="md" color="blue.700">Sales Leaderboard</Heading>
-          <Badge colorScheme="blue" fontSize="md" px={3}>Current Week</Badge>
+      <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
+        <HStack justify="space-between" mb={2}>
+          <Heading size="sm" color="blue.700">Sales Leaderboard</Heading>
+          <Badge colorScheme="blue" fontSize="xs" px={2}>Current Week</Badge>
         </HStack>
         
-        <Table size="sm" variant="simple">
+        <Table size="sm" variant="simple" sx={{ 'td, th': { py: 1, px: 2 } }}>
           <Thead bg="blue.50">
             <Tr>
-              <Th>Rank</Th>
-              <Th>Salesperson</Th>
-              <Th isNumeric>Leads</Th>
+              <Th fontSize="xs">Rank</Th>
+              <Th fontSize="xs">Salesperson</Th>
+              <Th isNumeric fontSize="xs">Leads</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -746,20 +744,19 @@ export default function DashboardsHomePage() {
                 <Td>
                   <Badge
                     colorScheme={index === 0 ? 'yellow' : index === 1 ? 'gray' : index === 2 ? 'orange' : 'blue'}
-                    fontSize="lg"
-                    px={3}
-                    py={1}
+                    fontSize="sm"
+                    px={2}
                   >
                     {index + 1}
                   </Badge>
                 </Td>
-                <Td fontWeight="medium" fontSize="md">{entry.name}</Td>
-                <Td isNumeric fontSize="xl" fontWeight="bold" color="blue.600">{entry.leads}</Td>
+                <Td fontWeight="medium" fontSize="sm">{entry.name}</Td>
+                <Td isNumeric fontSize="lg" fontWeight="bold" color="blue.600">{entry.leads}</Td>
               </Tr>
             ))}
             {salesLeaderboard.length === 0 && (
               <Tr>
-                <Td colSpan={3} textAlign="center" color="gray.400" py={6}>
+                <Td colSpan={3} textAlign="center" color="gray.400" py={4} fontSize="sm">
                   No leads recorded this week
                 </Td>
               </Tr>
