@@ -1,17 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Badge,
   Box,
   Heading,
   HStack,
   IconButton,
+  Progress,
   SimpleGrid,
   Spinner,
   Stack,
+  Stat,
+  StatHelpText,
+  StatLabel,
+  StatNumber,
+  Table,
+  Tbody,
+  Td,
   Text,
+  Th,
+  Thead,
+  Tr,
   useToast,
+  VStack,
 } from '@chakra-ui/react'
-import { RepeatIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons'
 import { type Account } from '../../components/AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
@@ -234,7 +246,7 @@ export default function DashboardsHomePage() {
   const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
   const [loading, setLoading] = useState(leads.length === 0)
   const [lastRefresh, setLastRefresh] = useState<Date>(() => loadLastRefreshFromStorage() || new Date())
-  const hasSyncedCustomersRef = useRef(false)
+  const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
 
   const refreshLeads = useCallback(async (forceRefresh: boolean) => {
     if (!forceRefresh && !shouldRefresh(leads)) return
@@ -261,8 +273,8 @@ export default function DashboardsHomePage() {
 
   useEffect(() => {
     const syncFromCustomers = async () => {
-      if (hasSyncedCustomersRef.current) return
-      hasSyncedCustomersRef.current = true
+      if (hasSyncedCustomers) return
+      setHasSyncedCustomers(true)
       const { data, error } = await api.get<CustomerApi[]>('/api/customers')
       if (error || !data || data.length === 0) return
 
@@ -298,7 +310,7 @@ export default function DashboardsHomePage() {
       offLeadsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [refreshLeads])
+  }, [refreshLeads, hasSyncedCustomers])
 
   const unifiedAnalytics = useMemo(() => {
     const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
@@ -399,6 +411,95 @@ export default function DashboardsHomePage() {
     }
   }, [accountsData, leads])
 
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const endOfToday = new Date(startOfToday)
+  endOfToday.setDate(endOfToday.getDate() + 1)
+
+  const weekStart = new Date(startOfToday)
+  const day = weekStart.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  weekStart.setDate(weekStart.getDate() + diff)
+  const weekEnd = new Date(weekStart)
+  weekEnd.setDate(weekEnd.getDate() + 7)
+
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+
+  const parseLeadDate = (dateStr: string): Date | null => {
+    if (!dateStr || dateStr.trim() === '') return null
+    const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
+    if (ddmmyy) {
+      const day = parseInt(ddmmyy[1], 10)
+      const month = parseInt(ddmmyy[2], 10) - 1
+      const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
+      return new Date(year, month, day)
+    }
+    return null
+  }
+
+  const leadsWithDates = leads
+    .map((lead) => {
+      const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || ''
+      const parsedDate = parseLeadDate(dateValue)
+      if (!parsedDate) return null
+      return { data: lead, parsedDate }
+    })
+    .filter((x): x is { data: Lead; parsedDate: Date } => Boolean(x))
+
+  const weekTotal = leadsWithDates.filter(
+    (entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd
+  ).length
+
+  const monthTotal = leadsWithDates.filter(
+    (entry) => entry.parsedDate >= monthStart && entry.parsedDate < monthEnd
+  ).length
+
+  const todayTotal = leadsWithDates.filter(
+    (entry) => entry.parsedDate >= startOfToday && entry.parsedDate < endOfToday
+  ).length
+
+  const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
+  const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
+
+  const channelBreakdown: Record<string, number> = {}
+  leadsWithDates
+    .filter((entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd)
+    .forEach((entry) => {
+      const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || 'Unknown'
+      channelBreakdown[channel] = (channelBreakdown[channel] || 0) + 1
+    })
+
+  const teamBreakdown: Record<string, number> = {}
+  leadsWithDates
+    .filter((entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd)
+    .forEach((entry) => {
+      const member = entry.data['OD Team Member'] || entry.data['OD team member'] || 'Unknown'
+      if (member && member.trim() && member !== 'Unknown') {
+        teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
+      }
+    })
+
+  const salesLeaderboard = Object.entries(teamBreakdown)
+    .map(([name, leads]) => ({ name, leads }))
+    .sort((a, b) => b.leads - a.leads)
+    .slice(0, 5)
+
+  const accountsWithPercentages = accountsData
+    .map((account) => ({
+      ...account,
+      monthlyPercentage: account.monthlyTarget > 0 
+        ? ((account.monthlyActual || 0) / account.monthlyTarget) * 100 
+        : 0,
+    }))
+    .sort((a, b) => b.monthlySpendGBP - a.monthlySpendGBP)
+
+  const weekProgress = totalWeeklyTarget > 0 ? (weekTotal / totalWeeklyTarget) * 100 : 0
+  const isWeekOnTrack = weekTotal >= totalWeeklyTarget * 0.8
+  const dailyTarget = Math.ceil(totalWeeklyTarget / 7)
+  const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  const weekNumber = Math.ceil((now.getDate() + startOfToday.getDay()) / 7)
+
   if (loading && leads.length === 0) {
     return (
       <Box textAlign="center" py={12}>
@@ -411,140 +512,265 @@ export default function DashboardsHomePage() {
   }
 
   return (
-    <Stack spacing={6}>
-      <Box>
-        <Heading size="lg" mb={2}>
-          Dashboards
-        </Heading>
-        <Text color="gray.600">Live lead performance from the database.</Text>
-      </Box>
-
-      <Box
-        bg="bg.surface"
-        borderRadius="lg"
-        p={4}
-        border="1px solid"
-        borderColor="border.subtle"
-        shadow="sm"
-      >
-        <HStack justify="space-between" mb={4} flexWrap="wrap" gap={3}>
-          <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
-              Unified Lead Performance
-            </Text>
-            <Heading size="md" color="gray.700">
-              All Accounts Combined
-            </Heading>
-            <Text fontSize="xs" color="gray.500" mt={1}>
-              Last refreshed: {lastRefresh.toLocaleString('en-GB')}
-            </Text>
-          </Box>
+    <VStack spacing={6} align="stretch">
+      {/* Header Stats */}
+      <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
+        <HStack justify="space-between" mb={4} flexWrap="wrap">
+          <Heading size="lg" color="gray.700">
+            Client Lead Generation Dashboard
+          </Heading>
           <IconButton
-            aria-label="Refresh leads data"
+            aria-label="Refresh"
             icon={<RepeatIcon />}
             onClick={() => refreshLeads(true)}
             isLoading={loading}
-            variant="ghost"
-            colorScheme="gray"
+            colorScheme="blue"
             size="sm"
           />
         </HStack>
-        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-          {(['today', 'week', 'month'] as const).map((periodKey) => {
-            const period = unifiedAnalytics.periodMetrics[periodKey]
-            const variance = period.actual - period.target
-            const allChannels = Object.keys(period.breakdown).sort(
-              (a, b) => period.breakdown[b] - period.breakdown[a],
-            )
-            const allTeamMembers = Object.keys(period.teamBreakdown || {}).sort(
-              (a, b) => (period.teamBreakdown?.[b] || 0) - (period.teamBreakdown?.[a] || 0),
-            )
-            return (
-              <Box
-                key={periodKey}
-                border="1px solid"
-                borderColor="border.subtle"
-                borderRadius="lg"
-                p={4}
-                bg="bg.subtle"
-                minH="280px"
-              >
-                <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
-                  {period.label}
-                </Text>
-                <Heading size="2xl" mt={2} color="gray.800">
-                  {period.actual}
-                </Heading>
-                <Text fontSize="sm" color="gray.600">
-                  Actual Leads
-                </Text>
-                <Stack spacing={1} mt={3} fontSize="sm">
-                  <Text color="gray.600">
-                    Target Leads:{' '}
-                    <Text as="span" fontWeight="semibold">
-                      {period.target}
-                    </Text>
-                  </Text>
-                  <Text color="text.muted">
-                    Variance:{' '}
-                    <Text as="span" fontWeight="semibold">
-                      {variance > 0 ? '+' : ''}
-                      {variance}
-                    </Text>
-                  </Text>
-                </Stack>
-                <Box mt={4}>
-                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
-                    Channels
-                  </Text>
-                  {allChannels.length > 0 ? (
-                    <Stack spacing={1} maxH="120px" overflowY="auto">
-                      {allChannels.map((channel) => (
-                        <HStack key={channel} justify="space-between">
-                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
-                            {channel}
-                          </Text>
-                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
-                            {period.breakdown[channel]}
-                          </Badge>
-                        </HStack>
-                      ))}
-                    </Stack>
-                  ) : (
-                    <Text fontSize="sm" color="gray.400">
-                      No leads recorded
-                    </Text>
-                  )}
-                </Box>
 
-                <Box mt={4}>
-                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
-                    OD Team
-                  </Text>
-                  {allTeamMembers.length > 0 ? (
-                    <Stack spacing={1} maxH="120px" overflowY="auto">
-                      {allTeamMembers.map((member) => (
-                        <HStack key={member} justify="space-between">
-                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
-                            {member}
-                          </Text>
-                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
-                            {period.teamBreakdown?.[member] || 0}
-                          </Badge>
-                        </HStack>
-                      ))}
-                    </Stack>
-                  ) : (
-                    <Text fontSize="sm" color="gray.400">
-                      No team members recorded
-                    </Text>
-                  )}
-                </Box>
-              </Box>
-            )
-          })}
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+          <Stat>
+            <StatLabel>Total Leads This Week</StatLabel>
+            <StatNumber fontSize="3xl" color="orange.500">
+              {weekTotal}
+            </StatNumber>
+            <StatHelpText>Week {weekNumber} Target: {totalWeeklyTarget}</StatHelpText>
+          </Stat>
+
+          <Stat>
+            <StatLabel>Current Month</StatLabel>
+            <StatNumber fontSize="2xl">{currentMonth}</StatNumber>
+            <StatHelpText>Target: {totalMonthlyTarget}</StatHelpText>
+          </Stat>
+
+          <Stat>
+            <StatLabel>Month-to-Date</StatLabel>
+            <StatNumber fontSize="3xl" color="orange.500">
+              {monthTotal}
+            </StatNumber>
+            <StatHelpText>
+              {totalMonthlyTarget > 0 
+                ? `${((monthTotal / totalMonthlyTarget) * 100).toFixed(1)}% of target`
+                : 'No target set'}
+            </StatHelpText>
+          </Stat>
         </SimpleGrid>
       </Box>
-    </Stack>
+
+      {/* Main Client Table */}
+      <Box bg="white" borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200" overflow="hidden">
+        <Box overflowX="auto">
+          <Table size="sm" variant="simple">
+            <Thead bg="gray.100">
+              <Tr>
+                <Th>Client</Th>
+                <Th isNumeric>Spend (£)</Th>
+                <Th isNumeric>Current Week Actual</Th>
+                <Th isNumeric>Current Week Target</Th>
+                <Th isNumeric>Month Actual</Th>
+                <Th isNumeric>Month Target</Th>
+                <Th isNumeric>% of Target</Th>
+                <Th textAlign="center">DEFCON</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {accountsWithPercentages.map((account) => (
+                <Tr key={account.name} _hover={{ bg: 'gray.50' }}>
+                  <Td fontWeight="medium">{account.name}</Td>
+                  <Td isNumeric>{account.monthlySpendGBP.toLocaleString()}</Td>
+                  <Td isNumeric>{account.weeklyActual || 0}</Td>
+                  <Td isNumeric>{account.weeklyTarget || 0}</Td>
+                  <Td isNumeric>{account.monthlyActual || 0}</Td>
+                  <Td isNumeric>{account.monthlyTarget || 0}</Td>
+                  <Td isNumeric>
+                    <Text 
+                      color={
+                        account.monthlyPercentage >= 100 ? 'green.600' : 
+                        account.monthlyPercentage >= 50 ? 'yellow.600' : 
+                        'red.600'
+                      }
+                      fontWeight="semibold"
+                    >
+                      {account.monthlyPercentage.toFixed(1)}%
+                    </Text>
+                  </Td>
+                  <Td textAlign="center">
+                    <Badge
+                      colorScheme={
+                        account.defcon <= 2 ? 'red' : 
+                        account.defcon === 3 ? 'yellow' : 
+                        account.defcon >= 4 && account.defcon <= 5 ? 'green' : 
+                        'blue'
+                      }
+                      fontSize="md"
+                      px={3}
+                      py={1}
+                      borderRadius="md"
+                    >
+                      {account.defcon}
+                    </Badge>
+                  </Td>
+                </Tr>
+              ))}
+              <Tr bg="gray.100" fontWeight="bold" fontSize="md">
+                <Td>Totals ({accountsData.length} accounts)</Td>
+                <Td isNumeric>{accountsData.reduce((sum, a) => sum + a.monthlySpendGBP, 0).toLocaleString()}</Td>
+                <Td isNumeric>{accountsData.reduce((sum, a) => sum + (a.weeklyActual || 0), 0)}</Td>
+                <Td isNumeric>{totalWeeklyTarget}</Td>
+                <Td isNumeric>{accountsData.reduce((sum, a) => sum + (a.monthlyActual || 0), 0)}</Td>
+                <Td isNumeric>{totalMonthlyTarget}</Td>
+                <Td isNumeric>
+                  {totalMonthlyTarget > 0 
+                    ? ((monthTotal / totalMonthlyTarget) * 100).toFixed(1)
+                    : '0.0'}%
+                </Td>
+                <Td></Td>
+              </Tr>
+            </Tbody>
+          </Table>
+        </Box>
+      </Box>
+
+      {/* Channel Breakdown & Progress */}
+      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
+        {/* Channel Breakdown */}
+        <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
+          <Heading size="md" mb={4}>Channel</Heading>
+          <VStack align="stretch" spacing={3}>
+            {Object.entries(channelBreakdown)
+              .sort((a, b) => b[1] - a[1])
+              .map(([channel, count]) => (
+                <HStack key={channel} justify="space-between">
+                  <Text>{channel}</Text>
+                  <Badge colorScheme="blue" fontSize="md" px={3}>
+                    {count}
+                  </Badge>
+                </HStack>
+              ))}
+            {Object.keys(channelBreakdown).length === 0 && (
+              <Text color="gray.400">No leads this week</Text>
+            )}
+          </VStack>
+
+          <Box mt={6} p={4} bg="gray.50" borderRadius="md">
+            <Text fontWeight="semibold" fontSize="lg" mb={2}>Month-to-Date</Text>
+            <Text fontSize="3xl" fontWeight="bold" color="blue.600">{monthTotal}</Text>
+            {Object.entries(channelBreakdown).map(([channel, count]) => {
+              const percentage = monthTotal > 0 ? (count / monthTotal) * 100 : 0
+              return (
+                <HStack key={channel} justify="space-between" mt={2}>
+                  <Text fontSize="sm">{channel}</Text>
+                  <Text fontSize="sm" color="gray.600">{percentage.toFixed(0)}%</Text>
+                </HStack>
+              )
+            })}
+          </Box>
+        </Box>
+
+        {/* Week Progress - INCH BY INCH */}
+        <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
+          <Heading size="md" mb={4} color="purple.700">INCH BY INCH</Heading>
+          
+          <Box mb={6}>
+            <HStack justify="space-between" mb={2}>
+              <Text fontWeight="semibold">This Week's Target</Text>
+              <Badge 
+                colorScheme={isWeekOnTrack ? 'green' : 'orange'} 
+                fontSize="md" 
+                px={3}
+                py={1}
+              >
+                {isWeekOnTrack ? '✓ On Track' : '○ Behind'}
+              </Badge>
+            </HStack>
+            <Text fontSize="4xl" fontWeight="bold" color="blue.600">{totalWeeklyTarget}</Text>
+            <Progress 
+              value={weekProgress} 
+              colorScheme={weekProgress >= 80 ? 'green' : weekProgress >= 50 ? 'yellow' : 'red'}
+              size="lg"
+              borderRadius="md"
+              mt={2}
+              hasStripe
+              isAnimated
+            />
+            <Text fontSize="sm" color="gray.600" mt={1}>{weekProgress.toFixed(0)}% Complete ({weekTotal}/{totalWeeklyTarget})</Text>
+          </Box>
+
+          <VStack align="stretch" spacing={3}>
+            <HStack justify="space-between" p={3} bg="blue.50" borderRadius="md">
+              <Text fontWeight="medium">Daily Target</Text>
+              <Text fontSize="xl" fontWeight="bold">{dailyTarget}</Text>
+            </HStack>
+            
+            <HStack justify="space-between" p={3} bg="green.50" borderRadius="md">
+              <Text fontWeight="medium">Today's Leads</Text>
+              <HStack>
+                <Text fontSize="xl" fontWeight="bold">{todayTotal}</Text>
+                {todayTotal >= dailyTarget ? (
+                  <CheckCircleIcon color="green.500" />
+                ) : (
+                  <WarningIcon color="orange.500" />
+                )}
+              </HStack>
+            </HStack>
+
+            <HStack justify="space-between" p={3} bg="orange.50" borderRadius="md">
+              <Text fontWeight="medium">Left to Go</Text>
+              <Text fontSize="xl" fontWeight="bold" color="orange.600">
+                {Math.max(0, totalWeeklyTarget - weekTotal)}
+              </Text>
+            </HStack>
+          </VStack>
+        </Box>
+      </SimpleGrid>
+
+      {/* Sales Leaderboard */}
+      <Box bg="white" p={6} borderRadius="lg" shadow="sm" border="1px" borderColor="gray.200">
+        <HStack justify="space-between" mb={4}>
+          <Heading size="md" color="blue.700">Sales Leaderboard</Heading>
+          <Badge colorScheme="blue" fontSize="md" px={3}>Current Week</Badge>
+        </HStack>
+        
+        <Table size="sm" variant="simple">
+          <Thead bg="blue.50">
+            <Tr>
+              <Th>Rank</Th>
+              <Th>Salesperson</Th>
+              <Th isNumeric>Leads</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {salesLeaderboard.map((entry, index) => (
+              <Tr key={entry.name}>
+                <Td>
+                  <Badge
+                    colorScheme={index === 0 ? 'yellow' : index === 1 ? 'gray' : index === 2 ? 'orange' : 'blue'}
+                    fontSize="lg"
+                    px={3}
+                    py={1}
+                  >
+                    {index + 1}
+                  </Badge>
+                </Td>
+                <Td fontWeight="medium" fontSize="md">{entry.name}</Td>
+                <Td isNumeric fontSize="xl" fontWeight="bold" color="blue.600">{entry.leads}</Td>
+              </Tr>
+            ))}
+            {salesLeaderboard.length === 0 && (
+              <Tr>
+                <Td colSpan={3} textAlign="center" color="gray.400" py={6}>
+                  No leads recorded this week
+                </Td>
+              </Tr>
+            )}
+          </Tbody>
+        </Table>
+      </Box>
+
+      <Text fontSize="xs" color="gray.400" textAlign="center">
+        Last synced: {lastRefresh.toLocaleString('en-GB')} | Data from Google Sheets via automated sync
+      </Text>
+    </VStack>
   )
 }
