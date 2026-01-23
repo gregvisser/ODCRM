@@ -85,8 +85,11 @@ model Customer {
   
   // About section (AI-enriched company data)
   website               String?
-  whatTheyDo            String?
+  whatTheyDo            String?              @db.Text
   accreditations        String?
+  keyLeaders            String?
+  companyProfile        String?              @db.Text
+  recentNews            String?              @db.Text
   companySize           String?
   headquarters          String?
   foundingYear          String?
