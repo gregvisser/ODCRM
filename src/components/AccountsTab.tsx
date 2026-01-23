@@ -3501,8 +3501,12 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     setContactsData(loadContactsFromStorage())
   }, [])
 
-  // Load initial data from localStorage only (backend is the source of truth).
-  const [accountsData, setAccountsData] = useState<Account[]>([])
+  // Load initial data from localStorage first (backend will sync later).
+  const [accountsData, setAccountsData] = useState<Account[]>(() => {
+    const loaded = loadAccountsFromStorage()
+    const deletedAccountsSet = loadDeletedAccountsFromStorage()
+    return loaded.filter(acc => !deletedAccountsSet.has(acc.name))
+  })
 
   useEffect(() => {
     if (!isStorageAvailable()) return
@@ -4580,9 +4584,35 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     if (hasSyncedCustomersRef.current) return
 
     const syncFromCustomers = async () => {
+      // First, load from localStorage as fallback
+      const localAccounts = loadAccountsFromStorage()
+      const deletedAccountsSet = loadDeletedAccountsFromStorage()
+      const filteredLocalAccounts = localAccounts.filter(acc => !deletedAccountsSet.has(acc.name))
+      
+      // If we have local accounts, set them immediately so UI isn't empty
+      if (filteredLocalAccounts.length > 0 && accountsData.length === 0) {
+        setAccountsData(filteredLocalAccounts)
+        hasHydratedFromServerRef.current = true
+      }
+
+      // Then try to load from server
       const { data, error } = await api.get<CustomerApi[]>('/api/customers')
       if (error || !data) {
-        console.warn('Failed to load accounts from the customer database.')
+        console.warn('Failed to load accounts from the customer database. Using local storage data.')
+        // Don't overwrite local storage if server call fails
+        if (filteredLocalAccounts.length > 0) {
+          hasHydratedFromServerRef.current = true
+          return
+        }
+        return
+      }
+
+      // Only update if server has data
+      if (data.length === 0) {
+        console.warn('Server returned empty accounts array. Keeping local storage data.')
+        if (filteredLocalAccounts.length > 0) {
+          hasHydratedFromServerRef.current = true
+        }
         return
       }
 
@@ -4609,7 +4639,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     void syncFromCustomers()
-  }, [toast])
+  }, [toast, accountsData.length])
 
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.

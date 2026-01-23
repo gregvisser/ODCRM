@@ -61,6 +61,9 @@ services:
       - key: CLEARBIT_API_KEY
         sync: false
       
+      - key: GOOGLE_GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard
+      
       # Worker configuration
       - key: LEADS_SYNC_DISABLED
         value: false
