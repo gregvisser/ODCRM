@@ -2,9 +2,7 @@ export type CrmTopTab = {
   id:
     | 'dashboards-home'
     | 'customers-home'
-    | 'sales-home'
     | 'marketing-home'
-    | 'operations-home'
     | 'onboarding-home'
   label: string
   ownerAgent: string
@@ -18,21 +16,17 @@ export type CrmTopTab = {
 export const CRM_TOP_TABS: readonly CrmTopTab[] = [
   { id: 'dashboards-home', label: 'Dashboards', ownerAgent: 'UI Agent', path: '/dashboards' },
   { id: 'customers-home', label: 'OpenDoors Customers', ownerAgent: 'Customers Agent', path: '/customers' },
-  { id: 'sales-home', label: 'OpenDoors Sales', ownerAgent: 'Sales Agent', path: '/sales' },
   { id: 'marketing-home', label: 'OpenDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
-  { id: 'operations-home', label: 'Operations', ownerAgent: 'Operations Agent', path: '/operations' },
   { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },
 ] as const
 
 export type CrmTopTabId = (typeof CRM_TOP_TABS)[number]['id']
 
-export type CrmCategoryId = 'customers' | 'sales' | 'marketing' | 'operations' | 'onboarding'
+export type CrmCategoryId = 'customers' | 'marketing' | 'onboarding'
 
 export const CRM_CATEGORY_HOME_TAB: Readonly<Record<CrmCategoryId, CrmTopTabId>> = {
   customers: 'customers-home',
-  sales: 'sales-home',
   marketing: 'marketing-home',
-  operations: 'operations-home',
   onboarding: 'onboarding-home',
 } as const
 
