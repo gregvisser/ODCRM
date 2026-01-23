@@ -42,7 +42,15 @@ router.get('/auth', (req, res) => {
                      'test-customer-1'
   
   // Include customerId in state parameter to pass it through OAuth flow
-  const redirectUri = process.env.REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/outlook/callback`
+  // In production, REDIRECT_URI MUST be set and match Azure App Registration
+  const redirectUri = process.env.REDIRECT_URI || 
+    (process.env.NODE_ENV === 'development' ? `${req.protocol}://${req.get('host')}/api/outlook/callback` : undefined)
+  
+  if (!redirectUri) {
+    return res.status(500).json({ 
+      error: 'REDIRECT_URI environment variable must be set in production' 
+    })
+  }
 
   const scopes = [
     'https://graph.microsoft.com/User.Read',
@@ -119,9 +127,10 @@ router.get('/callback', async (req, res) => {
     const clientId = process.env.MICROSOFT_CLIENT_ID
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
     const tenantId = process.env.MICROSOFT_TENANT_ID || 'common'
-    const redirectUri = process.env.REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/outlook/callback`
+    const redirectUri = process.env.REDIRECT_URI || 
+      (process.env.NODE_ENV === 'development' ? `${req.protocol}://${req.get('host')}/api/outlook/callback` : undefined)
 
-    if (!clientId || !clientSecret) {
+    if (!clientId || !clientSecret || !redirectUri) {
       console.error('❌ Missing OAuth credentials:', {
         hasClientId: !!clientId,
         hasClientSecret: !!clientSecret

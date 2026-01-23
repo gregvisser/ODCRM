@@ -260,8 +260,11 @@ async function sendCampaignEmail(
     const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
     const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
 
-    // Inject tracking
-    const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN || 'http://localhost:3001'
+    // Inject tracking - MUST be set in production
+    const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN
+    if (!trackingDomain) {
+      console.warn('⚠️ EMAIL_TRACKING_DOMAIN not set - tracking will not work properly')
+    }
 
     // Send email
     const result = await sendEmail(prisma, {

@@ -7,12 +7,15 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc --skipLibCheck --noEmit false || tsc --noCheck || echo 'Compiling with errors allowed' && tsc --skipLibCheck || exit 0",
     "start": "node dist/index.js",
-    "postinstall": "prisma generate",
-    "db:generate": "prisma generate --schema ../prisma/schema.prisma",
-    "db:migrate": "prisma migrate dev --schema ../prisma/schema.prisma",
-    "db:studio": "prisma studio --schema ../prisma/schema.prisma",
-    "db:push": "prisma db push --schema ../prisma/schema.prisma",
-    "setup": "npm install && npx prisma generate --schema ../prisma/schema.prisma && echo '✅ Setup complete! Next: Create .env file and run npm run db:migrate'"
+    "postinstall": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
+    "prisma:migrate:dev": "prisma migrate dev --schema=./prisma/schema.prisma",
+    "prisma:migrate:deploy": "prisma migrate deploy --schema=./prisma/schema.prisma",
+    "prisma:studio": "prisma studio --schema=./prisma/schema.prisma",
+    "prisma:push": "prisma db push --schema=./prisma/schema.prisma",
+    "prisma:reset": "prisma migrate reset --schema=./prisma/schema.prisma",
+    "setup:dev": "npm install && npm run prisma:generate && echo '✅ Setup complete! Next: Create .env file and run npm run prisma:migrate:dev'",
+    "setup:prod": "npm install && npm run prisma:generate && npm run prisma:migrate:deploy"
   },
   "dependencies": {
     "@azure/identity": "^4.0.0",

@@ -75,9 +75,8 @@ export default function EmailSettingsTab() {
 
   const handleConnectOutlook = () => {
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
-    const apiUrl = window.location.hostname.includes('localhost') 
-      ? 'http://localhost:3001' 
-      : 'https://odcrm-api.onrender.com'
+    // Use centralized API URL from environment
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
     window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
   }
 

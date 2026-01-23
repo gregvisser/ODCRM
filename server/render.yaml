@@ -1,0 +1,91 @@
+services:
+  # OpenDoors CRM Backend API
+  - type: web
+    name: odcrm-api
+    runtime: node
+    region: oregon  # or your preferred region
+    plan: starter  # or free/starter/standard/pro
+    
+    # Build settings
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    
+    # Health check
+    healthCheckPath: /health
+    
+    # Auto-deploy from main branch
+    branch: main
+    
+    # Environment variables
+    # NOTE: Set actual values in Render dashboard, not here!
+    # This file should only contain non-secret configuration
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      - key: PORT
+        value: 10000  # Render's default, but Render will override this
+      
+      # Database - Add your Neon connection string in Render dashboard
+      - key: DATABASE_URL
+        sync: false  # Set manually in Render dashboard
+      
+      # Frontend CORS
+      - key: FRONTEND_URL
+        value: https://www.bidlow.co.uk
+      
+      - key: FRONTEND_URLS
+        value: https://www.bidlow.co.uk,https://bidlow.co.uk
+      
+      # Microsoft OAuth - Set these in Render dashboard
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      
+      - key: MICROSOFT_TENANT_ID
+        value: common
+      
+      - key: REDIRECT_URI
+        value: https://api.bidlow.co.uk/api/outlook/callback
+      
+      # Email tracking
+      - key: EMAIL_TRACKING_DOMAIN
+        value: https://api.bidlow.co.uk
+      
+      # API Keys - Set these in Render dashboard
+      - key: OPENAI_API_KEY
+        sync: false
+      
+      - key: CLEARBIT_API_KEY
+        sync: false
+      
+      # Worker configuration
+      - key: LEADS_SYNC_DISABLED
+        value: false
+      
+      - key: LEADS_SYNC_CRON
+        value: "*/10 * * * *"  # Every 10 minutes
+      
+      - key: ABOUT_ENRICHMENT_DISABLED
+        value: false
+      
+      - key: ABOUT_ENRICHMENT_CRON
+        value: "0 2 * * *"  # 2 AM daily
+      
+      - key: EMAIL_WORKERS_DISABLED
+        value: true  # Keep disabled until schema is fixed
+      
+      # Email sender configuration
+      - key: SENDER_BATCH_SIZE
+        value: 25
+      
+      - key: SENDER_LOCK_MINUTES
+        value: 5
+      
+      - key: MAILBOX_DAILY_CAP
+        value: 50
+      
+      - key: MAILBOX_SPREAD_HOURS
+        value: 10

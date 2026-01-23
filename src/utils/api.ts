@@ -1,10 +1,8 @@
 import { settingsStore } from '../platform'
 
 // API utility for making requests to backend
-// Use production URL when deployed, localhost for local development
-const API_BASE_URL = window.location.hostname.includes('localhost') 
-  ? 'http://localhost:3001' 
-  : 'https://odcrm-api.onrender.com'
+// Always use environment variable - no hardcoded URLs
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 export interface ApiResponse<T> {
   data?: T

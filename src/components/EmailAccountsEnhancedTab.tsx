@@ -130,7 +130,9 @@ export default function EmailAccountsEnhancedTab() {
   }, [])
 
   const handleConnectOutlook = () => {
-    window.location.href = `http://${window.location.hostname.includes('localhost') ? 'localhost:3001' : 'odcrm-api.onrender.com'}/api/outlook/auth?customerId=${customerId}`
+    // Use centralized API URL from environment
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
   }
 
   const handleCreateSMTP = () => {
@@ -175,9 +177,8 @@ export default function EmailAccountsEnhancedTab() {
     }
 
     try {
-      const apiUrl = window.location.hostname.includes('localhost') 
-        ? 'http://localhost:3001' 
-        : 'https://odcrm-api.onrender.com'
+      // Use centralized API URL from environment
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
       const response = await fetch(`${apiUrl}/api/outlook/identities`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

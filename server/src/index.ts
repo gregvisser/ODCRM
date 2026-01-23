@@ -32,13 +32,14 @@ const parseAllowedOrigins = () => {
     .map((value) => value.trim())
     .filter(Boolean)
 
-  const defaults = [
-    'http://localhost:5173',
-    'https://bidlow.co.uk',
-    'https://www.bidlow.co.uk',
-  ]
+  // In development, allow localhost by default
+  // In production, ONLY use environment variables (no hardcoded defaults)
+  const isDevelopment = process.env.NODE_ENV !== 'production'
+  const devDefaults = isDevelopment ? ['http://localhost:5173'] : []
 
-  return Array.from(new Set([...fromEnv, ...defaults]))
+  // Production domains should be set via FRONTEND_URL/FRONTEND_URLS env vars
+  // Example: FRONTEND_URLS=https://www.bidlow.co.uk,https://bidlow.co.uk
+  return Array.from(new Set([...fromEnv, ...devDefaults]))
 }
 
 const allowedOrigins = parseAllowedOrigins()
@@ -96,27 +97,38 @@ const PORT = process.env.PORT || 3001
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`)
   
-  // Email workers temporarily disabled - fix Prisma model names first
+  // ============================================================================
+  // BACKGROUND WORKERS / CRON JOBS
+  // ============================================================================
+  // These workers run automated tasks in production
+  // Control via environment variables (see env.example)
+  
+  // Email scheduler and reply detection - temporarily disabled
   console.log('⚠️  Email workers disabled temporarily - fixing schema alignment')
-  // console.log('📧 Starting email scheduler...')
-  // startEmailScheduler(prisma)
-  // console.log('📬 Starting reply detection worker...')
-  // startReplyDetectionWorker(prisma)
+  // const emailWorkersDisabled = process.env.EMAIL_WORKERS_DISABLED === 'true'
+  // if (!emailWorkersDisabled) {
+  //   console.log('📧 Starting email scheduler...')
+  //   startEmailScheduler(prisma)
+  //   console.log('📬 Starting reply detection worker...')
+  //   startReplyDetectionWorker(prisma)
+  // }
 
+  // Leads sync worker - syncs marketing leads from Google Sheets
   const leadsSyncDisabled = process.env.LEADS_SYNC_DISABLED === 'true'
   if (!leadsSyncDisabled) {
     console.log('📊 Starting leads sync worker...')
     startLeadsSyncWorker(prisma)
   } else {
-    console.log('⚠️  Leads sync worker disabled via LEADS_SYNC_DISABLED')
+    console.log('⚠️  Leads sync worker disabled via LEADS_SYNC_DISABLED=true')
   }
 
+  // About/Company enrichment worker - refreshes company data quarterly
   const aboutEnrichmentDisabled = process.env.ABOUT_ENRICHMENT_DISABLED === 'true'
   if (!aboutEnrichmentDisabled) {
     console.log('🤖 Starting About enrichment worker...')
     startAboutEnrichmentWorker(prisma)
   } else {
-    console.log('⚠️  About enrichment worker disabled via ABOUT_ENRICHMENT_DISABLED')
+    console.log('⚠️  About enrichment worker disabled via ABOUT_ENRICHMENT_DISABLED=true')
   }
 })
 
