@@ -14,6 +14,7 @@ import sequencesRoutes from './routes/sequences.js'
 import customersRoutes from './routes/customers.js'
 import leadsRoutes from './routes/leads.js'
 import companyDataRoutes from './routes/companyData.js'
+import adminRoutes from './routes/admin.js'
 import { startEmailScheduler } from './workers/emailScheduler.js'
 import { startReplyDetectionWorker } from './workers/replyDetection.js'
 import { startLeadsSyncWorker } from './workers/leadsSync.js'
@@ -81,6 +82,7 @@ app.use('/api/sequences', sequencesRoutes)
 app.use('/api/customers', customersRoutes)
 app.use('/api/leads', leadsRoutes)
 app.use('/api/company-data', companyDataRoutes)
+app.use('/api/admin', adminRoutes)
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
