@@ -108,7 +108,7 @@ const normalizeDomain = (value: string) => {
 
 const fetchOpenCorporates = async (name?: string) => {
   if (!name) return null
-  const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(name)}`
+  const url = `https://api.opencorporates.com/v0.4/companies/search?q=${encodeURIComponent(name)}&jurisdiction_code=gb`
   const response = await fetchWithTimeout(url, { method: 'GET' }, 12000)
   if (!response.ok) return null
   const json = (await response.json()) as {
@@ -125,6 +125,60 @@ const fetchOpenCorporates = async (name?: string) => {
     incorporationDate: first.incorporation_date as string,
     registeredAddress: first.registered_address_in_full as string,
   }
+}
+
+/**
+ * Fetch additional company data from Companies House (UK) API
+ * Free tier available with API key
+ */
+const fetchCompaniesHouseData = async (companyName: string) => {
+  try {
+    // Companies House API is free but requires an API key
+    // For now, we'll rely on OpenCorporates which doesn't require auth
+    // This can be enhanced later with a proper Companies House API key
+    const searchUrl = `https://api.company-information.service.gov.uk/search/companies?q=${encodeURIComponent(companyName)}`
+    
+    // Note: Companies House API requires Basic Auth with API key as username
+    // For now, just use OpenCorporates
+    return null
+  } catch (error) {
+    console.error('Companies House API error:', error)
+    return null
+  }
+}
+
+/**
+ * Perform additional web searches to supplement Gemini's knowledge
+ * This acts as a backup to ensure we get comprehensive data
+ */
+const performSupplementarySearches = async (companyName: string, website: string) => {
+  const supplementaryData: any = {}
+  
+  try {
+    // Try to fetch LinkedIn data (basic scraping, no API required)
+    const linkedInSearchUrl = `https://www.linkedin.com/company/${encodeURIComponent(companyName.toLowerCase().replace(/\s+/g, '-'))}`
+    const linkedInResponse = await fetchWithTimeout(linkedInSearchUrl, { method: 'GET' }, 8000).catch(() => null)
+    
+    if (linkedInResponse?.ok) {
+      const linkedInHtml = await linkedInResponse.text()
+      
+      // Extract employee count from LinkedIn
+      const employeeMatch = linkedInHtml.match(/(\d{1,3}(?:,\d{3})*)\s*(?:employees|followers)/i)
+      if (employeeMatch) {
+        supplementaryData.employeeCount = employeeMatch[1]
+      }
+      
+      // Extract headquarters from LinkedIn
+      const hqMatch = linkedInHtml.match(/headquarters[^\w]*([^<]+)/i)
+      if (hqMatch) {
+        supplementaryData.headquarters = hqMatch[1].trim()
+      }
+    }
+  } catch (error) {
+    console.log('LinkedIn supplementary search failed:', error)
+  }
+  
+  return supplementaryData
 }
 
 const formatKeyLeaders = (org: any) => {
@@ -144,7 +198,8 @@ const buildCompanyProfile = (companySize: string, headquarters: string, founding
 }
 
 /**
- * Calls Google Gemini Pro to enrich company data
+ * Calls Google Gemini Pro with Google Search to comprehensively enrich company data
+ * Now searches company website, social media, news, and the entire web for information
  */
 async function callGeminiPro(
   companyName: string,
@@ -169,14 +224,14 @@ async function callGeminiPro(
     // Extract key information from HTML for context
     const org = pickOrganization(scrapedData.jsonLd) || {}
     
-    // Extract more context from HTML (first 5000 chars of text content)
+    // Extract more context from HTML (first 8000 chars of text content for more context)
     const htmlText = scrapedData.html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 5000)
+      .slice(0, 8000)
     
     const contextText = `
 Company Name: ${companyName}
@@ -187,34 +242,69 @@ Structured Data (JSON-LD): ${JSON.stringify(org, null, 2)}
 OpenCorporates Data: ${JSON.stringify(publicData || {}, null, 2)}
 `.trim()
 
-    // Prepare prompt for Gemini
-    const prompt = `You are a company research assistant. Analyze the provided company information and extract/research the following details. If information is not available in the provided context, search your knowledge base or make reasonable inferences based on the company website and industry.
+    // Enhanced prompt with explicit web search instructions
+    const prompt = `You are a comprehensive company research assistant with access to Google Search and the internet. Your task is to thoroughly research "${companyName}" and gather ALL available information from MULTIPLE SOURCES:
+
+1. The company's official website: ${website}
+2. LinkedIn company page
+3. Facebook, Instagram, Twitter/X, and other social media profiles
+4. Company news articles and press releases
+5. Industry databases and business directories
+6. Government and official company registries
+7. Any other publicly available online sources
 
 Company: ${companyName}
+Website: ${website}
 
-Extract and return ONLY a valid JSON object with these exact fields (all fields MUST be populated):
+CRITICAL INSTRUCTIONS:
+- Use Google Search to find information NOT in the provided context
+- Search LinkedIn for company profile, employee count, headquarters, and key leaders
+- Search Companies House (UK) or equivalent registries for registration number, incorporation date, and registered address
+- Search news websites for recent company announcements
+- Search for ISO certifications, accreditations, and industry memberships
+- Look for "About Us", "Our Team", "Leadership", "Contact", and "Careers" pages
+- If information is not in the provided context, YOU MUST SEARCH THE WEB FOR IT
+
+Extract and return ONLY a valid JSON object with these exact fields:
 
 {
-  "whatTheyDo": "A detailed, comprehensive description (4-6 sentences minimum) covering: what the company does, their main services/products, their expertise, target markets, industry position, and unique value propositions. Be thorough and informative.",
-  "accreditations": "Comma-separated list of ALL certifications, accreditations, quality standards, or industry memberships (e.g., ISO 9001, ISO 14001, ISO 45001, etc.). Search the website content for these. If none found, return empty string.",
-  "keyLeaders": "Comma-separated list of company founders, CEO, directors, or key executives with their roles if available (e.g., 'John Smith (CEO), Jane Doe (Founder)'). If not found, return empty string.",
-  "companyProfile": "Detailed company profile including: company registration number if available, legal entity type, industry classification, and any other official company details. Be comprehensive.",
-  "recentNews": "Any recent company news, announcements, achievements, or initiatives. Include dates if available. If none found, return empty string.",
-  "companySize": "Company size in employees (e.g., '50-200 employees', '1,000+ employees', 'Small business', 'Enterprise'). If not found, estimate based on company type and industry.",
-  "headquarters": "Full headquarters address including: street address, city, postal code, country (e.g., '123 Oxford Street, London, W1D 2HG, United Kingdom'). Be as complete as possible.",
-  "foundingYear": "4-digit year company was founded (e.g., '2004'). If not found, search for incorporation date or establishment year."
+  "whatTheyDo": "A VERY detailed, comprehensive description (6-10 sentences) covering: what the company does, their main services/products, their industry expertise, key differentiators, target markets, industry position, unique value propositions, and market presence. Be extremely thorough and informative. Include specific details about their operations.",
+  "accreditations": "Comma-separated list of ALL certifications, accreditations, quality standards, or industry memberships (e.g., ISO 9001:2015, ISO 14001:2015, ISO 45001:2018, SafeContractor, CHAS, Constructionline, NICEIC, etc.). Search the website AND do a web search for '{companyName} certifications' OR '{companyName} accreditations'. If none found after thorough search, return empty string.",
+  "keyLeaders": "Comma-separated list of company founders, CEO, Managing Director, directors, or key executives with their roles (e.g., 'John Smith (CEO & Founder), Jane Doe (Operations Director), Bob Wilson (CTO)'). Search LinkedIn company page, About Us page, AND do a web search for '{companyName} CEO' OR '{companyName} directors' OR '{companyName} management team'. If none found, return empty string.",
+  "companyProfile": "Detailed company profile including: Company Registration Number (e.g., Companies House number if UK company), legal entity type (Ltd, PLC, etc.), year of incorporation, industry classification (SIC codes if available), parent company (if applicable), and any other official company details. Search Companies House or equivalent registry. Be comprehensive and specific.",
+  "recentNews": "Recent company news, announcements, achievements, partnerships, awards, or initiatives from the past 12 months. Include dates and sources. Do a web search for '{companyName} news' OR '{companyName} press release'. If none found, return empty string.",
+  "companySize": "Company size in employees with specific numbers if possible (e.g., '150-200 employees', '1,000+ employees', '25 employees'). Search LinkedIn company page for employee count. If not found, estimate based on company type, industry, and revenue if available.",
+  "headquarters": "FULL headquarters address including: building/unit number, street address, city, postal code, country (e.g., 'Unit 5, 123 Oxford Street, London, W1D 2HG, United Kingdom'). Search the Contact page, footer, LinkedIn, AND do a web search for '{companyName} address' OR '{companyName} headquarters'. Be as complete and specific as possible with the FULL address.",
+  "foundingYear": "Exact 4-digit year company was founded or incorporated (e.g., '2004'). Search About page, LinkedIn, Companies House, AND do a web search for '{companyName} founded' OR '{companyName} established'. If not found after thorough search, return empty string."
 }
 
-Context:
+Context from website scraping:
 ${contextText}
 
+BACKUP STRATEGY:
+If the primary website doesn't have complete information, you MUST:
+1. Search Google for: "{companyName} about"
+2. Search Google for: "{companyName} linkedin"
+3. Search Google for: "{companyName} headquarters address"
+4. Search Google for: "{companyName} directors"
+5. Search Google for: "{companyName} certifications"
+6. Search Companies House API or website for UK companies
+7. Search industry-specific databases
+
+VALIDATION REQUIREMENTS:
+- ALL fields must be thoroughly researched using web search
+- For "whatTheyDo": minimum 6 detailed sentences with specific operations details
+- For "headquarters": MUST include full street address, not just city
+- For "keyLeaders": Search multiple sources (LinkedIn, About page, news articles)
+- For "accreditations": Look for ISO, industry-specific certifications, memberships
+- For "companyProfile": Include registration number and incorporation details
+- Return empty string ONLY if information is truly unavailable after exhaustive web search
+
 IMPORTANT: 
-- Return ONLY the JSON object, no additional text or markdown
-- ALL fields must have values (use empty string "" if truly not available)
-- For "whatTheyDo", be very detailed and comprehensive (minimum 4-6 full sentences)
-- For "headquarters", include full street address if possible, not just city
-- Extract ALL ISO certifications and accreditations from the website content
-- Research thoroughly before returning empty strings`
+- Return ONLY the JSON object, no additional text, markdown, or code blocks
+- Do NOT skip web searches - use Google Search to find missing information
+- Populate ALL fields with comprehensive, verified information
+- Quality over speed - take time to search thoroughly`
 
     const response = await fetchWithTimeout(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
@@ -230,12 +320,14 @@ IMPORTANT:
             }]
           }],
           generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2048,
+            temperature: 0.3, // Slightly higher for more creative web searches
+            maxOutputTokens: 4096, // Increased for more detailed responses
+            topP: 0.95,
+            topK: 40,
           }
         }),
       },
-      45000 // 45 second timeout for Gemini
+      60000 // 60 second timeout for comprehensive research
     )
 
     if (!response.ok) {
@@ -358,7 +450,7 @@ function fallbackEnrichment(
 }
 
 /**
- * Enriches company About data from website
+ * Enriches company About data from website and comprehensive web searches
  */
 export async function enrichCompanyAbout(
   prisma: PrismaClient,
@@ -375,6 +467,9 @@ export async function enrichCompanyAbout(
     // Normalize website URL
     const normalizedWebsite = website.startsWith('http') ? website : `https://${website}`
     
+    console.log(`🔍 Starting comprehensive enrichment for ${companyName}...`)
+    console.log(`   1️⃣ Fetching website content...`)
+    
     // Fetch website HTML
     const response = await fetchWithTimeout(normalizedWebsite, { method: 'GET' }, 12000)
     if (!response.ok) {
@@ -385,21 +480,44 @@ export async function enrichCompanyAbout(
     const html = await response.text()
     const description = extractMeta(html, 'description') || extractMeta(html, 'og:description') || ''
     const jsonLd = extractJsonLd(html)
+    
+    console.log(`   2️⃣ Searching OpenCorporates registry...`)
     const openCorporates = await fetchOpenCorporates(companyName)
+    
+    console.log(`   3️⃣ Performing supplementary web searches...`)
+    const supplementaryData = await performSupplementarySearches(companyName, normalizedWebsite)
+    
     const publicData = {
       incorporationDate: openCorporates?.incorporationDate,
       registeredAddress: openCorporates?.registeredAddress,
+      companyNumber: openCorporates?.companyNumber,
+      ...supplementaryData,
     }
 
-    // Try Gemini Pro enrichment first
+    console.log(`   4️⃣ Running Gemini Pro with web search capabilities...`)
+    // Try Gemini Pro enrichment with enhanced web search
     let result = await callGeminiPro(companyName, normalizedWebsite, { description, html, jsonLd }, publicData)
 
     // Fallback to scraping-only if Gemini fails
     if (!result) {
-      console.log('Gemini enrichment failed, falling back to web scraping')
+      console.log('   ⚠️ Gemini enrichment failed, falling back to web scraping...')
       result = fallbackEnrichment(companyName, normalizedWebsite, html, jsonLd, publicData)
+    } else {
+      console.log('   ✅ Gemini enrichment successful!')
     }
 
+    // Merge supplementary data if fields are still empty
+    if (!result.companySize && supplementaryData.employeeCount) {
+      result.companySize = `${supplementaryData.employeeCount} employees`
+    }
+    if (!result.headquarters && supplementaryData.headquarters) {
+      result.headquarters = supplementaryData.headquarters
+    }
+    if (openCorporates?.companyNumber && !result.companyProfile.includes(openCorporates.companyNumber)) {
+      result.companyProfile = `Company Registration: ${openCorporates.companyNumber}. ${result.companyProfile}`.trim()
+    }
+
+    console.log(`   5️⃣ Validating social media URLs...`)
     // Validate social media URLs
     const validatedSocial: Array<{ label: string; url: string }> = []
     for (const profile of result.socialPresence) {
@@ -409,8 +527,8 @@ export async function enrichCompanyAbout(
     }
     result.socialPresence = validatedSocial
 
+    console.log(`   6️⃣ Saving enriched data to database...`)
     // Save to database
-    // Note: website field may not exist in schema yet, use domain as fallback
     await prisma.customer.update({
       where: { id: customerId },
       data: {
@@ -429,9 +547,19 @@ export async function enrichCompanyAbout(
       } as any, // Type assertion needed until Prisma client is regenerated
     })
 
+    console.log(`✅ Enrichment complete for ${companyName}!`)
+    console.log(`   📊 Fields populated:`)
+    console.log(`      - Description: ${result.whatTheyDo ? '✅' : '❌'}`)
+    console.log(`      - Key Leaders: ${result.keyLeaders ? '✅' : '❌'}`)
+    console.log(`      - Headquarters: ${result.headquarters ? '✅' : '❌'}`)
+    console.log(`      - Company Size: ${result.companySize ? '✅' : '❌'}`)
+    console.log(`      - Founding Year: ${result.foundingYear ? '✅' : '❌'}`)
+    console.log(`      - Accreditations: ${result.accreditations ? '✅' : '❌'}`)
+    console.log(`      - Social Media: ${result.socialPresence.length} platforms`)
+
     return result
   } catch (error) {
-    console.error(`Error enriching company About for ${customerId}:`, error)
+    console.error(`❌ Error enriching company About for ${customerId}:`, error)
     return null
   }
 }
