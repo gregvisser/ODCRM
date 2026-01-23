@@ -15,9 +15,7 @@ const getTabIcon = (tabId: CrmTopTabId): ComponentType<any> => {
   const iconMap: Record<CrmTopTabId, ComponentType<any>> = {
     'dashboards-home': ViewIcon,
     'customers-home': AtSignIcon,
-    'sales-home': ChatIcon,
     'marketing-home': EmailIcon,
-    'operations-home': SettingsIcon,
     'onboarding-home': AddIcon,
   }
   return iconMap[tabId] || AtSignIcon

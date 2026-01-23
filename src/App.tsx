@@ -13,9 +13,7 @@ import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
-import SalesHomePage from './tabs/sales/SalesHomePage'
 import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/MarketingHomePage'
-import OperationsHomePage, { type OperationsViewId } from './tabs/operations/OperationsHomePage'
 import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
@@ -39,7 +37,6 @@ function App() {
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies MarketingViewId },
       'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies MarketingViewId },
       schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies MarketingViewId },
-      'user-authorization': { tab: 'operations-home' as const, view: 'user-authorization' satisfies OperationsViewId },
     } as const
   }, [])
 
@@ -125,8 +122,6 @@ function App() {
             }}
           />
         )
-      case 'sales-home':
-        return <SalesHomePage />
       case 'marketing-home':
         return (
           <MarketingHomePage
@@ -139,20 +134,10 @@ function App() {
             }}
           />
         )
-      case 'operations-home':
-        return (
-          <OperationsHomePage
-            view={activeView}
-            onNavigate={(v) => {
-              setActiveView(v)
-              setFocusAccountName(undefined)
-            }}
-          />
-        )
       case 'onboarding-home':
         return <OnboardingHomePage />
       default:
-        return <SalesHomePage />
+        return <DashboardsHomePage />
     }
   })()
 
