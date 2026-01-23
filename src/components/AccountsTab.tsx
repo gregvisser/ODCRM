@@ -2080,6 +2080,7 @@ const renderAboutField = (
   expanded: boolean | undefined,
   onToggle: () => void,
   socialMedia: SocialProfile[],
+  headquarters?: string,
 ) => {
   const sectionItems = detailedSections(sections).map(item => {
     const formatted = formatStoredValue(item.value)
@@ -2139,6 +2140,47 @@ const renderAboutField = (
                   </Box>
                 ))}
               </Stack>
+            </Stack>
+          )
+        }
+        
+        // Special handling for Headquarters section with Google Maps
+        if (item.heading === 'Headquarters' && item.value) {
+          const address = item.value
+          const encodedAddress = encodeURIComponent(address)
+          const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodedAddress}`
+          
+          return (
+            <Stack key={item.heading} spacing={2}>
+              <Text fontSize="sm" fontWeight="semibold" color="gray.600">
+                {item.heading}
+              </Text>
+              <Text fontSize="sm" color="gray.700" whiteSpace="pre-line">
+                {item.value}
+              </Text>
+              <Link
+                href={googleMapsUrl}
+                isExternal
+                color="teal.600"
+                fontSize="sm"
+                fontWeight="medium"
+                display="inline-flex"
+                alignItems="center"
+                gap={1}
+              >
+                View on Google Maps
+                <ExternalLinkIcon />
+              </Link>
+              <Box
+                as="iframe"
+                src={`https://www.google.com/maps?q=${encodedAddress}&output=embed`}
+                width="100%"
+                height="200px"
+                borderRadius="md"
+                border="1px solid"
+                borderColor="gray.200"
+                loading="lazy"
+              />
             </Stack>
           )
         }
@@ -5386,91 +5428,52 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   borderColor="gray.200"
                   boxShadow="sm"
                 >
-                  <HStack justify="space-between" align="center" mb={4}>
-                    <Heading size="md" color="gray.700">
-                      About
-                    </Heading>
-                    <Button
-                      size="sm"
-                      colorScheme="teal"
-                      leftIcon={<RepeatIcon />}
-                      onClick={async () => {
-                        if (!selectedAccount.website) {
-                          toast({
-                            title: 'Website required',
-                            description: 'Please add a company website first',
-                            status: 'warning',
-                            duration: 3000,
-                            isClosable: true,
-                          })
-                          return
-                        }
-                        try {
-                          // Find customer ID from accountsData
-                          const customer = accountsData.find((a) => a.name === selectedAccount.name)
-                          if (!customer) {
-                            toast({
-                              title: 'Error',
-                              description: 'Could not find customer record',
-                              status: 'error',
-                              duration: 3000,
-                              isClosable: true,
-                            })
-                            return
-                          }
-                          // Get customer ID from API
-                          const customersResponse = await api.get<CustomerApi[]>('/api/customers')
-                          if (customersResponse.error || !customersResponse.data) {
-                            throw new Error('Failed to fetch customers')
-                          }
-                          const customerApi = customersResponse.data.find((c) => c.name === selectedAccount.name)
-                          if (!customerApi) {
-                            throw new Error('Customer not found')
-                          }
-                          // Call enrichment endpoint
-                          const enrichResponse = await api.post(`/api/customers/${customerApi.id}/enrich-about`, {})
-                          if (enrichResponse.error) {
-                            throw new Error(enrichResponse.error || 'Enrichment failed')
-                          }
-                          toast({
-                            title: 'About data refreshed',
-                            description: 'Company information has been updated',
-                            status: 'success',
-                            duration: 3000,
-                            isClosable: true,
-                          })
-                          // Reload account data from server
-                          const updatedCustomersResponse = await api.get<CustomerApi[]>('/api/customers')
-                          if (!updatedCustomersResponse.error && updatedCustomersResponse.data) {
-                            const updatedCustomer = updatedCustomersResponse.data.find((c) => c.id === customerApi.id)
-                            if (updatedCustomer) {
-                              const updatedAccount = buildAccountFromCustomer(updatedCustomer)
-                              updateAccountSilent(selectedAccount.name, updatedAccount)
-                              setSelectedAccount(updatedAccount)
-                            }
-                          }
-                        } catch (error: any) {
-                          toast({
-                            title: 'Enrichment failed',
-                            description: error.message || 'Failed to refresh About data',
-                            status: 'error',
-                            duration: 5000,
-                            isClosable: true,
-                          })
-                        }
-                      }}
-                    >
-                      Refresh About
-                    </Button>
-                  </HStack>
+                  <Heading size="md" color="gray.700" mb={4}>
+                    About
+                  </Heading>
                   <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
                     <EditableField
                       value={selectedAccount.website || ''}
-                      onSave={(value) => {
+                      onSave={async (value) => {
                         const normalized = normalizeCustomerWebsite(String(value))
                         updateAccount(selectedAccount.name, { website: normalized })
                         stopEditing(selectedAccount.name, 'website')
-                        if (normalized && !isServerSourceOfTruth) {
+                        
+                        // Auto-trigger AI enrichment when website is updated
+                        if (normalized && isServerSourceOfTruth) {
+                          try {
+                            const customersResponse = await api.get<CustomerApi[]>('/api/customers')
+                            if (!customersResponse.error && customersResponse.data) {
+                              const customerApi = customersResponse.data.find((c) => c.name === selectedAccount.name)
+                              if (customerApi) {
+                                // Trigger enrichment in background
+                                await api.post(`/api/customers/${customerApi.id}/enrich-about`, {})
+                                
+                                // Reload account data
+                                const updatedResponse = await api.get<CustomerApi[]>('/api/customers')
+                                if (!updatedResponse.error && updatedResponse.data) {
+                                  const updatedCustomer = updatedResponse.data.find((c) => c.id === customerApi.id)
+                                  if (updatedCustomer) {
+                                    const updatedAccount = buildAccountFromCustomer(updatedCustomer)
+                                    updateAccountSilent(selectedAccount.name, updatedAccount)
+                                    setSelectedAccount(updatedAccount)
+                                  }
+                                }
+                                
+                                toast({
+                                  title: 'Company data updated',
+                                  description: 'Enriched company information from website',
+                                  status: 'success',
+                                  duration: 3000,
+                                  isClosable: true,
+                                })
+                              }
+                            }
+                          } catch (error) {
+                            // Silent fail - enrichment is optional
+                            console.log('Background enrichment failed:', error)
+                          }
+                        } else if (normalized && !isServerSourceOfTruth) {
                           void populateAccountData({ ...selectedAccount, website: normalized }).then((populated) => {
                             if (populated.aboutSource === 'web') {
                               updateAccountSilent(selectedAccount.name, populated)
@@ -5481,7 +5484,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       onCancel={() => stopEditing(selectedAccount.name, 'website')}
                       isEditing={isFieldEditing(selectedAccount.name, 'website')}
                       onEdit={() => startEditing(selectedAccount.name, 'website')}
-                      label="Company website"
+                      label="Website"
                       type="url"
                       placeholder="https://example.com"
                       renderDisplay={(value) =>
@@ -5493,7 +5496,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                             fontWeight="medium"
                             textDecoration="underline"
                           >
-                            Company website
+                            Website
                           </Link>
                         ) : (
                           <Text fontSize="sm" color="text.muted">
@@ -5515,6 +5518,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       expandedAbout[selectedAccount.name],
                       () => handleToggleAbout(selectedAccount.name),
                       selectedAccount.socialMedia || [],
+                      selectedAccount.aboutSections.headquarters,
                     )}
                   </Box>
                 </Box>
