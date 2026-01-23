@@ -4759,26 +4759,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   onClick={(e) => handleAccountClick(account.name, e)}
                 >
                   <Td>
-                    <HStack spacing={2} align="center">
-                      <Text fontWeight="semibold" color="text.primary">
-                        {account.name}
-                      </Text>
-                      <IconButton
-                        aria-label={`Refresh ${account.name} data`}
-                        icon={<RepeatIcon />}
-                        size="xs"
-                        variant="ghost"
-                        colorScheme="gray"
-                        isLoading={refreshingAccounts.has(account.name)}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleRefreshCompanyData(account.name)
-                        }}
-                        minW="auto"
-                        w="auto"
-                        h="auto"
-                      />
-                    </HStack>
+                    <Text fontWeight="semibold" color="text.primary">
+                      {account.name}
+                    </Text>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
                     {editingCell?.accountName === account.name && editingCell?.field === 'spend' ? (
@@ -5263,22 +5246,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       </HStack>
                     </Stack>
                   </HStack>
-                  <HStack spacing={2}>
-                    <Button
-                      leftIcon={<RepeatIcon />}
-                      colorScheme="gray"
-                      variant="outline"
-                      onClick={() => handleRefreshCompanyData()}
-                      isLoading={isRefreshing}
-                      loadingText="Refreshing..."
-                      size="md"
-                    >
-                      Refresh Company Data
-                    </Button>
-                    <Button variant="outline" onClick={handleCloseDrawer} size="md">
-                      Close
-                    </Button>
-                  </HStack>
+                  <Button variant="outline" onClick={handleCloseDrawer} size="md">
+                    Close
+                  </Button>
                 </Stack>
               </Stack>
             </DrawerHeader>
