@@ -3890,30 +3890,98 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
   }
 
-  const deleteAccount = (accountName: string) => {
-    setAccountsData((prev) => {
-      const updated = prev.filter((acc) => acc.name !== accountName)
-      // Save to localStorage
-      saveAccountsToStorage(updated)
-      // Add to deleted accounts list to prevent it from being re-added
-      const newDeletedAccounts = new Set(deletedAccounts)
-      newDeletedAccounts.add(accountName)
-      setDeletedAccounts(newDeletedAccounts)
-      saveDeletedAccountsToStorage(newDeletedAccounts)
-      // Dispatch event so LeadsTab can get updated accounts
-      emit('accountsUpdated', updated)
-      return updated
-    })
-    if (selectedAccount?.name === accountName) {
-      setSelectedAccount(null)
+  const deleteAccount = async (accountName: string) => {
+    try {
+      // First, fetch the customer from the database to get the ID
+      const { data: customers, error } = await api.get<CustomerApi[]>('/api/customers')
+      
+      if (error || !customers) {
+        toast({
+          title: 'Delete failed',
+          description: 'Could not fetch customer data',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return
+      }
+
+      const customer = customers.find(c => c.name === accountName)
+      
+      if (!customer) {
+        // Account doesn't exist in database, just remove from local storage
+        setAccountsData((prev) => {
+          const updated = prev.filter((acc) => acc.name !== accountName)
+          saveAccountsToStorage(updated)
+          const newDeletedAccounts = new Set(deletedAccounts)
+          newDeletedAccounts.add(accountName)
+          setDeletedAccounts(newDeletedAccounts)
+          saveDeletedAccountsToStorage(newDeletedAccounts)
+          emit('accountsUpdated', updated)
+          return updated
+        })
+        
+        if (selectedAccount?.name === accountName) {
+          setSelectedAccount(null)
+        }
+        
+        toast({
+          title: 'Account removed',
+          description: `${accountName} has been removed from local storage`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+
+      // Delete from database
+      const { error: deleteError } = await api.delete(`/api/customers/${customer.id}`)
+      
+      if (deleteError) {
+        toast({
+          title: 'Delete failed',
+          description: typeof deleteError === 'string' ? deleteError : 'Could not delete account from database. It may have related contacts, campaigns, lists, or sequences that need to be deleted first.',
+          status: 'error',
+          duration: 8000,
+          isClosable: true,
+        })
+        return
+      }
+
+      // Successfully deleted from database, now update local state
+      setAccountsData((prev) => {
+        const updated = prev.filter((acc) => acc.name !== accountName)
+        saveAccountsToStorage(updated)
+        const newDeletedAccounts = new Set(deletedAccounts)
+        newDeletedAccounts.add(accountName)
+        setDeletedAccounts(newDeletedAccounts)
+        saveDeletedAccountsToStorage(newDeletedAccounts)
+        emit('accountsUpdated', updated)
+        return updated
+      })
+      
+      if (selectedAccount?.name === accountName) {
+        setSelectedAccount(null)
+      }
+      
+      toast({
+        title: 'Account deleted',
+        description: `${accountName} has been permanently deleted from the database`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    } catch (err: any) {
+      console.error('Error deleting account:', err)
+      toast({
+        title: 'Delete failed',
+        description: err?.message || 'An unexpected error occurred',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
     }
-    toast({
-      title: 'Account deleted',
-      description: `${accountName} has been permanently removed`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    })
   }
 
   // Save to localStorage whenever data changes
