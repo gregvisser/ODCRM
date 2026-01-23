@@ -144,9 +144,9 @@ const buildCompanyProfile = (companySize: string, headquarters: string, founding
 }
 
 /**
- * Calls self-hosted LLM endpoint to enrich company data
+ * Calls Google Gemini Pro to enrich company data
  */
-async function callSelfHostedLLM(
+async function callGeminiPro(
   companyName: string,
   website: string,
   scrapedData: {
@@ -159,79 +159,112 @@ async function callSelfHostedLLM(
     registeredAddress?: string
   }
 ): Promise<EnrichmentResult | null> {
-  const llmEndpoint = process.env.SELF_HOSTED_LLM_ENDPOINT
-  if (!llmEndpoint) {
-    console.warn('SELF_HOSTED_LLM_ENDPOINT not configured, using fallback scraping only')
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY
+  if (!apiKey) {
+    console.warn('GOOGLE_GEMINI_API_KEY not configured, using fallback scraping only')
     return null
   }
 
   try {
     // Extract key information from HTML for context
     const org = pickOrganization(scrapedData.jsonLd) || {}
+    
+    // Extract more context from HTML (first 5000 chars of text content)
+    const htmlText = scrapedData.html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 5000)
+    
     const contextText = `
 Company Name: ${companyName}
 Website: ${website}
-Description: ${scrapedData.description}
-Founded: ${org.foundingDate || 'Unknown'}
-Headquarters: ${org.address ? JSON.stringify(org.address) : 'Unknown'}
-Employees: ${org.numberOfEmployees || 'Unknown'}
-OpenCorporates incorporation date: ${publicData?.incorporationDate || 'Unknown'}
-OpenCorporates registered address: ${publicData?.registeredAddress || 'Unknown'}
+Meta Description: ${scrapedData.description}
+Website Content Excerpt: ${htmlText}
+Structured Data (JSON-LD): ${JSON.stringify(org, null, 2)}
+OpenCorporates Data: ${JSON.stringify(publicData || {}, null, 2)}
 `.trim()
 
-    // Prepare prompt for LLM
-    const prompt = `Extract and structure the following company information from the provided context. Return a JSON object with these exact fields:
+    // Prepare prompt for Gemini
+    const prompt = `You are a company research assistant. Analyze the provided company information and extract/research the following details. If information is not available in the provided context, search your knowledge base or make reasonable inferences based on the company website and industry.
+
+Company: ${companyName}
+
+Extract and return ONLY a valid JSON object with these exact fields (all fields MUST be populated):
+
 {
-  "whatTheyDo": "A detailed, comprehensive description of what the company does, their services, products, and expertise. Include 4-6 sentences covering their main business activities, target markets, and unique value propositions. Be thorough and informative.",
-  "accreditations": "Comma-separated list of certifications, accreditations, or standards (e.g., ISO 9001, ISO 14001)",
-  "keyLeaders": "Comma-separated list of founders or key leaders if known",
-  "companyProfile": "Single sentence combining size, headquarters, and founding year",
-  "recentNews": "1-2 short bullet-like sentences about recent news or initiatives",
-  "companySize": "Company size in format like '50-200 employees' or '1,000+ employees'",
-  "headquarters": "City, Country format (e.g., 'London, United Kingdom')",
-  "foundingYear": "Year founded (4 digits, e.g., '2004')"
+  "whatTheyDo": "A detailed, comprehensive description (4-6 sentences minimum) covering: what the company does, their main services/products, their expertise, target markets, industry position, and unique value propositions. Be thorough and informative.",
+  "accreditations": "Comma-separated list of ALL certifications, accreditations, quality standards, or industry memberships (e.g., ISO 9001, ISO 14001, ISO 45001, etc.). Search the website content for these. If none found, return empty string.",
+  "keyLeaders": "Comma-separated list of company founders, CEO, directors, or key executives with their roles if available (e.g., 'John Smith (CEO), Jane Doe (Founder)'). If not found, return empty string.",
+  "companyProfile": "Detailed company profile including: company registration number if available, legal entity type, industry classification, and any other official company details. Be comprehensive.",
+  "recentNews": "Any recent company news, announcements, achievements, or initiatives. Include dates if available. If none found, return empty string.",
+  "companySize": "Company size in employees (e.g., '50-200 employees', '1,000+ employees', 'Small business', 'Enterprise'). If not found, estimate based on company type and industry.",
+  "headquarters": "Full headquarters address including: street address, city, postal code, country (e.g., '123 Oxford Street, London, W1D 2HG, United Kingdom'). Be as complete as possible.",
+  "foundingYear": "4-digit year company was founded (e.g., '2004'). If not found, search for incorporation date or establishment year."
 }
 
 Context:
 ${contextText}
 
-Return only valid JSON, no additional text.`
+IMPORTANT: 
+- Return ONLY the JSON object, no additional text or markdown
+- ALL fields must have values (use empty string "" if truly not available)
+- For "whatTheyDo", be very detailed and comprehensive (minimum 4-6 full sentences)
+- For "headquarters", include full street address if possible, not just city
+- Extract ALL ISO certifications and accreditations from the website content
+- Research thoroughly before returning empty strings`
 
     const response = await fetchWithTimeout(
-      llmEndpoint,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt,
-          max_tokens: 500,
-          temperature: 0.3,
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 2048,
+          }
         }),
       },
-      30000
+      45000 // 45 second timeout for Gemini
     )
 
     if (!response.ok) {
-      console.error(`LLM endpoint returned ${response.status}`)
+      console.error(`Gemini API returned ${response.status}`)
+      const errorText = await response.text()
+      console.error('Gemini error:', errorText)
       return null
     }
 
-    const data = (await response.json()) as Record<string, unknown>
-    // Handle different LLM response formats
-    const text = (data.text as string) || (data.response as string) || (data.content as string) || JSON.stringify(data)
+    const data = await response.json() as any
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+    
+    if (!text) {
+      console.error('No text in Gemini response')
+      return null
+    }
+
     let parsed: any
     try {
-      // Try to extract JSON from response
+      // Try to extract JSON from response (Gemini sometimes wraps it in markdown)
       const jsonMatch = text.match(/\{[\s\S]*\}/)
       if (jsonMatch) {
         parsed = JSON.parse(jsonMatch[0])
       } else {
         parsed = JSON.parse(text)
       }
-    } catch {
-      console.error('Failed to parse LLM response as JSON')
+    } catch (e) {
+      console.error('Failed to parse Gemini response as JSON:', e)
+      console.error('Gemini response text:', text)
       return null
     }
 
@@ -262,7 +295,7 @@ Return only valid JSON, no additional text.`
       socialPresence,
     }
   } catch (error) {
-    console.error('Error calling self-hosted LLM:', error)
+    console.error('Error calling Google Gemini:', error)
     return null
   }
 }
@@ -358,11 +391,12 @@ export async function enrichCompanyAbout(
       registeredAddress: openCorporates?.registeredAddress,
     }
 
-    // Try LLM enrichment first
-    let result = await callSelfHostedLLM(companyName, normalizedWebsite, { description, html, jsonLd }, publicData)
+    // Try Gemini Pro enrichment first
+    let result = await callGeminiPro(companyName, normalizedWebsite, { description, html, jsonLd }, publicData)
 
-    // Fallback to scraping-only if LLM fails
+    // Fallback to scraping-only if Gemini fails
     if (!result) {
+      console.log('Gemini enrichment failed, falling back to web scraping')
       result = fallbackEnrichment(companyName, normalizedWebsite, html, jsonLd, publicData)
     }
 
