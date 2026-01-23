@@ -182,7 +182,7 @@ OpenCorporates registered address: ${publicData?.registeredAddress || 'Unknown'}
     // Prepare prompt for LLM
     const prompt = `Extract and structure the following company information from the provided context. Return a JSON object with these exact fields:
 {
-  "whatTheyDo": "A concise description of what the company does (2-3 sentences)",
+  "whatTheyDo": "A detailed, comprehensive description of what the company does, their services, products, and expertise. Include 4-6 sentences covering their main business activities, target markets, and unique value propositions. Be thorough and informative.",
   "accreditations": "Comma-separated list of certifications, accreditations, or standards (e.g., ISO 9001, ISO 14001)",
   "keyLeaders": "Comma-separated list of founders or key leaders if known",
   "companyProfile": "Single sentence combining size, headquarters, and founding year",

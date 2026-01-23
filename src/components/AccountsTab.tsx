@@ -2081,6 +2081,11 @@ const renderAboutField = (
   onToggle: () => void,
   socialMedia: SocialProfile[],
   headquarters?: string,
+  website?: string,
+  onWebsiteSave?: (value: string) => Promise<void>,
+  isEditingWebsite?: boolean,
+  onEditWebsite?: () => void,
+  onCancelWebsite?: () => void,
 ) => {
   const sectionItems = detailedSections(sections).map(item => {
     const formatted = formatStoredValue(item.value)
@@ -2102,6 +2107,21 @@ const renderAboutField = (
     const whatTheyDoFormatted = formatStoredValue(sections.whatTheyDo)
     return (
       <Stack spacing={3}>
+        {/* Website Link */}
+        {website && (
+          <Box mb={2}>
+            <Link
+              href={website}
+              isExternal
+              color="teal.600"
+              fontSize="sm"
+              fontWeight="medium"
+              textDecoration="underline"
+            >
+              {website}
+            </Link>
+          </Box>
+        )}
         <Text fontSize="sm" fontWeight="semibold" color="gray.600">
           What they do
         </Text>
@@ -2117,6 +2137,53 @@ const renderAboutField = (
 
   return (
     <Stack spacing={5}>
+      {/* Website Link - always at top */}
+      {website && (
+        <Box>
+          {isEditingWebsite ? (
+            <Input
+              defaultValue={website}
+              autoFocus
+              size="sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && onWebsiteSave) {
+                  onWebsiteSave(e.currentTarget.value)
+                }
+                if (e.key === 'Escape' && onCancelWebsite) {
+                  onCancelWebsite()
+                }
+              }}
+              onBlur={(e) => {
+                if (onWebsiteSave) {
+                  onWebsiteSave(e.currentTarget.value)
+                }
+              }}
+            />
+          ) : (
+            <HStack spacing={2} align="center">
+              <Link
+                href={website}
+                isExternal
+                color="teal.600"
+                fontSize="sm"
+                fontWeight="medium"
+                textDecoration="underline"
+              >
+                {website}
+              </Link>
+              {onEditWebsite && (
+                <IconButton
+                  aria-label="Edit website"
+                  icon={<EditIcon />}
+                  size="xs"
+                  variant="ghost"
+                  onClick={onEditWebsite}
+                />
+              )}
+            </HStack>
+          )}
+        </Box>
+      )}
       {visibleSections.map((item) => {
         // Special handling for Recent news section with links
         if (item.heading === 'Recent news' && item.newsItems && item.newsItems.length > 0) {
@@ -5431,11 +5498,22 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   <Heading size="md" color="gray.700" mb={4}>
                     About
                   </Heading>
-                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
-                    <EditableField
-                      value={selectedAccount.website || ''}
-                      onSave={async (value) => {
-                        const normalized = normalizeCustomerWebsite(String(value))
+                  <Box
+                    p={4}
+                    borderRadius="lg"
+                    border="1px solid"
+                    borderColor="gray.100"
+                    bg="gray.50"
+                  >
+                    {renderAboutField(
+                      selectedAccount.aboutSections,
+                      expandedAbout[selectedAccount.name],
+                      () => handleToggleAbout(selectedAccount.name),
+                      selectedAccount.socialMedia || [],
+                      selectedAccount.aboutSections.headquarters,
+                      selectedAccount.website,
+                      async (newWebsite: string) => {
+                        const normalized = normalizeCustomerWebsite(newWebsite)
                         updateAccount(selectedAccount.name, { website: normalized })
                         stopEditing(selectedAccount.name, 'website')
                         
@@ -5480,45 +5558,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                             }
                           })
                         }
-                      }}
-                      onCancel={() => stopEditing(selectedAccount.name, 'website')}
-                      isEditing={isFieldEditing(selectedAccount.name, 'website')}
-                      onEdit={() => startEditing(selectedAccount.name, 'website')}
-                      label="Website"
-                      type="url"
-                      placeholder="https://example.com"
-                      renderDisplay={(value) =>
-                        value ? (
-                          <Link
-                            href={String(value)}
-                            isExternal
-                            color="teal.600"
-                            fontWeight="medium"
-                            textDecoration="underline"
-                          >
-                            Website
-                          </Link>
-                        ) : (
-                          <Text fontSize="sm" color="text.muted">
-                            Add website to pull company info
-                          </Text>
-                        )
-                      }
-                    />
-                  </SimpleGrid>
-                  <Box
-                    p={4}
-                    borderRadius="lg"
-                    border="1px solid"
-                    borderColor="gray.100"
-                    bg="gray.50"
-                  >
-                    {renderAboutField(
-                      selectedAccount.aboutSections,
-                      expandedAbout[selectedAccount.name],
-                      () => handleToggleAbout(selectedAccount.name),
-                      selectedAccount.socialMedia || [],
-                      selectedAccount.aboutSections.headquarters,
+                      },
+                      isFieldEditing(selectedAccount.name, 'website'),
+                      () => startEditing(selectedAccount.name, 'website'),
+                      () => stopEditing(selectedAccount.name, 'website'),
                     )}
                   </Box>
                 </Box>
