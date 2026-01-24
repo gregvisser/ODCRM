@@ -220,6 +220,13 @@ export default function OnboardingHomePage() {
     [customers, selectedCustomerId],
   )
 
+  const selectedAccountSnapshot = useMemo(() => {
+    if (!selectedCustomer) return null
+    const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
+    if (!Array.isArray(storedAccounts)) return null
+    return storedAccounts.find((acc) => acc.name === selectedCustomer.name) || null
+  }, [selectedCustomer])
+
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
@@ -508,6 +515,33 @@ export default function OnboardingHomePage() {
     })
   }
 
+  const upsertContactForAccount = (accountName: string, contact: PrimaryContact): string | null => {
+    const fullName = `${contact.firstName} ${contact.lastName}`.trim()
+    if (!fullName) return null
+    const contacts = getJson<StoredContact[]>(OdcrmStorageKeys.contacts) || []
+    const existingIndex = contacts.findIndex((item) => item.id === contact.id)
+    const nextId =
+      contact.id ||
+      `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const nextContact: StoredContact = {
+      id: nextId,
+      name: fullName,
+      title: contact.roleLabel || contact.roleId || '',
+      accounts: accountName ? [accountName] : [],
+      tier: 'Decision maker',
+      status: contact.status,
+      email: contact.email,
+      phone: contact.phone,
+    }
+    const updated =
+      existingIndex >= 0
+        ? contacts.map((item, index) => (index === existingIndex ? nextContact : item))
+        : [...contacts, nextContact]
+    setJson(OdcrmStorageKeys.contacts, updated)
+    emit('contactsUpdated', updated)
+    return nextId
+  }
+
   const handleSave = async () => {
     if (!selectedCustomer) return
     setIsSaving(true)
@@ -515,9 +549,37 @@ export default function OnboardingHomePage() {
       selectedCustomer.accountData && typeof selectedCustomer.accountData === 'object'
         ? selectedCustomer.accountData
         : {}
+    const nextContactId = upsertContactForAccount(
+      selectedCustomer.name,
+      accountDetails.primaryContact,
+    )
+    const nextAccountDetails = {
+      ...accountDetails,
+      primaryContact: {
+        ...accountDetails.primaryContact,
+        id: nextContactId || accountDetails.primaryContact.id,
+      },
+    }
     const nextAccountData = {
       ...currentAccountData,
       clientProfile,
+      accountDetails: nextAccountDetails,
+      contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
+      contactEmail: accountDetails.primaryContact.email,
+      contactNumber: accountDetails.primaryContact.phone,
+      primaryContact: nextAccountDetails.primaryContact,
+      contactRoleId: accountDetails.primaryContact.roleId,
+      contactRoleLabel: accountDetails.primaryContact.roleLabel,
+      contactActive: accountDetails.primaryContact.status === 'Active',
+      headOfficeAddress: accountDetails.headOfficeAddress,
+      headOfficePlaceId: accountDetails.headOfficePlaceId,
+      headOfficePostcode: accountDetails.headOfficePostcode,
+      assignedAccountManager: accountDetails.assignedAccountManagerName,
+      assignedAccountManagerId: accountDetails.assignedAccountManagerId,
+      assignedClientDdiNumber: accountDetails.assignedClientDdiNumber,
+      emailAccounts: accountDetails.emailAccounts,
+      emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
+      days: accountDetails.daysPerWeek,
     }
     const { error } = await api.put(`/api/customers/${selectedCustomer.id}`, {
       name: selectedCustomer.name,
@@ -536,12 +598,34 @@ export default function OnboardingHomePage() {
     const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
     if (storedAccounts && Array.isArray(storedAccounts)) {
       const updatedAccounts = storedAccounts.map((acc) =>
-        acc.name === selectedCustomer.name ? { ...acc, clientProfile } : acc,
+        acc.name === selectedCustomer.name
+          ? {
+              ...acc,
+              clientProfile,
+              primaryContact: nextAccountDetails.primaryContact,
+              contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
+              contactEmail: accountDetails.primaryContact.email,
+              contactNumber: accountDetails.primaryContact.phone,
+              contactRoleId: accountDetails.primaryContact.roleId,
+              contactRoleLabel: accountDetails.primaryContact.roleLabel,
+              contactActive: accountDetails.primaryContact.status === 'Active',
+              headOfficeAddress: accountDetails.headOfficeAddress,
+              headOfficePlaceId: accountDetails.headOfficePlaceId,
+              headOfficePostcode: accountDetails.headOfficePostcode,
+              assignedAccountManager: accountDetails.assignedAccountManagerName,
+              assignedAccountManagerId: accountDetails.assignedAccountManagerId,
+              assignedClientDdiNumber: accountDetails.assignedClientDdiNumber,
+              emailAccounts: accountDetails.emailAccounts,
+              emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
+              days: accountDetails.daysPerWeek,
+            }
+          : acc,
       )
       setJson(OdcrmStorageKeys.accounts, updatedAccounts)
       emit('accountsUpdated', updatedAccounts)
     }
-    toast({ title: 'Client profile saved', status: 'success', duration: 2500 })
+    setAccountDetails(nextAccountDetails)
+    toast({ title: 'Onboarding details saved', status: 'success', duration: 2500 })
     setIsSaving(false)
   }
 
@@ -589,6 +673,227 @@ export default function OnboardingHomePage() {
       </Box>
 
       {selectedCustomer ? (
+        <Stack spacing={6}>
+          <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+          <Stack spacing={6}>
+            <Heading size="md">Account Details</Heading>
+
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+              <FormControl>
+                <FormLabel>Contact First Name</FormLabel>
+                <Input
+                  value={accountDetails.primaryContact.firstName}
+                  onChange={(e) => updatePrimaryContact({ firstName: e.target.value })}
+                  placeholder="First name"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Contact Last Name</FormLabel>
+                <Input
+                  value={accountDetails.primaryContact.lastName}
+                  onChange={(e) => updatePrimaryContact({ lastName: e.target.value })}
+                  placeholder="Last name"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Contact Email</FormLabel>
+                <Input
+                  type="email"
+                  value={accountDetails.primaryContact.email}
+                  onChange={(e) => updatePrimaryContact({ email: e.target.value })}
+                  placeholder="name@company.com"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Contact Number</FormLabel>
+                <Input
+                  value={accountDetails.primaryContact.phone}
+                  onChange={(e) => updatePrimaryContact({ phone: e.target.value })}
+                  placeholder="Phone number"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Role at Company</FormLabel>
+                <Stack spacing={2}>
+                  <HStack>
+                    <Input
+                      list="contact-role-options"
+                      value={contactRoleInput}
+                      onChange={(e) => setContactRoleInput(e.target.value)}
+                      placeholder="Add or select a role"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          addContactRole(contactRoleInput)
+                        }
+                      }}
+                    />
+                    <IconButton
+                      aria-label="Add role"
+                      icon={<AddIcon />}
+                      onClick={() => addContactRole(contactRoleInput)}
+                    />
+                  </HStack>
+                  <datalist id="contact-role-options">
+                    {contactRoles.map((role) => (
+                      <option key={role.id} value={role.label} />
+                    ))}
+                  </datalist>
+                  {accountDetails.primaryContact.roleLabel ? (
+                    <Tag size="sm" colorScheme="blue" borderRadius="full">
+                      <TagLabel>{accountDetails.primaryContact.roleLabel}</TagLabel>
+                      <TagCloseButton onClick={() => updatePrimaryContact({ roleId: '', roleLabel: '' })} />
+                    </Tag>
+                  ) : null}
+                </Stack>
+              </FormControl>
+              <FormControl>
+                <FormLabel>Contact Status</FormLabel>
+                <Select
+                  value={accountDetails.primaryContact.status}
+                  onChange={(e) =>
+                    updatePrimaryContact({ status: e.target.value as PrimaryContact['status'] })
+                  }
+                >
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </Select>
+              </FormControl>
+            </SimpleGrid>
+
+            <Divider />
+
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+              <FormControl>
+                <FormLabel>Web Address</FormLabel>
+                <Input
+                  value={selectedAccountSnapshot?.website || ''}
+                  isReadOnly
+                  placeholder="Website from account card"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Assigned Account Manager</FormLabel>
+                <Select
+                  placeholder={assignedUsers.length ? 'Select user' : 'No users found'}
+                  value={accountDetails.assignedAccountManagerId || ''}
+                  onChange={(e) => {
+                    const nextId = e.target.value
+                    const user = assignedUsers.find((u) => u.id === nextId) || null
+                    updateAccountDetails({
+                      assignedAccountManagerId: nextId,
+                      assignedAccountManagerName: user ? `${user.firstName} ${user.lastName}`.trim() : '',
+                    })
+                  }}
+                >
+                  {assignedUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {`${user.firstName} ${user.lastName}`.trim()} ({user.email})
+                    </option>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl>
+                <FormLabel>Assigned Client DDI & Number</FormLabel>
+                <Input
+                  value={accountDetails.assignedClientDdiNumber}
+                  onChange={(e) => updateAccountDetails({ assignedClientDdiNumber: e.target.value })}
+                  placeholder="DDI / Number"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Days a Week</FormLabel>
+                <Select
+                  value={accountDetails.daysPerWeek}
+                  onChange={(e) => updateAccountDetails({ daysPerWeek: Number(e.target.value) })}
+                >
+                  <option value={1}>1 day</option>
+                  <option value={2}>2 days</option>
+                  <option value={3}>3 days</option>
+                  <option value={4}>4 days</option>
+                  <option value={5}>5 days</option>
+                </Select>
+              </FormControl>
+              <FormControl>
+                <FormLabel>Weekly Lead Target</FormLabel>
+                <Input
+                  value={
+                    typeof selectedAccountSnapshot?.weeklyTarget === 'number'
+                      ? String(selectedAccountSnapshot.weeklyTarget)
+                      : ''
+                  }
+                  isReadOnly
+                  placeholder="Pulled from linked Google Sheet"
+                />
+              </FormControl>
+            </SimpleGrid>
+
+            <FormControl>
+              <FormLabel>Head Office Address</FormLabel>
+              <Stack spacing={2}>
+                <Input
+                  value={headOfficeQuery}
+                  onChange={(e) => {
+                    setHeadOfficeQuery(e.target.value)
+                    updateAccountDetails({ headOfficeAddress: e.target.value })
+                  }}
+                  placeholder="Search by company name or postcode"
+                />
+                {headOfficeLoading ? (
+                  <HStack spacing={2}>
+                    <Spinner size="xs" />
+                    <Text fontSize="xs" color="gray.500">
+                      Searching addresses...
+                    </Text>
+                  </HStack>
+                ) : null}
+                {headOfficeOptions.length > 0 ? (
+                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                    <VStack align="stretch" spacing={0}>
+                      {headOfficeOptions.map((option) => (
+                        <Button
+                          key={option.placeId || option.label}
+                          variant="ghost"
+                          justifyContent="flex-start"
+                          fontWeight="normal"
+                          onClick={() => {
+                            updateAccountDetails({
+                              headOfficeAddress: option.label,
+                              headOfficePlaceId: option.placeId,
+                            })
+                            setHeadOfficeQuery(option.label)
+                            setHeadOfficeOptions([])
+                          }}
+                        >
+                          {option.label}
+                        </Button>
+                      ))}
+                    </VStack>
+                  </Box>
+                ) : null}
+              </Stack>
+            </FormControl>
+
+            <FormControl>
+              <FormLabel>5 Email Accounts Set Up</FormLabel>
+              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                {accountDetails.emailAccounts.map((value, index) => (
+                  <Input
+                    key={`email-account-${index}`}
+                    value={value}
+                    onChange={(e) => {
+                      const next = [...accountDetails.emailAccounts]
+                      next[index] = e.target.value
+                      updateAccountDetails({ emailAccounts: next })
+                    }}
+                    placeholder={`Email account ${index + 1}`}
+                  />
+                ))}
+              </SimpleGrid>
+            </FormControl>
+          </Stack>
+        </Box>
+
         <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
           <Stack spacing={6}>
             <HStack justify="space-between">
@@ -934,6 +1239,7 @@ export default function OnboardingHomePage() {
             </FormControl>
           </Stack>
         </Box>
+        </Stack>
       ) : (
         <Box border="1px dashed" borderColor="gray.300" borderRadius="xl" p={6}>
           <Text color="gray.600" fontSize="sm">
