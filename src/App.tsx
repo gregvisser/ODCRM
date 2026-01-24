@@ -13,7 +13,7 @@ import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
-import MarketingHomePage, { type MarketingViewId } from './tabs/marketing/MarketingHomePage'
+import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
@@ -29,14 +29,14 @@ function App() {
     return {
       accounts: { tab: 'customers-home' as const, view: 'accounts' satisfies CustomersViewId },
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
-      'marketing-leads': { tab: 'marketing-home' as const, view: 'leads' satisfies MarketingViewId },
-      'email-campaigns': { tab: 'marketing-home' as const, view: 'campaigns' satisfies MarketingViewId },
-      'email-templates': { tab: 'marketing-home' as const, view: 'templates' satisfies MarketingViewId },
-      'cognism-prospects': { tab: 'marketing-home' as const, view: 'cognism-prospects' satisfies MarketingViewId },
-      inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies MarketingViewId },
-      reports: { tab: 'marketing-home' as const, view: 'reports' satisfies MarketingViewId },
-      'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies MarketingViewId },
-      schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies MarketingViewId },
+      'marketing-leads': { tab: 'marketing-home' as const, view: 'leads' satisfies OpenDoorsViewId },
+      'email-campaigns': { tab: 'marketing-home' as const, view: 'campaigns' satisfies OpenDoorsViewId },
+      'email-templates': { tab: 'marketing-home' as const, view: 'templates' satisfies OpenDoorsViewId },
+      'cognism-prospects': { tab: 'marketing-home' as const, view: 'cognism-prospects' satisfies OpenDoorsViewId },
+      inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
+      reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
+      'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies OpenDoorsViewId },
+      schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies OpenDoorsViewId },
     } as const
   }, [])
 
@@ -126,7 +126,6 @@ function App() {
         return (
           <MarketingHomePage
             view={activeView}
-            focusAccountName={focusAccountName}
             onNavigate={(v) => {
               setActiveView(v)
               // focus isn't used yet in Marketing, but keep URL clean

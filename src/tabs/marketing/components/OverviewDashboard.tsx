@@ -30,7 +30,7 @@ import {
   CheckCircleIcon,
   WarningIcon,
   TimeIcon,
-  TrendingUpIcon,
+  ArrowUpIcon,
   AddIcon,
 } from '@chakra-ui/icons'
 
@@ -247,7 +247,7 @@ const OverviewDashboard: React.FC = () => {
                           activity.type === 'sequence_started' ? RepeatIcon :
                           activity.type === 'email_sent' ? EmailIcon :
                           activity.type === 'reply_received' ? CheckCircleIcon :
-                          TrendingUpIcon
+                          ArrowUpIcon
                         }
                         color={
                           activity.type === 'sequence_started' ? 'blue.500' :

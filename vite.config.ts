@@ -12,4 +12,17 @@ export default defineConfig({
     strictPort: true,
     host: true,
   },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          ui: ['@chakra-ui/react', '@chakra-ui/icons', '@emotion/react', '@emotion/styled'],
+          utils: ['framer-motion', 'papaparse'],
+        }
+      }
+    }
+  }
 })

@@ -39,6 +39,11 @@ export type OpenDoorsViewId =
   | 'reports'
   | 'templates'
   | 'inbox'
+  | 'leads'
+  | 'cognism-prospects'
+  | 'schedules'
+
+export type MarketingViewId = OpenDoorsViewId
 
 function coerceViewId(view?: string): OpenDoorsViewId {
   if (
