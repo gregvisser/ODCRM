@@ -1,4 +1,5 @@
 import { useToast } from '@chakra-ui/react'
+import { buildCsvForDownload, stringifyForDownload, triggerDownload } from './download'
 
 export interface ExportImportOptions<T> {
   data: T[]
@@ -20,7 +21,7 @@ export function useExportImport<T extends Record<string, any>>(
   const toast = options.toast ?? fallbackToast
   const data = Array.isArray(options.data) ? options.data : []
 
-  const exportData = (format: 'json' | 'csv' = 'json') => {
+  const exportData = async (format: 'json' | 'csv' = 'json') => {
     try {
       if (data.length === 0) {
         toast({
@@ -33,51 +34,14 @@ export function useExportImport<T extends Record<string, any>>(
         return
       }
 
+      const dateSuffix = new Date().toISOString().split('T')[0]
+
       if (format === 'json') {
-        const dataStr = JSON.stringify(data, null, 2)
-        const dataBlob = new Blob([dataStr], { type: 'application/json' })
-        const url = URL.createObjectURL(dataBlob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `${options.filename}-${new Date().toISOString().split('T')[0]}.json`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+        const dataStr = await stringifyForDownload(data, true)
+        triggerDownload(dataStr, `${options.filename}-${dateSuffix}.json`, 'application/json')
       } else {
-        // CSV export
-        if (data.length === 0) return
-
-        // Get headers from first item
-        const firstItem = data[0]
-        const headers = Object.keys(firstItem)
-
-        const csvRows = [
-          headers.join(','),
-          ...data.map((item) =>
-            headers
-              .map((header) => {
-                const value = item[header]
-                if (value === null || value === undefined) return ''
-                if (typeof value === 'object') {
-                  return `"${JSON.stringify(value).replace(/"/g, '""')}"`
-                }
-                return `"${String(value).replace(/"/g, '""')}"`
-              })
-              .join(',')
-          ),
-        ]
-
-        const csvContent = csvRows.join('\n')
-        const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(dataBlob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `${options.filename}-${new Date().toISOString().split('T')[0]}.csv`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+        const csvContent = await buildCsvForDownload(data)
+        triggerDownload(csvContent, `${options.filename}-${dateSuffix}.csv`, 'text/csv;charset=utf-8;')
       }
 
       toast({
@@ -88,9 +52,13 @@ export function useExportImport<T extends Record<string, any>>(
         isClosable: true,
       })
     } catch (error) {
+      const message =
+        error instanceof Error && error.message === 'Worker timed out'
+          ? 'Export took too long. Try filtering the data or exporting smaller chunks.'
+          : 'Failed to export data.'
       toast({
         title: 'Export failed',
-        description: 'Failed to export data.',
+        description: message,
         status: 'error',
         duration: 3000,
         isClosable: true,

@@ -38,6 +38,7 @@ import {
   Flex,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
+import { buildCsvForDownload, stringifyForDownload, triggerDownload } from '../utils/download'
 
 export type User = {
   id: string
@@ -440,19 +441,12 @@ function UserAuthorizationTab() {
     }
   }
 
-  const handleExport = (format: 'json' | 'csv' = 'json') => {
+  const handleExport = async (format: 'json' | 'csv' = 'json') => {
     try {
+      const dateSuffix = new Date().toISOString().split('T')[0]
       if (format === 'json') {
-        const dataStr = JSON.stringify(users, null, 2)
-        const dataBlob = new Blob([dataStr], { type: 'application/json' })
-        const url = URL.createObjectURL(dataBlob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `users-export-${new Date().toISOString().split('T')[0]}.json`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+        const dataStr = await stringifyForDownload(users, true)
+        triggerDownload(dataStr, `users-export-${dateSuffix}.json`, 'application/json')
       } else {
         // CSV export
         const headers = [
@@ -467,35 +461,22 @@ function UserAuthorizationTab() {
           'Last Login Date',
           'Created Date',
         ]
-        
-        const csvRows = [
-          headers.join(','),
-          ...users.map((user) =>
-            [
-              user.userId,
-              `"${user.firstName.replace(/"/g, '""')}"`,
-              `"${user.lastName.replace(/"/g, '""')}"`,
-              `"${(user.username || user.email).replace(/"/g, '""')}"`,
-              `"${(user.phoneNumber || '').replace(/"/g, '""')}"`,
-              `"${user.role.replace(/"/g, '""')}"`,
-              `"${user.department.replace(/"/g, '""')}"`,
-              user.accountStatus,
-              formatDate(user.lastLoginDate),
-              formatDate(user.createdDate),
-            ].join(',')
-          ),
-        ]
-        
-        const csvContent = csvRows.join('\n')
-        const dataBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-        const url = URL.createObjectURL(dataBlob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `users-export-${new Date().toISOString().split('T')[0]}.csv`
-        document.body.appendChild(link)
-        link.click()
-        document.body.removeChild(link)
-        URL.revokeObjectURL(url)
+
+        const csvRows = users.map((user) => ({
+          'User ID': user.userId,
+          'First Name': user.firstName,
+          'Last Name': user.lastName,
+          Username: user.username || user.email,
+          'Phone Number': user.phoneNumber || '',
+          Role: user.role,
+          Department: user.department,
+          'Account Status': user.accountStatus,
+          'Last Login Date': formatDate(user.lastLoginDate),
+          'Created Date': formatDate(user.createdDate),
+        }))
+
+        const csvContent = await buildCsvForDownload(csvRows, headers)
+        triggerDownload(csvContent, `users-export-${dateSuffix}.csv`, 'text/csv;charset=utf-8;')
       }
       
       toast({
@@ -506,9 +487,13 @@ function UserAuthorizationTab() {
         isClosable: true,
       })
     } catch (error) {
+      const message =
+        error instanceof Error && error.message === 'Worker timed out'
+          ? 'Export took too long. Try filtering the data or exporting smaller chunks.'
+          : 'Failed to export user data.'
       toast({
         title: 'Export failed',
-        description: 'Failed to export user data.',
+        description: message,
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -809,7 +794,7 @@ function UserAuthorizationTab() {
           <HStack spacing={3} flexWrap="wrap">
             <Button
               variant="outline"
-              onClick={() => handleExport('csv')}
+              onClick={() => void handleExport('csv')}
               isDisabled={users.length === 0}
               size={{ base: 'sm', md: 'md' }}
             >

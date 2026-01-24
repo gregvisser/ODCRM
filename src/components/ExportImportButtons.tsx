@@ -21,7 +21,7 @@ export function ExportImportButtons<T extends Record<string, any>>({
     <HStack spacing={3} flexWrap="wrap">
       <Button
         variant="outline"
-        onClick={() => exportData('json')}
+        onClick={() => void exportData('json')}
         isDisabled={data.length === 0}
         size={size}
       >
@@ -29,7 +29,7 @@ export function ExportImportButtons<T extends Record<string, any>>({
       </Button>
       <Button
         variant="outline"
-        onClick={() => exportData('csv')}
+        onClick={() => void exportData('csv')}
         isDisabled={data.length === 0}
         size={size}
       >

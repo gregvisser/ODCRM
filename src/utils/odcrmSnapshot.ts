@@ -1,5 +1,6 @@
 import { ODCRM_STORAGE_PREFIX, SIDEBAR_STORAGE_PREFIX } from '../platform/keys'
 import * as platformStorage from '../platform/storage'
+import { stringifyForDownload, triggerDownload } from './download'
 
 export type OdcrmSnapshotV1 = {
   version: 1
@@ -41,16 +42,10 @@ export function createOdcrmSnapshot(): OdcrmSnapshotV1 {
   }
 }
 
-export function downloadOdcrmSnapshot(snapshot: OdcrmSnapshotV1) {
-  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `odcrm-snapshot-${new Date().toISOString().split('T')[0]}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+export async function downloadOdcrmSnapshot(snapshot: OdcrmSnapshotV1) {
+  const json = await stringifyForDownload(snapshot, true)
+  const filename = `odcrm-snapshot-${new Date().toISOString().split('T')[0]}.json`
+  triggerDownload(json, filename, 'application/json')
 }
 
 export function importOdcrmSnapshot(snapshot: unknown, options?: { replace?: boolean }) {

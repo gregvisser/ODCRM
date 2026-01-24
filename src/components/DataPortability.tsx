@@ -27,10 +27,10 @@ export function DataPortability() {
     }
   })()
 
-  const handleExport = () => {
+  const handleExport = async () => {
     try {
       const snapshot = createOdcrmSnapshot()
-      downloadOdcrmSnapshot(snapshot)
+      await downloadOdcrmSnapshot(snapshot)
       toast({
         title: 'Export created',
         description: 'Downloaded an ODCRM snapshot (accounts/contacts/leads + sidebar prefs).',
@@ -126,7 +126,7 @@ export function DataPortability() {
         </Button>
       </HStack>
       <HStack spacing={2} flexWrap="wrap">
-        <Button size="sm" variant="outline" onClick={handleExport}>
+        <Button size="sm" variant="outline" onClick={() => void handleExport()}>
           Export ODCRM Data
         </Button>
         <Button size="sm" variant="outline" onClick={handleImport}>
