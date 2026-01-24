@@ -1,4 +1,5 @@
 import express from 'express'
+import path from 'node:path'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { prisma } from './lib/prisma.js'
@@ -15,6 +16,10 @@ import customersRoutes from './routes/customers.js'
 import leadsRoutes from './routes/leads.js'
 import companyDataRoutes from './routes/companyData.js'
 import adminRoutes from './routes/admin.js'
+import jobSectorsRoutes from './routes/jobSectors.js'
+import jobRolesRoutes from './routes/jobRoles.js'
+import placesRoutes from './routes/places.js'
+import uploadsRoutes from './routes/uploads.js'
 import { startEmailScheduler } from './workers/emailScheduler.js'
 import { startReplyDetectionWorker } from './workers/replyDetection.js'
 import { startLeadsSyncWorker } from './workers/leadsSync.js'
@@ -58,6 +63,7 @@ app.use(
   }),
 )
 app.use(express.json())
+app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
 
 // Health check
 app.get('/health', (req, res) => {
@@ -83,6 +89,10 @@ app.use('/api/customers', customersRoutes)
 app.use('/api/leads', leadsRoutes)
 app.use('/api/company-data', companyDataRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/job-sectors', jobSectorsRoutes)
+app.use('/api/job-roles', jobRolesRoutes)
+app.use('/api/places', placesRoutes)
+app.use('/api/uploads', uploadsRoutes)
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

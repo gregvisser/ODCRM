@@ -1,0 +1,39 @@
+---
+description: Always commit, push, and deploy changes after modifications
+alwaysApply: true
+---
+
+# Deployment Workflow
+
+After making any code changes, always follow this deployment workflow:
+
+## 1. Commit Changes
+- Stage relevant files with `git add`
+- Create descriptive commit messages explaining what changed and why
+- Use `git commit -m "message"` or interactive commit for detailed changes
+
+## 2. Run Tests
+- Run the appropriate test or lint command for the change
+- Fix any failures before pushing
+
+## 3. Push to Remote
+- Push committed changes to the remote repository with `git push`
+- Ensure you're on the correct branch before pushing
+- Verify the push was successful
+
+## 4. Deploy Changes
+- Deploy to staging/production environment as appropriate
+- Verify deployment completed successfully
+- Test the deployed changes in the target environment
+
+## When to Deploy
+- After completing a feature or bug fix
+- After significant refactoring
+- After adding new functionality
+- When changes are ready for testing or production
+
+## Important Notes
+- Never deploy uncommitted changes
+- Run tests locally before pushing
+- Use meaningful commit messages that explain the changes
+- Ensure CI/CD pipelines pass before deploying

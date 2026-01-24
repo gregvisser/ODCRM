@@ -122,6 +122,44 @@ type AgreementFile = {
   uploadedAt: string
 }
 
+export type Accreditation = {
+  id: string
+  name: string
+  fileUrl?: string
+  fileName?: string
+}
+
+export type TargetGeographicalArea = {
+  label: string
+  placeId?: string
+  city?: string
+  county?: string
+  country?: string
+}
+
+export type SocialMediaPresence = {
+  facebookUrl?: string
+  linkedinUrl?: string
+  xUrl?: string
+  instagramUrl?: string
+  tiktokUrl?: string
+  youtubeUrl?: string
+  websiteUrl?: string
+}
+
+export type ClientProfile = {
+  clientHistory: string
+  accreditations: Accreditation[]
+  targetGeographicalArea?: TargetGeographicalArea
+  targetJobSectorIds: string[]
+  targetJobRoleIds: string[]
+  keyBusinessObjectives: string
+  clientUSPs: string
+  socialMediaPresence: SocialMediaPresence
+  qualifyingQuestions: string
+  caseStudiesOrTestimonials: string
+}
+
 type CustomerApi = {
   id: string
   name: string
@@ -158,12 +196,20 @@ export type Account = {
   aboutSections: AboutSections
   sector: string
   socialMedia: SocialProfile[]
+  contactPersons?: string
+  contactNumber?: string
+  contactEmail?: string
+  headOfficeAddress?: string
+  assignedAccountManager?: string
+  assignedClientDdiNumber?: string
+  emailAccountsSetUp?: boolean
   logoUrl?: string
   aboutSource?: 'opencorporates' | 'web' | 'manual' | 'web_failed'
   aboutLocked?: boolean
   status: 'Active' | 'Inactive' | 'On Hold'
   targetLocation: string[]
   targetTitle: string
+  clientProfile?: ClientProfile
   monthlySpendGBP: number
   agreements: AgreementFile[]
   defcon: number
@@ -809,6 +855,27 @@ const DEFAULT_ABOUT_SECTIONS: AboutSections = {
   foundingYear: '',
 }
 
+const DEFAULT_CLIENT_PROFILE: ClientProfile = {
+  clientHistory: '',
+  accreditations: [],
+  targetGeographicalArea: undefined,
+  targetJobSectorIds: [],
+  targetJobRoleIds: [],
+  keyBusinessObjectives: '',
+  clientUSPs: '',
+  socialMediaPresence: {
+    facebookUrl: '',
+    linkedinUrl: '',
+    xUrl: '',
+    instagramUrl: '',
+    tiktokUrl: '',
+    youtubeUrl: '',
+    websiteUrl: '',
+  },
+  qualifyingQuestions: '',
+  caseStudiesOrTestimonials: '',
+}
+
 function mapClientStatusToAccountStatus(status?: string | null): Account['status'] {
   switch (status) {
     case 'inactive':
@@ -876,6 +943,25 @@ function sanitizeAccountForStorage(account: Account): AccountSnapshot {
 function coerceAccountData(value: unknown): Partial<Account> | null {
   if (!value || typeof value !== 'object') return null
   return value as Partial<Account>
+}
+
+function normalizeClientProfile(raw?: Partial<ClientProfile> | null): ClientProfile {
+  const safe = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...DEFAULT_CLIENT_PROFILE,
+    ...safe,
+    accreditations: Array.isArray(safe.accreditations) ? safe.accreditations : [],
+    targetJobSectorIds: Array.isArray(safe.targetJobSectorIds) ? safe.targetJobSectorIds : [],
+    targetJobRoleIds: Array.isArray(safe.targetJobRoleIds) ? safe.targetJobRoleIds : [],
+    socialMediaPresence: {
+      ...DEFAULT_CLIENT_PROFILE.socialMediaPresence,
+      ...(safe.socialMediaPresence || {}),
+    },
+    targetGeographicalArea:
+      safe.targetGeographicalArea && typeof safe.targetGeographicalArea === 'object'
+        ? safe.targetGeographicalArea
+        : undefined,
+  }
 }
 
 function computeAccountsSyncHash(accountsData: Account[]): string {
@@ -1122,9 +1208,17 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     aboutSections: { ...DEFAULT_ABOUT_SECTIONS, ...(raw.aboutSections || {}) },
     sector: raw.sector || '',
     socialMedia: Array.isArray(raw.socialMedia) ? raw.socialMedia : [],
+    contactPersons: raw.contactPersons || '',
+    contactNumber: raw.contactNumber || '',
+    contactEmail: raw.contactEmail || '',
+    headOfficeAddress: raw.headOfficeAddress || '',
+    assignedAccountManager: raw.assignedAccountManager || '',
+    assignedClientDdiNumber: raw.assignedClientDdiNumber || '',
+    emailAccountsSetUp: typeof raw.emailAccountsSetUp === 'boolean' ? raw.emailAccountsSetUp : false,
     status: raw.status || 'Active',
     targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
     targetTitle: raw.targetTitle || '',
+    clientProfile: normalizeClientProfile(raw.clientProfile),
     monthlySpendGBP: Number(raw.monthlySpendGBP || 0),
     agreements: Array.isArray(raw.agreements) ? raw.agreements : [],
     defcon: typeof raw.defcon === 'number' ? raw.defcon : 3,
@@ -4241,6 +4335,20 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     : '0.0'
 
   const isDrawerOpen = Boolean(selectedAccount)
+  const clientProfileSummary = selectedAccount
+    ? normalizeClientProfile(selectedAccount.clientProfile)
+    : null
+  const clientProfileStats = selectedAccount
+    ? {
+        accreditations: clientProfileSummary?.accreditations?.length ?? 0,
+        sectors: clientProfileSummary?.targetJobSectorIds?.length ?? 0,
+        roles: clientProfileSummary?.targetJobRoleIds?.length ?? 0,
+        socialLinks: Object.values(clientProfileSummary?.socialMediaPresence || {}).filter((value) =>
+          String(value || '').trim(),
+        ).length,
+        targetArea: clientProfileSummary?.targetGeographicalArea?.label || '',
+      }
+    : null
 
   const handleCloseDrawer = () => setSelectedAccount(null)
 
@@ -5514,6 +5622,47 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         </Select>
                       </FieldRow>
                     </SimpleGrid>
+                </Box>
+
+                {/* Client Profile Summary */}
+                <Box
+                  bg="white"
+                  borderRadius="xl"
+                  p={6}
+                  border="1px solid"
+                  borderColor="gray.200"
+                  boxShadow="sm"
+                >
+                  <Heading size="md" mb={4} color="gray.700">
+                    Client Profile Summary
+                  </Heading>
+                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                    <FieldRow label="Target Area">
+                      <Text fontSize="sm" color={clientProfileStats?.targetArea ? 'gray.700' : 'gray.400'}>
+                        {clientProfileStats?.targetArea || 'Not set'}
+                      </Text>
+                    </FieldRow>
+                    <FieldRow label="Accreditations">
+                      <Badge colorScheme={clientProfileStats?.accreditations ? 'teal' : 'gray'}>
+                        {clientProfileStats?.accreditations || 0} uploaded
+                      </Badge>
+                    </FieldRow>
+                    <FieldRow label="Job Sectors">
+                      <Badge colorScheme={clientProfileStats?.sectors ? 'purple' : 'gray'}>
+                        {clientProfileStats?.sectors || 0} selected
+                      </Badge>
+                    </FieldRow>
+                    <FieldRow label="Job Roles">
+                      <Badge colorScheme={clientProfileStats?.roles ? 'blue' : 'gray'}>
+                        {clientProfileStats?.roles || 0} selected
+                      </Badge>
+                    </FieldRow>
+                    <FieldRow label="Social Links">
+                      <Badge colorScheme={clientProfileStats?.socialLinks ? 'green' : 'gray'}>
+                        {clientProfileStats?.socialLinks || 0} linked
+                      </Badge>
+                    </FieldRow>
+                  </SimpleGrid>
                 </Box>
 
                 {/* About Section */}

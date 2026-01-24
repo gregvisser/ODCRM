@@ -493,3 +493,23 @@ model LeadSyncState {
   @@index([lastSyncAt])
   @@map("lead_sync_states")
 }
+
+model JobSector {
+  id        String   @id
+  label     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([label])
+  @@map("job_sectors")
+}
+
+model JobRole {
+  id        String   @id
+  label     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([label])
+  @@map("job_roles")
+}
