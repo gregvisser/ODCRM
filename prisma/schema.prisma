@@ -52,6 +52,10 @@ model contacts {
   customers                customers                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   email_campaign_prospects email_campaign_prospects[]
 
+  // New email outreach relationships
+  sequenceEnrollments sequence_enrollments[]
+  activities contact_activities[]
+
   @@index([customerId, email])
   @@index([customerId])
   @@index([email])
@@ -109,6 +113,12 @@ model customers {
   email_campaigns     email_campaigns[]
   email_identities    email_identities[]
   email_sequences     email_sequences[]
+
+  // New email outreach relationships
+  workspaces workspaces[]
+  sequences sequences[]
+  emailAccounts email_accounts[]
+  contactActivities contact_activities[]
 
   @@index([clientStatus])
   @@index([domain])
@@ -344,4 +354,175 @@ enum ProspectStatus {
   unsubscribed
   replied
   completed
+}
+
+// ============================================================================
+// OPENDOORS EMAIL OUTREACH SYSTEM - NEW MODELS
+// Based on Reply.io architecture exploration
+// ============================================================================
+
+model workspaces {
+  id         String   @id @default(cuid())
+  customerId String
+  name       String
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relationships
+  customer customers @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@unique([customerId, name])
+}
+
+model sequences {
+  id                       String          @id @default(cuid())
+  customerId               String
+  name                     String
+  description              String?
+  status                   SequenceStatus  @default(draft)
+  ownerId                  String?         // User ID
+  folderId                 String?
+  goalType                 String?
+  goalTarget               Int?
+  goalDeadline             DateTime?
+  sendingTimezone          String          @default("UTC")
+  sendingWindowStart       String?         // HH:MM format
+  sendingWindowEnd         String?         // HH:MM format
+  sendingDaysJson          Json            @default("[true, true, true, true, true, false, false]")
+  maxEmailsPerDay          Int             @default(100)
+  throttleDelayMinutes     Int             @default(60)
+  stopOnReply              Boolean         @default(true)
+  stopOnBounce             Boolean         @default(true)
+  stopOnUnsubscribe        Boolean         @default(true)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+  createdBy                String?
+  totalEnrolled            Int             @default(0)
+  totalSent                Int             @default(0)
+  totalDelivered           Int             @default(0)
+  totalOpened              Int             @default(0)
+  totalClicked             Int             @default(0)
+  totalReplied             Int             @default(0)
+  totalBounced             Int             @default(0)
+  totalUnsubscribed        Int             @default(0)
+
+  // Relationships
+  customer                 customers       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  steps                    sequence_steps[]
+  enrollments              sequence_enrollments[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model sequence_steps {
+  id                    String          @id @default(cuid())
+  sequenceId            String
+  stepOrder             Int
+  stepType              String          // 'email', 'task', 'linkedin', 'call', 'conditional', 'delay'
+  delayDays             Int             @default(0)
+  delayHours            Int             @default(0)
+  delayMinutes          Int             @default(0)
+  subjectTemplate       String?
+  bodyTemplate          String?
+  conditions            Json?
+  taskTitle             String?
+  taskDescription       String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  timesExecuted         Int             @default(0)
+  successRate           Decimal?        @db.Decimal(5,2)
+
+  // Relationships
+  sequence              sequences       @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, stepOrder])
+  @@index([sequenceId])
+}
+
+model sequence_enrollments {
+  id                     String          @id @default(cuid())
+  sequenceId             String
+  contactId              String
+  enrolledAt             DateTime        @default(now())
+  enrolledBy             String?
+  status                 String          @default("active") // 'active', 'paused', 'completed', 'stopped', 'bounced', 'unsubscribed'
+  lastStepCompletedAt    DateTime?
+  nextStepScheduledAt    DateTime?
+  completedAt            DateTime?
+  totalEmailsSent        Int             @default(0)
+  totalOpens             Int             @default(0)
+  totalClicks            Int             @default(0)
+  totalReplies           Int             @default(0)
+
+  // Relationships
+  sequence               sequences       @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  contact                contacts        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, contactId])
+  @@index([sequenceId])
+  @@index([contactId])
+  @@index([nextStepScheduledAt])
+}
+
+model email_accounts {
+  id                       String          @id @default(cuid())
+  customerId               String
+  workspaceId              String          // Using customerId for now
+  emailAddress             String
+  displayName              String?
+  provider                 String          @default("outlook") // 'outlook', 'gmail', 'custom_smtp'
+  accessToken              String?
+  refreshToken             String?
+  smtpHost                 String?
+  smtpPort                 Int?
+  smtpUsername             String?
+  smtpPassword             String?
+  dailySendLimit           Int             @default(150)
+  isActive                 Boolean         @default(true)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
+
+  // Relationships
+  customer                 customers       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, emailAddress])
+  @@index([customerId])
+  @@index([emailAddress])
+  @@index([isActive])
+}
+
+model contact_activities {
+  id          String    @id @default(cuid())
+  contactId   String
+  customerId  String
+  activityType String   // 'email_sent', 'email_opened', 'email_clicked', 'email_replied', etc.
+  occurredAt  DateTime  @default(now())
+  metadata    Json      @default("{}")
+  processed   Boolean   @default(false)
+
+  // Relationships
+  contact     contacts  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  customer    customers @relation(fields: [customerId], references: [id])
+
+  @@index([contactId])
+  @@index([customerId])
+  @@index([activityType])
+  @@index([occurredAt])
+}
+
+// Note: Existing customers and contacts models are extended via relationships in the new models above
+
+// ============================================================================
+// ENUMS FOR NEW MODELS
+// ============================================================================
+
+enum SequenceStatus {
+  draft
+  active
+  paused
+  stopped
+  archived
 }

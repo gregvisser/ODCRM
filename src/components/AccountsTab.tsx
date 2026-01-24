@@ -160,6 +160,17 @@ export type ClientProfile = {
   caseStudiesOrTestimonials: string
 }
 
+export type PrimaryContact = {
+  id?: string
+  firstName: string
+  lastName: string
+  email: string
+  phone: string
+  roleId?: string
+  roleLabel?: string
+  status: 'Active' | 'Inactive'
+}
+
 type CustomerApi = {
   id: string
   name: string
@@ -199,10 +210,18 @@ export type Account = {
   contactPersons?: string
   contactNumber?: string
   contactEmail?: string
+  primaryContact?: PrimaryContact
+  contactRoleId?: string
+  contactRoleLabel?: string
+  contactActive?: boolean
   headOfficeAddress?: string
+  headOfficePlaceId?: string
+  headOfficePostcode?: string
   assignedAccountManager?: string
+  assignedAccountManagerId?: string
   assignedClientDdiNumber?: string
   emailAccountsSetUp?: boolean
+  emailAccounts?: string[]
   logoUrl?: string
   aboutSource?: 'opencorporates' | 'web' | 'manual' | 'web_failed'
   aboutLocked?: boolean
@@ -1211,10 +1230,18 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     contactPersons: raw.contactPersons || '',
     contactNumber: raw.contactNumber || '',
     contactEmail: raw.contactEmail || '',
+    primaryContact: raw.primaryContact,
+    contactRoleId: raw.contactRoleId || '',
+    contactRoleLabel: raw.contactRoleLabel || '',
+    contactActive: typeof raw.contactActive === 'boolean' ? raw.contactActive : true,
     headOfficeAddress: raw.headOfficeAddress || '',
+    headOfficePlaceId: raw.headOfficePlaceId || '',
+    headOfficePostcode: raw.headOfficePostcode || '',
     assignedAccountManager: raw.assignedAccountManager || '',
+    assignedAccountManagerId: raw.assignedAccountManagerId || '',
     assignedClientDdiNumber: raw.assignedClientDdiNumber || '',
     emailAccountsSetUp: typeof raw.emailAccountsSetUp === 'boolean' ? raw.emailAccountsSetUp : false,
+    emailAccounts: Array.isArray(raw.emailAccounts) ? raw.emailAccounts : [],
     status: raw.status || 'Active',
     targetLocation: Array.isArray(raw.targetLocation) ? raw.targetLocation : [],
     targetTitle: raw.targetTitle || '',

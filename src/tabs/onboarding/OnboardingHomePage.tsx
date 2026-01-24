@@ -32,6 +32,7 @@ import type {
   Account,
   Accreditation,
   ClientProfile,
+  PrimaryContact,
   SocialMediaPresence,
   TargetGeographicalArea,
 } from '../../components/AccountsTab'
@@ -45,6 +46,43 @@ type CustomerApi = {
 type JobTaxonomyItem = {
   id: string
   label: string
+}
+
+type ContactRoleItem = {
+  id: string
+  label: string
+}
+
+type AccountDetails = {
+  primaryContact: PrimaryContact
+  headOfficeAddress: string
+  headOfficePlaceId?: string
+  headOfficePostcode?: string
+  assignedAccountManagerId?: string
+  assignedAccountManagerName?: string
+  assignedClientDdiNumber: string
+  emailAccounts: string[]
+  daysPerWeek: number
+}
+
+type AssignedUser = {
+  id: string
+  userId: string
+  firstName: string
+  lastName: string
+  email: string
+  accountStatus: 'Active' | 'Inactive'
+}
+
+type StoredContact = {
+  id: string
+  name: string
+  title: string
+  accounts: string[]
+  tier: string
+  status: string
+  email: string
+  phone: string
 }
 
 const EMPTY_SOCIAL: SocialMediaPresence = {
@@ -70,6 +108,30 @@ const EMPTY_PROFILE: ClientProfile = {
   caseStudiesOrTestimonials: '',
 }
 
+const EMPTY_PRIMARY_CONTACT: PrimaryContact = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  roleId: '',
+  roleLabel: '',
+  status: 'Active',
+}
+
+const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
+  primaryContact: EMPTY_PRIMARY_CONTACT,
+  headOfficeAddress: '',
+  headOfficePlaceId: '',
+  headOfficePostcode: '',
+  assignedAccountManagerId: '',
+  assignedAccountManagerName: '',
+  assignedClientDdiNumber: '',
+  emailAccounts: ['', '', '', '', ''],
+  daysPerWeek: 1,
+}
+
+const CONTACT_ROLES_STORAGE_KEY = 'odcrm_contact_roles'
+
 const normalizeClientProfile = (raw?: Partial<ClientProfile> | null): ClientProfile => {
   const safe = raw && typeof raw === 'object' ? raw : {}
   return {
@@ -89,6 +151,22 @@ const normalizeClientProfile = (raw?: Partial<ClientProfile> | null): ClientProf
   }
 }
 
+const normalizeAccountDetails = (raw?: Partial<AccountDetails> | null): AccountDetails => {
+  const safe = raw && typeof raw === 'object' ? raw : {}
+  return {
+    ...EMPTY_ACCOUNT_DETAILS,
+    ...safe,
+    primaryContact: {
+      ...EMPTY_PRIMARY_CONTACT,
+      ...(safe.primaryContact || {}),
+    },
+    emailAccounts: Array.isArray(safe.emailAccounts) && safe.emailAccounts.length
+      ? safe.emailAccounts
+      : [...EMPTY_ACCOUNT_DETAILS.emailAccounts],
+    daysPerWeek: typeof safe.daysPerWeek === 'number' ? safe.daysPerWeek : 1,
+  }
+}
+
 const isValidUrl = (value: string): boolean => {
   if (!value) return true
   try {
@@ -104,22 +182,38 @@ const buildAccreditation = (): Accreditation => ({
   name: '',
 })
 
+const loadContactRoles = (): ContactRoleItem[] => {
+  const stored = getJson<ContactRoleItem[]>(CONTACT_ROLES_STORAGE_KEY)
+  return Array.isArray(stored) ? stored : []
+}
+
+const saveContactRoles = (roles: ContactRoleItem[]) => {
+  setJson(CONTACT_ROLES_STORAGE_KEY, roles)
+}
+
 export default function OnboardingHomePage() {
   const toast = useToast()
   const [customers, setCustomers] = useState<CustomerApi[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
   const [clientProfile, setClientProfile] = useState<ClientProfile>(EMPTY_PROFILE)
+  const [accountDetails, setAccountDetails] = useState<AccountDetails>(EMPTY_ACCOUNT_DETAILS)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [jobSectors, setJobSectors] = useState<JobTaxonomyItem[]>([])
   const [jobRoles, setJobRoles] = useState<JobTaxonomyItem[]>([])
+  const [contactRoles, setContactRoles] = useState<ContactRoleItem[]>([])
   const [jobSectorInput, setJobSectorInput] = useState('')
   const [jobRoleInput, setJobRoleInput] = useState('')
+  const [contactRoleInput, setContactRoleInput] = useState('')
   const [geoQuery, setGeoQuery] = useState('')
   const [geoOptions, setGeoOptions] = useState<TargetGeographicalArea[]>([])
   const [geoLoading, setGeoLoading] = useState(false)
+  const [headOfficeQuery, setHeadOfficeQuery] = useState('')
+  const [headOfficeOptions, setHeadOfficeOptions] = useState<TargetGeographicalArea[]>([])
+  const [headOfficeLoading, setHeadOfficeLoading] = useState(false)
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
+  const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
 
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId) || null,
@@ -171,6 +265,11 @@ export default function OnboardingHomePage() {
   useEffect(() => {
     void fetchCustomers()
     void fetchTaxonomy()
+    setContactRoles(loadContactRoles())
+    const storedUsers = getJson<AssignedUser[]>(OdcrmStorageKeys.users)
+    if (Array.isArray(storedUsers)) {
+      setAssignedUsers(storedUsers.filter((user) => user.accountStatus === 'Active'))
+    }
   }, [fetchCustomers, fetchTaxonomy])
 
   useEffect(() => {
@@ -182,6 +281,16 @@ export default function OnboardingHomePage() {
     const nextProfile = normalizeClientProfile((rawAccountData as { clientProfile?: ClientProfile }).clientProfile)
     setClientProfile(nextProfile)
     setGeoQuery(nextProfile.targetGeographicalArea?.label || '')
+
+    const rawDetails = rawAccountData as Partial<AccountDetails> & {
+      accountDetails?: Partial<AccountDetails>
+    }
+    const mergedDetails = normalizeAccountDetails({
+      ...rawDetails,
+      ...rawDetails.accountDetails,
+    })
+    setAccountDetails(mergedDetails)
+    setHeadOfficeQuery(mergedDetails.headOfficeAddress || '')
   }, [selectedCustomer])
 
   useEffect(() => {
@@ -200,8 +309,38 @@ export default function OnboardingHomePage() {
     return () => window.clearTimeout(handle)
   }, [geoQuery])
 
+  useEffect(() => {
+    if (!headOfficeQuery || headOfficeQuery.trim().length < 2) {
+      setHeadOfficeOptions([])
+      return
+    }
+    const handle = window.setTimeout(async () => {
+      setHeadOfficeLoading(true)
+      const { data } = await api.get<TargetGeographicalArea[]>(
+        `/api/places?query=${encodeURIComponent(headOfficeQuery.trim())}`,
+      )
+      setHeadOfficeOptions(Array.isArray(data) ? data : [])
+      setHeadOfficeLoading(false)
+    }, 350)
+    return () => window.clearTimeout(handle)
+  }, [headOfficeQuery])
+
   const updateProfile = useCallback((updates: Partial<ClientProfile>) => {
     setClientProfile((prev) => ({ ...prev, ...updates }))
+  }, [])
+
+  const updateAccountDetails = useCallback((updates: Partial<AccountDetails>) => {
+    setAccountDetails((prev) => ({ ...prev, ...updates }))
+  }, [])
+
+  const updatePrimaryContact = useCallback((updates: Partial<PrimaryContact>) => {
+    setAccountDetails((prev) => ({
+      ...prev,
+      primaryContact: {
+        ...prev.primaryContact,
+        ...updates,
+      },
+    }))
   }, [])
 
   const updateSocial = useCallback(
@@ -313,6 +452,21 @@ export default function OnboardingHomePage() {
     return data
   }
 
+  const createContactRole = (label: string): ContactRoleItem | null => {
+    const trimmed = label.trim()
+    if (!trimmed) return null
+    const existing = contactRoles.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return existing
+    const next: ContactRoleItem = {
+      id: `role_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      label: trimmed,
+    }
+    const updated = [...contactRoles, next].sort((a, b) => a.label.localeCompare(b.label))
+    setContactRoles(updated)
+    saveContactRoles(updated)
+    return next
+  }
+
   const addJobSector = async (label: string) => {
     const item = await createJobSector(label)
     if (!item) return
@@ -333,6 +487,13 @@ export default function OnboardingHomePage() {
         : [...clientProfile.targetJobRoleIds, item.id],
     })
     setJobRoleInput('')
+  }
+
+  const addContactRole = (label: string) => {
+    const item = createContactRole(label)
+    if (!item) return
+    updatePrimaryContact({ roleId: item.id, roleLabel: item.label })
+    setContactRoleInput('')
   }
 
   const removeJobSector = (id: string) => {
