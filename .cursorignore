@@ -1,0 +1,6 @@
+# Cursor indexing exclusions to prevent IDE freezes.
+backups/
+tmp/
+**/*.bundle
+build-errors.txt
+**/*.log
