@@ -18,10 +18,11 @@ export function useExportImport<T extends Record<string, any>>(
 ) {
   const fallbackToast = useToast()
   const toast = options.toast ?? fallbackToast
+  const data = Array.isArray(options.data) ? options.data : []
 
   const exportData = (format: 'json' | 'csv' = 'json') => {
     try {
-      if (options.data.length === 0) {
+      if (data.length === 0) {
         toast({
           title: 'No data to export',
           description: 'There is no data available to export.',
@@ -33,7 +34,7 @@ export function useExportImport<T extends Record<string, any>>(
       }
 
       if (format === 'json') {
-        const dataStr = JSON.stringify(options.data, null, 2)
+        const dataStr = JSON.stringify(data, null, 2)
         const dataBlob = new Blob([dataStr], { type: 'application/json' })
         const url = URL.createObjectURL(dataBlob)
         const link = document.createElement('a')
@@ -45,15 +46,15 @@ export function useExportImport<T extends Record<string, any>>(
         URL.revokeObjectURL(url)
       } else {
         // CSV export
-        if (options.data.length === 0) return
+        if (data.length === 0) return
 
         // Get headers from first item
-        const firstItem = options.data[0]
+        const firstItem = data[0]
         const headers = Object.keys(firstItem)
 
         const csvRows = [
           headers.join(','),
-          ...options.data.map((item) =>
+          ...data.map((item) =>
             headers
               .map((header) => {
                 const value = item[header]
@@ -81,7 +82,7 @@ export function useExportImport<T extends Record<string, any>>(
 
       toast({
         title: 'Export successful',
-        description: `${options.data.length} item(s) exported as ${format.toUpperCase()}.`,
+        description: `${data.length} item(s) exported as ${format.toUpperCase()}.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -165,8 +166,8 @@ export function useExportImport<T extends Record<string, any>>(
           }
 
           // Handle duplicates if getItemId provided
-          if (options.getItemId && options.data.length > 0) {
-            const existingIds = new Set(options.data.map((item) => options.getItemId!(item)))
+          if (options.getItemId && data.length > 0) {
+            const existingIds = new Set(data.map((item) => options.getItemId!(item)))
             const duplicateItems = validItems.filter((item) =>
               existingIds.has(options.getItemId!(item))
             )
@@ -178,7 +179,7 @@ export function useExportImport<T extends Record<string, any>>(
 
               if (shouldReplace) {
                 const importedIds = new Set(validItems.map((item) => options.getItemId!(item)))
-                const nonDuplicateItems = options.data.filter(
+                const nonDuplicateItems = data.filter(
                   (item) => !importedIds.has(options.getItemId!(item))
                 )
                 const updatedItems = [...nonDuplicateItems, ...validItems]
@@ -195,7 +196,7 @@ export function useExportImport<T extends Record<string, any>>(
                   (item) => !existingIds.has(options.getItemId!(item))
                 )
                 if (newItems.length > 0) {
-                  const updatedItems = [...options.data, ...newItems]
+                  const updatedItems = [...data, ...newItems]
                   options.onImport?.(updatedItems)
                   toast({
                     title: 'Import successful',
@@ -215,7 +216,7 @@ export function useExportImport<T extends Record<string, any>>(
                 }
               }
             } else {
-              const updatedItems = [...options.data, ...validItems]
+              const updatedItems = [...data, ...validItems]
               options.onImport?.(updatedItems)
               toast({
                 title: 'Import successful',
@@ -228,10 +229,10 @@ export function useExportImport<T extends Record<string, any>>(
           } else {
             // No duplicate handling, just import all
             if (options.onDuplicate) {
-              const updatedItems = options.onDuplicate(options.data, validItems)
+              const updatedItems = options.onDuplicate(data, validItems)
               options.onImport?.(updatedItems)
             } else {
-              const updatedItems = [...options.data, ...validItems]
+              const updatedItems = [...data, ...validItems]
               options.onImport?.(updatedItems)
             }
             toast({

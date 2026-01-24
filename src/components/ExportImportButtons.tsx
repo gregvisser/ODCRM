@@ -14,14 +14,15 @@ export function ExportImportButtons<T extends Record<string, any>>({
   ...options
 }: ExportImportButtonsProps<T>) {
   const toast = useToast()
-  const { exportData, importData } = useExportImport({ ...options, toast })
+  const data = Array.isArray(options.data) ? options.data : []
+  const { exportData, importData } = useExportImport({ ...options, data, toast })
 
   return (
     <HStack spacing={3} flexWrap="wrap">
       <Button
         variant="outline"
         onClick={() => exportData('json')}
-        isDisabled={options.data.length === 0}
+        isDisabled={data.length === 0}
         size={size}
       >
         Export JSON
@@ -29,7 +30,7 @@ export function ExportImportButtons<T extends Record<string, any>>({
       <Button
         variant="outline"
         onClick={() => exportData('csv')}
-        isDisabled={options.data.length === 0}
+        isDisabled={data.length === 0}
         size={size}
       >
         Export CSV
