@@ -3,6 +3,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   FormControl,
   FormLabel,
   Heading,
@@ -36,51 +37,22 @@ import {
   AlertDialogOverlay,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
-import { OdcrmStorageKeys } from '../platform/keys'
-import { getJson } from '../platform/storage'
-import { getEmailTemplates, setEmailTemplates, type OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
+import { api } from '../utils/api'
+import { settingsStore } from '../platform'
 
-function buildDefaultTemplates(): OdcrmEmailTemplate[] {
-  const now = new Date().toISOString()
-  return [
-    {
-      id: 'default-step1',
-      name: 'OpenDoors Default - Step 1',
-      subject: 'Quick question about {{accountName}}',
-      body: `Hi {{contactName}},
-
-I’m {{senderName}} from OpenDoors.
-
-We’re currently working with teams like {{accountName}} to improve outbound performance and reply rates.
-
-Open to a quick 10-minute chat this week?
-
-Best regards,
-{{senderName}}`,
-      stepNumber: 1,
-      createdAt: now,
-      updatedAt: now,
-    },
-    {
-      id: 'default-step2',
-      name: 'OpenDoors Default - Step 2',
-      subject: 'Following up — {{accountName}}',
-      body: `Hi {{contactName}},
-
-Just following up in case my previous email got buried.
-
-If it’s easier, I can send a 2–3 line summary tailored to {{accountName}}.
-
-Would you like that?
-
-Thanks,
-{{senderName}}`,
-      stepNumber: 2,
-      createdAt: now,
-      updatedAt: now,
-    },
-  ]
+type EmailTemplate = {
+  id: string
+  customerId: string | null
+  name: string
+  subjectTemplate: string
+  bodyTemplateHtml: string
+  bodyTemplateText?: string | null
+  stepNumber: number
+  createdAt: string
+  updatedAt: string
 }
+
+type Customer = { id: string; name: string }
 
 export default function MarketingEmailTemplatesTab() {
   const toast = useToast()
@@ -92,66 +64,95 @@ export default function MarketingEmailTemplatesTab() {
   } = useDisclosure()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
-  const [templates, setTemplatesState] = useState<OdcrmEmailTemplate[]>(() => {
-    const existing = getEmailTemplates()
-    if (existing.length > 0) return existing
-    const seeded = buildDefaultTemplates()
-    setEmailTemplates(seeded)
-    return seeded
-  })
-
+  const [templates, setTemplatesState] = useState<EmailTemplate[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(true)
   const [filterAccount, setFilterAccount] = useState<string>('__all__')
-  const [templateToDelete, setTemplateToDelete] = useState<OdcrmEmailTemplate | null>(null)
-  const [templateToEdit, setTemplateToEdit] = useState<OdcrmEmailTemplate | null>(null)
+  const [templateToDelete, setTemplateToDelete] = useState<EmailTemplate | null>(null)
+  const [templateToEdit, setTemplateToEdit] = useState<EmailTemplate | null>(null)
   const [isEditMode, setIsEditMode] = useState(false)
 
-  const [draft, setDraft] = useState<Omit<OdcrmEmailTemplate, 'id' | 'createdAt' | 'updatedAt'>>({
+  const [draft, setDraft] = useState<{
+    name: string
+    subject: string
+    body: string
+    stepNumber: number
+    customerId: string | null
+    isGlobal: boolean
+  }>({
     name: '',
     subject: '',
     body: '',
     stepNumber: 1,
-    account: '',
+    customerId: null,
+    isGlobal: false,
   })
+  const customerLookup = useMemo(() => {
+    return Object.fromEntries(customers.map((c) => [c.id, c.name]))
+  }, [customers])
 
-  // Persist templates any time they change.
+  const loadTemplates = async (activeCustomerId: string) => {
+    const { data, error } = await api.get<EmailTemplate[]>(
+      `/api/templates?customerId=${activeCustomerId}&includeGlobal=true`,
+    )
+    if (error) {
+      toast({ title: 'Error loading templates', description: error, status: 'error' })
+      return
+    }
+    setTemplatesState(data || [])
+  }
+
   useEffect(() => {
-    setEmailTemplates(templates)
-  }, [templates])
-
-  const availableAccounts = useMemo(() => {
-    const accounts = getJson<Array<{ name: string }>>(OdcrmStorageKeys.accounts) || []
-    const names = accounts.map((a) => a?.name).filter(Boolean)
-    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
+    const load = async () => {
+      setLoading(true)
+      const { data, error } = await api.get<Customer[]>('/api/customers')
+      if (error) {
+        toast({ title: 'Error loading customers', description: error, status: 'error' })
+        setLoading(false)
+        return
+      }
+      const list = data || []
+      setCustomers(list)
+      const activeCustomerId =
+        settingsStore.getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+      if (activeCustomerId) {
+        await loadTemplates(activeCustomerId)
+      }
+      setLoading(false)
+    }
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const filteredTemplates = useMemo(() => {
     const list = [...templates]
     if (filterAccount === '__all__') return list
-    if (filterAccount === '__global__') return list.filter((t) => !t.account)
-    return list.filter((t) => (t.account || '').toLowerCase() === filterAccount.toLowerCase())
+    if (filterAccount === '__global__') return list.filter((t) => !t.customerId)
+    return list.filter((t) => t.customerId === filterAccount)
   }, [templates, filterAccount])
 
   const openCreate = () => {
     setIsEditMode(false)
     setTemplateToEdit(null)
-    setDraft({ name: '', subject: '', body: '', stepNumber: 1, account: '' })
+    setDraft({ name: '', subject: '', body: '', stepNumber: 1, customerId: null, isGlobal: false })
     onOpen()
   }
 
-  const openEdit = (t: OdcrmEmailTemplate) => {
+  const openEdit = (t: EmailTemplate) => {
     setIsEditMode(true)
     setTemplateToEdit(t)
     setDraft({
       name: t.name,
-      subject: t.subject,
-      body: t.body,
+      subject: t.subjectTemplate,
+      body: t.bodyTemplateHtml,
       stepNumber: t.stepNumber,
-      account: t.account || '',
+      customerId: t.customerId,
+      isGlobal: !t.customerId,
     })
     onOpen()
   }
 
-  const save = () => {
+  const save = async () => {
     if (!draft.name.trim() || !draft.subject.trim() || !draft.body.trim()) {
       toast({
         title: 'Missing fields',
@@ -163,40 +164,63 @@ export default function MarketingEmailTemplatesTab() {
       return
     }
 
-    const now = new Date().toISOString()
+    const activeCustomerId =
+      settingsStore.getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+    if (!activeCustomerId) {
+      toast({ title: 'Missing customer', description: 'Select a customer first.', status: 'error' })
+      return
+    }
+
     if (isEditMode && templateToEdit) {
-      const updated: OdcrmEmailTemplate = {
-        ...templateToEdit,
-        ...draft,
-        account: draft.account?.trim() || undefined,
-        updatedAt: now,
+      const { error } = await api.patch(`/api/templates/${templateToEdit.id}?customerId=${activeCustomerId}`, {
+        name: draft.name.trim(),
+        subjectTemplate: draft.subject.trim(),
+        bodyTemplateHtml: draft.body.trim(),
+        bodyTemplateText: draft.body.trim(),
+        stepNumber: draft.stepNumber,
+        isGlobal: draft.isGlobal,
+      })
+      if (error) {
+        toast({ title: 'Update failed', description: error, status: 'error' })
+        return
       }
-      setTemplatesState((prev) => prev.map((t) => (t.id === templateToEdit.id ? updated : t)))
       toast({ title: 'Template updated', status: 'success', duration: 1500 })
     } else {
-      const created: OdcrmEmailTemplate = {
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        ...draft,
-        account: draft.account?.trim() || undefined,
-        createdAt: now,
-        updatedAt: now,
+      const { error } = await api.post(`/api/templates?customerId=${activeCustomerId}`, {
+        name: draft.name.trim(),
+        subjectTemplate: draft.subject.trim(),
+        bodyTemplateHtml: draft.body.trim(),
+        bodyTemplateText: draft.body.trim(),
+        stepNumber: draft.stepNumber,
+        isGlobal: draft.isGlobal,
+      })
+      if (error) {
+        toast({ title: 'Create failed', description: error, status: 'error' })
+        return
       }
-      setTemplatesState((prev) => [created, ...prev])
       toast({ title: 'Template created', status: 'success', duration: 1500 })
     }
 
+    await loadTemplates(activeCustomerId)
     onClose()
   }
 
-  const requestDelete = (t: OdcrmEmailTemplate) => {
+  const requestDelete = (t: EmailTemplate) => {
     setTemplateToDelete(t)
     onDeleteOpen()
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!templateToDelete) return
-    setTemplatesState((prev) => prev.filter((t) => t.id !== templateToDelete.id))
+    const activeCustomerId =
+      settingsStore.getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+    const { error } = await api.delete(`/api/templates/${templateToDelete.id}?customerId=${activeCustomerId}`)
+    if (error) {
+      toast({ title: 'Delete failed', description: error, status: 'error' })
+      return
+    }
     toast({ title: 'Template deleted', status: 'success', duration: 1500 })
+    await loadTemplates(activeCustomerId)
     setTemplateToDelete(null)
     onDeleteClose()
   }
@@ -221,9 +245,9 @@ export default function MarketingEmailTemplatesTab() {
             <Select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} size="sm">
               <option value="__all__">All templates</option>
               <option value="__global__">Global (no customer)</option>
-              {availableAccounts.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
                 </option>
               ))}
             </Select>
@@ -265,8 +289,8 @@ export default function MarketingEmailTemplatesTab() {
                       <Text fontWeight="semibold">{t.name}</Text>
                     </Td>
                     <Td>
-                      {t.account ? (
-                        <Badge colorScheme="gray">{t.account}</Badge>
+                      {t.customerId ? (
+                        <Badge colorScheme="gray">{customerLookup[t.customerId] || t.customerId}</Badge>
                       ) : (
                         <Text fontSize="sm" color="gray.400" fontStyle="italic">
                           Global
@@ -280,7 +304,7 @@ export default function MarketingEmailTemplatesTab() {
                     </Td>
                     <Td>
                       <Text fontSize="sm" noOfLines={1} maxW="520px">
-                        {t.subject}
+                        {t.subjectTemplate}
                       </Text>
                     </Td>
                     <Td>
@@ -340,16 +364,30 @@ export default function MarketingEmailTemplatesTab() {
                 <FormControl>
                   <FormLabel>Customer (optional)</FormLabel>
                   <Select
-                    value={draft.account || ''}
-                    onChange={(e) => setDraft({ ...draft, account: e.target.value })}
+                    value={draft.customerId || ''}
+                    onChange={(e) => setDraft({ ...draft, customerId: e.target.value || null, isGlobal: !e.target.value })}
                     placeholder="Global (no customer)"
+                    isDisabled={draft.isGlobal}
                   >
-                    {availableAccounts.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
                       </option>
                     ))}
                   </Select>
+                  <Checkbox
+                    mt={2}
+                    isChecked={draft.isGlobal}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        isGlobal: e.target.checked,
+                        customerId: e.target.checked ? null : draft.customerId,
+                      })
+                    }
+                  >
+                    Global template
+                  </Checkbox>
                 </FormControl>
                 <FormControl isRequired maxW="220px">
                   <FormLabel>Step</FormLabel>

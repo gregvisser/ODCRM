@@ -8,20 +8,27 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { applyTemplatePlaceholders, previewTemplate } from '../services/templateRenderer.js'
+import { randomUUID } from 'crypto'
 
 const router = Router()
 
-// Note: ODCRM doesn't have a dedicated templates table yet
-// We'll use email_sequence_steps as our template storage for now
-// Or create a new templates table in a future migration
+const getCustomerId = (req: any): string => {
+  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+  if (!customerId) {
+    const err = new Error('Customer ID required') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+  return customerId
+}
 
 const createTemplateSchema = z.object({
-  customerId: z.string(),
   name: z.string().min(1),
   subjectTemplate: z.string().min(1),
   bodyTemplateHtml: z.string().min(1),
   bodyTemplateText: z.string().optional(),
-  category: z.string().optional(),
+  stepNumber: z.number().int().min(1).max(10).default(1),
+  isGlobal: z.boolean().optional(),
 })
 
 const updateTemplateSchema = z.object({
@@ -29,27 +36,93 @@ const updateTemplateSchema = z.object({
   subjectTemplate: z.string().min(1).optional(),
   bodyTemplateHtml: z.string().min(1).optional(),
   bodyTemplateText: z.string().optional(),
-  category: z.string().optional(),
+  stepNumber: z.number().int().min(1).max(10).optional(),
+  isGlobal: z.boolean().optional(),
 })
 
-// For now, we'll create a simple in-memory templates storage that syncs with localStorage on frontend
-// In production, you'd want to add a dedicated 'templates' table to the database
-
 // GET /api/templates - Get all templates for customer
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
   try {
-    const { customerId } = req.query
+    const customerId = getCustomerId(req)
+    const includeGlobal = req.query.includeGlobal !== 'false'
 
-    if (!customerId || typeof customerId !== 'string') {
-      return res.status(400).json({ error: 'customerId is required' })
+    const templates = await prisma.emailTemplate.findMany({
+      where: includeGlobal
+        ? { OR: [{ customerId }, { customerId: null }] }
+        : { customerId },
+      orderBy: [{ updatedAt: 'desc' }],
+    })
+
+    return res.json(templates)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Create template
+router.post('/', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const data = createTemplateSchema.parse(req.body)
+    const created = await prisma.emailTemplate.create({
+      data: {
+        id: randomUUID(),
+        customerId: data.isGlobal ? null : customerId,
+        name: data.name,
+        subjectTemplate: data.subjectTemplate,
+        bodyTemplateHtml: data.bodyTemplateHtml,
+        bodyTemplateText: data.bodyTemplateText || null,
+        stepNumber: data.stepNumber,
+      },
+    })
+    res.status(201).json(created)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Update template
+router.patch('/:id', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const data = updateTemplateSchema.parse(req.body)
+    const { id } = req.params
+
+    const existing = await prisma.emailTemplate.findUnique({ where: { id } })
+    if (!existing) return res.status(404).json({ error: 'Template not found' })
+    if (existing.customerId && existing.customerId !== customerId) {
+      return res.status(403).json({ error: 'Template not accessible' })
     }
 
-    // For now, return empty array - frontend uses localStorage
-    // In full migration, would query from database templates table
-    return res.json([])
+    const updated = await prisma.emailTemplate.update({
+      where: { id },
+      data: {
+        ...data,
+        customerId: data.isGlobal ? null : existing.customerId ?? customerId,
+      },
+    })
+    res.json(updated)
   } catch (error) {
-    console.error('Error fetching templates:', error)
-    return res.status(500).json({ error: 'Failed to fetch templates' })
+    next(error)
+  }
+})
+
+// Delete template
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+
+    const existing = await prisma.emailTemplate.findUnique({ where: { id } })
+    if (!existing) return res.status(404).json({ error: 'Template not found' })
+    if (existing.customerId && existing.customerId !== customerId) {
+      return res.status(403).json({ error: 'Template not accessible' })
+    }
+
+    await prisma.emailTemplate.delete({ where: { id } })
+    res.json({ success: true })
+  } catch (error) {
+    next(error)
   }
 })
 

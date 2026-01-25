@@ -14,6 +14,7 @@ import listsRoutes from './routes/lists.js'
 import sequencesRoutes from './routes/sequences.js'
 import customersRoutes from './routes/customers.js'
 import leadsRoutes from './routes/leads.js'
+import templatesRoutes from './routes/templates.js'
 import companyDataRoutes from './routes/companyData.js'
 import adminRoutes from './routes/admin.js'
 import jobSectorsRoutes from './routes/jobSectors.js'
@@ -88,6 +89,7 @@ app.use('/api/lists', listsRoutes)
 app.use('/api/sequences', sequencesRoutes)
 app.use('/api/customers', customersRoutes)
 app.use('/api/leads', leadsRoutes)
+app.use('/api/templates', templatesRoutes)
 app.use('/api/company-data', companyDataRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/job-sectors', jobSectorsRoutes)

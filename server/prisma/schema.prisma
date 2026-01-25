@@ -117,6 +117,7 @@ model Customer {
   customerContacts      CustomerContact[]
   contactLists          ContactList[]
   emailSequences        EmailSequence[]
+  emailTemplates        EmailTemplate[]
   leadRecords           LeadRecord[]
   leadSyncState         LeadSyncState?
   suppressionEntries    SuppressionEntry[]
@@ -256,6 +257,24 @@ model EmailCampaignTemplate {
   @@unique([campaignId, stepNumber])
   @@index([campaignId])
   @@map("email_campaign_templates")
+}
+
+model EmailTemplate {
+  id               String   @id
+  customerId       String?
+  name             String
+  subjectTemplate  String
+  bodyTemplateHtml String
+  bodyTemplateText String?
+  stepNumber       Int      @default(1)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([stepNumber])
+  @@map("email_templates")
 }
 
 model EmailCampaignProspect {

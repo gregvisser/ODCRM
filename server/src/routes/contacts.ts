@@ -19,8 +19,12 @@ const getCustomerId = (req: express.Request): string => {
 router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
+    const source = req.query.source as string | undefined
     const contacts = await prisma.contact.findMany({
-      where: { customerId },
+      where: {
+        customerId,
+        ...(source ? { source } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 1000,
     })
@@ -182,6 +186,22 @@ router.post('/bulk-upsert', async (req, res, next) => {
     })
 
     res.json({ created, updated, contacts })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Delete contacts by source (e.g., cognism imports)
+router.delete('/by-source', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const source = req.query.source as string | undefined
+    if (!source) return res.status(400).json({ error: 'source is required' })
+
+    const result = await prisma.contact.deleteMany({
+      where: { customerId, source },
+    })
+    res.json({ deleted: result.count })
   } catch (error) {
     next(error)
   }

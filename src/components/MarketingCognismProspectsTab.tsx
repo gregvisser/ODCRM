@@ -1,9 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
   Button,
-  Checkbox,
   FormControl,
   FormLabel,
   Heading,
@@ -27,9 +26,7 @@ import {
 } from '@chakra-ui/react'
 import { DeleteIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
-import { OdcrmStorageKeys } from '../platform/keys'
-import { getJson } from '../platform/storage'
-import { getCognismProspects, setCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
+import { settingsStore } from '../platform'
 
 type ParsedProspectRow = {
   firstName: string
@@ -50,6 +47,19 @@ type ParseMeta = {
 type ParseResult = {
   rows: ParsedProspectRow[]
   meta: ParseMeta | null
+}
+
+type Customer = { id: string; name: string }
+
+type ServerProspect = {
+  id: string
+  firstName: string
+  lastName: string
+  jobTitle?: string | null
+  companyName: string
+  email: string
+  phone?: string | null
+  source?: string | null
 }
 
 function detectDelimiter(text: string): '\t' | ',' {
@@ -201,44 +211,75 @@ export default function MarketingCognismProspectsTab() {
   const toast = useToast()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const availableAccounts = useMemo(() => {
-    const accounts = getJson<Array<{ name: string }>>(OdcrmStorageKeys.accounts) || []
-    const names = accounts.map((a) => a?.name).filter(Boolean)
-    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-  }, [])
-
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<string>('')
   const [rawText, setRawText] = useState<string>('')
   const [search, setSearch] = useState<string>('')
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
-
-  const stored = useMemo(() => getCognismProspects(), [])
-  const [prospects, setProspects] = useState<CognismProspect[]>(stored)
+  const [prospects, setProspects] = useState<ServerProspect[]>([])
+  const [loading, setLoading] = useState(false)
 
   const parsedResult = useMemo(() => parseCognismExport(rawText), [rawText])
   const parsed = parsedResult.rows
 
   const visible = useMemo(() => {
-    const scoped = selectedCustomer
-      ? prospects.filter((p) => (p.accountName || '').toLowerCase() === selectedCustomer.toLowerCase())
-      : prospects
-    if (!search.trim()) return scoped
+    if (!search.trim()) return prospects
     const q = search.trim().toLowerCase()
-    return scoped.filter((p) =>
+    return prospects.filter((p) =>
       [p.firstName, p.lastName, p.email, p.companyName, p.jobTitle, p.phone]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
         .includes(q)
     )
-  }, [prospects, selectedCustomer, search])
+  }, [prospects, search])
 
-  const persist = (next: CognismProspect[]) => {
-    setProspects(next)
-    setCognismProspects(next)
+  const customerLookup = useMemo(() => {
+    return Object.fromEntries(customers.map((c) => [c.id, c.name]))
+  }, [customers])
+
+  const loadCustomers = async () => {
+    const { data, error } = await api.get<Customer[]>('/api/customers')
+    if (error) {
+      toast({ title: 'Failed to load customers', description: error, status: 'error' })
+      return
+    }
+    const list = data || []
+    setCustomers(list)
+    const activeCustomerId =
+      settingsStore.getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+    if (activeCustomerId) {
+      setSelectedCustomer(activeCustomerId)
+    }
   }
 
-  const importParsed = () => {
+  const loadProspects = async (customerId: string) => {
+    if (!customerId) return
+    setLoading(true)
+    const { data, error } = await api.get<ServerProspect[]>(
+      `/api/contacts?customerId=${customerId}&source=cognism`,
+    )
+    if (error) {
+      toast({ title: 'Failed to load prospects', description: error, status: 'error' })
+      setLoading(false)
+      return
+    }
+    setProspects(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    loadCustomers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      loadProspects(selectedCustomer)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer])
+
+  const importParsed = async () => {
     if (!selectedCustomer) {
       toast({ title: 'Select a customer first', description: 'Pick the customer account this list belongs to.', status: 'error' })
       return
@@ -248,95 +289,60 @@ export default function MarketingCognismProspectsTab() {
       return
     }
 
-    const now = new Date().toISOString()
-    const existingKey = new Set(
-      prospects.map((p) => `${(p.accountName || '').toLowerCase()}|${p.email.toLowerCase()}`)
+    const { error, data } = await api.post<{ created: number; updated: number }>(
+      `/api/contacts/bulk-upsert?customerId=${selectedCustomer}`,
+      {
+        contacts: parsed.map((row) => ({
+          firstName: row.firstName || '',
+          lastName: row.lastName || '',
+          jobTitle: row.jobTitle,
+          companyName: row.companyName,
+          email: row.email,
+          phone: row.phone,
+          source: 'cognism',
+        })),
+      },
     )
-
-    let added = 0
-    const next = [...prospects]
-    for (const row of parsed) {
-      const key = `${selectedCustomer.toLowerCase()}|${row.email.toLowerCase()}`
-      if (existingKey.has(key)) continue
-      existingKey.add(key)
-      next.push({
-        id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        firstName: row.firstName || '',
-        lastName: row.lastName || '',
-        jobTitle: row.jobTitle,
-        companyName: row.companyName,
-        email: row.email,
-        phone: row.phone,
-        accountName: selectedCustomer,
-        source: 'cognism',
-        importedAt: now,
-      })
-      added++
+    if (error) {
+      toast({ title: 'Import failed', description: error, status: 'error' })
+      return
     }
 
-    persist(next)
     setRawText('')
-    setSelectedEmails(new Set())
+    await loadProspects(selectedCustomer)
 
     toast({
       title: 'Imported prospects',
-      description: `Added ${added} new prospect(s) for ${selectedCustomer}.`,
+      description: `Created ${data?.created ?? 0}, updated ${data?.updated ?? 0} prospect(s) for ${customerLookup[selectedCustomer] || selectedCustomer}.`,
       status: 'success',
       duration: 3500,
       isClosable: true,
     })
   }
 
-  const syncSelectedToServer = async () => {
-    const emails = Array.from(selectedEmails)
-    if (emails.length === 0) {
-      toast({ title: 'No prospects selected', status: 'info', duration: 2000 })
-      return
-    }
-    const toSync = prospects.filter((p) => emails.includes(p.email.toLowerCase()))
-    if (toSync.length === 0) return
-
-    const { error, data } = await api.post<{ created: number; updated: number }>(`/api/contacts/bulk-upsert`, {
-      contacts: toSync.map((p) => ({
-        firstName: p.firstName,
-        lastName: p.lastName,
-        jobTitle: p.jobTitle,
-        companyName: p.companyName,
-        email: p.email,
-        phone: p.phone,
-        source: 'cognism',
-      })),
-    })
-
-    if (error) {
-      toast({ title: 'Sync failed', description: error, status: 'error', duration: 4000, isClosable: true })
-      return
-    }
-    toast({
-      title: 'Synced to server',
-      description: `Created ${data?.created ?? 0}, updated ${data?.updated ?? 0} contacts.`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    })
-  }
-
-  const toggleAllVisible = (checked: boolean) => {
-    if (!checked) {
-      setSelectedEmails(new Set())
-      return
-    }
-    const next = new Set(selectedEmails)
-    for (const p of visible) next.add(p.email.toLowerCase())
-    setSelectedEmails(next)
-  }
-
-  const deleteCustomerList = () => {
+  const refreshFromServer = async () => {
     if (!selectedCustomer) return
-    const next = prospects.filter((p) => (p.accountName || '').toLowerCase() !== selectedCustomer.toLowerCase())
-    persist(next)
-    setSelectedEmails(new Set())
-    toast({ title: 'Deleted list', description: `Removed prospects for ${selectedCustomer}.`, status: 'success', duration: 2500 })
+    await loadProspects(selectedCustomer)
+    toast({ title: 'Refreshed', status: 'success', duration: 1500 })
+  }
+
+  const deleteCustomerList = async () => {
+    if (!selectedCustomer) return
+    if (!confirm('Delete all Cognism prospects for this customer?')) return
+    const { error, data } = await api.delete<{ deleted: number }>(
+      `/api/contacts/by-source?customerId=${selectedCustomer}&source=cognism`,
+    )
+    if (error) {
+      toast({ title: 'Delete failed', description: error, status: 'error' })
+      return
+    }
+    await loadProspects(selectedCustomer)
+    toast({
+      title: 'Deleted list',
+      description: `Removed ${data?.deleted ?? 0} prospects for ${customerLookup[selectedCustomer] || selectedCustomer}.`,
+      status: 'success',
+      duration: 2500,
+    })
   }
 
   const onFilePick = async (file: File) => {
@@ -360,12 +366,11 @@ export default function MarketingCognismProspectsTab() {
             value={selectedCustomer}
             onChange={(e) => {
               setSelectedCustomer(e.target.value)
-              setSelectedEmails(new Set())
             }}
             placeholder="Select customer"
           >
-            {availableAccounts.map((name) => (
-              <option key={name} value={name}>{name}</option>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>{customer.name}</option>
             ))}
           </Select>
         </FormControl>
@@ -390,7 +395,7 @@ export default function MarketingCognismProspectsTab() {
         </Button>
       </HStack>
 
-      {availableAccounts.length === 0 && (
+      {customers.length === 0 && (
         <Alert status="warning">
           <AlertIcon />
           <AlertDescription>
@@ -441,14 +446,8 @@ export default function MarketingCognismProspectsTab() {
             <FormLabel fontSize="sm" mb={1}>Search</FormLabel>
             <Input value={search} onChange={(e) => setSearch(e.target.value)} size="sm" placeholder="Search name/email/company..." />
           </FormControl>
-          <Checkbox
-            isChecked={visible.length > 0 && visible.every((p) => selectedEmails.has(p.email.toLowerCase()))}
-            onChange={(e) => toggleAllVisible(e.target.checked)}
-          >
-            Select visible
-          </Checkbox>
-          <Button size="sm" onClick={syncSelectedToServer} variant="outline">
-            Sync selected to server
+          <Button size="sm" onClick={refreshFromServer} variant="outline" isDisabled={!selectedCustomer || loading}>
+            Refresh
           </Button>
         </HStack>
 
@@ -469,7 +468,6 @@ export default function MarketingCognismProspectsTab() {
         <Table size="sm" variant="simple">
           <Thead bg="gray.50">
             <Tr>
-              <Th>Select</Th>
               <Th>Name</Th>
               <Th>Email</Th>
               <Th>Company</Th>
@@ -480,30 +478,15 @@ export default function MarketingCognismProspectsTab() {
           <Tbody>
             {visible.length === 0 ? (
               <Tr>
-                <Td colSpan={6}>
+                <Td colSpan={5}>
                   <Text py={4} color="gray.500">
-                    No prospects yet{selectedCustomer ? ` for ${selectedCustomer}` : ''}.
+                    No prospects yet{selectedCustomer ? ` for ${customerLookup[selectedCustomer] || selectedCustomer}` : ''}.
                   </Text>
                 </Td>
               </Tr>
             ) : (
-              visible.slice(0, 500).map((p) => {
-                const emailKey = p.email.toLowerCase()
-                return (
+              visible.slice(0, 500).map((p) => (
                   <Tr key={p.id}>
-                    <Td>
-                      <Checkbox
-                        isChecked={selectedEmails.has(emailKey)}
-                        onChange={(e) => {
-                          setSelectedEmails((prev) => {
-                            const next = new Set(prev)
-                            if (e.target.checked) next.add(emailKey)
-                            else next.delete(emailKey)
-                            return next
-                          })
-                        }}
-                      />
-                    </Td>
                     <Td>
                       <Text fontWeight="semibold">{`${p.firstName} ${p.lastName}`.trim() || '(No name)'}</Text>
                     </Td>
@@ -520,8 +503,7 @@ export default function MarketingCognismProspectsTab() {
                       {p.accountName ? <Badge colorScheme="gray">{p.accountName}</Badge> : <Badge>Unassigned</Badge>}
                     </Td>
                   </Tr>
-                )
-              })
+              ))
             )}
           </Tbody>
         </Table>
