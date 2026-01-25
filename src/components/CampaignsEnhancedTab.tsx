@@ -4,7 +4,7 @@
  * Adapted to Chakra UI and ODCRM database schema
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -38,6 +38,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, ViewIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
+import { settingsStore } from '../platform'
 
 type Campaign = {
   id: string
@@ -79,6 +80,15 @@ export default function CampaignsEnhancedTab() {
 
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure()
   const toast = useToast()
+  const activeCustomerId = form.customerId || settingsStore.getCurrentCustomerId('prod-customer-1')
+
+  const listLookup = useMemo(() => {
+    return Object.fromEntries(lists.map((list) => [list.id, list]))
+  }, [lists])
+
+  const sequenceLookup = useMemo(() => {
+    return Object.fromEntries(sequences.map((sequence) => [sequence.id, sequence]))
+  }, [sequences])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -86,7 +96,7 @@ export default function CampaignsEnhancedTab() {
     // Fetch all necessary data
     const [customersRes, campaignsRes] = await Promise.all([
       api.get<any[]>('/api/customers'),
-      api.get<Campaign[]>('/api/campaigns'),
+      api.get<Campaign[]>(`/api/campaigns?customerId=${activeCustomerId}`),
     ])
 
     if ((customersRes.data || [])) {
@@ -101,7 +111,7 @@ export default function CampaignsEnhancedTab() {
     }
 
     setLoading(false)
-  }, [form.customerId])
+  }, [activeCustomerId])
 
   // Load lists and sequences when customer changes
   useEffect(() => {
@@ -132,7 +142,7 @@ export default function CampaignsEnhancedTab() {
       return
     }
 
-    const { error } = await api.post('/api/campaigns', {
+    const { error } = await api.post(`/api/campaigns?customerId=${activeCustomerId}`, {
       customerId: form.customerId,
       name: form.name,
       description: form.description,
@@ -160,7 +170,7 @@ export default function CampaignsEnhancedTab() {
   }
 
   const handleStartCampaign = async (campaignId: string) => {
-    const { error } = await api.post(`/api/campaigns/${campaignId}/start`, {})
+    const { error } = await api.post(`/api/campaigns/${campaignId}/start?customerId=${activeCustomerId}`, {})
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
     } else {
@@ -170,7 +180,7 @@ export default function CampaignsEnhancedTab() {
   }
 
   const handlePauseCampaign = async (campaignId: string) => {
-    const { error } = await api.post(`/api/campaigns/${campaignId}/pause`, {})
+    const { error } = await api.post(`/api/campaigns/${campaignId}/pause?customerId=${activeCustomerId}`, {})
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
     } else {
@@ -239,8 +249,12 @@ export default function CampaignsEnhancedTab() {
                       {campaign.status.toUpperCase()}
                     </Badge>
                   </Td>
-                  <Td fontSize="sm">List name here</Td>
-                  <Td fontSize="sm">Sequence name here</Td>
+                  <Td fontSize="sm">
+                    {listLookup[campaign.listId || '']?.name || campaign.listId || '-'}
+                  </Td>
+                  <Td fontSize="sm">
+                    {sequenceLookup[campaign.sequenceId || '']?.name || campaign.sequenceId || '-'}
+                  </Td>
                   <Td fontSize="sm" color="gray.600">
                     {new Date(campaign.createdAt).toLocaleDateString()}
                   </Td>
