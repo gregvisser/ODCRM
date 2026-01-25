@@ -63,6 +63,7 @@ enum ProspectStatus {
   bounced
   unsubscribed
   replied
+  suppressed
   completed
 }
 
@@ -118,6 +119,7 @@ model Customer {
   emailSequences        EmailSequence[]
   leadRecords           LeadRecord[]
   leadSyncState         LeadSyncState?
+  suppressionEntries    SuppressionEntry[]
 
   @@index([id])
   @@index([domain])
@@ -335,6 +337,25 @@ model EmailEvent {
   @@index([occurredAt])
   @@index([type])
   @@map("email_events")
+}
+
+model SuppressionEntry {
+  id         String   @id
+  customerId String
+  type       String   // "domain" | "email"
+  value      String
+  reason     String?
+  source     String?  // "manual" | "import" | "bounce" | "unsubscribe"
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, type, value])
+  @@index([customerId])
+  @@index([type])
+  @@index([value])
+  @@map("suppression_entries")
 }
 
 model EmailMessageMetadata {

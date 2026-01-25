@@ -101,8 +101,8 @@ export default function CampaignsEnhancedTab() {
 
     if ((customersRes.data || [])) {
       setCustomers((customersRes.data || []))
-      if ((customersRes.data || []).length > 0 && !form.customerId) {
-        setForm((f) => ({ ...f, customerId: (customersRes.data || [])[0].id }))
+      if ((customersRes.data || []).length > 0) {
+        setForm((f) => (f.customerId ? f : { ...f, customerId: (customersRes.data || [])[0].id }))
       }
     }
 

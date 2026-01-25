@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -137,6 +137,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     direction: 'desc',
   })
   const toast = useToast()
+  const lastErrorToastAtRef = useRef(0)
 
   // Allow parent navigators (top-tab shell) to focus an account's performance view.
   useEffect(() => {
@@ -242,13 +243,17 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       }
       setError('Failed to load leads data from the server.')
       console.error('Error loading leads:', err)
-      toast({
-        title: 'Error loading leads',
-        description: 'Failed to fetch data from the server. Please try again.',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
+      const now = Date.now()
+      if (now - lastErrorToastAtRef.current > 60000) {
+        toast({
+          title: 'Error loading leads',
+          description: 'Failed to fetch data from the server. Please try again.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        lastErrorToastAtRef.current = now
+      }
     } finally {
       setLoading(false)
     }

@@ -115,6 +115,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
             unsubscribedAt: null,
             bouncedAt: null,
             replyDetectedAt: null,
+            lastStatus: { not: 'suppressed' },
           }
         },
         include: {
@@ -235,6 +236,25 @@ async function processScheduledEmails(prisma: PrismaClient) {
   }
 }
 
+async function isSuppressed(prisma: PrismaClient, customerId: string, email: string) {
+  const normalizedEmail = email.trim().toLowerCase()
+  const domain = normalizedEmail.split('@')[1]
+  if (!domain) return false
+
+  const match = await prisma.suppressionEntry.findFirst({
+    where: {
+      customerId,
+      OR: [
+        { type: 'email', value: normalizedEmail },
+        { type: 'domain', value: domain },
+      ]
+    },
+    select: { id: true },
+  })
+
+  return Boolean(match)
+}
+
 async function sendCampaignEmail(
   prisma: PrismaClient,
   campaign: any,
@@ -242,6 +262,28 @@ async function sendCampaignEmail(
   stepNumber: number
 ) {
   try {
+    const recipientEmail = prospect.contact?.email?.toLowerCase()
+    if (recipientEmail) {
+      const suppressed = await isSuppressed(prisma, campaign.customerId, recipientEmail)
+      if (suppressed) {
+        await prisma.emailCampaignProspect.update({
+          where: { id: prospect.id },
+          data: { lastStatus: 'suppressed' } as any
+        })
+        try {
+          await (prisma as any).emailCampaignProspectStep.deleteMany({
+            where: {
+              campaignProspectId: prospect.id,
+              sentAt: null
+            }
+          })
+        } catch {
+          // ignore if schema not migrated yet
+        }
+        return
+      }
+    }
+
     const template = campaign.templates.find((t: any) => t.stepNumber === stepNumber)
     if (!template) {
       console.error(`Template for step ${stepNumber} not found for campaign ${campaign.id}`)

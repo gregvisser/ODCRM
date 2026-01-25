@@ -15,6 +15,7 @@ import {
   CopyIcon,
   SettingsIcon,
   TimeIcon,
+  WarningIcon,
 } from '@chakra-ui/icons'
 import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack, Badge } from '@chakra-ui/react'
 
@@ -29,6 +30,7 @@ import TemplatesTab from './components/TemplatesTab'
 import InboxTab from './components/InboxTab'
 import OverviewDashboard from './components/OverviewDashboard'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
+import ComplianceTab from './components/ComplianceTab'
 
 export type OpenDoorsViewId =
   | 'overview'
@@ -37,6 +39,7 @@ export type OpenDoorsViewId =
   | 'lists'
   | 'campaigns'
   | 'email-accounts'
+  | 'compliance'
   | 'reports'
   | 'templates'
   | 'inbox'
@@ -53,6 +56,7 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'lists' ||
     view === 'campaigns' ||
     view === 'email-accounts' ||
+    view === 'compliance' ||
     view === 'reports' ||
     view === 'templates' ||
     view === 'inbox' ||
@@ -82,9 +86,10 @@ export default function MarketingHomePage({
     : activeView === 'lists' ? 4
     : activeView === 'campaigns' ? 5
     : activeView === 'email-accounts' ? 6
-    : activeView === 'reports' ? 7
-    : activeView === 'templates' ? 8
-    : activeView === 'inbox' ? 9
+    : activeView === 'compliance' ? 7
+    : activeView === 'reports' ? 8
+    : activeView === 'templates' ? 9
+    : activeView === 'inbox' ? 10
     : 0
 
   return (
@@ -119,9 +124,10 @@ export default function MarketingHomePage({
               : nextIndex === 4 ? 'lists'
               : nextIndex === 5 ? 'campaigns'
               : nextIndex === 6 ? 'email-accounts'
-              : nextIndex === 7 ? 'reports'
-              : nextIndex === 8 ? 'templates'
-              : nextIndex === 9 ? 'inbox'
+              : nextIndex === 7 ? 'compliance'
+              : nextIndex === 8 ? 'reports'
+              : nextIndex === 9 ? 'templates'
+              : nextIndex === 10 ? 'inbox'
               : 'overview'
             onNavigate?.(nextView)
           }}
@@ -224,41 +230,6 @@ export default function MarketingHomePage({
                     h={12}
                   >
                     <HStack spacing={3} w="full">
-                      <Icon as={TimeIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Leads</Text>
-                        <Text fontSize="xs" opacity={0.8}>Google Sheets sync</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
                       <Icon as={RepeatIcon} boxSize={5} />
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">Sequences</Text>
@@ -298,6 +269,41 @@ export default function MarketingHomePage({
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">People</Text>
                         <Text fontSize="xs" opacity={0.8}>Contact management</Text>
+                      </VStack>
+                    </HStack>
+                  </Tab>
+
+                  <Tab
+                    justifyContent={{ md: 'flex-start' }}
+                    fontSize="sm"
+                    fontWeight="600"
+                    borderRadius="lg"
+                    color="gray.700"
+                    bg="white"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    _hover={{
+                      bg: 'blue.50',
+                      color: 'blue.700',
+                      borderColor: 'blue.300',
+                      transform: 'translateY(-1px)',
+                      boxShadow: 'sm'
+                    }}
+                    _selected={{
+                      bg: 'blue.500',
+                      color: 'white',
+                      borderColor: 'blue.500',
+                      boxShadow: 'md',
+                      transform: 'translateY(-1px)'
+                    }}
+                    transition="all 0.2s"
+                    h={12}
+                  >
+                    <HStack spacing={3} w="full">
+                      <Icon as={TimeIcon} boxSize={5} />
+                      <VStack align="start" spacing={0} flex={1}>
+                        <Text fontSize="sm" fontWeight="semibold">Leads</Text>
+                        <Text fontSize="xs" opacity={0.8}>Google Sheets sync</Text>
                       </VStack>
                     </HStack>
                   </Tab>
@@ -403,6 +409,41 @@ export default function MarketingHomePage({
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">Email Accounts</Text>
                         <Text fontSize="xs" opacity={0.8}>Sending infrastructure</Text>
+                      </VStack>
+                    </HStack>
+                  </Tab>
+
+                  <Tab
+                    justifyContent={{ md: 'flex-start' }}
+                    fontSize="sm"
+                    fontWeight="600"
+                    borderRadius="lg"
+                    color="gray.700"
+                    bg="white"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    _hover={{
+                      bg: 'blue.50',
+                      color: 'blue.700',
+                      borderColor: 'blue.300',
+                      transform: 'translateY(-1px)',
+                      boxShadow: 'sm'
+                    }}
+                    _selected={{
+                      bg: 'blue.500',
+                      color: 'white',
+                      borderColor: 'blue.500',
+                      boxShadow: 'md',
+                      transform: 'translateY(-1px)'
+                    }}
+                    transition="all 0.2s"
+                    h={12}
+                  >
+                    <HStack spacing={3} w="full">
+                      <Icon as={WarningIcon} boxSize={5} />
+                      <VStack align="start" spacing={0} flex={1}>
+                        <Text fontSize="sm" fontWeight="semibold">Compliance</Text>
+                        <Text fontSize="xs" opacity={0.8}>Suppression & safety</Text>
                       </VStack>
                     </HStack>
                   </Tab>
@@ -557,6 +598,9 @@ export default function MarketingHomePage({
               </TabPanel>
               <TabPanel px={0} h="full">
                 <EmailAccountsTab />
+              </TabPanel>
+              <TabPanel px={0} h="full">
+                <ComplianceTab />
               </TabPanel>
               <TabPanel px={0} h="full">
                 <ReportsTab />
