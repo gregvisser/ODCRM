@@ -133,6 +133,7 @@ const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
 }
 
 const CONTACT_ROLES_STORAGE_KEY = 'odcrm_contact_roles'
+const LOCAL_CUSTOMER_PREFIX = 'local_'
 
 const normalizeClientProfile = (raw?: Partial<ClientProfile> | null): ClientProfile => {
   const safe = raw && typeof raw === 'object' ? raw : {}
@@ -193,6 +194,16 @@ const saveContactRoles = (roles: ContactRoleItem[]) => {
   setJson(CONTACT_ROLES_STORAGE_KEY, roles)
 }
 
+const buildLocalCustomers = (): CustomerApi[] => {
+  const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
+  if (!Array.isArray(storedAccounts) || storedAccounts.length === 0) return []
+  return storedAccounts.map((account, index) => ({
+    id: `${LOCAL_CUSTOMER_PREFIX}${account.name || index}`,
+    name: account.name || `Account ${index + 1}`,
+    accountData: account as Record<string, unknown>,
+  }))
+}
+
 export default function OnboardingHomePage() {
   const toast = useToast()
   const [customers, setCustomers] = useState<CustomerApi[]>([])
@@ -233,12 +244,21 @@ export default function OnboardingHomePage() {
     setIsLoading(true)
     setLoadError(null)
     const { data, error } = await api.get<CustomerApi[]>('/api/customers')
-    if (error) {
-      setLoadError(error)
-    } else if (data) {
-      setCustomers(data)
-      if (!selectedCustomerId && data.length > 0) {
-        setSelectedCustomerId(data[0].id)
+    const apiCustomers = Array.isArray(data) ? data : []
+    if (error || apiCustomers.length === 0) {
+      const localCustomers = buildLocalCustomers()
+      if (localCustomers.length > 0) {
+        setCustomers(localCustomers)
+        if (!selectedCustomerId || !localCustomers.some((item) => item.id === selectedCustomerId)) {
+          setSelectedCustomerId(localCustomers[0].id)
+        }
+      } else if (error) {
+        setLoadError(error)
+      }
+    } else {
+      setCustomers(apiCustomers)
+      if (!selectedCustomerId || !apiCustomers.some((item) => item.id === selectedCustomerId)) {
+        setSelectedCustomerId(apiCustomers[0].id)
       }
     }
     setIsLoading(false)
@@ -589,14 +609,21 @@ export default function OnboardingHomePage() {
       emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
       days: accountDetails.daysPerWeek,
     }
-    const { error } = await api.put(`/api/customers/${selectedCustomer.id}`, {
-      name: selectedCustomer.name,
-      accountData: nextAccountData,
-    })
-    if (error) {
-      toast({ title: 'Save failed', description: error, status: 'error', duration: 4000 })
-      setIsSaving(false)
-      return
+    let apiError: string | undefined
+    if (!selectedCustomer.id.startsWith(LOCAL_CUSTOMER_PREFIX)) {
+      const { error } = await api.put(`/api/customers/${selectedCustomer.id}`, {
+        name: selectedCustomer.name,
+        accountData: nextAccountData,
+      })
+      apiError = error
+    }
+    if (apiError) {
+      toast({
+        title: 'Saved locally, but API update failed',
+        description: apiError,
+        status: 'warning',
+        duration: 5000,
+      })
     }
     setCustomers((prev) =>
       prev.map((customer) =>
@@ -633,7 +660,9 @@ export default function OnboardingHomePage() {
       emit('accountsUpdated', updatedAccounts)
     }
     setAccountDetails(nextAccountDetails)
-    toast({ title: 'Onboarding details saved', status: 'success', duration: 2500 })
+    if (!apiError) {
+      toast({ title: 'Onboarding details saved', status: 'success', duration: 2500 })
+    }
     setIsSaving(false)
   }
 
