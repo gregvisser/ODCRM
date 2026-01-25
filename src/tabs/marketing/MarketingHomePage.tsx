@@ -16,6 +16,7 @@ import {
   SettingsIcon,
   TimeIcon,
   WarningIcon,
+  CalendarIcon,
 } from '@chakra-ui/icons'
 import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack, Badge } from '@chakra-ui/react'
 
@@ -31,6 +32,7 @@ import InboxTab from './components/InboxTab'
 import OverviewDashboard from './components/OverviewDashboard'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 import ComplianceTab from './components/ComplianceTab'
+import SchedulesTab from './components/SchedulesTab'
 
 export type OpenDoorsViewId =
   | 'overview'
@@ -57,6 +59,7 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'campaigns' ||
     view === 'email-accounts' ||
     view === 'compliance' ||
+    view === 'schedules' ||
     view === 'reports' ||
     view === 'templates' ||
     view === 'inbox' ||
@@ -87,9 +90,10 @@ export default function MarketingHomePage({
     : activeView === 'campaigns' ? 5
     : activeView === 'email-accounts' ? 6
     : activeView === 'compliance' ? 7
-    : activeView === 'reports' ? 8
-    : activeView === 'templates' ? 9
-    : activeView === 'inbox' ? 10
+    : activeView === 'schedules' ? 8
+    : activeView === 'reports' ? 9
+    : activeView === 'templates' ? 10
+    : activeView === 'inbox' ? 11
     : 0
 
   return (
@@ -125,9 +129,10 @@ export default function MarketingHomePage({
               : nextIndex === 5 ? 'campaigns'
               : nextIndex === 6 ? 'email-accounts'
               : nextIndex === 7 ? 'compliance'
-              : nextIndex === 8 ? 'reports'
-              : nextIndex === 9 ? 'templates'
-              : nextIndex === 10 ? 'inbox'
+              : nextIndex === 8 ? 'schedules'
+              : nextIndex === 9 ? 'reports'
+              : nextIndex === 10 ? 'templates'
+              : nextIndex === 11 ? 'inbox'
               : 'overview'
             onNavigate?.(nextView)
           }}
@@ -475,6 +480,41 @@ export default function MarketingHomePage({
                     h={12}
                   >
                     <HStack spacing={3} w="full">
+                      <Icon as={CalendarIcon} boxSize={5} />
+                      <VStack align="start" spacing={0} flex={1}>
+                        <Text fontSize="sm" fontWeight="semibold">Schedules</Text>
+                        <Text fontSize="xs" opacity={0.8}>Delivery windows</Text>
+                      </VStack>
+                    </HStack>
+                  </Tab>
+
+                  <Tab
+                    justifyContent={{ md: 'flex-start' }}
+                    fontSize="sm"
+                    fontWeight="600"
+                    borderRadius="lg"
+                    color="gray.700"
+                    bg="white"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    _hover={{
+                      bg: 'blue.50',
+                      color: 'blue.700',
+                      borderColor: 'blue.300',
+                      transform: 'translateY(-1px)',
+                      boxShadow: 'sm'
+                    }}
+                    _selected={{
+                      bg: 'blue.500',
+                      color: 'white',
+                      borderColor: 'blue.500',
+                      boxShadow: 'md',
+                      transform: 'translateY(-1px)'
+                    }}
+                    transition="all 0.2s"
+                    h={12}
+                  >
+                    <HStack spacing={3} w="full">
                       <Icon as={SearchIcon} boxSize={5} />
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">Reports</Text>
@@ -601,6 +641,9 @@ export default function MarketingHomePage({
               </TabPanel>
               <TabPanel px={0} h="full">
                 <ComplianceTab />
+              </TabPanel>
+              <TabPanel px={0} h="full">
+                <SchedulesTab />
               </TabPanel>
               <TabPanel px={0} h="full">
                 <ReportsTab />
