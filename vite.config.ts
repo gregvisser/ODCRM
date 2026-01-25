@@ -16,14 +16,5 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     chunkSizeWarningLimit: 1500,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom'],
-          ui: ['@chakra-ui/react', '@chakra-ui/icons', '@emotion/react', '@emotion/styled'],
-          utils: ['framer-motion', 'papaparse'],
-        }
-      }
-    }
   }
 })
