@@ -340,7 +340,7 @@ const TemplatesTab: React.FC = () => {
                 <Menu>
                   <MenuButton
                     as={IconButton}
-                    icon={<MoreVerticalIcon />}
+                    icon={<EditIcon />}
                     size="sm"
                     variant="ghost"
                     onClick={(e) => e.stopPropagation()}

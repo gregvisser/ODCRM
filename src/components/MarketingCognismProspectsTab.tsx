@@ -500,7 +500,7 @@ export default function MarketingCognismProspectsTab() {
                       <Text fontSize="sm" color="gray.700">{p.jobTitle || '-'}</Text>
                     </Td>
                     <Td>
-                      {p.accountName ? <Badge colorScheme="gray">{p.accountName}</Badge> : <Badge>Unassigned</Badge>}
+                      <Badge colorScheme="gray">{p.companyName || 'Unassigned'}</Badge>
                     </Td>
                   </Tr>
               ))

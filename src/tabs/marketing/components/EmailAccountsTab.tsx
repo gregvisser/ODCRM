@@ -19,6 +19,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  MenuDivider,
   Progress,
   Select,
   SimpleGrid,
@@ -59,15 +60,12 @@ import {
 import {
   AddIcon,
   SearchIcon,
-  MoreVerticalIcon,
   EditIcon,
   DeleteIcon,
   EmailIcon,
   CheckCircleIcon,
   WarningIcon,
   SettingsIcon,
-  TestTubeIcon,
-  RefreshIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
@@ -171,7 +169,7 @@ const EmailAccountsTab: React.FC = () => {
         await api.put(`/api/email-accounts/${editingAccount.id}`, editingAccount)
       } else {
         const res = await api.post('/api/email-accounts', editingAccount)
-        setEditingAccount({ ...editingAccount, id: res.data.id })
+        setEditingAccount({ ...editingAccount, id: (res.data as any).id })
       }
       await loadData()
       onClose()
@@ -197,7 +195,7 @@ const EmailAccountsTab: React.FC = () => {
         title: 'Verification email sent',
         status: 'success',
         duration: 3000,
-      })
+      } as any)
     } catch (error) {
       toast({
         title: 'Failed to send verification',
@@ -214,7 +212,7 @@ const EmailAccountsTab: React.FC = () => {
         title: 'Test email sent successfully',
         status: 'success',
         duration: 3000,
-      })
+      } as any)
     } catch (error) {
       toast({
         title: 'Failed to send test email',
@@ -454,7 +452,7 @@ const EmailAccountsTab: React.FC = () => {
                       <Menu>
                         <MenuButton
                           as={IconButton}
-                          icon={<MoreVerticalIcon />}
+                          icon={<SettingsIcon />}
                           size="sm"
                           variant="ghost"
                         />
@@ -467,10 +465,10 @@ const EmailAccountsTab: React.FC = () => {
                               Verify Account
                             </MenuItem>
                           )}
-                          <MenuItem icon={<TestTubeIcon />} onClick={() => handleTestAccount(account.id)}>
+                          <MenuItem icon={<EmailIcon />} onClick={() => handleTestAccount(account.id)}>
                             Send Test Email
                           </MenuItem>
-                          <MenuItem icon={<RefreshIcon />}>
+                          <MenuItem icon={<CheckCircleIcon />}>
                             Refresh Stats
                           </MenuItem>
                           <MenuItem

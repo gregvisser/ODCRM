@@ -19,6 +19,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  MenuDivider,
   Select,
   SimpleGrid,
   Text,
@@ -40,17 +41,15 @@ import {
   TagLabel,
   Progress,
   Checkbox,
+  Stat,
+  StatLabel,
+  StatNumber,
 } from '@chakra-ui/react'
 import {
   SearchIcon,
-  MoreVerticalIcon,
   EmailIcon,
-  ReplyIcon,
   StarIcon,
-  ArchiveIcon,
   DeleteIcon,
-  SendIcon,
-  ClockIcon,
   CheckCircleIcon,
   WarningIcon,
   ChatIcon,
@@ -286,7 +285,7 @@ const InboxTab: React.FC = () => {
           </Text>
         </VStack>
         <HStack>
-          <Button leftIcon={<ArchiveIcon />} variant="outline">
+          <Button leftIcon={<DeleteIcon />} variant="outline">
             Archive All Read
           </Button>
         </HStack>
@@ -441,12 +440,14 @@ const InboxTab: React.FC = () => {
                       icon={<StarIcon />}
                       color={selectedThread.isStarred ? 'yellow.400' : 'gray.400'}
                       onClick={() => handleToggleStar(selectedThread.id)}
+                      aria-label="Toggle star"
                     />
                     <IconButton
                       size="sm"
                       variant="ghost"
-                      icon={<ArchiveIcon />}
+                      icon={<DeleteIcon />}
                       onClick={() => handleArchiveThread(selectedThread.id)}
+                      aria-label="Archive thread"
                     />
                   </HStack>
                 </Flex>
@@ -465,7 +466,7 @@ const InboxTab: React.FC = () => {
                       <Flex justify="space-between" align="center" mb={2}>
                         <HStack>
                           <Icon
-                            as={message.direction === 'inbound' ? EmailIcon : SendIcon}
+                            as={message.direction === 'inbound' ? EmailIcon : EmailIcon}
                             boxSize={4}
                             color={message.direction === 'inbound' ? 'blue.500' : 'gray.500'}
                           />
@@ -496,7 +497,7 @@ const InboxTab: React.FC = () => {
                   />
                   <Flex justify="flex-end">
                     <Button
-                      leftIcon={<ReplyIcon />}
+                      leftIcon={<EmailIcon />}
                       colorScheme="blue"
                       onClick={handleSendReply}
                       isDisabled={!replyContent.trim()}

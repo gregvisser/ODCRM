@@ -19,6 +19,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  MenuDivider,
   Progress,
   Select,
   SimpleGrid,
@@ -56,16 +57,14 @@ import {
 import {
   AddIcon,
   SearchIcon,
-  MoreVerticalIcon,
   EditIcon,
   DeleteIcon,
-  SendIcon,
   CalendarIcon,
   EmailIcon,
   CheckCircleIcon,
-  ClockIcon,
-  PauseIcon,
-  PlayIcon,
+  SettingsIcon,
+  TriangleUpIcon,
+  TriangleDownIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
@@ -222,7 +221,7 @@ const CampaignsTab: React.FC = () => {
         title: 'Campaign sent successfully',
         status: 'success',
         duration: 3000,
-      })
+      } as any)
     } catch (error) {
       toast({
         title: 'Failed to send campaign',
@@ -265,10 +264,10 @@ const CampaignsTab: React.FC = () => {
     switch (status) {
       case 'draft': return EditIcon
       case 'scheduled': return CalendarIcon
-      case 'sending': return SendIcon
+      case 'sending': return EmailIcon
       case 'sent': return CheckCircleIcon
-      case 'paused': return PauseIcon
-      default: return ClockIcon
+      case 'paused': return SettingsIcon
+      default: return TimeIcon
     }
   }
 
@@ -502,7 +501,7 @@ const CampaignsTab: React.FC = () => {
                       <Menu>
                         <MenuButton
                           as={IconButton}
-                          icon={<MoreVerticalIcon />}
+                          icon={<SettingsIcon />}
                           size="sm"
                           variant="ghost"
                         />
@@ -511,7 +510,7 @@ const CampaignsTab: React.FC = () => {
                             Edit
                           </MenuItem>
                           {campaign.status === 'draft' && (
-                            <MenuItem icon={<SendIcon />} onClick={() => handleSendCampaign(campaign.id)}>
+                            <MenuItem icon={<EmailIcon />} onClick={() => handleSendCampaign(campaign.id)}>
                               Send Now
                             </MenuItem>
                           )}

@@ -57,14 +57,10 @@ import {
   SearchIcon,
   AddIcon,
   DownloadIcon,
-  UploadIcon,
-  MoreVerticalIcon,
   EditIcon,
   DeleteIcon,
   EmailIcon,
   PhoneIcon,
-  BuildingIcon,
-  UserIcon,
   CheckIcon,
   ChevronDownIcon,
 } from '@chakra-ui/icons'
@@ -242,7 +238,7 @@ const CognismProspectsTab: React.FC = () => {
           </Text>
         </VStack>
         <HStack>
-          <Button leftIcon={<UploadIcon />} size="sm" variant="outline">
+          <Button leftIcon={<AddIcon />} size="sm" variant="outline">
             Import
           </Button>
           <Button leftIcon={<AddIcon />} colorScheme="blue" size="sm">
@@ -420,7 +416,7 @@ const CognismProspectsTab: React.FC = () => {
                       <Menu>
                         <MenuButton
                           as={IconButton}
-                          icon={<MoreVerticalIcon />}
+                          icon={<SettingsIcon />}
                           size="sm"
                           variant="ghost"
                         />

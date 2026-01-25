@@ -57,13 +57,9 @@ import {
 import {
   AddIcon,
   SearchIcon,
-  MoreVerticalIcon,
   EditIcon,
   DeleteIcon,
-  UsersIcon,
-  FilterIcon,
   DownloadIcon,
-  UploadIcon,
   CopyIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
@@ -180,7 +176,7 @@ const ListsTab: React.FC = () => {
         await api.put(`/api/lists/${editingList.id}`, editingList)
       } else {
         const res = await api.post('/api/lists', editingList)
-        setEditingList({ ...editingList, id: res.data.id })
+        setEditingList({ ...editingList, id: (res.data as any).id })
       }
       await loadData()
       onClose()
@@ -313,7 +309,7 @@ const ListsTab: React.FC = () => {
           </Text>
         </VStack>
         <HStack>
-          <Button leftIcon={<UploadIcon />} size="sm" variant="outline">
+          <Button leftIcon={<AddIcon />} size="sm" variant="outline">
             Import
           </Button>
           <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateList}>
@@ -416,7 +412,7 @@ const ListsTab: React.FC = () => {
                 <Menu>
                   <MenuButton
                     as={IconButton}
-                    icon={<MoreVerticalIcon />}
+                    icon={<SettingsIcon />}
                     size="sm"
                     variant="ghost"
                     onClick={(e) => e.stopPropagation()}
@@ -425,7 +421,7 @@ const ListsTab: React.FC = () => {
                     <MenuItem icon={<EditIcon />} onClick={() => handleEditList(list)}>
                       Edit
                     </MenuItem>
-                    <MenuItem icon={<UsersIcon />} onClick={() => handleManageProspects(list)}>
+                    <MenuItem icon={<AddIcon />} onClick={() => handleManageProspects(list)}>
                       Manage Prospects
                     </MenuItem>
                     <MenuItem icon={<CopyIcon />} onClick={() => handleDuplicateList(list)}>
@@ -446,7 +442,7 @@ const ListsTab: React.FC = () => {
               <VStack spacing={3} align="stretch">
                 <HStack justify="space-between">
                   <HStack>
-                    <Icon as={UsersIcon} color="blue.500" boxSize={4} />
+                    <Icon as={AddIcon} color="blue.500" boxSize={4} />
                     <Text fontSize="sm" fontWeight="semibold">
                       {list.prospectCount.toLocaleString()} prospects
                     </Text>
