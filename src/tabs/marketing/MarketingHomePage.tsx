@@ -33,6 +33,7 @@ import OverviewDashboard from './components/OverviewDashboard'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
+import CognismProspectsTab from './components/CognismProspectsTab'
 
 export type OpenDoorsViewId =
   | 'overview'
@@ -63,7 +64,8 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'reports' ||
     view === 'templates' ||
     view === 'inbox' ||
-    view === 'leads'
+    view === 'leads' ||
+    view === 'cognism-prospects'
   )
     return view
   return 'overview'
@@ -86,14 +88,15 @@ export default function MarketingHomePage({
     : activeView === 'sequences' ? 1
     : activeView === 'people' ? 2
     : activeView === 'leads' ? 3
-    : activeView === 'lists' ? 4
-    : activeView === 'campaigns' ? 5
-    : activeView === 'email-accounts' ? 6
-    : activeView === 'compliance' ? 7
-    : activeView === 'schedules' ? 8
-    : activeView === 'reports' ? 9
-    : activeView === 'templates' ? 10
-    : activeView === 'inbox' ? 11
+    : activeView === 'cognism-prospects' ? 4
+    : activeView === 'lists' ? 5
+    : activeView === 'campaigns' ? 6
+    : activeView === 'email-accounts' ? 7
+    : activeView === 'compliance' ? 8
+    : activeView === 'schedules' ? 9
+    : activeView === 'reports' ? 10
+    : activeView === 'templates' ? 11
+    : activeView === 'inbox' ? 12
     : 0
 
   return (
@@ -125,14 +128,15 @@ export default function MarketingHomePage({
               : nextIndex === 1 ? 'sequences'
               : nextIndex === 2 ? 'people'
               : nextIndex === 3 ? 'leads'
-              : nextIndex === 4 ? 'lists'
-              : nextIndex === 5 ? 'campaigns'
-              : nextIndex === 6 ? 'email-accounts'
-              : nextIndex === 7 ? 'compliance'
-              : nextIndex === 8 ? 'schedules'
-              : nextIndex === 9 ? 'reports'
-              : nextIndex === 10 ? 'templates'
-              : nextIndex === 11 ? 'inbox'
+              : nextIndex === 4 ? 'cognism-prospects'
+              : nextIndex === 5 ? 'lists'
+              : nextIndex === 6 ? 'campaigns'
+              : nextIndex === 7 ? 'email-accounts'
+              : nextIndex === 8 ? 'compliance'
+              : nextIndex === 9 ? 'schedules'
+              : nextIndex === 10 ? 'reports'
+              : nextIndex === 11 ? 'templates'
+              : nextIndex === 12 ? 'inbox'
               : 'overview'
             onNavigate?.(nextView)
           }}
@@ -309,6 +313,41 @@ export default function MarketingHomePage({
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">Leads</Text>
                         <Text fontSize="xs" opacity={0.8}>Google Sheets sync</Text>
+                      </VStack>
+                    </HStack>
+                  </Tab>
+
+                  <Tab
+                    justifyContent={{ md: 'flex-start' }}
+                    fontSize="sm"
+                    fontWeight="600"
+                    borderRadius="lg"
+                    color="gray.700"
+                    bg="white"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    _hover={{
+                      bg: 'blue.50',
+                      color: 'blue.700',
+                      borderColor: 'blue.300',
+                      transform: 'translateY(-1px)',
+                      boxShadow: 'sm'
+                    }}
+                    _selected={{
+                      bg: 'blue.500',
+                      color: 'white',
+                      borderColor: 'blue.500',
+                      boxShadow: 'md',
+                      transform: 'translateY(-1px)'
+                    }}
+                    transition="all 0.2s"
+                    h={12}
+                  >
+                    <HStack spacing={3} w="full">
+                      <Icon as={SearchIcon} boxSize={5} />
+                      <VStack align="start" spacing={0} flex={1}>
+                        <Text fontSize="sm" fontWeight="semibold">Prospects</Text>
+                        <Text fontSize="xs" opacity={0.8}>Cognism import</Text>
                       </VStack>
                     </HStack>
                   </Tab>
@@ -629,6 +668,9 @@ export default function MarketingHomePage({
               </TabPanel>
               <TabPanel px={0} h="full">
                 <MarketingLeadsTab focusAccountName={focusAccountName} />
+              </TabPanel>
+              <TabPanel px={0} h="full">
+                <CognismProspectsTab />
               </TabPanel>
               <TabPanel px={0} h="full">
                 <ListsTab />
