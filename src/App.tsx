@@ -126,6 +126,7 @@ function App() {
         return (
           <MarketingHomePage
             view={activeView}
+            focusAccountName={focusAccountName}
             onNavigate={(v) => {
               setActiveView(v)
               // focus isn't used yet in Marketing, but keep URL clean

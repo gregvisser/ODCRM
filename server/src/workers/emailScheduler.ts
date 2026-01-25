@@ -150,7 +150,7 @@ async function processScheduledEmails(prisma: PrismaClient) {
 
           // Schedule next step if it exists
           const nextStepNumber = stepNumber + 1
-          const nextTemplate = campaign.email_campaign_templates.find((t: any) => t.stepNumber === nextStepNumber)
+          const nextTemplate = campaign.templates.find((t: any) => t.stepNumber === nextStepNumber)
           if (nextTemplate) {
             const min = Number.isFinite(nextTemplate.delayDaysMin) ? nextTemplate.delayDaysMin : campaign.followUpDelayDaysMin
             const max = Number.isFinite(nextTemplate.delayDaysMax) ? nextTemplate.delayDaysMax : campaign.followUpDelayDaysMax
@@ -242,7 +242,7 @@ async function sendCampaignEmail(
   stepNumber: number
 ) {
   try {
-    const template = campaign.email_campaign_templates.find((t: any) => t.stepNumber === stepNumber)
+    const template = campaign.templates.find((t: any) => t.stepNumber === stepNumber)
     if (!template) {
       console.error(`Template for step ${stepNumber} not found for campaign ${campaign.id}`)
       return
@@ -250,11 +250,11 @@ async function sendCampaignEmail(
 
     // Render template
     const variables = {
-      firstName: prospect.contacts.firstName,
-      lastName: prospect.contacts.lastName,
-      companyName: prospect.contacts.companyName,
-      email: prospect.contacts.email,
-      jobTitle: prospect.contacts.jobTitle,
+      firstName: prospect.contact.firstName,
+      lastName: prospect.contact.lastName,
+      companyName: prospect.contact.companyName,
+      email: prospect.contact.email,
+      jobTitle: prospect.contact.jobTitle,
     }
     
     const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
@@ -269,7 +269,7 @@ async function sendCampaignEmail(
     // Send email
     const result = await sendEmail(prisma, {
       senderIdentityId: campaign.senderIdentityId,
-      toEmail: prospect.contacts.email,
+      toEmail: prospect.contact.email,
       subject: renderedSubject,
       htmlBody: renderedHtml,
       textBody: template.bodyTemplateText || renderedHtml,
@@ -318,10 +318,10 @@ async function sendCampaignEmail(
           data: { lastStatus: 'completed' } as any })
       }
 
-      console.log(`✅ Sent step ${stepNumber} email to ${prospect.contacts.email}`)
+      console.log(`✅ Sent step ${stepNumber} email to ${prospect.contact.email}`)
     } else {
       // Handle failure
-      console.error(`❌ Failed to send email to ${prospect.contacts.email}:`, result.error)
+      console.error(`❌ Failed to send email to ${prospect.contact.email}:`, result.error)
 
       // Check if it's a bounce
       if (result.error?.toLowerCase().includes('bounce') || 

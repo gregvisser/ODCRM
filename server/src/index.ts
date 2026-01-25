@@ -115,15 +115,16 @@ app.listen(PORT, () => {
   // These workers run automated tasks in production
   // Control via environment variables (see env.example)
   
-  // Email scheduler and reply detection - temporarily disabled
-  console.log('⚠️  Email workers disabled temporarily - fixing schema alignment')
-  // const emailWorkersDisabled = process.env.EMAIL_WORKERS_DISABLED === 'true'
-  // if (!emailWorkersDisabled) {
-  //   console.log('📧 Starting email scheduler...')
-  //   startEmailScheduler(prisma)
-  //   console.log('📬 Starting reply detection worker...')
-  //   startReplyDetectionWorker(prisma)
-  // }
+  // Email scheduler and reply detection
+  const emailWorkersDisabled = process.env.EMAIL_WORKERS_DISABLED === 'true'
+  if (!emailWorkersDisabled) {
+    console.log('📧 Starting email scheduler...')
+    startEmailScheduler(prisma)
+    console.log('📬 Starting reply detection worker...')
+    startReplyDetectionWorker(prisma)
+  } else {
+    console.log('⚠️  Email workers disabled via EMAIL_WORKERS_DISABLED=true')
+  }
 
   // Leads sync worker - syncs marketing leads from Google Sheets
   const leadsSyncDisabled = process.env.LEADS_SYNC_DISABLED === 'true'

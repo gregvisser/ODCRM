@@ -28,6 +28,7 @@ import ReportsTab from './components/ReportsTab'
 import TemplatesTab from './components/TemplatesTab'
 import InboxTab from './components/InboxTab'
 import OverviewDashboard from './components/OverviewDashboard'
+import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 
 export type OpenDoorsViewId =
   | 'overview'
@@ -54,7 +55,8 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'email-accounts' ||
     view === 'reports' ||
     view === 'templates' ||
-    view === 'inbox'
+    view === 'inbox' ||
+    view === 'leads'
   )
     return view
   return 'overview'
@@ -63,9 +65,11 @@ function coerceViewId(view?: string): OpenDoorsViewId {
 export default function MarketingHomePage({
   view,
   onNavigate,
+  focusAccountName,
 }: {
   view?: string
   onNavigate?: (view: OpenDoorsViewId) => void
+  focusAccountName?: string
 }) {
   const activeView = coerceViewId(view)
   const [isPanelOpen, setIsPanelOpen] = useState(true)
@@ -74,12 +78,13 @@ export default function MarketingHomePage({
     activeView === 'overview' ? 0
     : activeView === 'sequences' ? 1
     : activeView === 'people' ? 2
-    : activeView === 'lists' ? 3
-    : activeView === 'campaigns' ? 4
-    : activeView === 'email-accounts' ? 5
-    : activeView === 'reports' ? 6
-    : activeView === 'templates' ? 7
-    : activeView === 'inbox' ? 8
+    : activeView === 'leads' ? 3
+    : activeView === 'lists' ? 4
+    : activeView === 'campaigns' ? 5
+    : activeView === 'email-accounts' ? 6
+    : activeView === 'reports' ? 7
+    : activeView === 'templates' ? 8
+    : activeView === 'inbox' ? 9
     : 0
 
   return (
@@ -110,12 +115,13 @@ export default function MarketingHomePage({
               nextIndex === 0 ? 'overview'
               : nextIndex === 1 ? 'sequences'
               : nextIndex === 2 ? 'people'
-              : nextIndex === 3 ? 'lists'
-              : nextIndex === 4 ? 'campaigns'
-              : nextIndex === 5 ? 'email-accounts'
-              : nextIndex === 6 ? 'reports'
-              : nextIndex === 7 ? 'templates'
-              : nextIndex === 8 ? 'inbox'
+              : nextIndex === 3 ? 'leads'
+              : nextIndex === 4 ? 'lists'
+              : nextIndex === 5 ? 'campaigns'
+              : nextIndex === 6 ? 'email-accounts'
+              : nextIndex === 7 ? 'reports'
+              : nextIndex === 8 ? 'templates'
+              : nextIndex === 9 ? 'inbox'
               : 'overview'
             onNavigate?.(nextView)
           }}
@@ -187,6 +193,41 @@ export default function MarketingHomePage({
                       <VStack align="start" spacing={0} flex={1}>
                         <Text fontSize="sm" fontWeight="semibold">Overview</Text>
                         <Text fontSize="xs" opacity={0.8}>Dashboard & metrics</Text>
+                      </VStack>
+                    </HStack>
+                  </Tab>
+
+                  <Tab
+                    justifyContent={{ md: 'flex-start' }}
+                    fontSize="sm"
+                    fontWeight="600"
+                    borderRadius="lg"
+                    color="gray.700"
+                    bg="white"
+                    border="1px solid"
+                    borderColor="gray.200"
+                    _hover={{
+                      bg: 'blue.50',
+                      color: 'blue.700',
+                      borderColor: 'blue.300',
+                      transform: 'translateY(-1px)',
+                      boxShadow: 'sm'
+                    }}
+                    _selected={{
+                      bg: 'blue.500',
+                      color: 'white',
+                      borderColor: 'blue.500',
+                      boxShadow: 'md',
+                      transform: 'translateY(-1px)'
+                    }}
+                    transition="all 0.2s"
+                    h={12}
+                  >
+                    <HStack spacing={3} w="full">
+                      <Icon as={TimeIcon} boxSize={5} />
+                      <VStack align="start" spacing={0} flex={1}>
+                        <Text fontSize="sm" fontWeight="semibold">Leads</Text>
+                        <Text fontSize="xs" opacity={0.8}>Google Sheets sync</Text>
                       </VStack>
                     </HStack>
                   </Tab>
@@ -504,6 +545,9 @@ export default function MarketingHomePage({
               </TabPanel>
               <TabPanel px={0} h="full">
                 <PeopleTab />
+              </TabPanel>
+              <TabPanel px={0} h="full">
+                <MarketingLeadsTab focusAccountName={focusAccountName} />
               </TabPanel>
               <TabPanel px={0} h="full">
                 <ListsTab />
