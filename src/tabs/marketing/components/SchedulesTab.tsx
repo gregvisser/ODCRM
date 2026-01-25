@@ -17,6 +17,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  MenuDivider,
   Select,
   SimpleGrid,
   Stat,
@@ -60,7 +61,6 @@ import {
   DeleteIcon,
   TimeIcon,
   CalendarIcon,
-  ClockIcon,
   SettingsIcon,
   CheckIcon,
 } from '@chakra-ui/icons'
@@ -186,7 +186,7 @@ const SchedulesTab: React.FC = () => {
         await api.put(`/api/schedules/${editingSchedule.id}`, editingSchedule)
       } else {
         const res = await api.post('/api/schedules', editingSchedule)
-        setEditingSchedule({ ...editingSchedule, id: res.data.id })
+        setEditingSchedule({ ...editingSchedule, id: (res.data as any).id })
       }
       await loadData()
       onClose()
@@ -616,6 +616,7 @@ const SchedulesTab: React.FC = () => {
                           variant="ghost"
                           onClick={() => handleRemoveTimeWindow(index)}
                           isDisabled={editingSchedule.timeWindows.length === 1}
+                          aria-label="Remove time window"
                         />
                       </Flex>
                     ))}

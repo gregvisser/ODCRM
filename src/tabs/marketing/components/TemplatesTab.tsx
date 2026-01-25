@@ -19,6 +19,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  MenuDivider,
   Select,
   SimpleGrid,
   Text,
@@ -45,13 +46,11 @@ import {
 import {
   AddIcon,
   SearchIcon,
-  MoreVerticalIcon,
   EditIcon,
   DeleteIcon,
   CopyIcon,
   StarIcon,
   EmailIcon,
-  TemplateIcon,
   ViewIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
@@ -166,7 +165,7 @@ const TemplatesTab: React.FC = () => {
         await api.put(`/api/templates/${editingTemplate.id}`, editingTemplate)
       } else {
         const res = await api.post('/api/templates', editingTemplate)
-        setEditingTemplate({ ...editingTemplate, id: res.data.id })
+        setEditingTemplate({ ...editingTemplate, id: (res.data as any).id })
       }
       await loadData()
       onClose()

@@ -33,15 +33,12 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react'
 import {
-  BarChartIcon,
-  LineChartIcon,
-  PieChartIcon,
-  TrendingUpIcon,
-  TrendingDownIcon,
   CalendarIcon,
   EmailIcon,
   CheckCircleIcon,
   WarningIcon,
+  TriangleUpIcon,
+  TriangleDownIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
@@ -162,7 +159,7 @@ const ReportsTab: React.FC = () => {
         value: `${metrics.openRate}%`,
         change: '+2.1%',
         changeType: 'increase' as const,
-        icon: BarChartIcon,
+        icon: CalendarIcon,
       },
       {
         label: 'Reply Rate',
@@ -176,7 +173,7 @@ const ReportsTab: React.FC = () => {
         value: `${metrics.clickRate}%`,
         change: '-0.2%',
         changeType: 'decrease' as const,
-        icon: TrendingUpIcon,
+        icon: TriangleUpIcon,
       },
     ]
   }, [metrics])
