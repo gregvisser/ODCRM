@@ -161,7 +161,6 @@ export default function EmailAccountsEnhancedTab() {
     }
 
     // Create SMTP email identity
-    // This would need a dedicated endpoint - for now using a placeholder
     const payload = {
       customerId: smtpForm.customerId,
       emailAddress: smtpForm.emailAddress,
@@ -177,18 +176,8 @@ export default function EmailAccountsEnhancedTab() {
     }
 
     try {
-      // Use centralized API URL from environment
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
-      const response = await fetch(`${apiUrl}/api/outlook/identities`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to create SMTP account')
-      }
-
+      const { error } = await api.post('/api/outlook/identities', payload)
+      if (error) throw new Error(error)
       toast({
         title: 'Success',
         description: 'SMTP account created',
@@ -229,7 +218,7 @@ export default function EmailAccountsEnhancedTab() {
   const handleDisconnect = async (id: string) => {
     if (!confirm('Disconnect this email account?')) return
 
-    const { error } = await api.delete(`/api/outlook/identities/${id}`)
+    const { error } = await api.delete(`/api/outlook/identities/${id}?customerId=${customerId}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
     } else {

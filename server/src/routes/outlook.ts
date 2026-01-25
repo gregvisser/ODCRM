@@ -432,10 +432,85 @@ router.get('/callback', async (req, res) => {
   }
 })
 
+const getCustomerId = (req: express.Request) =>
+  (req.body?.customerId as string) ||
+  (req.headers['x-customer-id'] as string) ||
+  (req.query.customerId as string)
+
+// Create SMTP identity
+router.post('/identities', async (req, res, next) => {
+  try {
+    const {
+      customerId,
+      emailAddress,
+      displayName,
+      provider,
+      smtpHost,
+      smtpPort,
+      smtpUsername,
+      smtpPassword,
+      smtpSecure,
+      dailySendLimit,
+      isActive
+    } = req.body || {}
+
+    const resolvedCustomerId = customerId || getCustomerId(req)
+    if (!resolvedCustomerId || !emailAddress) {
+      return res.status(400).json({ error: 'Customer ID and email address are required' })
+    }
+
+    if (provider && provider !== 'smtp') {
+      return res.status(400).json({ error: 'Only SMTP accounts can be created via this endpoint' })
+    }
+
+    if (!smtpHost || !smtpUsername || !smtpPassword) {
+      return res.status(400).json({ error: 'SMTP host, username, and password are required' })
+    }
+
+    const identity = await prisma.emailIdentity.upsert({
+      where: {
+        customerId_emailAddress: {
+          customerId: resolvedCustomerId,
+          emailAddress
+        }
+      },
+      update: {
+        displayName,
+        provider: 'smtp',
+        smtpHost,
+        smtpPort,
+        smtpUsername,
+        smtpPassword,
+        smtpSecure: smtpSecure ?? false,
+        dailySendLimit: dailySendLimit ?? 150,
+        isActive: isActive ?? true
+      },
+      create: {
+        id: randomUUID(),
+        customerId: resolvedCustomerId,
+        emailAddress,
+        displayName,
+        provider: 'smtp',
+        smtpHost,
+        smtpPort,
+        smtpUsername,
+        smtpPassword,
+        smtpSecure: smtpSecure ?? false,
+        dailySendLimit: dailySendLimit ?? 150,
+        isActive: isActive ?? true
+      }
+    })
+
+    res.json(identity)
+  } catch (error) {
+    next(error)
+  }
+})
+
 // List email identities for customer
 router.get('/identities', async (req, res, next) => {
   try {
-    const customerId = req.headers['x-customer-id'] as string || req.query.customerId as string
+    const customerId = getCustomerId(req)
     if (!customerId) {
       return res.status(400).json({ error: 'Customer ID required' })
     }
@@ -446,9 +521,14 @@ router.get('/identities', async (req, res, next) => {
         id: true,
         emailAddress: true,
         displayName: true,
+        provider: true,
         isActive: true,
         dailySendLimit: true,
-        createdAt: true
+        createdAt: true,
+        smtpHost: true,
+        smtpPort: true,
+        smtpUsername: true,
+        smtpSecure: true
       },
       orderBy: { createdAt: 'desc' }
     })
@@ -462,7 +542,7 @@ router.get('/identities', async (req, res, next) => {
 // Update identity (e.g., daily send limit)
 router.patch('/identities/:id', async (req, res, next) => {
   try {
-    const customerId = req.headers['x-customer-id'] as string || req.query.customerId as string
+    const customerId = getCustomerId(req)
     const { id } = req.params
     const data = req.body
 
@@ -488,7 +568,7 @@ router.patch('/identities/:id', async (req, res, next) => {
 // Disconnect identity
 router.delete('/identities/:id', async (req, res, next) => {
   try {
-    const customerId = req.headers['x-customer-id'] as string || req.query.customerId as string
+    const customerId = getCustomerId(req)
     const { id } = req.params
 
     const identity = await prisma.emailIdentity.findFirst({
