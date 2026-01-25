@@ -26,8 +26,10 @@ import {
 import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
 import { emit } from '../../platform/events'
+import { settingsStore } from '../../platform'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import { getJson, setJson } from '../../platform/storage'
+import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import type {
   Account,
   Accreditation,
@@ -299,6 +301,12 @@ export default function OnboardingHomePage() {
     setAccountDetails(mergedDetails)
     setHeadOfficeQuery(mergedDetails.headOfficeAddress || '')
   }, [selectedCustomer])
+
+  useEffect(() => {
+    if (selectedCustomerId) {
+      settingsStore.setCurrentCustomerId(selectedCustomerId)
+    }
+  }, [selectedCustomerId])
 
   useEffect(() => {
     if (!geoQuery || geoQuery.trim().length < 2) {
@@ -892,6 +900,10 @@ export default function OnboardingHomePage() {
               </SimpleGrid>
             </FormControl>
           </Stack>
+        </Box>
+
+        <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+          <EmailAccountsEnhancedTab />
         </Box>
 
         <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
