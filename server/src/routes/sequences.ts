@@ -5,9 +5,18 @@ import { prisma } from '../lib/prisma.js'
 
 const router = Router()
 
+const getCustomerId = (req: any): string => {
+  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+  if (!customerId) {
+    const err = new Error('customerId is required') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+  return customerId
+}
+
 // Schema validation
 const createSequenceSchema = z.object({
-  customerId: z.string(),
   name: z.string().min(1),
   description: z.string().optional(),
   steps: z.array(
@@ -37,11 +46,7 @@ const createStepSchema = z.object({
 // GET /api/sequences - Get all sequences for a customer
 router.get('/', async (req, res) => {
   try {
-    const { customerId } = req.query
-
-    if (!customerId || typeof customerId !== 'string') {
-      return res.status(400).json({ error: 'customerId is required' })
-    }
+    const customerId = getCustomerId(req)
 
     const sequences = await prisma.emailSequence.findMany({
       where: { customerId },
@@ -59,7 +64,7 @@ router.get('/', async (req, res) => {
       customerId: seq.customerId,
       name: seq.name,
       description: seq.description,
-      stepCount: seq._count.email_sequence_steps,
+      stepCount: seq._count.steps,
       createdAt: seq.createdAt.toISOString(),
       updatedAt: seq.updatedAt.toISOString(),
     }))
@@ -96,7 +101,7 @@ router.get('/:id', async (req, res) => {
       description: sequence.description,
       createdAt: sequence.createdAt.toISOString(),
       updatedAt: sequence.updatedAt.toISOString(),
-      steps: sequence.steps_data.map((step) => ({
+      steps: sequence.steps.map((step) => ({
         id: step.id,
         stepOrder: step.stepOrder,
         delayDaysFromPrevious: step.delayDaysFromPrevious,
@@ -117,16 +122,17 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const validated = createSequenceSchema.parse(req.body)
+    const customerId = getCustomerId(req)
 
     const sequence = await prisma.emailSequence.create({ data: {
         id: `seq_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-        customerId: validated.customerId,
+        customerId,
         name: validated.name,
         description: validated.description,
         updatedAt: new Date(),
-        steps: validated.email_sequence_steps
+        steps: validated.steps
           ? {
-              create: validated.email_sequence_steps.map((step) => ({
+              create: validated.steps.map((step) => ({
                 id: `step_${Date.now()}_${Math.random().toString(36).substring(7)}`,
                 stepOrder: step.stepOrder,
                 delayDaysFromPrevious: step.delayDaysFromPrevious,
@@ -150,10 +156,10 @@ router.post('/', async (req, res) => {
       customerId: sequence.customerId,
       name: sequence.name,
       description: sequence.description,
-      stepCount: sequence.steps_data.length,
+      stepCount: sequence.steps.length,
       createdAt: sequence.createdAt.toISOString(),
       updatedAt: sequence.updatedAt.toISOString(),
-      steps: sequence.steps_data.map((step) => ({
+      steps: sequence.steps.map((step) => ({
         id: step.id,
         stepOrder: step.stepOrder,
         delayDaysFromPrevious: step.delayDaysFromPrevious,
@@ -197,7 +203,7 @@ router.put('/:id', async (req, res) => {
       customerId: sequence.customerId,
       name: sequence.name,
       description: sequence.description,
-      stepCount: sequence._count.email_sequence_steps,
+      stepCount: sequence._count.steps,
       createdAt: sequence.createdAt.toISOString(),
       updatedAt: sequence.updatedAt.toISOString(),
     })

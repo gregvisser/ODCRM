@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertIcon,
   Box,
   Button,
   Card,
@@ -7,7 +9,6 @@ import {
   CardHeader,
   Flex,
   Grid,
-  GridItem,
   Heading,
   HStack,
   Icon,
@@ -25,7 +26,6 @@ import {
   Stat,
   StatLabel,
   StatNumber,
-  Switch,
   Table,
   Tbody,
   Td,
@@ -43,6 +43,7 @@ import {
   ModalHeader,
   ModalBody,
   ModalCloseButton,
+  Spinner,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -51,64 +52,92 @@ import {
   EditIcon,
   DeleteIcon,
   ViewIcon,
-  RepeatIcon,
   TimeIcon,
-  CheckCircleIcon,
-  WarningIcon,
 } from '@chakra-ui/icons'
+import { api } from '../../../utils/api'
 
-// Mock data - in real implementation, this would come from API
-const mockSequences = [
-  {
-    id: '1',
-    name: 'Welcome Sequence',
-    status: 'active',
-    people: 1250,
-    openRate: 28.5,
-    replyRate: 3.2,
-    progress: 75,
-    owner: 'Greg Visser',
-    deliveries: 950,
-    lastActivity: '2 hours ago',
-  },
-  {
-    id: '2',
-    name: 'Product Demo Follow-up',
-    status: 'active',
-    people: 543,
-    openRate: 31.2,
-    replyRate: 4.1,
-    progress: 45,
-    owner: 'Greg Visser',
-    deliveries: 320,
-    lastActivity: '1 hour ago',
-  },
-  {
-    id: '3',
-    name: 'Newsletter Signup',
-    status: 'paused',
-    people: 2100,
-    openRate: 22.8,
-    replyRate: 1.8,
-    progress: 90,
-    owner: 'Greg Visser',
-    deliveries: 1800,
-    lastActivity: '3 days ago',
-  },
-]
+type SequenceSummary = {
+  id: string
+  name: string
+  description?: string | null
+  stepCount: number
+  createdAt: string
+  updatedAt: string
+}
 
 const SequencesTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [ownerFilter, setOwnerFilter] = useState('all')
   const { isOpen, onOpen, onClose } = useDisclosure()
-
-  const filteredSequences = mockSequences.filter(sequence => {
-    const matchesSearch = sequence.name.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesStatus = statusFilter === 'all' || sequence.status === statusFilter
-    const matchesOwner = ownerFilter === 'all' || sequence.owner === ownerFilter
-    return matchesSearch && matchesStatus && matchesOwner
+  const [sequences, setSequences] = useState<SequenceSummary[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [formState, setFormState] = useState({
+    name: '',
+    description: '',
   })
+
+  const loadSequences = async () => {
+    setIsLoading(true)
+    setError(null)
+    const { data, error: apiError } = await api.get<SequenceSummary[]>('/api/sequences')
+    if (apiError) {
+      setError(apiError)
+      setSequences([])
+    } else {
+      setSequences(data || [])
+    }
+    setIsLoading(false)
+  }
+
+  useEffect(() => {
+    loadSequences()
+  }, [])
+
+  const filteredSequences = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return sequences
+    return sequences.filter((sequence) => sequence.name.toLowerCase().includes(query))
+  }, [searchQuery, sequences])
+
+  const totalSteps = useMemo(
+    () => sequences.reduce((sum, seq) => sum + (seq.stepCount || 0), 0),
+    [sequences],
+  )
+
+  const handleCreateSequence = async () => {
+    const name = formState.name.trim()
+    if (!name) {
+      setError('Sequence name is required.')
+      return
+    }
+
+    setError(null)
+    const payload = {
+      name,
+      description: formState.description.trim() || undefined,
+    }
+    const { data, error: apiError } = await api.post<SequenceSummary>('/api/sequences', payload)
+    if (apiError || !data) {
+      setError(apiError || 'Failed to create sequence.')
+      return
+    }
+
+    setSequences((prev) => [data, ...prev])
+    setFormState({ name: '', description: '' })
+    onClose()
+  }
+
+  const handleDeleteSequence = async (sequence: SequenceSummary) => {
+    if (!window.confirm(`Delete "${sequence.name}"? This cannot be undone.`)) return
+    const { error: apiError } = await api.delete(`/api/sequences/${sequence.id}`)
+    if (apiError) {
+      setError(apiError)
+      return
+    }
+    setSequences((prev) => prev.filter((item) => item.id !== sequence.id))
+  }
+
+  const formatDate = (value: string) => new Date(value).toLocaleDateString()
 
   return (
     <Box p={6}>
@@ -129,33 +158,13 @@ const SequencesTab: React.FC = () => {
         {/* Filters and Search */}
         <Card>
           <CardBody>
-            <Grid templateColumns={{ base: '1fr', md: '1fr 1fr 1fr 2fr' }} gap={4} alignItems="center">
-              <Box>
-                <Text fontSize="sm" fontWeight="medium" mb={2}>Status</Text>
-                <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} size="sm">
-                  <option value="all">All Statuses</option>
-                  <option value="active">Active</option>
-                  <option value="paused">Paused</option>
-                  <option value="draft">Draft</option>
-                  <option value="stopped">Stopped</option>
-                </Select>
-              </Box>
-
-              <Box>
-                <Text fontSize="sm" fontWeight="medium" mb={2}>Owner</Text>
-                <Select value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)} size="sm">
-                  <option value="all">All Owners</option>
-                  <option value="Greg Visser">Greg Visser</option>
-                </Select>
-              </Box>
-
+            <Grid templateColumns={{ base: '1fr', md: '1fr 1fr 2fr' }} gap={4} alignItems="center">
               <Box>
                 <Text fontSize="sm" fontWeight="medium" mb={2}>Sort By</Text>
                 <Select size="sm">
-                  <option value="name">Name</option>
+                  <option value="updated">Updated Date</option>
                   <option value="created">Created Date</option>
-                  <option value="performance">Performance</option>
-                  <option value="people">People Count</option>
+                  <option value="name">Name</option>
                 </Select>
               </Box>
 
@@ -179,18 +188,24 @@ const SequencesTab: React.FC = () => {
         {/* Sequences Table */}
         <Card>
           <CardBody p={0}>
+            {error && (
+              <Alert status="error" borderRadius="md" m={4}>
+                <AlertIcon />
+                {error}
+              </Alert>
+            )}
+            {isLoading ? (
+              <Flex align="center" justify="center" py={16}>
+                <Spinner size="lg" />
+              </Flex>
+            ) : (
             <Table variant="simple">
               <Thead>
                 <Tr>
                   <Th>Name</Th>
-                  <Th>Status</Th>
-                  <Th isNumeric>People</Th>
-                  <Th isNumeric>Open Rate</Th>
-                  <Th isNumeric>Reply Rate</Th>
-                  <Th>Progress</Th>
-                  <Th>Owner</Th>
-                  <Th>Deliveries</Th>
-                  <Th>Last Activity</Th>
+                  <Th>Steps</Th>
+                  <Th>Created</Th>
+                  <Th>Updated</Th>
                   <Th>Actions</Th>
                 </Tr>
               </Thead>
@@ -200,60 +215,26 @@ const SequencesTab: React.FC = () => {
                     <Td>
                       <VStack align="start" spacing={1}>
                         <Text fontWeight="medium">{sequence.name}</Text>
-                        <Text fontSize="xs" color="gray.500">ID: {sequence.id}</Text>
+                        <Text fontSize="xs" color="gray.500">
+                          {sequence.description || 'No description'}
+                        </Text>
                       </VStack>
                     </Td>
                     <Td>
-                      <HStack>
-                        <Switch
-                          colorScheme="green"
-                          isChecked={sequence.status === 'active'}
-                          size="sm"
-                        />
-                        <Badge
-                          colorScheme={
-                            sequence.status === 'active' ? 'green' :
-                            sequence.status === 'paused' ? 'orange' : 'gray'
-                          }
-                          size="sm"
-                        >
-                          {sequence.status}
-                        </Badge>
+                      <Badge colorScheme={sequence.stepCount ? 'blue' : 'gray'}>
+                        {sequence.stepCount} step{sequence.stepCount === 1 ? '' : 's'}
+                      </Badge>
+                    </Td>
+                    <Td>
+                      <Text fontSize="sm">{formatDate(sequence.createdAt)}</Text>
+                    </Td>
+                    <Td>
+                      <HStack spacing={2}>
+                        <Icon as={TimeIcon} color="gray.400" boxSize={4} />
+                        <Text fontSize="sm" color="gray.600">
+                          {formatDate(sequence.updatedAt)}
+                        </Text>
                       </HStack>
-                    </Td>
-                    <Td isNumeric>
-                      <Text fontWeight="medium">{sequence.people.toLocaleString()}</Text>
-                    </Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text fontWeight="medium">{sequence.openRate}%</Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {Math.round(sequence.people * sequence.openRate / 100)} opens
-                        </Text>
-                      </VStack>
-                    </Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text fontWeight="medium">{sequence.replyRate}%</Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {Math.round(sequence.people * sequence.replyRate / 100)} replies
-                        </Text>
-                      </VStack>
-                    </Td>
-                    <Td>
-                      <VStack align="start" spacing={1}>
-                        <Text fontSize="sm">{sequence.progress}%</Text>
-                        <Progress value={sequence.progress} size="sm" colorScheme="blue" w="60px" />
-                      </VStack>
-                    </Td>
-                    <Td>
-                      <Text fontSize="sm">{sequence.owner}</Text>
-                    </Td>
-                    <Td>
-                      <Text fontWeight="medium">{sequence.deliveries.toLocaleString()}</Text>
-                    </Td>
-                    <Td>
-                      <Text fontSize="sm" color="gray.600">{sequence.lastActivity}</Text>
                     </Td>
                     <Td>
                       <Menu>
@@ -261,9 +242,14 @@ const SequencesTab: React.FC = () => {
                         <MenuList>
                           <MenuItem icon={<ViewIcon />}>View Details</MenuItem>
                           <MenuItem icon={<EditIcon />}>Edit Sequence</MenuItem>
-                          <MenuItem icon={<RepeatIcon />}>Clone Sequence</MenuItem>
-                          <MenuItem icon={<TimeIcon />}>View Analytics</MenuItem>
-                          <MenuItem icon={<DeleteIcon />} color="red.500">Delete</MenuItem>
+                          <MenuItem icon={<TimeIcon />}>View Activity</MenuItem>
+                          <MenuItem
+                            icon={<DeleteIcon />}
+                            color="red.500"
+                            onClick={() => handleDeleteSequence(sequence)}
+                          >
+                            Delete
+                          </MenuItem>
                         </MenuList>
                       </Menu>
                     </Td>
@@ -271,6 +257,7 @@ const SequencesTab: React.FC = () => {
                 ))}
               </Tbody>
             </Table>
+            )}
           </CardBody>
         </Card>
 
@@ -280,32 +267,32 @@ const SequencesTab: React.FC = () => {
             <CardBody>
               <Stat>
                 <StatLabel>Total Sequences</StatLabel>
-                <StatNumber>{mockSequences.length}</StatNumber>
+                <StatNumber>{sequences.length}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Active Sequences</StatLabel>
-                <StatNumber>{mockSequences.filter(s => s.status === 'active').length}</StatNumber>
+                <StatLabel>Total Steps</StatLabel>
+                <StatNumber>{totalSteps}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Total People</StatLabel>
-                <StatNumber>{mockSequences.reduce((sum, s) => sum + s.people, 0).toLocaleString()}</StatNumber>
+                <StatLabel>Sequences With Steps</StatLabel>
+                <StatNumber>{sequences.filter((s) => s.stepCount > 0).length}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Avg Reply Rate</StatLabel>
+                <StatLabel>Newest Updated</StatLabel>
                 <StatNumber>
-                  {(mockSequences.reduce((sum, s) => sum + s.replyRate, 0) / mockSequences.length).toFixed(1)}%
+                  {sequences[0]?.updatedAt ? formatDate(sequences[0].updatedAt) : '—'}
                 </StatNumber>
               </Stat>
             </CardBody>
@@ -323,37 +310,27 @@ const SequencesTab: React.FC = () => {
             <VStack spacing={4} align="stretch">
               <Box>
                 <Text fontWeight="medium" mb={2}>Sequence Name</Text>
-                <Input placeholder="Enter sequence name..." />
+                <Input
+                  placeholder="Enter sequence name..."
+                  value={formState.name}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, name: e.target.value }))}
+                />
               </Box>
 
               <Box>
                 <Text fontWeight="medium" mb={2}>Description (Optional)</Text>
-                <Input placeholder="Brief description of this sequence..." />
-              </Box>
-
-              <Box>
-                <Text fontWeight="medium" mb={2}>Goal Type</Text>
-                <Select>
-                  <option value="replies">Maximize Replies</option>
-                  <option value="meetings">Schedule Meetings</option>
-                  <option value="sales">Drive Sales</option>
-                  <option value="custom">Custom Goal</option>
-                </Select>
-              </Box>
-
-              <Box>
-                <Text fontWeight="medium" mb={2}>Email Account</Text>
-                <Select>
-                  <option value="">Select sending account...</option>
-                  {/* Would be populated from email accounts */}
-                </Select>
+                <Input
+                  placeholder="Brief description of this sequence..."
+                  value={formState.description}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, description: e.target.value }))}
+                />
               </Box>
 
               <Flex justify="flex-end" pt={4}>
                 <Button variant="ghost" mr={3} onClick={onClose}>
                   Cancel
                 </Button>
-                <Button colorScheme="blue" onClick={onClose}>
+                <Button colorScheme="blue" onClick={handleCreateSequence}>
                   Create Sequence
                 </Button>
               </Flex>

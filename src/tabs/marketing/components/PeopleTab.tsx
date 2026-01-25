@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertIcon,
   Box,
   Button,
   Card,
@@ -44,6 +46,7 @@ import {
   ModalCloseButton,
   FormControl,
   FormLabel,
+  Spinner,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -52,81 +55,72 @@ import {
   EditIcon,
   DeleteIcon,
   ViewIcon,
-  AtSignIcon,
   EmailIcon,
   PhoneIcon,
   StarIcon,
-  CheckCircleIcon,
-  WarningIcon,
-  TimeIcon,
 } from '@chakra-ui/icons'
+import { api } from '../../../utils/api'
 
-// Mock data - in real implementation, this would come from API
-const mockContacts = [
-  {
-    id: '1',
-    email: 'john.smith@techcorp.com',
-    firstName: 'John',
-    lastName: 'Smith',
-    jobTitle: 'CTO',
-    companyName: 'TechCorp Inc',
-    status: 'active',
-    openRate: 85,
-    clickRate: 25,
-    replyRate: 8,
-    lastContacted: '2 days ago',
-    totalEmails: 12,
-    source: 'manual',
-  },
-  {
-    id: '2',
-    email: 'sarah.jones@startup.io',
-    firstName: 'Sarah',
-    lastName: 'Jones',
-    jobTitle: 'VP Engineering',
-    companyName: 'Startup.io',
-    status: 'active',
-    openRate: 92,
-    clickRate: 15,
-    replyRate: 3,
-    lastContacted: '1 week ago',
-    totalEmails: 8,
-    source: 'csv_import',
-  },
-  {
-    id: '3',
-    email: 'mike.wilson@unsubscribed.com',
-    firstName: 'Mike',
-    lastName: 'Wilson',
-    jobTitle: 'CEO',
-    companyName: 'Wilson Enterprises',
-    status: 'unsubscribed',
-    openRate: 0,
-    clickRate: 0,
-    replyRate: 0,
-    lastContacted: '3 months ago',
-    totalEmails: 5,
-    source: 'manual',
-  },
-]
+type ContactRecord = {
+  id: string
+  email: string
+  firstName: string
+  lastName: string
+  jobTitle?: string | null
+  companyName: string
+  status: 'active' | 'inactive' | 'unsubscribed' | 'bounced'
+  source: string
+  phone?: string | null
+  createdAt: string
+}
 
 const PeopleTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
   const { isOpen, onOpen, onClose } = useDisclosure()
-
-  const filteredContacts = mockContacts.filter(contact => {
-    const matchesSearch =
-      contact.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.firstName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.lastName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      contact.companyName?.toLowerCase().includes(searchQuery.toLowerCase())
-
-    const matchesStatus = statusFilter === 'all' || contact.status === statusFilter
-
-    return matchesSearch && matchesStatus
+  const [contacts, setContacts] = useState<ContactRecord[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [formState, setFormState] = useState({
+    firstName: '',
+    lastName: '',
+    email: '',
+    jobTitle: '',
+    companyName: '',
+    phone: '',
   })
+
+  const loadContacts = async () => {
+    setIsLoading(true)
+    setError(null)
+    const { data, error: apiError } = await api.get<ContactRecord[]>('/api/contacts')
+    if (apiError) {
+      setError(apiError)
+      setContacts([])
+    } else {
+      setContacts(data || [])
+    }
+    setIsLoading(false)
+  }
+
+  useEffect(() => {
+    loadContacts()
+  }, [])
+
+  const filteredContacts = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    return contacts.filter((contact) => {
+      const matchesSearch =
+        contact.email.toLowerCase().includes(query) ||
+        contact.firstName?.toLowerCase().includes(query) ||
+        contact.lastName?.toLowerCase().includes(query) ||
+        contact.companyName?.toLowerCase().includes(query)
+
+      const matchesStatus = statusFilter === 'all' || contact.status === statusFilter
+      return matchesSearch && matchesStatus
+    })
+  }, [contacts, searchQuery, statusFilter])
 
   const handleSelectContact = (contactId: string) => {
     setSelectedContacts(prev =>
@@ -143,6 +137,59 @@ const PeopleTab: React.FC = () => {
       setSelectedContacts(filteredContacts.map(c => c.id))
     }
   }
+
+  const handleCreateContact = async () => {
+    if (!formState.email.trim() || !formState.companyName.trim()) {
+      setError('Email and company name are required.')
+      return
+    }
+
+    const payload = {
+      firstName: formState.firstName.trim(),
+      lastName: formState.lastName.trim(),
+      email: formState.email.trim(),
+      jobTitle: formState.jobTitle.trim() || undefined,
+      companyName: formState.companyName.trim(),
+      phone: formState.phone.trim() || undefined,
+      source: 'manual',
+    }
+
+    const { data, error: apiError } = await api.post<ContactRecord>('/api/contacts', payload)
+    if (apiError || !data) {
+      setError(apiError || 'Failed to create contact.')
+      return
+    }
+
+    setContacts((prev) => [data, ...prev])
+    setFormState({
+      firstName: '',
+      lastName: '',
+      email: '',
+      jobTitle: '',
+      companyName: '',
+      phone: '',
+    })
+    onClose()
+  }
+
+  const handleDeleteContact = async (contact: ContactRecord) => {
+    if (!window.confirm(`Delete ${contact.firstName || ''} ${contact.lastName || ''}?`)) return
+    const { error: apiError } = await api.delete(`/api/contacts/${contact.id}`)
+    if (apiError) {
+      setError(apiError)
+      return
+    }
+    setContacts((prev) => prev.filter((item) => item.id !== contact.id))
+  }
+
+  const statusCounts = useMemo(() => ({
+    total: contacts.length,
+    active: contacts.filter((c) => c.status === 'active').length,
+    unsubscribed: contacts.filter((c) => c.status === 'unsubscribed').length,
+    bounced: contacts.filter((c) => c.status === 'bounced').length,
+  }), [contacts])
+
+  const formatDate = (value: string) => new Date(value).toLocaleDateString()
 
   return (
     <Box p={6}>
@@ -171,7 +218,7 @@ const PeopleTab: React.FC = () => {
             <CardBody>
               <Stat>
                 <StatLabel>Total Contacts</StatLabel>
-                <StatNumber>33,519</StatNumber>
+                <StatNumber>{statusCounts.total}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
@@ -179,23 +226,23 @@ const PeopleTab: React.FC = () => {
             <CardBody>
               <Stat>
                 <StatLabel>Active Contacts</StatLabel>
-                <StatNumber>32,514</StatNumber>
+                <StatNumber>{statusCounts.active}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Avg Open Rate</StatLabel>
-                <StatNumber>28.5%</StatNumber>
+                <StatLabel>Unsubscribed</StatLabel>
+                <StatNumber>{statusCounts.unsubscribed}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Avg Reply Rate</StatLabel>
-                <StatNumber>3.2%</StatNumber>
+                <StatLabel>Bounced</StatLabel>
+                <StatNumber>{statusCounts.bounced}</StatNumber>
               </Stat>
             </CardBody>
           </Card>
@@ -208,14 +255,11 @@ const PeopleTab: React.FC = () => {
               <Box>
                 <Text fontSize="sm" fontWeight="medium" mb={2}>Status</Text>
                 <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} size="sm">
-                  <option value="all">All Contacts (33,519)</option>
-                  <option value="active">Active (32,514)</option>
-                  <option value="opened">Opened (10,239)</option>
-                  <option value="replied">Replied (213)</option>
-                  <option value="bounced">Bounced (192)</option>
-                  <option value="unsubscribed">Opted Out (10)</option>
-                  <option value="to_call">To Call (0)</option>
-                  <option value="clicked">Clicked (0)</option>
+                  <option value="all">All Contacts</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="bounced">Bounced</option>
+                  <option value="unsubscribed">Opted Out</option>
                 </Select>
               </Box>
 
@@ -268,6 +312,17 @@ const PeopleTab: React.FC = () => {
         {/* Contacts Table */}
         <Card>
           <CardBody p={0}>
+            {error && (
+              <Alert status="error" borderRadius="md" m={4}>
+                <AlertIcon />
+                {error}
+              </Alert>
+            )}
+            {isLoading ? (
+              <Flex align="center" justify="center" py={16}>
+                <Spinner size="lg" />
+              </Flex>
+            ) : (
             <Table variant="simple">
               <Thead>
                 <Tr>
@@ -281,9 +336,8 @@ const PeopleTab: React.FC = () => {
                   <Th>Contact</Th>
                   <Th>Company</Th>
                   <Th>Status</Th>
-                  <Th isNumeric>Open Rate</Th>
-                  <Th isNumeric>Reply Rate</Th>
-                  <Th>Last Contacted</Th>
+                  <Th>Email</Th>
+                  <Th>Created</Th>
                   <Th>Source</Th>
                   <Th>Actions</Th>
                 </Tr>
@@ -316,12 +370,6 @@ const PeopleTab: React.FC = () => {
                           <Text fontSize="sm" color="gray.600">
                             {contact.jobTitle}
                           </Text>
-                          <HStack spacing={1}>
-                            <Icon as={EmailIcon} boxSize={3} color="gray.400" />
-                            <Text fontSize="sm" color="blue.600">
-                              {contact.email}
-                            </Text>
-                          </HStack>
                         </VStack>
                       </HStack>
                     </Td>
@@ -343,24 +391,16 @@ const PeopleTab: React.FC = () => {
                          contact.status}
                       </Badge>
                     </Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text fontWeight="medium">{contact.openRate}%</Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {Math.round(contact.totalEmails * contact.openRate / 100)}/{contact.totalEmails}
+                    <Td>
+                      <HStack spacing={1}>
+                        <Icon as={EmailIcon} boxSize={3} color="gray.400" />
+                        <Text fontSize="sm" color="blue.600">
+                          {contact.email}
                         </Text>
-                      </VStack>
-                    </Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text fontWeight="medium">{contact.replyRate}%</Text>
-                        <Text fontSize="xs" color="gray.500">
-                          {Math.round(contact.totalEmails * contact.replyRate / 100)}/{contact.totalEmails}
-                        </Text>
-                      </VStack>
+                      </HStack>
                     </Td>
                     <Td>
-                      <Text fontSize="sm" color="gray.600">{contact.lastContacted}</Text>
+                      <Text fontSize="sm" color="gray.600">{formatDate(contact.createdAt)}</Text>
                     </Td>
                     <Td>
                       <Badge variant="outline" size="sm">
@@ -376,7 +416,13 @@ const PeopleTab: React.FC = () => {
                           <MenuItem icon={<EditIcon />}>Edit Contact</MenuItem>
                           <MenuItem icon={<EmailIcon />}>Send Email</MenuItem>
                           <MenuItem icon={<StarIcon />}>Add to Sequence</MenuItem>
-                          <MenuItem icon={<DeleteIcon />} color="red.500">Delete</MenuItem>
+                          <MenuItem
+                            icon={<DeleteIcon />}
+                            color="red.500"
+                            onClick={() => handleDeleteContact(contact)}
+                          >
+                            Delete
+                          </MenuItem>
                         </MenuList>
                       </Menu>
                     </Td>
@@ -384,6 +430,7 @@ const PeopleTab: React.FC = () => {
                 ))}
               </Tbody>
             </Table>
+            )}
           </CardBody>
         </Card>
       </VStack>
@@ -399,34 +446,59 @@ const PeopleTab: React.FC = () => {
               <SimpleGrid columns={2} spacing={4}>
                 <FormControl>
                   <FormLabel>First Name</FormLabel>
-                  <Input placeholder="John" />
+                  <Input
+                    placeholder="John"
+                    value={formState.firstName}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, firstName: e.target.value }))}
+                  />
                 </FormControl>
                 <FormControl>
                   <FormLabel>Last Name</FormLabel>
-                  <Input placeholder="Smith" />
+                  <Input
+                    placeholder="Smith"
+                    value={formState.lastName}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, lastName: e.target.value }))}
+                  />
                 </FormControl>
               </SimpleGrid>
 
               <FormControl isRequired>
                 <FormLabel>Email Address</FormLabel>
-                <Input type="email" placeholder="john@company.com" />
+                <Input
+                  type="email"
+                  placeholder="john@company.com"
+                  value={formState.email}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, email: e.target.value }))}
+                />
               </FormControl>
 
               <SimpleGrid columns={2} spacing={4}>
                 <FormControl>
                   <FormLabel>Job Title</FormLabel>
-                  <Input placeholder="CTO" />
+                  <Input
+                    placeholder="CTO"
+                    value={formState.jobTitle}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, jobTitle: e.target.value }))}
+                  />
                 </FormControl>
                 <FormControl>
                   <FormLabel>Company</FormLabel>
-                  <Input placeholder="TechCorp Inc" />
+                  <Input
+                    placeholder="TechCorp Inc"
+                    value={formState.companyName}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, companyName: e.target.value }))}
+                  />
                 </FormControl>
               </SimpleGrid>
 
               <SimpleGrid columns={2} spacing={4}>
                 <FormControl>
                   <FormLabel>Phone</FormLabel>
-                  <Input placeholder="+1 (555) 123-4567" />
+                  <Input
+                    placeholder="+1 (555) 123-4567"
+                    value={formState.phone}
+                    onChange={(e) => setFormState((prev) => ({ ...prev, phone: e.target.value }))}
+                  />
                 </FormControl>
                 <FormControl>
                   <FormLabel>Industry</FormLabel>
@@ -439,26 +511,11 @@ const PeopleTab: React.FC = () => {
                 </FormControl>
               </SimpleGrid>
 
-              <SimpleGrid columns={3} spacing={4}>
-                <FormControl>
-                  <FormLabel>Country</FormLabel>
-                  <Input placeholder="United States" />
-                </FormControl>
-                <FormControl>
-                  <FormLabel>State</FormLabel>
-                  <Input placeholder="California" />
-                </FormControl>
-                <FormControl>
-                  <FormLabel>City</FormLabel>
-                  <Input placeholder="San Francisco" />
-                </FormControl>
-              </SimpleGrid>
-
               <Flex justify="flex-end" pt={4}>
                 <Button variant="ghost" mr={3} onClick={onClose}>
                   Cancel
                 </Button>
-                <Button colorScheme="blue" onClick={onClose}>
+                <Button colorScheme="blue" onClick={handleCreateContact}>
                   Add Contact
                 </Button>
               </Flex>

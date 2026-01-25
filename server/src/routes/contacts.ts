@@ -44,6 +44,91 @@ const upsertInputSchema = z.object({
   ),
 })
 
+const createContactSchema = z.object({
+  firstName: z.string().default(''),
+  lastName: z.string().default(''),
+  jobTitle: z.string().optional(),
+  companyName: z.string().min(1),
+  email: z.string().email(),
+  phone: z.string().optional(),
+  source: z.string().optional().default('manual'),
+})
+
+// Create a single contact
+router.post('/', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const data = createContactSchema.parse(req.body)
+
+    const existing = await prisma.contact.findFirst({
+      where: { customerId, email: data.email },
+      select: { id: true },
+    })
+
+    if (existing) {
+      return res.status(409).json({ error: 'Contact already exists for this email.' })
+    }
+
+    const contact = await prisma.contact.create({
+      data: {
+        id: randomUUID(),
+        customerId,
+        firstName: data.firstName || '',
+        lastName: data.lastName || '',
+        jobTitle: data.jobTitle || null,
+        companyName: data.companyName,
+        email: data.email,
+        phone: data.phone || null,
+        source: data.source || 'manual',
+        updatedAt: new Date(),
+      },
+    })
+
+    res.status(201).json(contact)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Update a contact
+router.put('/:id', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const data = createContactSchema.partial().parse(req.body)
+
+    const existing = await prisma.contact.findFirst({
+      where: { id: req.params.id, customerId },
+      select: { id: true },
+    })
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Contact not found' })
+    }
+
+    const contact = await prisma.contact.update({
+      where: { id: req.params.id },
+      data: {
+        ...data,
+        updatedAt: new Date(),
+      },
+    })
+
+    res.json(contact)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// Delete a contact
+router.delete('/:id', async (req, res, next) => {
+  try {
+    await prisma.contact.delete({ where: { id: req.params.id } })
+    res.json({ success: true })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // Bulk upsert contacts by (customerId, email)
 router.post('/bulk-upsert', async (req, res, next) => {
   try {
