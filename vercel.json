@@ -1,8 +1,7 @@
 {
   "installCommand": "npm install",
-  "buildCommand": "npm run build",
+  "buildCommand": "vite build",
   "outputDirectory": "dist",
-  "framework": null,
   "env": {
     "VITE_API_URL": "https://odcrm-api.onrender.com"
   },
