@@ -35,6 +35,12 @@ jobs:
       working-directory: ./server
       run: npm run build
 
+    - name: Run database migrations
+      working-directory: ./server
+      run: npm run prisma:migrate:deploy
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v3
       with:

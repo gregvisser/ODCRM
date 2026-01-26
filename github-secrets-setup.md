@@ -18,6 +18,11 @@ Go to: https://github.com/yourusername/odcrm/settings/secrets/actions
      4. Open it and copy the entire contents
      5. Paste as the secret value (it will be a long XML string)
 
+3. **DATABASE_URL**
+   - Value: Your Azure PostgreSQL connection string
+   - Format: `postgresql://username:password@host:port/database?sslmode=require`
+   - Description: Required for database migrations during deployment
+
 ## Frontend Deployment Secrets
 
 ### AZURE_STATIC_WEB_APPS_API_TOKEN
