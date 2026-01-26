@@ -189,7 +189,7 @@ const EmailAccountsTab: React.FC = () => {
 
   const handleVerifyAccount = async (accountId: string) => {
     try {
-      await api.post(`/api/email-accounts/${accountId}/verify`)
+      await api.post(`/api/email-accounts/${accountId}/verify`, {})
       await loadData()
       toast({
         title: 'Verification email sent',
@@ -207,7 +207,7 @@ const EmailAccountsTab: React.FC = () => {
 
   const handleTestAccount = async (accountId: string) => {
     try {
-      await api.post(`/api/email-accounts/${accountId}/test`)
+      await api.post(`/api/email-accounts/${accountId}/test`, {})
       toast({
         title: 'Test email sent successfully',
         status: 'success',

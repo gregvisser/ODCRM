@@ -63,6 +63,7 @@ import {
   PhoneIcon,
   CheckIcon,
   ChevronDownIcon,
+  SettingsIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 

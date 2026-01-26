@@ -65,6 +65,7 @@ import {
   SettingsIcon,
   TriangleUpIcon,
   TriangleDownIcon,
+  TimeIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
@@ -215,7 +216,7 @@ const CampaignsTab: React.FC = () => {
 
   const handleSendCampaign = async (campaignId: string) => {
     try {
-      await api.post(`/api/campaigns/${campaignId}/send`)
+      await api.post(`/api/campaigns/${campaignId}/send`, {})
       await loadData()
       toast({
         title: 'Campaign sent successfully',
