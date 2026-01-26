@@ -1,8 +1,8 @@
 import { settingsStore } from '../platform'
 
 // API utility for making requests to backend
-// Always use environment variable - no hardcoded URLs
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+// Use environment variable or empty string for relative URLs (Azure proxy)
+const API_BASE_URL = import.meta.env.VITE_API_URL || ''
 
 export interface ApiResponse<T> {
   data?: T

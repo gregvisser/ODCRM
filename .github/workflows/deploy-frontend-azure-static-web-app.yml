@@ -30,6 +30,10 @@ jobs:
 
     - name: Build application
       run: npm run build
+      env:
+        VITE_AZURE_CLIENT_ID: ${{ secrets.VITE_AZURE_CLIENT_ID }}
+        VITE_AZURE_TENANT_ID: ${{ secrets.VITE_AZURE_TENANT_ID }}
+        VITE_AZURE_REDIRECT_URI: ${{ secrets.VITE_AZURE_REDIRECT_URI }}
 
     - name: Deploy to Azure Static Web Apps
       uses: azure/static-web-apps-deploy@v1

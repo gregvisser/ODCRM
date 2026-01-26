@@ -32,6 +32,18 @@ Go to: https://github.com/yourusername/odcrm/settings/secrets/actions
   3. Click "Copy" to get the token
   4. Paste as the secret value
 
+### VITE_AZURE_CLIENT_ID
+- Value: Your Azure AD application client ID
+- Description: Required for Azure AD authentication in production builds
+
+### VITE_AZURE_TENANT_ID
+- Value: Your Azure AD tenant ID
+- Description: Required for Azure AD authentication in production builds
+
+### VITE_AZURE_REDIRECT_URI
+- Value: `https://odcrm.bidlow.co.uk`
+- Description: The redirect URI for Azure AD authentication after login
+
 ## Verification
 
 After adding secrets:

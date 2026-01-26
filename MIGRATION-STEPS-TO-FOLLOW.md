@@ -86,6 +86,8 @@ Update `staticwebapp.config.json` with your actual App Service URL:
 }
 ```
 
+Replace `your-app-service-name` with your actual Azure App Service name (this should match the `AZURE_WEBAPP_NAME` secret value).
+
 ---
 
 ## PHASE 4: Testing & Verification

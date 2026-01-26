@@ -47,7 +47,7 @@ Wait 24-48 hours for DNS propagation, then:
 
 ## Step 5: Update Static Web App Config
 
-If your App Service hostname is different, update `staticwebapp.config.json`:
+**IMPORTANT**: Update `staticwebapp.config.json` with your actual App Service URL:
 
 ```json
 {
@@ -55,11 +55,11 @@ If your App Service hostname is different, update `staticwebapp.config.json`:
     {
       "route": "/api/*",
       "backend": {
-        "url": "https://odcrm-api.azurewebsites.net"
+        "url": "https://your-app-service-name.azurewebsites.net"
       }
     }
   ]
 }
 ```
 
-Replace with your actual App Service URL if different.
+Replace `your-app-service-name` with your actual Azure App Service name (should match the `AZURE_WEBAPP_NAME` secret value).
