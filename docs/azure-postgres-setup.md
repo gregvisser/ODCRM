@@ -1,178 +1,223 @@
-# Azure PostgreSQL Flexible Server Setup Guide
+# Azure PostgreSQL Setup Guide
 
-This guide explains how to set up Azure Database for PostgreSQL Flexible Server for the ODCRM application.
+This guide explains how to migrate from Neon PostgreSQL to Azure Database for PostgreSQL Flexible Server.
 
 ## Prerequisites
 
-- Azure subscription
-- Azure CLI installed (optional, for CLI setup)
+- Azure subscription with appropriate permissions
+- Azure CLI installed (optional, for command-line operations)
 
-## 1. Create Azure Database for PostgreSQL Flexible Server
+## Step 1: Create Azure Database for PostgreSQL Flexible Server
 
-### Option A: Azure Portal (Recommended for beginners)
+### Option A: Using Azure Portal (Recommended for beginners)
 
 1. Go to [Azure Portal](https://portal.azure.com)
-2. Search for "PostgreSQL Flexible Server"
+2. Search for "PostgreSQL" and select "Azure Database for PostgreSQL flexible servers"
 3. Click "Create"
-4. Fill in the details:
-   - **Subscription**: Your Azure subscription
+4. Configure:
+   - **Subscription**: Select your subscription
    - **Resource group**: Create new or select existing (e.g., `odcrm-rg`)
-   - **Server name**: `odcrm-postgres` (must be globally unique)
+   - **Server name**: `odcrm-postgres` (must be unique)
    - **Region**: Select the same region as your App Service
-   - **PostgreSQL version**: 15 (or latest stable)
-   - **Workload type**: Development (for cost optimization)
+   - **PostgreSQL version**: 15 (latest stable)
+   - **Workload type**: Development (can be changed later)
    - **Compute + storage**:
-     - Compute size: Burstable, B1ms (1 vCore, 2 GiB RAM)
-     - Storage: 32 GiB (can increase later)
-   - **Availability zone**: Zone-redundant (for production)
-   - **Authentication**: PostgreSQL authentication only
-   - **Admin username**: `odcrmadmin` (or your choice)
-   - **Password**: Set a strong password
-5. Click "Review + create" then "Create"
+     - Compute size: Burstable, B1ms (cheapest for development)
+     - Storage: 32 GiB (minimum)
+   - **Admin username**: `odcrmadmin` (or your preferred name)
+   - **Password**: Create a strong password
+   - **Confirm password**: Repeat the password
 
-### Option B: Azure CLI
+5. Click "Review + create" then "Create"
+6. Wait for deployment to complete (about 5-10 minutes)
+
+### Option B: Using Azure CLI
 
 ```bash
 # Set variables
 RESOURCE_GROUP="odcrm-rg"
 SERVER_NAME="odcrm-postgres"
-LOCATION="uksouth"  # or your preferred region
 ADMIN_USER="odcrmadmin"
-ADMIN_PASSWORD="YourStrongPassword123!"
+ADMIN_PASSWORD="YourStrongPasswordHere123!"
 
 # Create resource group
-az group create --name $RESOURCE_GROUP --location $LOCATION
+az group create --name $RESOURCE_GROUP --location "UK South"
 
-# Create PostgreSQL Flexible Server
+# Create PostgreSQL server
 az postgres flexible-server create \
   --resource-group $RESOURCE_GROUP \
   --name $SERVER_NAME \
-  --location $LOCATION \
+  --location "UK South" \
   --admin-user $ADMIN_USER \
   --admin-password $ADMIN_PASSWORD \
-  --sku-name Standard_B1ms \
-  --tier Burstable \
+  --sku-name "B_Standard_B1ms" \
+  --tier "Burstable" \
   --storage-size 32 \
-  --version 15 \
-  --public-access Enabled
+  --version 15
 ```
 
-## 2. Configure Firewall Rules
+## Step 2: Configure Database Connection
 
-After creation, you need to allow access from your App Service and development machines.
-
-### Allow Azure services access:
-1. In Azure Portal, go to your PostgreSQL server
-2. Under "Settings" → "Networking"
-3. Check "Allow public access from any Azure service within Azure to this server"
-4. Click "Save"
-
-### For local development:
-Add your IP address under "Firewall rules" or use "Allow all IPs" temporarily for development.
-
-## 3. Get Connection String
+### Get Connection Information
 
 1. In Azure Portal, go to your PostgreSQL server
 2. Under "Settings" → "Connection strings"
-3. Copy the "ADO.NET" connection string and modify it for PostgreSQL format
+3. Copy the connection string format
 
-The connection string will look like:
+### DATABASE_URL Format for Azure PostgreSQL
+
+The connection string should look like this:
+
 ```
 postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require
 ```
 
-## 4. Environment Variables
+**Important Notes:**
+- Always use `sslmode=require` for Azure PostgreSQL
+- The default database name is `postgres`
+- Username format: `username@servername`
 
-Set the following environment variables in your Azure App Service:
+### Update Environment Variables
 
-### Backend (App Service)
-```
-DATABASE_URL=postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require
-```
+Update your `.env` files with the new DATABASE_URL:
 
-### Frontend (Static Web Apps)
-No database variables needed in frontend.
-
-### Local Development (.env)
-```
-DATABASE_URL=postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require
+**For local development** (`.env` in root):
+```bash
+# Keep your Neon URL for local dev if needed
+DATABASE_URL="postgresql://your-local-db-url"
 ```
 
-## 5. Database Migration
+**For production** (set in Azure App Service):
+- Go to Azure Portal → App Service → Configuration → Application settings
+- Add: `DATABASE_URL` = `postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require`
 
-### Initial Setup (run once)
+## Step 3: Network Configuration
+
+### Configure Firewall Rules
+
+By default, Azure PostgreSQL blocks all connections. You need to allow:
+
+1. **Your local development IP** (for migrations)
+2. **Azure App Service** (for production)
+
+#### Allow Local Development Access
+
+1. In Azure Portal → PostgreSQL server → "Networking"
+2. Under "Firewall rules" → "Add current client IP address"
+3. Or add your specific IP address range
+
+#### Allow Azure App Service Access
+
+Azure services can connect to PostgreSQL, but you may need to enable "Allow public access from any Azure service within Azure" in the Networking settings.
+
+## Step 4: Run Database Migrations
+
+### Local Development
+
 ```bash
 # Navigate to server directory
 cd server
 
-# Install dependencies
-npm install
-
 # Generate Prisma client
 npm run prisma:generate
 
-# Create initial migration (if schema changes exist)
-npm run prisma:migrate:dev -- --name init
-
-# Push schema to database
-npm run prisma:push
+# Run migrations (creates tables, etc.)
+npm run prisma:migrate:dev
 ```
 
 ### Production Deployment
-For production deployments, run:
+
+For production, migrations run automatically during the App Service deployment via the GitHub Actions workflow.
+
+**Manual production migration** (if needed):
+
 ```bash
-npm run setup:prod
+# Set production DATABASE_URL
+export DATABASE_URL="postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require"
+
+# Run migrations
+cd server
+npm run prisma:migrate:deploy
 ```
 
-This runs:
-- `npm install`
-- `npm run prisma:generate`
-- `npm run prisma:migrate:deploy`
+## Step 5: Verify Connection
 
-## 6. Verify Connection
+### Test Database Connection
 
-Test the database connection:
+Create a simple test script to verify the connection:
 
+```javascript
+// test-db.js
+const { PrismaClient } = require('@prisma/client')
+
+const prisma = new PrismaClient()
+
+async function main() {
+  try {
+    await prisma.$connect()
+    console.log('✅ Database connection successful!')
+    await prisma.$disconnect()
+  } catch (error) {
+    console.error('❌ Database connection failed:', error)
+  }
+}
+
+main()
+```
+
+Run it:
 ```bash
 cd server
-npm run prisma:studio
+node test-db.js
 ```
-
-This should open Prisma Studio and connect to your Azure PostgreSQL database.
-
-## 7. Cost Optimization
-
-### Development/Staging
-- Use Burstable B1ms compute tier
-- 32 GiB storage
-- Estimated cost: ~£15-20/month
-
-### Production
-- Consider General Purpose or Memory Optimized tiers based on your load
-- Enable auto-scaling if needed
-- Monitor usage and adjust compute size accordingly
-
-## 8. Backup and Security
-
-- Azure PostgreSQL automatically creates backups
-- Retention period: 7 days (can be increased)
-- Encryption at rest is enabled by default
-- Consider enabling Azure Defender for PostgreSQL for advanced security
 
 ## Troubleshooting
 
-### Connection Issues
-- Verify firewall rules allow your IP
-- Check that SSL mode is set to `require`
-- Ensure username/password are correct
-- Try connecting with a PostgreSQL client like pgAdmin
+### Common Issues
 
-### Migration Issues
-- Check that DATABASE_URL is set correctly
-- Run `npm run prisma:generate` before migrations
-- Use `prisma db push` for initial schema deployment
+1. **SSL Connection Error**
+   - Ensure `sslmode=require` is in your DATABASE_URL
+   - Azure requires SSL connections
 
-### Performance Issues
-- Monitor query performance with `EXPLAIN ANALYZE`
-- Consider adding indexes for frequently queried columns
-- Check Azure Monitor for database metrics
+2. **Authentication Failed**
+   - Double-check username/password
+   - Username format: `username@servername`
+
+3. **Server Not Found**
+   - Verify server name and region
+   - Check if server is running
+
+4. **Firewall Block**
+   - Add your IP to firewall rules
+   - Ensure Azure services are allowed
+
+### Useful Commands
+
+```bash
+# Check server status
+az postgres flexible-server show --resource-group odcrm-rg --name odcrm-postgres
+
+# Restart server (if needed)
+az postgres flexible-server restart --resource-group odcrm-rg --name odcrm-postgres
+
+# View connection strings
+az postgres flexible-server show-connection-string --resource-group odcrm-rg --name odcrm-postgres
+```
+
+## Migration Checklist
+
+- [ ] Create Azure PostgreSQL Flexible Server
+- [ ] Configure firewall rules
+- [ ] Update DATABASE_URL in environment variables
+- [ ] Test local connection
+- [ ] Run migrations locally
+- [ ] Deploy to production and verify
+- [ ] Update DNS and domain configuration
+- [ ] Clean up old Neon database (after verifying migration)
+
+## Cost Considerations
+
+- **Burstable B1ms**: ~£15/month
+- **Storage**: £0.10 per GB per month
+- **Backup**: Included in storage
+- Monitor usage in Azure Cost Management

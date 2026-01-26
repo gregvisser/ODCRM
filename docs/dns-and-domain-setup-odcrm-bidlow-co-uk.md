@@ -1,214 +1,207 @@
 # DNS & Custom Domain Setup: odcrm.bidlow.co.uk
 
-This guide explains how to configure the custom domain `odcrm.bidlow.co.uk` for your Azure-hosted ODCRM application.
+This guide explains how to configure the custom domain `odcrm.bidlow.co.uk` to point to your Azure-hosted OpenDoors CRM application.
 
-## Architecture Overview
+## Overview
 
-Your application will be accessible at:
-- **Frontend (Static Web App)**: `https://odcrm.bidlow.co.uk`
-- **Backend (App Service)**: `https://odcrm-api.azurewebsites.net` (proxied via Static Web App)
-
-The Static Web App serves as the main entry point and proxies API calls to the App Service.
+Your application architecture:
+- **Frontend**: Azure Static Web Apps (main entry point)
+- **Backend**: Azure App Service (proxied via `/api/*` routes)
+- **Domain**: `odcrm.bidlow.co.uk` hosted on GoDaddy
 
 ## Prerequisites
 
-- Azure Static Web App created and deployed
-- Azure App Service created and deployed
-- Access to GoDaddy DNS management for `bidlow.co.uk`
-- Custom domain validation completed in Azure
+- GoDaddy account with access to bidlow.co.uk domain
+- Azure Static Web App deployed and running
+- Azure App Service deployed and running
+- Custom domain verified in Azure (see Step 2)
 
-## 1. Configure Custom Domain in Azure Static Web Apps
+## Step 1: Prepare Azure Resources
 
-### Step 1: Add Custom Domain to Static Web App
+### Get Azure Static Web App URL
 
 1. Go to [Azure Portal](https://portal.azure.com)
 2. Navigate to your Static Web App
 3. Under "Settings" → "Custom domains"
-4. Click "Add custom domain"
-5. Choose "Enter domain name"
-6. Enter: `odcrm.bidlow.co.uk`
-7. Click "Next"
+4. Note the "Default hostname" (e.g., `random-name.azurestaticapps.net`)
 
-### Step 2: Domain Validation
+### Enable Custom Domain in Azure Static Web App
 
-Azure will provide validation options:
+1. In Azure Portal → Static Web App → "Custom domains"
+2. Click "Add custom domain"
+3. Enter: `odcrm.bidlow.co.uk`
+4. Select "CNAME" validation method
+5. Azure will show you the required CNAME record values
+6. **Don't complete this step yet** - you'll do it after DNS configuration
 
-**Option A: CNAME Record (Recommended)**
-- **Host**: `odcrm`
-- **Type**: `CNAME`
-- **Points to**: `<your-static-web-app-url>.azurestaticapps.net`
+## Step 2: Configure DNS Records in GoDaddy
 
-**Option B: TXT Record**
-- **Host**: `odcrm`
-- **Type**: `TXT`
-- **Value**: `<azure-provided-validation-code>`
+### Access GoDaddy DNS Settings
 
-## 2. Update GoDaddy DNS Records
+1. Log in to your [GoDaddy account](https://account.godaddy.com)
+2. Go to "My Products" → Domain Settings
+3. Find `bidlow.co.uk` and click "DNS" or "Manage DNS"
 
-### Access GoDaddy DNS Management
+### Add CNAME Record for www/odcrm subdomain
 
-1. Log in to your [GoDaddy account](https://www.godaddy.com)
-2. Go to "My Products" → "Domains"
-3. Click on `bidlow.co.uk`
-4. Click "DNS" or "Manage DNS"
+You need to add a CNAME record that points `odcrm.bidlow.co.uk` to your Azure Static Web App.
 
-### Add CNAME Record for Static Web App
+**Record Details:**
+- **Type**: CNAME
+- **Host**: `odcrm` (this creates `odcrm.bidlow.co.uk`)
+- **Points to**: Your Azure Static Web App hostname (e.g., `random-name.azurestaticapps.net`)
+- **TTL**: 600 (10 minutes) or 3600 (1 hour)
 
-1. Click "Add" to create a new record
-2. Select record type: **CNAME**
-3. Fill in the details:
-   - **Host**: `odcrm`
-   - **Type**: `CNAME`
-   - **Points to**: `<your-static-web-app-url>.azurestaticapps.net`
-   - **TTL**: `3600` (1 hour)
-
-Example:
+**Example:**
 ```
-Host: odcrm
 Type: CNAME
-Points To: amazing-ocean-123456789.azurestaticapps.net
+Host: odcrm
+Points to: amazing-sky-123456789.azurestaticapps.net
 TTL: 3600
 ```
 
-### Alternative: A Record (if required)
+### Optional: Root Domain Redirect
 
-If Azure requires an A record instead:
-1. Get the IP address from Azure Static Web App custom domain setup
-2. Add an A record:
-   - **Host**: `odcrm`
-   - **Type**: `A`
-   - **Points to**: `<azure-ip-address>`
-   - **TTL**: `3600`
+If you want `bidlow.co.uk` to redirect to `odcrm.bidlow.co.uk`:
 
-## 3. Update Static Web App Configuration
+**Record Details:**
+- **Type**: A
+- **Host**: `@` (root domain)
+- **Points to**: The IP address of your redirect service (check GoDaddy forwarding options)
 
-### Update API Proxy URL
+Or use GoDaddy's domain forwarding feature to redirect `bidlow.co.uk` to `https://odcrm.bidlow.co.uk`.
 
-Edit your `staticwebapp.config.json` to use the correct backend URL:
+## Step 3: Verify DNS Propagation
+
+### Check DNS Records
+
+Use these tools to verify your DNS records are set correctly:
+
+1. **GoDaddy DNS Checker**: In GoDaddy, use their DNS lookup tool
+2. **Online DNS Tools**:
+   - [DNS Checker](https://dnschecker.org)
+   - [MX Toolbox](https://mxtoolbox.com)
+   - Command line: `nslookup odcrm.bidlow.co.uk`
+
+**Expected Results:**
+- `odcrm.bidlow.co.uk` should resolve to your Azure Static Web App hostname
+- The CNAME record should show: `odcrm.bidlow.co.uk CNAME amazing-sky-123456789.azurestaticapps.net`
+
+## Step 4: Complete Azure Custom Domain Setup
+
+### Add Custom Domain in Azure
+
+1. Return to Azure Portal → Static Web App → "Custom domains"
+2. Click "Add custom domain"
+3. Enter: `odcrm.bidlow.co.uk`
+4. Select "CNAME" validation method
+5. Azure will verify the DNS record exists
+6. If verification succeeds, the domain will be added
+
+### Configure SSL Certificate
+
+Azure Static Web Apps automatically provides SSL certificates for custom domains. This may take a few minutes to provision.
+
+## Step 5: Test the Setup
+
+### Verify Application Access
+
+1. Wait 5-10 minutes for DNS propagation
+2. Visit `https://odcrm.bidlow.co.uk`
+3. Verify:
+   - Frontend loads correctly
+   - API calls work (should proxy to your App Service)
+   - SSL certificate is valid (padlock icon)
+
+### Test API Proxy
+
+Your `staticwebapp.config.json` should proxy `/api/*` requests to your backend:
 
 ```json
 {
-  "routes": [
-    {
-      "route": "/api/*",
-      "allowedRoles": ["anonymous"],
-      "backend": {
-        "url": "https://odcrm-api.azurewebsites.net"
-      }
-    }
-  ]
+  "route": "/api/*",
+  "backend": {
+    "url": "https://odcrm-api.azurewebsites.net"
+  }
 }
 ```
 
-Replace `odcrm-api.azurewebsites.net` with your actual App Service URL.
+Test API endpoints:
+- Visit: `https://odcrm.bidlow.co.uk/api/health` (if you have a health endpoint)
+- Check browser network tab to ensure API calls go through the proxy
 
-## 4. SSL Certificate Setup
-
-Azure Static Web Apps automatically provisions SSL certificates for custom domains. This process may take up to 24 hours.
-
-### Verify SSL Status
-
-1. In Azure Portal, go to your Static Web App
-2. Under "Custom domains", check the status
-3. Wait for "SSL certificate" to show "Ready"
-
-## 5. Test the Configuration
-
-### DNS Propagation Check
-
-Use tools like:
-- [DNS Checker](https://dnschecker.org)
-- `nslookup odcrm.bidlow.co.uk`
-- `dig odcrm.bidlow.co.uk`
-
-### Functional Testing
-
-1. Visit `https://odcrm.bidlow.co.uk`
-2. Verify the application loads
-3. Test API calls (login, data fetching)
-4. Check browser developer tools for any CORS or API errors
-
-## 6. Troubleshooting
+## Troubleshooting
 
 ### DNS Issues
 
-**Problem**: Domain not resolving
-**Solution**:
-- Wait 24-48 hours for DNS propagation
-- Check CNAME record is correct
-- Verify Azure domain validation is complete
+1. **DNS not propagating**
+   - Wait longer (up to 24 hours for full propagation)
+   - Clear local DNS cache: `ipconfig /flushdns` (Windows)
+   - Try different DNS servers (8.8.8.8, 1.1.1.1)
 
-**Problem**: SSL certificate not provisioning
-**Solution**:
-- Ensure domain validation is complete
-- Check that DNS records are correct
-- Contact Azure support if issues persist
+2. **Wrong CNAME target**
+   - Double-check the Azure Static Web App hostname
+   - Ensure no extra dots or spaces in the record
 
-### API Proxy Issues
+3. **CNAME record not found**
+   - Verify the record was added correctly in GoDaddy
+   - Check if there are conflicting records (A, AAAA, etc.)
 
-**Problem**: API calls failing
-**Solution**:
-- Verify App Service URL in `staticwebapp.config.json`
-- Check App Service is running
-- Review CORS settings on App Service
-- Check API endpoint URLs in frontend code
+### Azure Issues
 
-### Common Issues
+1. **Custom domain validation fails**
+   - Ensure DNS record is live (use online DNS checkers)
+   - Wait a few minutes and try again
+   - Check Azure status page for outages
 
-1. **CNAME vs A Record Confusion**
-   - Use CNAME for subdomains (odcrm.bidlow.co.uk)
-   - Use A record only if Azure specifically requires it
+2. **SSL certificate issues**
+   - Azure provisions certificates automatically
+   - May take up to 24 hours for new domains
+   - Check Azure Static Web App logs
 
-2. **DNS Propagation Delays**
-   - Changes can take 24-48 hours to propagate globally
-   - Use DNS checking tools to monitor progress
+3. **API proxy not working**
+   - Verify `staticwebapp.config.json` is deployed
+   - Check backend App Service is running
+   - Ensure CORS is configured on the backend
 
-3. **SSL Certificate Delays**
-   - Azure may take up to 24 hours to provision certificates
-   - Check status in Azure Portal
+### Common GoDaddy Issues
 
-## 7. Backup Domain Configuration
+1. **Records not saving**
+   - Try clearing browser cache
+   - Use incognito/private browsing mode
+   - Contact GoDaddy support if persistent
 
-If you need to temporarily point to a different service:
+2. **Multiple records conflict**
+   - GoDaddy allows multiple records of the same type
+   - Ensure the correct record has priority
+   - Remove old/incorrect records
 
-### Point to App Service Directly
-Add a CNAME record pointing to your App Service:
+## DNS Record Summary
+
+**Required Records for odcrm.bidlow.co.uk:**
+
 ```
-Host: odcrm
 Type: CNAME
-Points To: odcrm-api.azurewebsites.net
-```
-
-### Point to Vercel/Render (Rollback)
-```
 Host: odcrm
-Type: CNAME
-Points To: your-vercel-app.vercel.app
+Value: [your-azure-static-web-app-hostname].azurestaticapps.net
+TTL: 3600
 ```
 
-## 8. Monitoring & Maintenance
+**Optional: Root domain redirect**
+- Use GoDaddy's domain forwarding feature
+- Or add A record pointing to redirect service
 
-### Regular Checks
+## Next Steps
 
-- Monitor DNS resolution
-- Check SSL certificate validity
-- Verify API connectivity
-- Monitor Azure resource health
+After DNS setup is complete:
 
-### Renewal Requirements
-
-- SSL certificates auto-renew through Azure
-- DNS records rarely need changes
-- Update Azure resources if URLs change
-
-## 9. Cost Considerations
-
-- Custom domains are free on Azure Static Web Apps
-- SSL certificates are free
-- DNS hosting costs depend on your GoDaddy plan
+1. Update your `.env.example` files to reflect production URLs
+2. Test all application features
+3. Set up monitoring and alerts in Azure
+4. Consider setting up Azure Front Door for additional features (CDN, WAF, etc.)
 
 ## Support Resources
 
-- [Azure Static Web Apps Custom Domains](https://learn.microsoft.com/en-us/azure/static-web-apps/custom-domain)
-- [GoDaddy DNS Management](https://www.godaddy.com/help/manage-dns-680)
-- [Azure Support](https://azure.microsoft.com/en-us/support/)
+- [Azure Static Web Apps Documentation](https://docs.microsoft.com/en-us/azure/static-web-apps/)
+- [GoDaddy DNS Help](https://www.godaddy.com/help/manage-dns-680)
+- [Azure DNS Troubleshooting](https://docs.microsoft.com/en-us/azure/dns/dns-troubleshoot)

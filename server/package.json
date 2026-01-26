@@ -2,10 +2,13 @@
   "name": "odcrm-server",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --skipLibCheck --noEmit false || tsc --noCheck || echo 'Compiling with errors allowed' && tsc --skipLibCheck || exit 0",
+    "build": "tsc",
     "start": "node dist/index.js",
     "postinstall": "prisma generate --schema=./prisma/schema.prisma",
     "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",

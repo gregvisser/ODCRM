@@ -19,31 +19,24 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '24'
         cache: 'npm'
         cache-dependency-path: server/package-lock.json
 
     - name: Install dependencies
-      working-directory: ./server
-      run: npm ci
+      run: cd server && npm ci
 
     - name: Generate Prisma client
-      working-directory: ./server
-      run: npm run prisma:generate
-
-    - name: Build application
-      working-directory: ./server
-      run: npm run build
-
-    - name: Run database migrations
-      working-directory: ./server
-      run: npm run prisma:migrate:deploy
+      run: cd server && npm run prisma:generate
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    - name: Build application
+      run: cd server && npm run build
 
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         package: ./server

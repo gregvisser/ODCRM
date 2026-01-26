@@ -2,146 +2,108 @@
 
 This document lists files and configurations that should be removed or updated after successfully migrating to Azure.
 
-## Files to Delete
+## 🗑️ Files to Delete
 
 ### Root Level Files
-- `vercel.json` - No longer needed as frontend moves to Azure Static Web Apps
+- [ ] `vercel.json` - No longer needed, Azure Static Web Apps handles routing
+- [ ] `.env` - Contains Neon database URL, replace with Azure-focused .env.example
 
 ### Server Directory Files
-- `server/render.yaml` - No longer needed as backend moves to Azure App Service
+- [ ] `server/render.yaml` - Render-specific configuration, no longer needed
+- [ ] `server/.env` - Contains Neon-specific URLs, replace with Azure-focused .env.example
 
-## Environment Variables to Remove
+## 📝 Files to Update
 
-### Vercel Environment Variables
-Remove these from Vercel dashboard:
-- `VITE_API_URL` (will be handled by Static Web Apps config)
+### Environment Files
+Update `.env.example` files to use Azure URLs instead of Render/Neon:
 
-### Render Environment Variables
-Remove these from Render dashboard after migration:
-- `NODE_ENV`
-- `PORT`
-- `DATABASE_URL` (move to Azure App Service)
-- `FRONTEND_URL`
-- `FRONTEND_URLS`
-- All Microsoft OAuth variables (move to Azure App Service)
-- All API key variables (move to Azure App Service)
-
-## Services to Decommission
-
-### Vercel
-1. Go to Vercel dashboard
-2. Delete the ODCRM frontend project
-3. Remove custom domain `odcrm.bidlow.co.uk` from Vercel
-
-### Render
-1. Go to Render dashboard
-2. Delete the `odcrm-api` service
-3. Remove any custom domains or configurations
-
-### Neon PostgreSQL (Optional)
-If you want to completely migrate away from Neon:
-
-1. Export any remaining data if needed
-2. Delete the Neon database
-3. Cancel Neon subscription
-
-**Note**: Keep Neon as backup until Azure setup is fully tested and stable.
-
-## Git History Cleanup (Optional)
-
-If you want to remove sensitive configuration from git history:
-
+**Root `.env.example`:**
 ```bash
-# Remove files from git history (use with caution)
-git filter-branch --tree-filter 'rm -f vercel.json server/render.yaml' --prune-empty HEAD
-
-# Or use BFG Repo-Cleaner for better performance
-# Download from https://rtyley.github.io/bfg-repo-cleaner/
-java -jar bfg.jar --delete-files vercel.json
-java -jar bfg.jar --delete-files render.yaml
+# Update API URL for Azure
+VITE_API_URL=https://odcrm.bidlow.co.uk/api
 ```
 
-## Scripts to Update
+**Server `.env.example`:**
+```bash
+# Update all URLs to use Azure domains
+DATABASE_URL=postgresql://odcrmadmin:password@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require
+FRONTEND_URL=https://odcrm.bidlow.co.uk
+FRONTEND_URLS=https://odcrm.bidlow.co.uk
+REDIRECT_URI=https://odcrm.bidlow.co.uk/api/outlook/callback
+EMAIL_TRACKING_DOMAIN=https://odcrm.bidlow.co.uk
+```
 
-### Root package.json Scripts
-Remove or comment out Neon-specific scripts:
-- `deploy:update-neon` - No longer needed
-- `deploy:migrate` - Update to work with Azure
-- `deploy:create-customer` - Update database references
+### Documentation Updates
+- [ ] Update main README.md to reference Azure URLs
+- [ ] Update any deployment documentation
+- [ ] Update API documentation with new base URLs
 
-### Server package.json Scripts
-The Prisma scripts are already generic and will work with Azure PostgreSQL.
+## 🏗️ Azure Resources to Clean Up Later
 
-## Documentation to Update
+### After 30-Day Verification Period
+- [ ] **Delete Neon PostgreSQL database** (after confirming Azure DB works)
+- [ ] **Delete Vercel app** (after confirming Azure Static Web App works)
+- [ ] **Delete Render service** (after confirming Azure App Service works)
 
-### Environment Documentation
-Update `docs/ENVIRONMENTS.md` to reflect Azure deployments instead of Vercel/Render.
+### Cost Optimization
+- [ ] Review Azure resource sizing (scale down if over-provisioned)
+- [ ] Set up Azure Cost Management alerts
+- [ ] Consider reserved instances for long-term cost savings
 
-### Deployment Documentation
-Update any deployment guides to reference Azure instead of Vercel/Render/Neon.
+## 🔍 Verification Before Cleanup
 
-## DNS Records to Update
+### Test Everything Works on Azure
+- [ ] Frontend loads at `https://odcrm.bidlow.co.uk`
+- [ ] API endpoints work through proxy
+- [ ] Database operations functional
+- [ ] Authentication works
+- [ ] Email functionality works
+- [ ] All user workflows complete successfully
 
-After Azure migration is complete and tested:
+### Backup Verification
+- [ ] Neon database backup available (export if needed)
+- [ ] Vercel deployment history accessible
+- [ ] Render logs and configurations backed up
 
-1. Update GoDaddy DNS records to point to Azure (see `docs/dns-and-domain-setup-odcrm-bidlow-co-uk.md`)
-2. Remove any Vercel or Render DNS configurations
+## 🚨 Critical: Don't Delete Yet!
 
-## Monitoring & Alerts
+**Wait 7-14 days after migration before deleting old resources:**
+- Allows time to fix any issues discovered post-migration
+- Provides fallback if Azure migration has problems
+- Gives time for DNS propagation and SSL setup
 
-### Azure Monitor Setup
-After migration:
-1. Set up Azure Monitor alerts for App Service
-2. Configure Static Web Apps monitoring
-3. Set up PostgreSQL database monitoring
-4. Remove any Vercel/Render monitoring
+## 📋 Cleanup Checklist
 
-### GitHub Actions
-The new workflows in `.github/workflows/` will handle deployments. Remove any old Vercel/Render webhook configurations.
+### Immediate (After Successful Migration)
+- [ ] Update .env.example files with Azure URLs
+- [ ] Update documentation references
+- [ ] Commit and push cleanup changes
 
-## Backup & Recovery
+### After 7 Days
+- [ ] Delete vercel.json
+- [ ] Delete server/render.yaml
+- [ ] Update .gitignore if needed
 
-### Database Backups
-- Azure PostgreSQL provides automatic backups
-- Set up additional backup strategies if needed
-- Document backup/restore procedures for Azure
+### After 30 Days (Only if everything works perfectly)
+- [ ] Delete Neon database
+- [ ] Delete Vercel app
+- [ ] Delete Render service
+- [ ] Archive any local configuration backups
 
-### Application Backups
-- Azure App Service has deployment slots for staging
-- Use GitHub for code backups (already handled)
-- Consider Azure Backup for comprehensive disaster recovery
+## 🔄 Rollback Plan
 
-## Cost Management
+If issues arise after cleanup:
 
-### Remove Unused Services
-- Cancel Vercel subscription or remove unused projects
-- Cancel Render subscription or remove unused services
-- Monitor Neon usage and cancel if fully migrated
+1. **Quick Rollback**: Redeploy to Vercel/Render using git history
+2. **Data Rollback**: Restore from Neon backup if needed
+3. **DNS Rollback**: Point domain back to original services
 
-### Azure Cost Optimization
-- Set up Azure Cost Management alerts
-- Monitor resource usage
-- Consider reserved instances for production workloads
+**Keep backups until you're 100% confident in Azure setup!**
 
-## Final Verification Steps
+## 📞 Support
 
-After cleanup:
-
-1. ✅ Verify application works at `https://odcrm.bidlow.co.uk`
-2. ✅ Confirm all API endpoints function correctly
-3. ✅ Test user authentication flows
-4. ✅ Verify database connectivity and data integrity
-5. ✅ Check monitoring and logging are working
-6. ✅ Confirm CI/CD pipelines deploy successfully
-7. ✅ Test backup and restore procedures
-8. ✅ Review costs and optimize as needed
-
-## Rollback Plan
-
-If issues arise after cleanup, you can rollback by:
-
-1. **Temporary DNS Change**: Point DNS back to Vercel/Render temporarily
-2. **Service Recreation**: Recreate Vercel/Render services if needed
-3. **Database**: Keep Neon as backup until confident in Azure setup
-
-Keep this document and all migration documentation for at least 30 days after successful migration.
+If you encounter issues during cleanup:
+- Check Azure resource dependencies
+- Verify all services are running
+- Test from multiple locations/devices
+- Contact Azure support if needed
