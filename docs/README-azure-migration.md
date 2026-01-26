@@ -107,8 +107,6 @@ az webapp config appsettings set \
   --resource-group odcrm-rg \
   --name odcrm-api \
   --setting DATABASE_URL="postgresql://odcrmadmin:YourPassword@odcrm-postgres.postgres.database.azure.com:5432/postgres?sslmode=require"
-```
-
 #### 2.3 Run Database Migration
 ```bash
 cd server
