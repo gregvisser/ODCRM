@@ -112,7 +112,7 @@ az webapp config appsettings set \
 cd server
 npm install
 npm run prisma:generate
-npm run prisma:db:push  # For initial setup
+npm run prisma:push  # For initial setup
 ```
 
 ### Phase 3: Backend Deployment Setup

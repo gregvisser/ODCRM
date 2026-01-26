@@ -16,7 +16,7 @@ npm run prisma:generate
 
 # Run database migration (this will create tables)
 Write-Host "Running database migration..."
-npm run prisma:db:push
+npm run prisma:push
 
 # Optional: Run development migration if you have migration files
 # npm run prisma:migrate:dev

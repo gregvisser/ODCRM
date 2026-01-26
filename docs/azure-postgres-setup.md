@@ -115,7 +115,7 @@ npm run prisma:generate
 npm run prisma:migrate:dev -- --name init
 
 # Push schema to database
-npm run prisma:db:push
+npm run prisma:push
 ```
 
 ### Production Deployment
