@@ -24,7 +24,7 @@
  */
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, useToast } from '@chakra-ui/react'
+import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, useToast } from '@chakra-ui/react'
 import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
 import { databaseCustomersToAccounts, databaseCustomerToAccount, accountToDatabaseCustomer, type Account } from '../utils/customerAccountMapper'
 import { setJson, getJson } from '../platform/storage'
@@ -151,10 +151,10 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       <VStack py={10} spacing={4}>
         <Spinner size="xl" color="orange.500" thickness="4px" />
         <Box textAlign="center">
-          <AlertTitle fontSize="lg">Loading customers from database...</AlertTitle>
-          <AlertDescription color="gray.600">
+          <Text fontSize="lg" fontWeight="bold">Loading customers from database...</Text>
+          <Text color="gray.600">
             Fetching fresh data from Azure PostgreSQL
-          </AlertDescription>
+          </Text>
         </Box>
       </VStack>
     )
