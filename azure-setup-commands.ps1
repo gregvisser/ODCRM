@@ -46,7 +46,7 @@ az staticwebapp create `
   --name odcrm-frontend `
   --resource-group odcrm-rg `
   --location uksouth `
-  --source https://github.com/yourusername/odcrm `
+  --source https://github.com/gregvisser/ODCRM.git `
   --branch main `
   --app-location "/" `
   --output-location "dist" `
