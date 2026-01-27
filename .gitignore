@@ -28,3 +28,7 @@ dist-ssr
 
 # Local scratch artifacts (logo scans, scraped pages, etc.)
 .tmp/
+
+# Local Azure deployment artifacts (do not commit)
+publishProfile.xml
+azure-setup-script.sh
