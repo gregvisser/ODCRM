@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon, EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
-import AccountsTab from '../../components/AccountsTab'
+import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 
 export type CustomersViewId = 'accounts' | 'contacts'
@@ -118,7 +118,7 @@ export default function CustomersHomePage({
         <TabPanels flex="1" pt={1}>
           <TabPanel px={0}>
             <Box>
-              <AccountsTab focusAccountName={focusAccountName} />
+              <AccountsTabDatabase focusAccountName={focusAccountName} />
             </Box>
           </TabPanel>
           <TabPanel px={0}>

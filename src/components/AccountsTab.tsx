@@ -62,6 +62,7 @@ import { fetchCompanyData, refreshCompanyData } from '../services/companyDataSer
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { api } from '../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
+import MigrateAccountsPanel from './MigrateAccountsPanel'
 
 type Contact = {
   name: string
@@ -4779,7 +4780,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
     if (!isStorageAvailable()) return true
-    return getItem(STORAGE_KEY_ACCOUNTS) !== null
+    const accounts = getJson<Account[]>(STORAGE_KEY_ACCOUNTS)
+    return accounts !== null && accounts.length > 0
   })()
 
   const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
@@ -4837,6 +4839,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
           </Button>
         </HStack>
       </HStack>
+
+      {/* Migration Panel - show if no accounts exist */}
+      {!hasStoredAccounts && <MigrateAccountsPanel />}
 
       {!hasStoredAccounts && (
         <Box mb={6} p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
