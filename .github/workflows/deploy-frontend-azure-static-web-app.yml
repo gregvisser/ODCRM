@@ -22,7 +22,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '24'
+        node-version: '22'
         cache: 'npm'
         cache-dependency-path: package-lock.json
 
@@ -34,7 +34,7 @@ jobs:
       env:
         VITE_AZURE_CLIENT_ID: ${{ secrets.VITE_AZURE_CLIENT_ID }}
         VITE_AZURE_TENANT_ID: ${{ secrets.VITE_AZURE_TENANT_ID }}
-        VITE_AZURE_REDIRECT_URI: ${{ secrets.VITE_AZURE_REDIRECT_URI }}
+        VITE_AZURE_REDIRECT_URI: https://odcrm.bidlow.co.uk
 
     - name: Deploy to Azure Static Web Apps
       uses: azure/static-web-apps-deploy@v1
