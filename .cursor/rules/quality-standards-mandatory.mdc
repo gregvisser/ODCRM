@@ -1,0 +1,309 @@
+# MANDATORY Quality Standards - ALL AGENTS MUST FOLLOW
+
+## 🚨 CRITICAL - READ THIS FIRST
+
+**Every agent working on this project MUST follow these standards. No exceptions.**
+
+This rule is automatically applied to ALL agents in this workspace.
+
+---
+
+## ✅ Before Making ANY Changes
+
+### 1. Read the Testing Checklist
+**Location:** `TESTING-CHECKLIST.md` (root directory)
+
+**You MUST:**
+- [ ] Read the entire testing checklist before making changes
+- [ ] Follow ALL pre-commit, pre-deploy, and post-deploy checks
+- [ ] Test locally before committing
+- [ ] Verify production after deployment
+
+### 2. Understand the Architecture
+**Location:** `ARCHITECTURE.md` (root directory)
+
+**Key Principle:** Database is the SINGLE SOURCE OF TRUTH
+- Never use localStorage for business-critical data
+- Always use `useCustomersFromDatabase` hook for customer data
+- Follow database-first architecture patterns
+
+---
+
+## 🔧 Code Quality Rules
+
+### Rule 1: Test Everything Locally First
+```bash
+# BEFORE committing, ALWAYS run:
+npm run dev          # Frontend must start without errors
+cd server && npm run dev  # Backend must start without errors
+npm run build        # Production build must succeed
+```
+
+**Check in browser:**
+- [ ] No console errors (F12 → Console)
+- [ ] App loads without white screen
+- [ ] Changed features work as expected
+- [ ] No context provider errors
+
+### Rule 2: Proper Component Usage
+
+#### Chakra UI Components
+❌ **NEVER do this:**
+```tsx
+<Box>
+  <AlertTitle>Title</AlertTitle>  // Missing Alert wrapper!
+</Box>
+```
+
+✅ **ALWAYS do this:**
+```tsx
+<Alert>
+  <AlertTitle>Title</AlertTitle>  // Wrapped in Alert
+</Alert>
+```
+
+**Components that require wrappers:**
+- `AlertTitle`, `AlertDescription` → Must be inside `<Alert>`
+- `ModalHeader`, `ModalBody`, `ModalFooter` → Must be inside `<Modal>`
+- `TabPanel` → Must be inside `<Tabs>`
+- `useToast` hook → Requires ChakraProvider
+
+### Rule 3: Database Operations
+
+**ALWAYS use these hooks/utilities:**
+```typescript
+// For customer data
+import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
+
+// For API calls
+import { api } from '../utils/api'
+
+// NEVER directly manipulate localStorage for business data
+// localStorage is ONLY for UI preferences, drafts, session state
+```
+
+### Rule 4: Error Handling
+
+**Every API call must handle errors:**
+```typescript
+const { data, error } = await api.get('/api/customers')
+if (error) {
+  console.error('Error:', error)
+  // Show user-friendly error message
+  toast({ title: 'Error', description: error, status: 'error' })
+  return
+}
+// Use data...
+```
+
+---
+
+## 📝 Commit Standards
+
+### Commit Message Format
+```
+Type: Brief summary (50 chars or less)
+
+WHAT CHANGED:
+- Bullet point of changes
+- Another change
+
+WHY:
+- Reason for change
+- Problem being solved
+
+TESTING:
+- What was tested
+- How it was verified
+
+IMPACT:
+- Production impact (if any)
+- Breaking changes (if any)
+```
+
+### Commit Types
+- `Fix:` - Bug fix
+- `Feature:` - New feature
+- `Refactor:` - Code refactoring
+- `Docs:` - Documentation only
+- `Test:` - Add/update tests
+- `Chore:` - Maintenance tasks
+
+---
+
+## 🚀 Deployment Process
+
+### Step 1: Pre-Commit
+- [ ] All tests pass locally
+- [ ] Code builds without errors: `npm run build`
+- [ ] TypeScript checks pass: `npx tsc --noEmit`
+- [ ] No console errors in browser
+- [ ] Changes tested thoroughly
+
+### Step 2: Commit
+```bash
+git add .
+git commit -m "Descriptive message with testing notes"
+```
+
+### Step 3: Deploy
+```bash
+git push origin main
+```
+
+**This automatically triggers:**
+- GitHub Actions workflow
+- Azure deployment (frontend + backend)
+- Takes 3-5 minutes
+
+### Step 4: Verify Production (MANDATORY)
+**Immediately after deployment:**
+1. Check GitHub Actions: https://github.com/gregvisser/ODCRM/actions
+2. Wait for green checkmark
+3. Test production: https://odcrm.bidlow.co.uk
+4. Verify:
+   - [ ] App loads without errors
+   - [ ] No white screen
+   - [ ] Changed features work
+   - [ ] No console errors (F12)
+
+---
+
+## ❌ What NOT To Do
+
+### Never Skip Testing
+❌ "I'll test it in production" → **UNACCEPTABLE**
+✅ "I tested locally, then deployed, then verified production"
+
+### Never Deploy Broken Code
+❌ "It works on my machine" → **NOT GOOD ENOUGH**
+✅ "Production build tested with `npm run build && npm run preview`"
+
+### Never Make Assumptions
+❌ "This should work" → **TEST IT**
+✅ "This works, I verified it in the browser"
+
+### Never Rush Deployments
+❌ "Quick fix, no testing needed" → **ALWAYS TEST**
+✅ "Even small fixes get full testing"
+
+---
+
+## 🎯 Quality Checklist (Copy for Every Task)
+
+```
+Task: [Description]
+Agent: [Your name/type]
+Date: [YYYY-MM-DD]
+
+Pre-Development:
+- [ ] Read TESTING-CHECKLIST.md
+- [ ] Read ARCHITECTURE.md
+- [ ] Understand the problem fully
+- [ ] Plan the solution
+
+Development:
+- [ ] Code follows quality standards
+- [ ] Proper error handling
+- [ ] No hardcoded values
+- [ ] Proper component usage
+- [ ] TypeScript types correct
+
+Testing:
+- [ ] Tested locally (frontend)
+- [ ] Tested locally (backend)
+- [ ] Tested locally (integration)
+- [ ] Production build succeeds
+- [ ] No console errors
+- [ ] All features work
+
+Deployment:
+- [ ] Committed with proper message
+- [ ] Pushed to GitHub
+- [ ] GitHub Actions passed
+- [ ] Production verified
+- [ ] No errors in production
+
+Documentation:
+- [ ] Updated relevant docs
+- [ ] Added comments if needed
+- [ ] Updated API docs if endpoints changed
+
+Result: ✅ Success / ❌ Failed
+Notes: [Any notes]
+```
+
+---
+
+## 📚 Required Reading
+
+Before making ANY changes, read these files:
+
+1. **TESTING-CHECKLIST.md** (root) - Testing requirements
+2. **ARCHITECTURE.md** (root) - System architecture
+3. **FIX-COMPLETE.md** (root) - Recent fixes and lessons learned
+4. **docs/agents/AGENTS.md** - Multi-agent workflow (if applicable)
+
+---
+
+## 🚫 Production Incident Response
+
+If you break production:
+
+### Immediate Actions (First 5 Minutes)
+1. **Acknowledge** - "I broke production, fixing now"
+2. **Identify** - Find the exact line of code that broke
+3. **Fix** - Create the fix immediately
+4. **Test** - Test the fix locally (don't deploy another broken fix!)
+5. **Deploy** - Push the fix to production
+6. **Verify** - Immediately test production again
+
+### Post-Incident (Within 1 Hour)
+1. Document what broke and why
+2. Update TESTING-CHECKLIST.md if a check was missed
+3. Add regression test if possible
+4. Review what went wrong in your process
+
+### Learn and Improve
+- Production breaks are serious
+- They erode user trust
+- Prevention is always better than fixes
+- When in doubt, test more, not less
+
+---
+
+## 💡 Remember
+
+> **"100% accuracy is the only acceptable standard."**
+> **"Test locally, verify thoroughly, deploy confidently."**
+> **"Database first, always. No shortcuts. Do it right."**
+
+If you're unsure about something:
+1. Read the documentation
+2. Test it locally first
+3. Ask for clarification
+4. Test it again
+5. Then proceed
+
+**Your work affects real users and real business operations.**
+**Quality is not optional. Testing is not optional. Standards are not optional.**
+
+---
+
+## ✅ Confirmation
+
+By working on this project, you confirm that you:
+- [ ] Have read this entire document
+- [ ] Have read TESTING-CHECKLIST.md
+- [ ] Have read ARCHITECTURE.md
+- [ ] Understand the quality standards
+- [ ] Will follow these standards for ALL changes
+- [ ] Will test everything before deployment
+- [ ] Will verify production after deployment
+- [ ] Will take responsibility if something breaks
+
+---
+
+**Last Updated:** 2026-01-27
+**Status:** Active - Mandatory for ALL agents
+**Enforcement:** Automatic via `.cursor/rules/`

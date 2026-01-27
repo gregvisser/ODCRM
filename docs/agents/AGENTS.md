@@ -4,6 +4,25 @@ This repo uses a **multi-agent** workflow inside Cursor. Each agent owns a bound
 
 ---
 
+## 🚨 MANDATORY FOR ALL AGENTS
+
+**Before doing ANYTHING, read these files:**
+
+1. **`.cursor/rules/quality-standards-mandatory.mdc`** - Quality standards (auto-applied)
+2. **`TESTING-CHECKLIST.md`** - Testing requirements before every deployment
+3. **`ARCHITECTURE.md`** - Database-first architecture principles
+
+**Key Rules:**
+- ✅ Test locally before committing
+- ✅ Verify production after deploying
+- ✅ Database is single source of truth
+- ✅ 100% accuracy required, no exceptions
+- ❌ No untested code in production
+- ❌ No localStorage for business data
+- ❌ No skipping quality checks
+
+---
+
 ### Agent list
 
 - **OpenDoors CRM – Project Manager (PM)**: orchestration, delegation, review, merge, prioritization (does not implement tab logic).
