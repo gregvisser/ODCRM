@@ -29,6 +29,7 @@ import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
 import { databaseCustomersToAccounts, databaseCustomerToAccount, accountToDatabaseCustomer, type Account } from '../utils/customerAccountMapper'
 import { setJson, getJson } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
+import AccountsTab from './AccountsTab'
 
 type Props = {
   focusAccountName?: string
@@ -174,10 +175,6 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       </Alert>
     )
   }
-
-  // Dynamically import AccountsTab to avoid circular dependencies
-  // and to ensure localStorage is hydrated before it loads
-  const AccountsTab = require('./AccountsTab').default
 
   return (
     <Box>
