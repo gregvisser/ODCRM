@@ -110,8 +110,8 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         lastLocalStorageHashRef.current = currentHash
         console.log('✅ Sync to database complete')
         
-        // Refresh from database to get any server-generated fields
-        await refetch()
+        // Note: We don't refetch here to avoid render loops and glitching
+        // The data will be refreshed on the next periodic refresh (every 60s)
       } catch (error) {
         console.error('❌ Failed to sync to database:', error)
         toast({
