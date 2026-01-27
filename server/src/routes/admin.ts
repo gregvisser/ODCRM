@@ -4,6 +4,14 @@ import { PrismaClient } from '@prisma/client';
 const router = Router();
 const prisma = new PrismaClient();
 
+const getWebsiteFromAccountData = (accountData: unknown): string | null => {
+  if (!accountData || typeof accountData !== 'object') {
+    return null;
+  }
+  const candidate = (accountData as { website?: unknown }).website;
+  return typeof candidate === 'string' && candidate.trim() ? candidate : null;
+};
+
 /**
  * POST /api/admin/migrate-websites
  * Migrates website URLs from accountData.website to the top-level website field
@@ -29,7 +37,7 @@ router.post('/migrate-websites', async (req, res) => {
     const results: Array<{ name: string; action: string; website?: string }> = [];
 
     for (const customer of customers) {
-      const accountDataWebsite = customer.accountData?.website;
+      const accountDataWebsite = getWebsiteFromAccountData(customer.accountData);
       
       // If accountData has a website but the top-level field doesn't, migrate it
       if (accountDataWebsite && !customer.website) {
