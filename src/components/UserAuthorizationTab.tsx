@@ -856,29 +856,20 @@ function UserAuthorizationTab() {
             },
           }}
         >
-          <Table variant="simple" size="md" minW="1000px">
+          <Table variant="simple" size="md" minW="800px">
             <Thead>
               <Tr>
-                <Th whiteSpace="nowrap">User ID</Th>
                 <Th whiteSpace="nowrap">Name</Th>
-                <Th whiteSpace="nowrap">Username</Th>
-                <Th whiteSpace="nowrap">Phone Number</Th>
+                <Th whiteSpace="nowrap">Surname</Th>
                 <Th whiteSpace="nowrap">Role</Th>
-                <Th whiteSpace="nowrap">Department</Th>
-                <Th whiteSpace="nowrap">Account Status</Th>
-                <Th whiteSpace="nowrap">Last Login Date</Th>
-                <Th whiteSpace="nowrap">Created Date</Th>
+                <Th whiteSpace="nowrap">Contact Number</Th>
+                <Th whiteSpace="nowrap">Email Address</Th>
                 <Th whiteSpace="nowrap">Actions</Th>
               </Tr>
             </Thead>
             <Tbody>
               {users.map((user) => (
                 <Tr key={user.id}>
-                  <Td>
-                    <Text fontFamily="mono" fontSize="sm" whiteSpace="nowrap">
-                      {user.userId}
-                    </Text>
-                  </Td>
                   <Td>
                     <HStack spacing={2}>
                       <Avatar
@@ -887,17 +878,20 @@ function UserAuthorizationTab() {
                         src={user.profilePhoto}
                         flexShrink={0}
                       />
-                      <VStack align="start" spacing={0} minW={0}>
-                        <Text fontWeight="medium" noOfLines={1}>
-                          {user.firstName} {user.lastName}
-                        </Text>
-                      </VStack>
+                      <Text fontWeight="medium" noOfLines={1}>
+                        {user.firstName}
+                      </Text>
                     </HStack>
                   </Td>
                   <Td>
-                    <Text noOfLines={1} fontSize="sm">
-                      {user.username || user.email}
+                    <Text fontWeight="medium" noOfLines={1}>
+                      {user.lastName}
                     </Text>
+                  </Td>
+                  <Td>
+                    <Badge colorScheme="blue" variant="subtle" whiteSpace="nowrap">
+                      {user.role}
+                    </Badge>
                   </Td>
                   <Td>
                     <Text noOfLines={1} fontSize="sm">
@@ -905,22 +899,10 @@ function UserAuthorizationTab() {
                     </Text>
                   </Td>
                   <Td>
-                    <Badge colorScheme="gray" variant="subtle" whiteSpace="nowrap">
-                      {user.role}
-                    </Badge>
+                    <Text noOfLines={1} fontSize="sm" color="blue.600">
+                      {user.email}
+                    </Text>
                   </Td>
-                  <Td>
-                    <Badge colorScheme="gray" variant="subtle" whiteSpace="nowrap">
-                      {user.department}
-                    </Badge>
-                  </Td>
-                  <Td>
-                    <Badge colorScheme={getStatusColor(user.accountStatus)} whiteSpace="nowrap">
-                      {user.accountStatus}
-                    </Badge>
-                  </Td>
-                  <Td whiteSpace="nowrap">{formatDate(user.lastLoginDate)}</Td>
-                  <Td whiteSpace="nowrap">{formatDate(user.createdDate)}</Td>
                   <Td>
                     <HStack spacing={2}>
                       <IconButton
@@ -928,6 +910,7 @@ function UserAuthorizationTab() {
                         icon={<EditIcon />}
                         size="sm"
                         variant="ghost"
+                        colorScheme="blue"
                         onClick={() => handleEdit(user)}
                       />
                       <IconButton
@@ -935,7 +918,7 @@ function UserAuthorizationTab() {
                         icon={<DeleteIcon />}
                         size="sm"
                         variant="ghost"
-                        colorScheme="gray"
+                        colorScheme="red"
                         onClick={() => handleDelete(user)}
                       />
                     </HStack>

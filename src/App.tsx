@@ -15,6 +15,7 @@ import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
+import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
 
@@ -136,6 +137,15 @@ function App() {
         )
       case 'onboarding-home':
         return <OnboardingHomePage />
+      case 'settings-home':
+        return (
+          <SettingsHomePage
+            view={activeView}
+            onNavigate={(v) => {
+              setActiveView(v)
+            }}
+          />
+        )
       default:
         return <DashboardsHomePage />
     }
