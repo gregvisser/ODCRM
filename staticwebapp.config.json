@@ -4,7 +4,7 @@
       "route": "/api/*",
       "allowedRoles": ["anonymous"],
       "backend": {
-        "url": "https://odcrm-api.azurewebsites.net"
+        "url": "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
       }
     },
     {
