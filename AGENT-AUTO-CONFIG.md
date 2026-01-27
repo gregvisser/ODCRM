@@ -165,6 +165,23 @@ ODCRM/
 
 4. **All future agents will automatically see it!**
 
+### To Create a NEW Rule File:
+
+**⚠️ CRITICAL:** Rule files MUST have YAML frontmatter or they won't be applied!
+
+```markdown
+---
+description: Brief description of what this rule does
+alwaysApply: true
+---
+
+# Your Rule Title
+
+Your rule content here...
+```
+
+**Without the YAML frontmatter (`---`, `description`, `alwaysApply: true`, `---`), the file is just a markdown file and Cursor will NOT auto-apply it to agents!**
+
 ### To Update Testing Checklist:
 
 1. **Edit:**
