@@ -3606,11 +3606,92 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [resizingColumn, resizeStartX, resizeStartWidth])
   
   // Handle inline edit
-  const handleCellEdit = (accountName: string, field: string, currentValue: number) => {
+  const handleCellEdit = (accountName: string, field: string, currentValue: number | string) => {
     setEditingCell({ accountName, field })
     setEditValue(String(currentValue))
   }
   
+  const handleCellSave = () => {
+    if (!editingCell) return
+    
+    const { accountName, field } = editingCell
+    
+    // Handle account name rename
+    if (field === 'name') {
+      const newName = editValue.trim()
+      
+      // Validation
+      if (!newName) {
+        toast({
+          title: 'Name required',
+          description: 'Account name cannot be empty',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      // Check if new name already exists (excluding current account)
+      if (accountsData.some(acc => acc.name !== accountName && acc.name.toLowerCase() === newName.toLowerCase())) {
+        toast({
+          title: 'Name already exists',
+          description: `An account with the name "${newName}" already exists`,
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      // Rename the account
+      setAccountsData(prevAccounts => {
+        return prevAccounts.map(acc => {
+          if (acc.name === accountName) {
+            return { ...acc, name: newName }
+          }
+          return acc
+        })
+      })
+      
+      // Update selected account if it's open
+      if (selectedAccount && selectedAccount.name === accountName) {
+        setSelectedAccount({ ...selectedAccount, name: newName })
+      }
+      
+      toast({
+        title: 'Account renamed',
+        description: `Renamed "${accountName}" to "${newName}"`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    } else {
+      // Handle numeric fields
+      const numValue = Number(editValue)
+      
+      if (isNaN(numValue)) {
+        toast({
+          title: 'Invalid value',
+          description: 'Please enter a valid number',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      const updates: Partial<Account> = {}
+      if (field === 'spend') updates.monthlySpendGBP = numValue
+      else if (field === 'weeklyTarget') updates.weeklyTarget = numValue
+      else if (field === 'monthlyTarget') updates.monthlyTarget = numValue
+      
+      updateAccount(accountName, updates)
+    }
+    
+    setEditingCell(null)
+    setEditValue('')
+  }
   
   const handleCellCancel = () => {
     setEditingCell(null)
@@ -5105,10 +5186,44 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   _hover={{ bg: 'bg.subtle' }}
                   onClick={(e) => handleAccountClick(account.name, e)}
                 >
-                  <Td>
-                    <Text fontWeight="semibold" color="text.primary">
-                      {account.name}
-                    </Text>
+                  <Td onClick={(e) => e.stopPropagation()}>
+                    {editingCell?.accountName === account.name && editingCell?.field === 'name' ? (
+                      <HStack spacing={1}>
+                        <Input
+                          size="sm"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCellSave()
+                            if (e.key === 'Escape') handleCellCancel()
+                          }}
+                          autoFocus
+                          w="200px"
+                        />
+                        <IconButton
+                          aria-label="Save"
+                          icon={<CheckIcon />}
+                          size="xs"
+                          onClick={handleCellSave}
+                        />
+                        <IconButton
+                          aria-label="Cancel"
+                          icon={<CloseIcon />}
+                          size="xs"
+                          onClick={handleCellCancel}
+                        />
+                      </HStack>
+                    ) : (
+                      <Text
+                        fontWeight="semibold"
+                        color="text.primary"
+                        cursor="pointer"
+                        _hover={{ textDecoration: 'underline' }}
+                        onClick={() => handleCellEdit(account.name, 'name', account.name)}
+                      >
+                        {account.name}
+                      </Text>
+                    )}
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
                     {editingCell?.accountName === account.name && editingCell?.field === 'spend' ? (
