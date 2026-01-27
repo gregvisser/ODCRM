@@ -32,3 +32,6 @@ dist-ssr
 # Local Azure deployment artifacts (do not commit)
 publishProfile.xml
 azure-setup-script.sh
+
+# Cursor workspace images
+assets/c__Users_*
