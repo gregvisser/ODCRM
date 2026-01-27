@@ -31,8 +31,8 @@ export default function LoginPage({
           </Text>
           {showConfigWarning ? (
             <Text color="red.500" fontSize="sm">
-              Microsoft login is not configured yet. Add the Azure client and tenant IDs in Vercel
-              before signing in.
+              Microsoft login is not configured yet. Add the Azure client and tenant IDs in Azure
+              Static Web Apps environment variables before signing in.
             </Text>
           ) : null}
           <Button size="lg" onClick={onSignIn} isDisabled={disableSignIn}>
