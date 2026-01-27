@@ -1,0 +1,129 @@
+---
+description: Development workflow for Azure-hosted ODCRM application
+alwaysApply: true
+---
+
+# Development Workflow - Azure Migration
+
+## 🚨 Always Work Locally First
+
+**Never develop directly in production!** Always follow this workflow:
+
+## Development Process
+
+### 1️⃣ Start Local Development Servers
+
+```bash
+# Terminal 1 - Backend Server
+cd server
+npm run dev
+# Runs on http://localhost:3001
+
+# Terminal 2 - Frontend Dev Server
+npm run dev
+# Runs on http://localhost:5173
+```
+
+### 2️⃣ Make Your Changes
+
+- Edit code locally
+- Test thoroughly on localhost
+- Verify functionality works as expected
+- Check browser console for errors
+
+### 3️⃣ Deploy to Production (Azure)
+
+```bash
+# Commit your changes
+git add .
+git commit -m "Descriptive message of your changes"
+
+# Push to GitHub - triggers automatic Azure deployment
+git push origin main
+```
+
+### 4️⃣ Verify Deployment
+
+- GitHub Actions automatically builds and deploys to Azure (3-5 minutes)
+- Monitor at: https://github.com/gregvisser/ODCRM/actions
+- Test at: https://odcrm.bidlow.co.uk
+
+## Environment Configuration
+
+### Local Development
+- Frontend: `.env.local` (localhost:5173)
+- Backend: `server/.env` (localhost:3001)
+- Database: Azure PostgreSQL (shared with production)
+
+### Production (Azure)
+- Frontend: Azure Static Web Apps (odcrm.bidlow.co.uk)
+- Backend: Azure App Service (managed by Azure)
+- Database: Azure PostgreSQL Flexible Server
+- All environment variables managed in Azure portal
+
+## 🔄 Preventing Stale Data Issues
+
+### Why Azure is Better Than Vercel/Neon/Render
+
+**No more stale data problems!** Azure handles this properly:
+
+1. **Fresh Builds Every Time**
+   - GitHub Actions builds from scratch on every push
+   - No cached dependencies from old deployments
+   - Each deployment is completely isolated
+
+2. **Clear Environment Separation**
+   - Local dev: Your `.env.local` + `server/.env` (localhost URLs)
+   - Production: Azure environment variables (production URLs)
+   - **No cross-contamination** between environments
+
+3. **Database Connection Clarity**
+   - Both local and production use **same Azure PostgreSQL**
+   - No "missing data" issues - same database everywhere
+   - Schema changes apply immediately via Prisma migrations
+
+4. **No CDN/Edge Caching Issues**
+   - Azure Static Web Apps uses intelligent caching
+   - Changes deploy immediately (no 24-hour CDN propagation)
+   - Force refresh: `Ctrl+Shift+R` (Windows) or `Cmd+Shift+R` (Mac)
+
+### If You See Stale Data
+
+```bash
+# 1. Clear browser cache
+Ctrl+Shift+Delete (or Cmd+Shift+Delete on Mac)
+
+# 2. Hard refresh the page
+Ctrl+Shift+R (or Cmd+Shift+R on Mac)
+
+# 3. Verify latest deployment succeeded
+# Check: https://github.com/gregvisser/ODCRM/actions
+
+# 4. Check environment variables match
+cd server && npm run prisma:studio
+# This opens Prisma Studio to view actual database data
+```
+
+### Development Rule: Always Verify
+
+Before reporting "stale data":
+1. ✅ Check Git history - did your changes actually get pushed?
+2. ✅ Check GitHub Actions - did deployment succeed?
+3. ✅ Hard refresh browser (Ctrl+Shift+R)
+4. ✅ Verify environment variables are correct
+
+## Important Notes
+
+✅ **DO:**
+- Always test locally before pushing
+- Commit frequently with clear messages
+- Let GitHub Actions handle deployment
+- Hard refresh browser after deployments (Ctrl+Shift+R)
+- Use Prisma Studio to verify database state
+
+❌ **DON'T:**
+- Don't edit production directly
+- Don't skip local testing
+- Don't push untested code
+- Don't assume data is stale - verify deployment first
+- Don't mix local and production environment variables

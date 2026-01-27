@@ -1,0 +1,12 @@
+{
+  "spa": {
+    "redirectUris": [
+      "https://odcrm.bidlow.co.uk",
+      "https://www.odcrm.bidlow.co.uk",
+      "http://localhost:5173"
+    ]
+  },
+  "web": {
+    "redirectUris": []
+  }
+}
