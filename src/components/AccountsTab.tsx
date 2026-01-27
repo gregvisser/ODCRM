@@ -4106,7 +4106,20 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     const account = accountsData.find(a => a.name === accountName)
     if (!account) return
     
-    const numValue = parseFloat(editValue) || 0
+    const numValue = parseFloat(editValue)
+    
+    // Validate numeric input - reject NaN or invalid numbers
+    if (isNaN(numValue)) {
+      toast({
+        title: 'Invalid value',
+        description: 'Please enter a valid number',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+    
     const updates: Partial<Account> = {}
     
     if (field === 'spend') {
