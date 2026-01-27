@@ -32,6 +32,7 @@ jobs:
     - name: Build application
       run: npm run build
       env:
+        VITE_API_URL: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
         VITE_AZURE_CLIENT_ID: ${{ secrets.VITE_AZURE_CLIENT_ID }}
         VITE_AZURE_TENANT_ID: ${{ secrets.VITE_AZURE_TENANT_ID }}
         VITE_AZURE_REDIRECT_URI: https://odcrm.bidlow.co.uk
