@@ -3611,88 +3611,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     setEditValue(String(currentValue))
   }
   
-  const handleCellSave = () => {
-    if (!editingCell) return
-    
-    const { accountName, field } = editingCell
-    
-    // Handle account name rename
-    if (field === 'name') {
-      const newName = editValue.trim()
-      
-      // Validation
-      if (!newName) {
-        toast({
-          title: 'Name required',
-          description: 'Account name cannot be empty',
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-      
-      // Check if new name already exists (excluding current account)
-      if (accountsData.some(acc => acc.name !== accountName && acc.name.toLowerCase() === newName.toLowerCase())) {
-        toast({
-          title: 'Name already exists',
-          description: `An account with the name "${newName}" already exists`,
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-      
-      // Rename the account
-      setAccountsData(prevAccounts => {
-        return prevAccounts.map(acc => {
-          if (acc.name === accountName) {
-            return { ...acc, name: newName }
-          }
-          return acc
-        })
-      })
-      
-      // Update selected account if it's open
-      if (selectedAccount && selectedAccount.name === accountName) {
-        setSelectedAccount({ ...selectedAccount, name: newName })
-      }
-      
-      toast({
-        title: 'Account renamed',
-        description: `Renamed "${accountName}" to "${newName}"`,
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      })
-    } else {
-      // Handle numeric fields
-      const numValue = Number(editValue)
-      
-      if (isNaN(numValue)) {
-        toast({
-          title: 'Invalid value',
-          description: 'Please enter a valid number',
-          status: 'error',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
-      
-      const updates: Partial<Account> = {}
-      if (field === 'spend') updates.monthlySpendGBP = numValue
-      else if (field === 'weeklyTarget') updates.weeklyTarget = numValue
-      else if (field === 'monthlyTarget') updates.monthlyTarget = numValue
-      
-      updateAccount(accountName, updates)
-    }
-    
-    setEditingCell(null)
-    setEditValue('')
-  }
-  
   const handleCellCancel = () => {
     setEditingCell(null)
     setEditValue('')
@@ -4126,23 +4044,82 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const handleCellSave = () => {
     if (!editingCell) return
     
-    const account = accountsData.find(a => a.name === editingCell.accountName)
+    const { accountName, field } = editingCell
+    
+    // Handle account name rename
+    if (field === 'name') {
+      const newName = editValue.trim()
+      
+      // Validation
+      if (!newName) {
+        toast({
+          title: 'Name required',
+          description: 'Account name cannot be empty',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      // Check if new name already exists (excluding current account)
+      if (accountsData.some(acc => acc.name !== accountName && acc.name.toLowerCase() === newName.toLowerCase())) {
+        toast({
+          title: 'Name already exists',
+          description: `An account with the name "${newName}" already exists`,
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+      
+      // Rename the account
+      setAccountsData(prevAccounts => {
+        return prevAccounts.map(acc => {
+          if (acc.name === accountName) {
+            return { ...acc, name: newName }
+          }
+          return acc
+        })
+      })
+      
+      // Update selected account if it's open
+      if (selectedAccount && selectedAccount.name === accountName) {
+        setSelectedAccount({ ...selectedAccount, name: newName })
+      }
+      
+      toast({
+        title: 'Account renamed',
+        description: `Renamed "${accountName}" to "${newName}"`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+      
+      setEditingCell(null)
+      setEditValue('')
+      return
+    }
+    
+    // Handle numeric fields
+    const account = accountsData.find(a => a.name === accountName)
     if (!account) return
     
     const numValue = parseFloat(editValue) || 0
     const updates: Partial<Account> = {}
     
-    if (editingCell.field === 'spend') {
+    if (field === 'spend') {
       updates.monthlySpendGBP = numValue
-    } else if (editingCell.field === 'weeklyTarget') {
+    } else if (field === 'weeklyTarget') {
       updates.weeklyTarget = numValue
-    } else if (editingCell.field === 'monthlyTarget') {
+    } else if (field === 'monthlyTarget') {
       updates.monthlyTarget = numValue
-    } else if (editingCell.field === 'defcon') {
+    } else if (field === 'defcon') {
       updates.defcon = Math.max(1, Math.min(5, Math.round(numValue))) // Clamp between 1 and 5
     }
     
-    updateAccount(editingCell.accountName, updates)
+    updateAccount(accountName, updates)
     setEditingCell(null)
     setEditValue('')
   }
