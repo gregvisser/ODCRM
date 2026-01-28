@@ -314,8 +314,8 @@ function shouldRefreshMarketingLeads(leads: Lead[]): boolean {
   }
 
   const now = new Date()
-  const sixHoursInMs = 6 * 60 * 60 * 1000
-  return now.getTime() - lastRefreshTime.getTime() >= sixHoursInMs
+  const thirtyMinutesInMs = 30 * 60 * 1000
+  return now.getTime() - lastRefreshTime.getTime() >= thirtyMinutesInMs
 }
 
 // Load deleted contacts from storage
@@ -4829,7 +4829,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     
     // Check if we should refresh
     if (!forceRefresh && !shouldRefreshMarketingLeads(cachedLeads)) {
-      console.log('Skipping leads refresh - less than 6 hours since last refresh')
+      console.log('Skipping leads refresh - less than 30 minutes since last refresh')
       setLeads(cachedLeads)
       setLeadsLoading(false)
       return
@@ -5426,7 +5426,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   if (diff < 60) return `${diff} seconds ago`
                   if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
                   return leadsLastRefresh.toLocaleTimeString()
-                })()} • Auto-refreshes every 6 hours
+                })()} • Auto-refreshes every 30 minutes
               </Text>
             </Box>
             <IconButton
