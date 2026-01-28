@@ -212,31 +212,24 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     setError(null)
 
     try {
-      // Load accounts from localStorage to sync with account metadata
+      // Fetch leads from API - it already filters for accounts with Google Sheets URLs
+      // No need to filter again based on localStorage (database is single source of truth)
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-      const sheetAccounts = new Set(
-        accountsData
-          .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-          .map((account) => account.name),
-      )
-      const filteredLeads = sheetAccounts.size
-        ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
-        : []
-      setLeads(filteredLeads)
-      const refreshTime = saveLeadsToStorage(filteredLeads, lastSyncAt)
+      setLeads(allLeads)
+      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
       setLastRefresh(refreshTime)
 
       // Keep account lead counts in sync (so "Leads: X" badges update across the app).
-      syncAccountLeadCountsFromLeads(filteredLeads)
+      syncAccountLeadCountsFromLeads(allLeads)
 
       // Group leads by account for summary
       const leadsByAccount: Record<string, number> = {}
-      filteredLeads.forEach(lead => {
+      allLeads.forEach(lead => {
         leadsByAccount[lead.accountName] = (leadsByAccount[lead.accountName] || 0) + 1
       })
-      console.log(`   Leads by account:`, leadsByAccount)
+      console.log(`✅ Leads loaded by account:`, leadsByAccount)
 
-      const description = `Loaded ${filteredLeads.length} leads from the server.`
+      const description = `Loaded ${allLeads.length} leads from the server.`
       toast({
         title: 'Leads loaded successfully',
         description,
@@ -275,15 +268,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     // Listen for account updates (when new accounts are created or metadata changes)
     const handleAccountsUpdated = (event?: Event) => {
       console.log('📥 Accounts updated event received - refreshing leads...', event)
-      const accountsData = loadAccountsFromStorage()
-      const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-      if (!hasSheets) {
-        setLeads([])
-        const refreshTime = saveLeadsToStorage([], null)
-        setLastRefresh(refreshTime)
-        return
-      }
       // Force refresh when accounts are updated to keep lead counts current
+      // API will handle filtering for accounts with Google Sheets URLs
       loadLeads(true)
     }
 
