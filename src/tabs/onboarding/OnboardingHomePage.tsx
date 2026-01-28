@@ -883,24 +883,6 @@ export default function OnboardingHomePage() {
                 ) : null}
               </Stack>
             </FormControl>
-
-            <FormControl>
-              <FormLabel>5 Email Accounts Set Up</FormLabel>
-              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                {accountDetails.emailAccounts.map((value, index) => (
-                  <Input
-                    key={`email-account-${index}`}
-                    value={value}
-                    onChange={(e) => {
-                      const next = [...accountDetails.emailAccounts]
-                      next[index] = e.target.value
-                      updateAccountDetails({ emailAccounts: next })
-                    }}
-                    placeholder={`Email account ${index + 1}`}
-                  />
-                ))}
-              </SimpleGrid>
-            </FormControl>
           </Stack>
         </Box>
 
