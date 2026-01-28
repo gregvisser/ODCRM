@@ -47,20 +47,44 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   useEffect(() => {
     if (loading) return
 
-    console.log('🔄 Hydrating localStorage from database...', customers.length, 'customers')
+    // Get current localStorage data
+    const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
     
     // Convert database customers to Account format
-    const accounts = databaseCustomersToAccounts(customers)
+    const dbAccounts = databaseCustomersToAccounts(customers)
     
-    // Write to localStorage so AccountsTab can read it
-    // This is the transitional bridge between old (localStorage) and new (database) architecture
-    setJson(OdcrmStorageKeys.accounts, accounts)
-    setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-    
-    // Store hash to detect changes later
-    lastLocalStorageHashRef.current = JSON.stringify(accounts)
-    
-    console.log('✅ localStorage hydrated with', accounts.length, 'accounts from database')
+    // SMART HYDRATION: Only overwrite if localStorage is empty OR if database has more recent data
+    // This prevents destroying user edits that haven't been synced yet
+    if (!currentAccounts || currentAccounts.length === 0) {
+      // localStorage is empty - hydrate from database
+      console.log('🔄 Initial hydration from database...', customers.length, 'customers')
+      setJson(OdcrmStorageKeys.accounts, dbAccounts)
+      setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      lastLocalStorageHashRef.current = JSON.stringify(dbAccounts)
+      console.log('✅ localStorage hydrated with', dbAccounts.length, 'accounts from database')
+    } else {
+      // localStorage has data - merge database changes while preserving local edits
+      console.log('🔄 Merging database updates with local data...')
+      const merged = currentAccounts.map(localAccount => {
+        const dbAccount = dbAccounts.find(db => db._databaseId === localAccount._databaseId)
+        if (!dbAccount) return localAccount // Keep local if not in database
+        
+        // Preserve local edits for key fields that user might have just changed
+        // Only update fields from database that are clearly server-side (like lead counts)
+        return {
+          ...dbAccount, // Start with database data
+          ...localAccount, // Override with local data (preserves user edits)
+          // But keep server-calculated fields from database:
+          weeklyLeadActual: dbAccount.weeklyLeadActual,
+          monthlyLeadActual: dbAccount.monthlyLeadActual,
+          _lastSyncedAt: dbAccount._lastSyncedAt,
+        }
+      })
+      
+      setJson(OdcrmStorageKeys.accounts, merged)
+      lastLocalStorageHashRef.current = JSON.stringify(merged)
+      console.log('✅ Merged database updates with local edits')
+    }
     
     setIsHydrating(false)
   }, [customers, loading])
