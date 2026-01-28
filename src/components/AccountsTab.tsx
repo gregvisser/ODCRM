@@ -4813,35 +4813,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     void syncFromCustomers()
   }, [toast, accountsData.length])
 
-  useEffect(() => {
-    const cachedLeads = loadLeadsFromStorage()
-    if (!shouldRefreshMarketingLeads(cachedLeads)) return
-
-    let cancelled = false
-    const refreshLeads = async () => {
-      try {
-        const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-        if (cancelled) return
-        const sheetAccounts = new Set(
-          accountsData
-            .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-            .map((account) => account.name),
-        )
-        const filteredLeads = sheetAccounts.size
-          ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
-          : []
-        persistLeadsToStorage(filteredLeads, lastSyncAt)
-      } catch (err) {
-        console.warn('Failed to refresh leads:', err)
-      }
-    }
-
-    void refreshLeads()
-    return () => {
-      cancelled = true
-    }
-  }, [accountsData])
-
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
     if (!isStorageAvailable()) return true
@@ -4852,7 +4823,55 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
   const fieldConfig = getFieldConfig(contactsData)
 
-// Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
+  // Load leads data function
+  const loadLeadsData = useCallback(async (forceRefresh: boolean = false) => {
+    const cachedLeads = loadLeadsFromStorage()
+    
+    // Check if we should refresh
+    if (!forceRefresh && !shouldRefreshMarketingLeads(cachedLeads)) {
+      console.log('Skipping leads refresh - less than 30 minutes since last refresh')
+      setLeads(cachedLeads)
+      setLeadsLoading(false)
+      return
+    }
+
+    setLeadsLoading(true)
+    setLeadsError(null)
+
+    try {
+      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+      const sheetAccounts = new Set(
+        accountsData
+          .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+          .map((account) => account.name),
+      )
+      const filteredLeads = sheetAccounts.size
+        ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
+        : []
+      const refreshTime = persistLeadsToStorage(filteredLeads, lastSyncAt)
+      setLeads(filteredLeads)
+      setLeadsLastRefresh(refreshTime)
+      syncAccountLeadCountsFromLeads(filteredLeads)
+    } catch (err) {
+      setLeadsError('Failed to load leads data from the server.')
+      console.error('Error loading leads:', err)
+    } finally {
+      setLeadsLoading(false)
+    }
+  }, [accountsData])
+
+  useEffect(() => {
+    const cachedLeads = loadLeadsFromStorage()
+    if (!shouldRefreshMarketingLeads(cachedLeads)) {
+      setLeads(cachedLeads)
+      setLeadsLoading(false)
+      return
+    }
+
+    void loadLeadsData(false)
+  }, [loadLeadsData])
+
+  // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
     <>
       <HStack justify="space-between" mb={6} flexWrap="wrap" gap={3}>
@@ -5388,274 +5407,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
           </Tbody>
         </Table>
       </TableContainer>
-
-      {/* Leads Section */}
-      <Box mt={8}>
-        <Stack spacing={6}>
-          <HStack justify="space-between" align="flex-start">
-            <Box>
-              <Heading size="lg" mb={2}>
-                Leads Generated
-              </Heading>
-              <Text color="gray.600">
-                Live data from Google Sheets ({leads.filter(lead => !leadsFilter || lead.accountName === leadsFilter).length} of {leads.length} leads)
-              </Text>
-              <Text fontSize="xs" color="gray.500" mt={1}>
-                Last refreshed: {(() => {
-                  const now = new Date()
-                  const diff = Math.floor((now.getTime() - leadsLastRefresh.getTime()) / 1000)
-                  if (diff < 60) return `${diff} seconds ago`
-                  if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
-                  return leadsLastRefresh.toLocaleTimeString()
-                })()} • Auto-refreshes every 30 minutes
-              </Text>
-            </Box>
-            <IconButton
-              aria-label="Refresh leads data"
-              icon={<RepeatIcon />}
-              onClick={() => loadLeadsData(true)}
-              isLoading={leadsLoading}
-              colorScheme="gray"
-              size="sm"
-            />
-          </HStack>
-
-          <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-            <Heading size="sm" mb={4}>
-              Filter by Account
-            </Heading>
-            <Select
-              placeholder="All Accounts"
-              value={leadsFilter}
-              onChange={(e) => setLeadsFilter(e.target.value)}
-              size="sm"
-            >
-              {Array.from(new Set(leads.map((lead) => lead.accountName)))
-                .sort()
-                .map((accountName) => (
-                  <option key={accountName} value={accountName}>
-                    {accountName}
-                  </option>
-                ))}
-            </Select>
-          </Box>
-
-          {leadsLoading ? (
-            <Box textAlign="center" py={12}>
-              <Spinner size="xl" color="brand.500" thickness="4px" />
-              <Text mt={4} color="gray.600">
-                Loading leads data from the server...
-              </Text>
-            </Box>
-          ) : leadsError ? (
-            <Alert status="error" borderRadius="lg">
-              <AlertIcon />
-              <Box>
-                <AlertTitle>Error loading leads</AlertTitle>
-                <AlertDescription>{leadsError}</AlertDescription>
-              </Box>
-            </Alert>
-          ) : leads.length === 0 ? (
-            <Box textAlign="center" py={12}>
-              <Text fontSize="lg" color="gray.600">
-                No leads data available
-              </Text>
-              <Text fontSize="sm" color="gray.500" mt={2}>
-                Configure Client Leads sheets in account settings to view leads data
-              </Text>
-            </Box>
-          ) : (() => {
-            const filteredLeads = leads
-              .filter((lead) => !leadsFilter || lead.accountName === leadsFilter)
-              .sort((a, b) => {
-                const dateA = a['Date'] || ''
-                const dateB = b['Date'] || ''
-                
-                const parseDate = (dateStr: string): Date | null => {
-                  if (!dateStr || dateStr.trim() === '') return null
-                  const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-                  if (ddmmyy) {
-                    const day = parseInt(ddmmyy[1], 10)
-                    const month = parseInt(ddmmyy[2], 10) - 1
-                    const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-                    return new Date(year, month, day)
-                  }
-                  const parsed = new Date(dateStr)
-                  return isNaN(parsed.getTime()) ? null : parsed
-                }
-
-                const dateAObj = parseDate(dateA)
-                const dateBObj = parseDate(dateB)
-
-                if (!dateAObj && !dateBObj) return 0
-                if (!dateAObj) return 1
-                if (!dateBObj) return -1
-                
-                return dateBObj.getTime() - dateAObj.getTime()
-              })
-
-            const columnOrder = [
-              'Account',
-              'Week',
-              'Lead',
-              'Date',
-              'Channel of Lead',
-              'Company',
-              'Name',
-              'Job Title',
-              'Industry',
-              'Contact Info',
-              'OD Notes',
-              'Link to Website',
-              'OD Call Recording Available',
-              'First Meeting Booked',
-              'Outcome',
-              'Client Notes',
-              'Qualification',
-              'Lead Status',
-              'Pipeline Stage',
-              'Closed Date',
-            ]
-
-            const allColumns = new Set<string>()
-            leads.forEach((lead) => {
-              Object.keys(lead).forEach((key) => {
-                if (key !== 'accountName') {
-                  allColumns.add(key)
-                }
-              })
-            })
-
-            const orderedColumns: string[] = []
-            const remainingColumns: string[] = []
-
-            columnOrder.forEach((col) => {
-              if (allColumns.has(col)) {
-                orderedColumns.push(col)
-              }
-            })
-
-            allColumns.forEach((col) => {
-              if (!columnOrder.includes(col)) {
-                remainingColumns.push(col)
-              }
-            })
-
-            const columns = [...orderedColumns, ...remainingColumns.sort()]
-
-            const isUrl = (str: string): boolean => {
-              if (!str || str === 'Yes' || str === 'No' || str.trim() === '') return false
-              try {
-                new URL(str)
-                return true
-              } catch {
-                return false
-              }
-            }
-
-            const formatCell = (value: string, header: string): ReactNode => {
-              if (!value || value.trim() === '') return '-'
-
-              if (header.toLowerCase().includes('link') || header.toLowerCase().includes('website')) {
-                if (isUrl(value)) {
-                  return (
-                    <Link href={value} isExternal color="text.muted" display="inline-flex" alignItems="center" gap={1}>
-                      <ExternalLinkIcon />
-                    </Link>
-                  )
-                }
-              }
-
-              if (value.length > 100) {
-                return (
-                  <Text title={value} noOfLines={2} fontSize="xs">
-                    {value.substring(0, 100)}...
-                  </Text>
-                )
-              }
-
-              return value
-            }
-
-            return filteredLeads.length === 0 ? (
-              <Box textAlign="center" py={12} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-                <Text fontSize="lg" color="gray.600">
-                  No leads match the selected filter
-                </Text>
-                <Text fontSize="sm" color="gray.500" mt={2}>
-                  Clear the filter to see all leads
-                </Text>
-              </Box>
-            ) : (
-              <Box
-                overflowX="auto"
-                overflowY="auto"
-                maxH="calc(100vh - 300px)"
-                maxW="100%"
-                border="1px solid"
-                borderColor="gray.200"
-                borderRadius="lg"
-                bg="white"
-              >
-                <Table variant="simple" size="sm" minW="max-content">
-                  <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
-                    <Tr>
-                      {columns.map((col) => (
-                        <Th key={col} whiteSpace="nowrap" px={3} py={2} bg="gray.50">
-                          {col}
-                        </Th>
-                      ))}
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {filteredLeads.map((lead, index) => (
-                      <Tr
-                        key={`${lead.accountName}-${index}`}
-                        _hover={{ bg: 'gray.50' }}
-                        sx={{
-                          '&:hover td': {
-                            bg: 'gray.50',
-                          },
-                        }}
-                      >
-                        {columns.map((col) => {
-                          if (col === 'Account') {
-                            return (
-                              <Td
-                                key={col}
-                                px={3}
-                                py={2}
-                                position="sticky"
-                                left={0}
-                                bg="white"
-                                zIndex={5}
-                                _hover={{ bg: 'gray.50' }}
-                                sx={{
-                                  'tr:hover &': {
-                                    bg: 'gray.50',
-                                  },
-                                }}
-                              >
-                                <Badge colorScheme="gray">{lead.accountName}</Badge>
-                              </Td>
-                            )
-                          }
-                          const value = lead[col] || ''
-                          return (
-                            <Td key={col} px={3} py={2} whiteSpace="normal" maxW="300px">
-                              {formatCell(value, col)}
-                            </Td>
-                          )
-                        })}
-                      </Tr>
-                    ))}
-                  </Tbody>
-                </Table>
-              </Box>
-            )
-          })()}
-        </Stack>
-      </Box>
 
       {/* Create Account Modal */}
       <Modal isOpen={isCreateModalOpen} onClose={onCreateModalClose} size="xl">
@@ -6556,5 +6307,3 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 }
 
 export default AccountsTab
-
-
