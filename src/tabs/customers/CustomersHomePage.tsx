@@ -4,7 +4,7 @@ import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels,
 import { MdAssessment } from 'react-icons/md'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
-import LeadsReportingTab from '../../components/LeadsReportingTab'
+import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 
 export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
 
@@ -94,6 +94,20 @@ export default function CustomersHomePage({
                   <Text>Contacts</Text>
                 </HStack>
               </Tab>
+              <Tab
+                justifyContent={{ md: 'flex-start' }}
+                fontSize="sm"
+                fontWeight="600"
+                borderRadius="md"
+                color="text.muted"
+                _hover={{ bg: 'white', color: 'text.primary' }}
+                _selected={{ bg: 'white', color: 'text.primary', boxShadow: 'sm' }}
+              >
+                <HStack spacing={2}>
+                  <Icon as={MdAssessment} boxSize={4} />
+                  <Text>Leads</Text>
+                </HStack>
+              </Tab>
             </TabList>
           </Box>
         ) : (
@@ -130,7 +144,7 @@ export default function CustomersHomePage({
           </TabPanel>
           <TabPanel px={0}>
             <Box>
-              <LeadsReportingTab />
+              <MarketingLeadsTab focusAccountName={focusAccountName} />
             </Box>
           </TabPanel>
         </TabPanels>
