@@ -39,7 +39,15 @@ import {
   Alert,
   AlertIcon,
   Checkbox,
+  Editable,
+  EditableInput,
+  EditablePreview,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
 } from '@chakra-ui/react'
+import { ChevronDownIcon } from '@chakra-ui/icons'
 import { AddIcon, DeleteIcon, EditIcon, AttachmentIcon } from '@chakra-ui/icons'
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
@@ -1154,33 +1162,127 @@ function ContactsTab() {
                   <Heading size="sm">{contact.name}</Heading>
                 </Box>
               </Td>
-              <Td>{contact.title}</Td>
-              <Td>{contact.email}</Td>
-              <Td>{contact.phone}</Td>
               <Td>
-                <Stack spacing={1}>
-                  {contact.accounts && contact.accounts.length > 0 ? (
-                    contact.accounts.map((account) => (
-                      <Link
-                        key={account}
-                        color="text.muted"
-                        fontWeight="medium"
-                        cursor="pointer"
-                        onClick={(e) => {
-                          e.preventDefault()
-                          // Trigger navigation to accounts tab and open the account
-                          emit('navigateToAccount', { accountName: account })
-                        }}
-                        _hover={{ textDecoration: 'underline' }}
-                        display="block"
-                      >
-                        {account}
-                      </Link>
-                    ))
-                  ) : (
-                    <Text fontSize="sm" color="gray.400">No accounts</Text>
-                  )}
-                </Stack>
+                <Editable
+                  value={contact.title}
+                  onChange={(value) => {
+                    setContactsData(
+                      contactsData.map((c) =>
+                        c.id === contact.id ? { ...c, title: value } : c
+                      )
+                    )
+                  }}
+                  placeholder="Click to add title"
+                >
+                  <EditablePreview
+                    cursor="pointer"
+                    _hover={{ bg: 'gray.50' }}
+                    px={2}
+                    py={1}
+                    borderRadius="md"
+                    minW="100px"
+                  />
+                  <EditableInput px={2} py={1} />
+                </Editable>
+              </Td>
+              <Td>{contact.email}</Td>
+              <Td>
+                <Editable
+                  value={contact.phone}
+                  onChange={(value) => {
+                    setContactsData(
+                      contactsData.map((c) =>
+                        c.id === contact.id ? { ...c, phone: value } : c
+                      )
+                    )
+                  }}
+                  placeholder="Click to add phone"
+                >
+                  <EditablePreview
+                    cursor="pointer"
+                    _hover={{ bg: 'gray.50' }}
+                    px={2}
+                    py={1}
+                    borderRadius="md"
+                    minW="120px"
+                  />
+                  <EditableInput px={2} py={1} />
+                </Editable>
+              </Td>
+              <Td>
+                <Menu>
+                  <MenuButton
+                    as={Button}
+                    rightIcon={<ChevronDownIcon />}
+                    size="sm"
+                    variant="outline"
+                    w="full"
+                    textAlign="left"
+                  >
+                    {contact.accounts && contact.accounts.length > 0
+                      ? contact.accounts.length === 1
+                        ? contact.accounts[0]
+                        : `${contact.accounts.length} accounts`
+                      : 'Select account'}
+                  </MenuButton>
+                  <MenuList maxH="300px" overflowY="auto">
+                    {availableAccounts.map((account) => {
+                      const isSelected = contact.accounts?.includes(account)
+                      return (
+                        <MenuItem
+                          key={account}
+                          onClick={() => {
+                            const currentAccounts = contact.accounts || []
+                            let newAccounts: string[]
+                            
+                            if (isSelected) {
+                              // Remove account
+                              newAccounts = currentAccounts.filter((a) => a !== account)
+                            } else {
+                              // Add account
+                              newAccounts = [...currentAccounts, account]
+                            }
+                            
+                            setContactsData(
+                              contactsData.map((c) =>
+                                c.id === contact.id ? { ...c, accounts: newAccounts } : c
+                              )
+                            )
+                          }}
+                          bg={isSelected ? 'blue.50' : undefined}
+                          fontWeight={isSelected ? 'semibold' : 'normal'}
+                        >
+                          {isSelected ? '✓ ' : ''}{account}
+                        </MenuItem>
+                      )
+                    })}
+                    {availableAccounts.length === 0 && (
+                      <MenuItem isDisabled>
+                        <Text fontSize="sm" color="gray.500">
+                          No accounts available
+                        </Text>
+                      </MenuItem>
+                    )}
+                    {contact.accounts && contact.accounts.length > 0 && (
+                      <>
+                        <Box borderTop="1px solid" borderColor="gray.200" my={1} />
+                        <MenuItem
+                          onClick={() => {
+                            setContactsData(
+                              contactsData.map((c) =>
+                                c.id === contact.id ? { ...c, accounts: [] } : c
+                              )
+                            )
+                          }}
+                          color="red.500"
+                          fontWeight="semibold"
+                        >
+                          Clear all accounts
+                        </MenuItem>
+                      </>
+                    )}
+                  </MenuList>
+                </Menu>
               </Td>
               <Td>
                 <Badge colorScheme={contact.tier === 'Decision maker' ? 'purple' : 'blue'}>
