@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>EMERGENCY DATA RECOVERY</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #d32f2f; }
+        button { padding: 15px 30px; font-size: 18px; margin: 10px; cursor: pointer; background: #f57c00; color: white; border: none; border-radius: 5px; }
+        button:hover { background: #e65100; }
+        pre { background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; max-height: 400px; }
+        .success { color: #2e7d32; font-weight: bold; }
+        .error { color: #d32f2f; font-weight: bold; }
+        .section { margin: 20px 0; padding: 20px; border: 2px solid #ddd; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 EMERGENCY CUSTOMER DATA RECOVERY</h1>
+        <p><strong>Time-sensitive recovery tool - Use immediately!</strong></p>
+        
+        <div class="section">
+            <h2>Step 1: Find Your Data</h2>
+            <button onclick="scanAllStorage()">🔍 SCAN ALL STORAGE NOW</button>
+            <div id="scan-results"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 2: Push to Database</h2>
+            <button onclick="pushToDatabase()">💾 PUSH ALL DATA TO DATABASE</button>
+            <div id="push-results"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 3: Verify Database</h2>
+            <button onclick="verifyDatabase()">✅ CHECK DATABASE NOW</button>
+            <div id="verify-results"></div>
+        </div>
+    </div>
+
+    <script>
+        let foundCustomers = [];
+
+        async function scanAllStorage() {
+            const results = document.getElementById('scan-results');
+            results.innerHTML = '<p>Scanning...</p>';
+            
+            const allKeys = Object.keys(localStorage);
+            let found = {
+                accounts: [],
+                backups: [],
+                other: []
+            };
+
+            // Check all possible keys
+            const customerKeys = [
+                'odcrm_accounts',
+                'odcrm_customers',
+                'accounts',
+                'customers',
+                'accountsData'
+            ];
+
+            for (const key of customerKeys) {
+                try {
+                    const data = localStorage.getItem(key);
+                    if (data && data !== 'null' && data !== '[]') {
+                        const parsed = JSON.parse(data);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            found.accounts.push({ key, count: parsed.length, data: parsed });
+                            foundCustomers = parsed;
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            // Check backups
+            for (const key of allKeys) {
+                if (key.includes('backup') || key.includes('BACKUP')) {
+                    try {
+                        const data = localStorage.getItem(key);
+                        const parsed = JSON.parse(data);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            found.backups.push({ key, count: parsed.length, data: parsed });
+                            if (foundCustomers.length === 0) foundCustomers = parsed;
+                        }
+                    } catch (e) {}
+                }
+            }
+
+            let html = '<h3>Scan Results:</h3>';
+            
+            if (found.accounts.length > 0) {
+                html += '<div class="success">✅ FOUND CUSTOMER DATA!</div>';
+                found.accounts.forEach(item => {
+                    html += `<p><strong>${item.key}</strong>: ${item.count} customers</p>`;
+                    html += `<pre>${JSON.stringify(item.data, null, 2)}</pre>`;
+                });
+            } else {
+                html += '<div class="error">❌ No customer data in localStorage</div>';
+            }
+
+            if (found.backups.length > 0) {
+                html += '<div class="success">✅ FOUND BACKUP DATA!</div>';
+                found.backups.forEach(item => {
+                    html += `<p><strong>${item.key}</strong>: ${item.count} customers</p>`;
+                    html += `<pre>${JSON.stringify(item.data, null, 2)}</pre>`;
+                });
+            }
+
+            results.innerHTML = html;
+        }
+
+        async function pushToDatabase() {
+            const results = document.getElementById('push-results');
+            
+            if (foundCustomers.length === 0) {
+                results.innerHTML = '<div class="error">❌ No data to push! Run scan first.</div>';
+                return;
+            }
+
+            results.innerHTML = `<p>Pushing ${foundCustomers.length} customers to database...</p>`;
+
+            try {
+                let success = 0;
+                let failed = 0;
+
+                for (const customer of foundCustomers) {
+                    try {
+                        // Convert to database format
+                        const dbCustomer = {
+                            companyName: customer.name || 'Unknown',
+                            companyWebsite: customer.website || '',
+                            sector: customer.sector || '',
+                            accountData: customer,
+                            leadsReportingUrl: customer.clientLeadsSheetUrl || '',
+                            socialPresence: customer.socialMedia || []
+                        };
+
+                        const response = await fetch('/api/customers', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(dbCustomer)
+                        });
+
+                        if (response.ok) {
+                            success++;
+                            console.log('✅ Pushed:', customer.name);
+                        } else {
+                            failed++;
+                            console.error('❌ Failed:', customer.name, await response.text());
+                        }
+                    } catch (err) {
+                        failed++;
+                        console.error('❌ Error:', customer.name, err);
+                    }
+                }
+
+                results.innerHTML = `
+                    <div class="success">✅ SUCCESS: Pushed ${success} customers</div>
+                    ${failed > 0 ? `<div class="error">❌ FAILED: ${failed} customers</div>` : ''}
+                    <p><strong>NOW: Click "CHECK DATABASE NOW" to verify</strong></p>
+                `;
+            } catch (err) {
+                results.innerHTML = `<div class="error">❌ Error: ${err.message}</div>`;
+            }
+        }
+
+        async function verifyDatabase() {
+            const results = document.getElementById('verify-results');
+            results.innerHTML = '<p>Checking database...</p>';
+
+            try {
+                const response = await fetch('/api/customers');
+                const data = await response.json();
+
+                if (Array.isArray(data) && data.length > 0) {
+                    results.innerHTML = `
+                        <div class="success">✅ DATABASE HAS ${data.length} CUSTOMERS!</div>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                        <p><strong>SUCCESS! Now reload your main page!</strong></p>
+                    `;
+                } else {
+                    results.innerHTML = `<div class="error">❌ Database is still empty</div>`;
+                }
+            } catch (err) {
+                results.innerHTML = `<div class="error">❌ Error: ${err.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
