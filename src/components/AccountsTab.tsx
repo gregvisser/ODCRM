@@ -4417,12 +4417,15 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
 
     // Set sensible defaults for fields not in the form
+    // IMPORTANT: Use local date, not UTC, to avoid timezone issues
     const today = new Date()
     const oneYearFromNow = new Date(today)
     oneYearFromNow.setFullYear(today.getFullYear() + 1)
     
-    const defaultContractStart = today.toISOString().split('T')[0] // YYYY-MM-DD format
-    const defaultContractEnd = oneYearFromNow.toISOString().split('T')[0]
+    // Use toLocaleDateString('en-CA') for YYYY-MM-DD format in local timezone
+    // This ensures contract dates match the user's local date, not UTC
+    const defaultContractStart = today.toLocaleDateString('en-CA') // YYYY-MM-DD format
+    const defaultContractEnd = oneYearFromNow.toLocaleDateString('en-CA')
     
     // Auto-populate company data if available
     let initialAccount: Account = {
@@ -4440,8 +4443,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       monthlySpendGBP: newAccountForm.monthlySpendGBP || 0,
       agreements: newAccountForm.agreements || [],
       defcon: newAccountForm.defcon || 3,
-      contractStart: defaultContractStart, // Default to today
-      contractEnd: defaultContractEnd, // Default to one year from today
+      contractStart: defaultContractStart, // Default to today in local timezone
+      contractEnd: defaultContractEnd, // Default to one year from today in local timezone
       days: newAccountForm.days || 1,
       contacts: newAccountForm.contacts || 0,
       leads: newAccountForm.leads || 0,
