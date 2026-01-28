@@ -137,15 +137,6 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
     }
   }, [customers, updateCustomer, createCustomer, refetch, toast])
 
-  // EMERGENCY: Force immediate database reload on mount
-  useEffect(() => {
-    console.log('🚨 EMERGENCY MODE: Forcing immediate database reload')
-    // Clear any stale sync markers
-    localStorage.removeItem('odcrm_accounts_backend_sync_hash')
-    // Force fresh data load
-    refetch()
-  }, [refetch])
-
   // Set up periodic refresh to keep data fresh
   useEffect(() => {
     const interval = setInterval(() => {
@@ -161,12 +152,9 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       <VStack py={10} spacing={4}>
         <Spinner size="xl" color="orange.500" thickness="4px" />
         <Box textAlign="center">
-          <Text fontSize="lg" fontWeight="bold">🚨 LOADING YOUR CUSTOMERS FROM DATABASE...</Text>
+          <Text fontSize="lg" fontWeight="bold">Loading customers from database...</Text>
           <Text color="gray.600">
             Fetching fresh data from Azure PostgreSQL
-          </Text>
-          <Text fontSize="sm" color="orange.600" mt={2}>
-            Emergency recovery mode active - forcing fresh data load
           </Text>
         </Box>
       </VStack>
