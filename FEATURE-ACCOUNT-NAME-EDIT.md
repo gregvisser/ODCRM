@@ -1,6 +1,8 @@
 # Account Name Edit Feature
 
-## ✅ Status: DEPLOYED TO PRODUCTION
+## ❌ Status: REVERTED (No longer active)
+
+**Note:** This feature was successfully implemented and deployed, but has been reverted per user request. Account names are now read-only again in the table.
 
 ## Overview
 Added the ability to edit account names directly within the account table in the Accounts tab.
@@ -147,5 +149,32 @@ Added the ability to edit account names directly within the account table in the
 - If you rename an account, you may need to manually update associated contacts to use the new name
 - Future enhancement: Add cascade updates to related entities
 
+## Revert History
+
+### Final Commit: Feature Reverted
+**Commit:** `d84589a` - "Revert: Remove account name inline editing feature"
+- Status: ✅ Deployed successfully
+- Deployed: 2026-01-27 (shortly after 47656b8)
+- Reason: Per user request
+
+**Changes in Revert:**
+- Removed inline editing UI from account name cell
+- Reverted to simple read-only Text display
+- Removed account name rename validation logic
+- Kept all numeric field editing functionality intact
+- Kept numeric field validation (the bug fix from 47656b8)
+
+**Current State:**
+Account names are now **read-only** and display as:
+```typescript
+<Td>
+  <Text fontWeight="semibold" color="text.primary">
+    {account.name}
+  </Text>
+</Td>
+```
+
+All other inline editing features (Revenue, Weekly Target, Monthly Target, DEFCON) continue to work with proper validation.
+
 ## Screenshots
-*Screenshots to be added after user testing*
+*Feature was reverted before user testing*
