@@ -18,7 +18,8 @@
     "deploy:create-customer": "node scripts/create-customer.js",
     "deploy:guide": "node scripts/guided-deploy.js",
     "deploy:update-neon": "node scripts/update-neon-env.js",
-    "deploy:update-azure": "node scripts/update-azure-env.js"
+    "deploy:update-azure": "node scripts/update-azure-env.js",
+    "health-check": "node scripts/system-health-check.cjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",

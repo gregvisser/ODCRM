@@ -1,0 +1,386 @@
+---
+description: MANDATORY pre-flight checklist that EVERY agent MUST run at the START of EVERY chat
+alwaysApply: true
+priority: 1
+---
+
+# 🚨 MANDATORY: Chat Startup Protocol
+
+**THIS RUNS AUTOMATICALLY AT THE START OF EVERY CHAT**
+**NO AGENT MAY SKIP THIS. NO EXCEPTIONS.**
+
+---
+
+## ⚡ IMMEDIATE ACTIONS (First 30 Seconds)
+
+### 1. System Health Check
+```bash
+# Run these commands in parallel IMMEDIATELY
+git status                    # Check for uncommitted changes
+git log --oneline -5          # Check recent commits
+gh run list --limit 1         # Check last deployment status
+```
+
+**Verify:**
+- [ ] No uncommitted changes (if there are, **IMMEDIATELY ask user what happened**)
+- [ ] Last commit was successful
+- [ ] Last deployment passed (green checkmark)
+- [ ] Production is healthy: https://odcrm.bidlow.co.uk
+
+**IF ANY FAIL:** Stop and alert user IMMEDIATELY.
+
+---
+
+### 2. Database Verification
+```bash
+# Check database is accessible and has data
+cd server && node -e "
+const { PrismaClient } = require('./node_modules/@prisma/client');
+const prisma = new PrismaClient();
+prisma.customer.count().then(count => {
+  console.log('Database customers:', count);
+  process.exit(0);
+}).catch(err => {
+  console.error('Database ERROR:', err.message);
+  process.exit(1);
+});
+"
+```
+
+**Verify:**
+- [ ] Database connection works
+- [ ] Customer count > 0 (if user has data)
+- [ ] No connection errors
+
+**IF FAILS:** Alert user about database issues IMMEDIATELY.
+
+---
+
+### 3. Environment Configuration Audit
+
+**Check these files exist and are valid:**
+- [ ] `.env.local` (frontend environment variables)
+- [ ] `server/.env` (backend environment variables)
+- [ ] `staticwebapp.config.json` (Azure deployment config)
+- [ ] `.github/workflows/deploy-frontend-azure-static-web-app.yml`
+
+**Critical environment variables MUST exist:**
+
+**Frontend (.env.local):**
+- `VITE_API_URL` (backend API URL)
+- `VITE_AUTH_ALLOWED_EMAILS` (authorized users)
+
+**Backend (server/.env):**
+- `DATABASE_URL` (Azure PostgreSQL connection)
+- `MICROSOFT_CLIENT_ID` (OAuth)
+- `MICROSOFT_CLIENT_SECRET` (OAuth)
+- `PORT=3001`
+
+**IF ANY MISSING:** Report to user immediately.
+
+---
+
+### 4. Recent Activity Analysis
+
+**Check git log for the last 24 hours:**
+```bash
+git log --since="24 hours ago" --oneline
+```
+
+**Look for red flags:**
+- Emergency fixes
+- Revert commits
+- "CRITICAL" or "URGENT" in commit messages
+- Multiple commits in short timespan (indicates firefighting)
+
+**IF RED FLAGS:** Ask user about recent issues before proceeding.
+
+---
+
+## 📋 MANDATORY DECLARATION
+
+**Every agent must declare at start of chat:**
+
+```
+✅ SYSTEM HEALTH CHECK COMPLETE
+
+Database: [✅ CONNECTED | ❌ ERROR]
+Git Status: [✅ CLEAN | ⚠️ UNCOMMITTED CHANGES]
+Last Deploy: [✅ SUCCESS | ❌ FAILED]
+Production: [✅ HEALTHY | ❌ DOWN]
+Environment: [✅ VALID | ❌ ISSUES]
+
+Recent Activity: [NORMAL | ⚠️ ISSUES DETECTED]
+
+Ready to proceed: [YES | NO - REQUIRES ATTENTION]
+```
+
+**IF NOT READY:** Fix issues BEFORE accepting any user requests.
+
+---
+
+## 🔒 DATA INTEGRITY RULES
+
+### Rule 1: NEVER Clear Browser Storage Without Backup
+
+**BEFORE telling user to clear cache/localStorage:**
+1. Check if data is in database
+2. Create emergency backup script
+3. Verify backup works
+4. ONLY THEN clear cache
+
+**Code to backup localStorage:**
+```javascript
+// Save to file BEFORE clearing
+const backup = {};
+for (let i = 0; i < localStorage.length; i++) {
+  const key = localStorage.key(i);
+  backup[key] = localStorage.getItem(key);
+}
+console.log('BACKUP:', JSON.stringify(backup, null, 2));
+// Save this output to a file
+```
+
+### Rule 2: ALWAYS Verify Data is in Database
+
+**BEFORE AND AFTER any data operation:**
+```bash
+# Verify customer count
+cd server && npm run prisma:studio
+# Check customer table manually
+```
+
+**If data is ONLY in localStorage:**
+1. **STOP**
+2. Migrate to database FIRST
+3. Verify migration succeeded
+4. THEN proceed
+
+### Rule 3: ALWAYS Commit + Push After Changes
+
+**AFTER making any code changes:**
+```bash
+# This is MANDATORY, not optional
+git add .
+git commit -m "Descriptive message"
+git push origin main
+
+# Wait for deployment
+gh run watch
+# Or: gh run list --limit 1
+
+# Verify production
+# Check: https://odcrm.bidlow.co.uk
+```
+
+**NO EXCEPTIONS.** If you make a change, it MUST be deployed.
+
+### Rule 4: ALWAYS Verify Production After Deploy
+
+**Within 2 minutes of deployment:**
+1. Check GitHub Actions passed
+2. Open https://odcrm.bidlow.co.uk
+3. Test the changed feature
+4. Check browser console (F12) for errors
+5. Report results to user
+
+**Format:**
+```
+✅ Deployment Complete
+
+GitHub Actions: ✅ PASSED
+Production Status: ✅ LIVE
+Feature Tested: ✅ WORKING
+Console Errors: ❌ NONE
+
+User can now use the changes at: https://odcrm.bidlow.co.uk
+```
+
+---
+
+## 🚫 ABSOLUTE PROHIBITIONS
+
+**These actions are FORBIDDEN without explicit user approval:**
+
+1. ❌ Clear browser cache/localStorage
+2. ❌ Delete database records
+3. ❌ Modify production environment variables
+4. ❌ Skip testing "just this once"
+5. ❌ Deploy without verifying
+6. ❌ Make assumptions about data location
+7. ❌ Rush through critical operations
+
+**If user requests any of the above:**
+1. Explain the risks
+2. Ask for explicit confirmation
+3. Create backups first
+4. Document everything
+5. Verify results immediately
+
+---
+
+## 📊 Continuous Monitoring
+
+**Throughout the chat session:**
+
+### Every 10 minutes:
+- Check if there are uncommitted changes
+- Remind user to commit if needed
+
+### Before ending chat:
+- Verify all changes are committed
+- Verify all deployments succeeded
+- Create summary of what was done
+- Confirm production is healthy
+
+### If user disconnects:
+- Leave clear notes in commit messages
+- Ensure nothing is left in broken state
+- All work must be in git history
+
+---
+
+## 🎯 Quality Gates
+
+**NO CODE PASSES WITHOUT:**
+
+1. ✅ Local testing passed
+2. ✅ Build succeeds (`npm run build`)
+3. ✅ Committed to git
+4. ✅ Pushed to GitHub
+5. ✅ GitHub Actions passed
+6. ✅ Production verified
+7. ✅ User notified of results
+
+**IF ANY GATE FAILS:**
+- Stop immediately
+- Fix the issue
+- Re-run all gates
+- Document what went wrong
+
+---
+
+## 💡 Emergency Protocols
+
+### If You Break Production:
+
+**IMMEDIATE (First 5 minutes):**
+1. Acknowledge to user: "I broke production"
+2. Identify exact cause
+3. Create fix
+4. Test fix locally
+5. Deploy fix
+6. Verify fix in production
+7. Apologize and document
+
+### If Data is Lost:
+
+**IMMEDIATE:**
+1. Check database immediately
+2. Check git history for backups
+3. Check Azure backups
+4. Check browser localStorage (if same machine)
+5. Attempt recovery from all sources
+6. Report findings honestly
+7. Never make excuses
+
+### If Deployment Fails:
+
+**IMMEDIATE:**
+1. Check GitHub Actions logs
+2. Identify exact error
+3. Fix in local code
+4. Test build locally
+5. Push fix
+6. Monitor deployment
+7. Verify production
+
+---
+
+## 📝 Chat Session Log Template
+
+**Keep this updated throughout chat:**
+
+```markdown
+# Chat Session Log
+Date: [YYYY-MM-DD HH:MM]
+Agent: [Agent Type]
+User: [Username]
+
+## Pre-Flight Check
+- System Health: [PASS/FAIL]
+- Database: [PASS/FAIL]
+- Environment: [PASS/FAIL]
+- Recent Activity: [NORMAL/ISSUES]
+
+## Work Performed
+1. [Task description]
+   - Files modified: [list]
+   - Committed: [YES/NO]
+   - Deployed: [YES/NO]
+   - Verified: [YES/NO]
+
+## Deployments
+1. Commit: [hash]
+   - GitHub Actions: [PASS/FAIL]
+   - Production: [VERIFIED/NOT VERIFIED]
+   - Notes: [any issues]
+
+## Final Status
+- All changes committed: [YES/NO]
+- All deployments successful: [YES/NO]
+- Production healthy: [YES/NO]
+- User satisfied: [YES/NO]
+
+## Outstanding Issues
+- [List anything incomplete or broken]
+
+## Next Session Notes
+- [What the next agent should know]
+```
+
+---
+
+## 🔥 THE GOLDEN RULES
+
+1. **Test locally FIRST, always**
+2. **Commit IMMEDIATELY after changes**
+3. **Deploy within 5 minutes of commit**
+4. **Verify production within 2 minutes of deploy**
+5. **Never assume - always verify**
+6. **Database is ALWAYS source of truth**
+7. **localStorage is NEVER for business data**
+8. **If unsure, ask user**
+9. **Document everything**
+10. **Quality over speed, always**
+
+---
+
+## ✅ Startup Checklist Summary
+
+**Copy this at the start of EVERY chat:**
+
+```
+🚨 MANDATORY STARTUP PROTOCOL
+
+[ ] System health check complete
+[ ] Database connection verified
+[ ] Environment variables validated
+[ ] Recent activity analyzed
+[ ] No uncommitted changes (or acknowledged)
+[ ] Last deployment verified
+[ ] Production status confirmed
+[ ] Ready to proceed safely
+
+Status: [READY | NOT READY - ISSUES REQUIRE ATTENTION]
+```
+
+---
+
+**Last Updated:** 2026-01-28
+**Status:** MANDATORY - Automatically enforced
+**Priority:** HIGHEST - Runs before all other rules
+**Violations:** NOT PERMITTED - Agent must comply
+
+**This rule was created in response to catastrophic data loss incident.**
+**It exists to prevent that from EVER happening again.**

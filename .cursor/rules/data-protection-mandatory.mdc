@@ -1,0 +1,464 @@
+---
+description: MANDATORY data protection and backup rules - prevents data loss
+alwaysApply: true
+priority: 1
+---
+
+# 🛡️ MANDATORY: Data Protection Protocol
+
+**CREATED IN RESPONSE TO DATA LOSS INCIDENT**
+**THESE RULES ARE NON-NEGOTIABLE**
+
+---
+
+## 🚨 CRITICAL PRINCIPLE
+
+> **"The database is the ONLY source of truth. localStorage is NEVER used for business data."**
+
+**VIOLATION OF THIS PRINCIPLE IS UNACCEPTABLE.**
+
+---
+
+## 🔒 Rule #1: Database-First ALWAYS
+
+### What Goes in Database (PostgreSQL):
+✅ Customer/Account records
+✅ Contacts
+✅ Campaigns
+✅ Sequences  
+✅ Email templates
+✅ Lead data
+✅ Any business-critical information
+✅ User data
+✅ System configuration
+✅ Anything the user creates or edits
+
+### What Can Go in localStorage:
+✅ UI preferences (theme, sidebar collapsed)
+✅ Draft forms (BEFORE submission)
+✅ Temporary search/filter state
+✅ Session tokens (with expiry)
+✅ Feature flags (non-critical)
+
+### What NEVER Goes in localStorage:
+❌ Customer data
+❌ Account information
+❌ Contacts
+❌ Campaigns
+❌ Any data the user expects to persist
+❌ Anything that would be a problem if lost
+
+---
+
+## 🔒 Rule #2: Verify Data Location BEFORE Changes
+
+**BEFORE making ANY changes that could affect data:**
+
+```bash
+# 1. Check what's in database
+cd server && node -e "
+const { PrismaClient } = require('./node_modules/@prisma/client');
+const prisma = new PrismaClient();
+(async () => {
+  const count = await prisma.customer.count();
+  console.log('✅ Database has', count, 'customers');
+  
+  if (count === 0) {
+    console.log('⚠️ WARNING: Database is EMPTY');
+    console.log('⚠️ Check if data is in localStorage');
+  }
+  
+  await prisma.\$disconnect();
+})();
+"
+
+# 2. Check localStorage (via browser console or recovery script)
+# Ask user to open https://odcrm.bidlow.co.uk
+# Press F12 → Console → Run:
+Object.keys(localStorage).filter(k => k.includes('odcrm') || k.includes('customer') || k.includes('account'))
+```
+
+**IF data is in localStorage but NOT in database:**
+1. **STOP IMMEDIATELY**
+2. **DO NOT CLEAR CACHE**
+3. **DO NOT PROCEED WITH CHANGES**
+4. **Migrate data to database FIRST**
+5. **Verify migration succeeded**
+6. **THEN proceed**
+
+---
+
+## 🔒 Rule #3: Never Clear Cache Without Backup
+
+**IF you must tell user to clear browser cache:**
+
+### Step 1: Create Emergency Backup Script
+```javascript
+// emergency-backup.js
+const backup = {
+  timestamp: new Date().toISOString(),
+  data: {}
+};
+
+// Backup ALL localStorage
+for (let i = 0; i < localStorage.length; i++) {
+  const key = localStorage.key(i);
+  backup.data[key] = localStorage.getItem(key);
+}
+
+// Download backup
+const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = `odcrm-backup-${Date.now()}.json`;
+a.click();
+
+console.log('✅ Backup created');
+```
+
+### Step 2: User Runs Script
+- Tell user to open https://odcrm.bidlow.co.uk
+- Press F12 → Console
+- Paste script and run
+- Verify backup file downloaded
+
+### Step 3: Verify Data in Database
+```bash
+cd server && npm run prisma:studio
+# Manually check customer table has data
+```
+
+### Step 4: ONLY THEN Clear Cache
+**Tell user:** "Now you can clear cache safely. Your data is backed up and in the database."
+
+---
+
+## 🔒 Rule #4: Automatic Backups
+
+### Daily Backup Script
+
+Create this file: `server/scripts/backup-database.js`
+
+```javascript
+const { PrismaClient } = require('@prisma/client');
+const fs = require('fs');
+const path = require('path');
+
+const prisma = new PrismaClient();
+
+async function backupDatabase() {
+  const timestamp = new Date().toISOString().split('T')[0];
+  const backupDir = path.join(__dirname, '../backups');
+  
+  if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir, { recursive: true });
+  }
+  
+  const backup = {
+    timestamp: new Date().toISOString(),
+    customers: await prisma.customer.findMany(),
+    contacts: await prisma.customerContact.findMany(),
+    campaigns: await prisma.emailCampaign.findMany(),
+  };
+  
+  const filename = `backup-${timestamp}.json`;
+  const filepath = path.join(backupDir, filename);
+  
+  fs.writeFileSync(filepath, JSON.stringify(backup, null, 2));
+  console.log(`✅ Backup created: ${filename}`);
+  
+  // Keep only last 30 days of backups
+  const files = fs.readdirSync(backupDir);
+  const oldFiles = files.filter(f => {
+    const date = f.match(/backup-(\d{4}-\d{2}-\d{2})/);
+    if (!date) return false;
+    const fileDate = new Date(date[1]);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    return fileDate < thirtyDaysAgo;
+  });
+  
+  oldFiles.forEach(f => {
+    fs.unlinkSync(path.join(backupDir, f));
+    console.log(`🗑️ Deleted old backup: ${f}`);
+  });
+  
+  await prisma.$disconnect();
+}
+
+backupDatabase().catch(console.error);
+```
+
+**Add to package.json:**
+```json
+{
+  "scripts": {
+    "backup": "node scripts/backup-database.js"
+  }
+}
+```
+
+**Run daily:** (User or automated)
+```bash
+cd server && npm run backup
+```
+
+---
+
+## 🔒 Rule #5: Migration Verification
+
+**AFTER migrating data from localStorage to database:**
+
+### Verification Checklist:
+```bash
+# 1. Count records in database
+cd server && node -e "
+const { PrismaClient } = require('./node_modules/@prisma/client');
+const prisma = new PrismaClient();
+prisma.customer.count().then(count => {
+  console.log('✅ Database has', count, 'customers');
+  if (count === 0) {
+    console.error('❌ MIGRATION FAILED - Database is empty');
+    process.exit(1);
+  }
+  prisma.\$disconnect();
+});
+"
+
+# 2. Verify data looks correct
+cd server && npm run prisma:studio
+# Manually inspect first 5 records
+
+# 3. Test in production
+# Open https://odcrm.bidlow.co.uk
+# Check customers tab loads
+# Verify data is visible
+```
+
+**ONLY mark migration complete if ALL checks pass.**
+
+---
+
+## 🔒 Rule #6: Commit Data Changes Immediately
+
+**AFTER any operation that changes data:**
+
+```bash
+# Commit immediately - don't wait
+git add .
+git commit -m "Data operation: [what changed]
+
+- Customers affected: [count]
+- Operation: [create/update/delete]
+- Verified in database: YES
+- Production impact: [none/minor/major]"
+
+git push origin main
+```
+
+**NO EXCEPTIONS.** Data changes must be in git history.
+
+---
+
+## 🔒 Rule #7: Production Verification is Mandatory
+
+**AFTER every deployment that affects data:**
+
+### Verification Steps:
+1. Wait for GitHub Actions to complete (3-5 min)
+2. Open https://odcrm.bidlow.co.uk
+3. Hard refresh: Ctrl+Shift+R (Windows) or Cmd+Shift+R (Mac)
+4. Navigate to affected section
+5. Verify data is visible
+6. Check browser console (F12) for errors
+7. Test create/update/delete operations
+8. Confirm everything works
+
+**Report to user:**
+```
+✅ PRODUCTION VERIFICATION COMPLETE
+
+Deployment: ✅ SUCCESS
+Data visible: ✅ YES ([count] customers)
+Operations tested: ✅ PASS
+Console errors: ❌ NONE
+Production status: ✅ HEALTHY
+
+User can now access at: https://odcrm.bidlow.co.uk
+```
+
+---
+
+## 🚨 Emergency Data Recovery Procedures
+
+### If Data is Lost:
+
+**IMMEDIATE ACTIONS (First 10 minutes):**
+
+1. **Check database first:**
+```bash
+cd server && node -e "
+const { PrismaClient } = require('./node_modules/@prisma/client');
+const prisma = new PrismaClient();
+(async () => {
+  const customers = await prisma.customer.findMany();
+  console.log('Database customers:', customers.length);
+  console.log(JSON.stringify(customers, null, 2));
+  await prisma.\$disconnect();
+})();
+"
+```
+
+2. **Check Azure database backups:**
+   - Log into Azure Portal
+   - Navigate to PostgreSQL server
+   - Check "Backup and Restore"
+   - Restore from latest backup if needed
+
+3. **Check localStorage (if same browser/machine):**
+```javascript
+// In browser console on odcrm.bidlow.co.uk
+const possibleKeys = Object.keys(localStorage).filter(k => 
+  k.includes('odcrm') || 
+  k.includes('customer') || 
+  k.includes('account') ||
+  k.includes('backup')
+);
+console.log('Found keys:', possibleKeys);
+possibleKeys.forEach(key => {
+  console.log(key, localStorage.getItem(key));
+});
+```
+
+4. **Check git history for data:**
+```bash
+# Search commits for data changes
+git log --all --grep="customer\|account\|data" --since="7 days ago"
+
+# Check if data was ever committed (shouldn't be, but check)
+git log --all --oneline | head -50
+```
+
+5. **Check file backups:**
+```bash
+# Check if backup directory exists
+ls -la server/backups/
+# Restore from most recent backup if exists
+```
+
+### If No Recovery Possible:
+
+1. **Be honest with user immediately**
+2. **Explain what was lost**
+3. **Explain why it happened**
+4. **Never make excuses**
+5. **Focus on preventing recurrence**
+6. **Help user recreate critical data if needed**
+
+---
+
+## 🎯 Data Integrity Checks
+
+### Run These Periodically:
+
+**Daily Health Check:**
+```bash
+# Check database connection and record counts
+cd server && node -e "
+const { PrismaClient } = require('./node_modules/@prisma/client');
+const prisma = new PrismaClient();
+(async () => {
+  console.log('🔍 DATABASE HEALTH CHECK');
+  console.log('Customers:', await prisma.customer.count());
+  console.log('Contacts:', await prisma.customerContact.count());
+  console.log('Campaigns:', await prisma.emailCampaign.count());
+  console.log('✅ Database is healthy');
+  await prisma.\$disconnect();
+})();
+"
+```
+
+**Weekly Backup Verification:**
+```bash
+# Verify backups exist and are recent
+ls -lh server/backups/ | tail -10
+# Should see files from last 7 days
+```
+
+**Monthly Audit:**
+- Review all data access patterns
+- Verify no localStorage usage for business data
+- Check Azure database backups are configured
+- Test recovery procedures
+
+---
+
+## 📊 Monitoring & Alerts
+
+### Set Up Alerts For:
+
+1. **Database connection failures**
+   - Monitor server logs
+   - Alert if Prisma can't connect
+
+2. **Zero records in critical tables**
+   - Alert if customer count = 0
+   - Could indicate accidental deletion
+
+3. **Failed deployments**
+   - Monitor GitHub Actions
+   - Alert on any failed workflow
+
+4. **Production errors**
+   - Monitor browser console errors
+   - Set up error tracking (Sentry/similar)
+
+---
+
+## 💡 Golden Rules
+
+1. **Database is ALWAYS source of truth**
+2. **localStorage is NEVER for business data**
+3. **Verify before clearing cache**
+4. **Backup before risky operations**
+5. **Commit data changes immediately**
+6. **Verify production after every deploy**
+7. **Test recovery procedures regularly**
+8. **Never assume data is safe**
+9. **Always verify, never trust**
+10. **When in doubt, create a backup**
+
+---
+
+## ✅ Data Protection Checklist
+
+**Run this before ANY risky operation:**
+
+```
+BEFORE proceeding:
+[ ] Data is in database (verified with Prisma Studio)
+[ ] Database backup exists (checked backup directory)
+[ ] No localStorage dependencies (code review)
+[ ] Emergency backup script ready (created if needed)
+[ ] User has saved important work (confirmed)
+[ ] Recovery procedure documented (tested if possible)
+
+AFTER operation:
+[ ] Data still in database (verified)
+[ ] Production verified (tested live site)
+[ ] No errors in console (checked F12)
+[ ] User confirmed data visible (asked user)
+[ ] Changes committed to git (pushed to GitHub)
+
+Status: [SAFE TO PROCEED | STOP - ISSUES DETECTED]
+```
+
+---
+
+**Last Updated:** 2026-01-28
+**Status:** MANDATORY - Zero tolerance for violations
+**Created:** In response to catastrophic data loss incident
+**Purpose:** Ensure this NEVER happens again
+
+**Every agent must follow these rules. No exceptions. No shortcuts. No excuses.**

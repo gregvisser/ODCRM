@@ -18,7 +18,8 @@
     "prisma:push": "prisma db push --schema=./prisma/schema.prisma",
     "prisma:reset": "prisma migrate reset --schema=./prisma/schema.prisma",
     "setup:dev": "npm install && npm run prisma:generate && echo '✅ Setup complete! Next: Create .env file and run npm run prisma:migrate:dev'",
-    "setup:prod": "npm install && npm run prisma:generate && npm run prisma:migrate:deploy"
+    "setup:prod": "npm install && npm run prisma:generate && npm run prisma:migrate:deploy",
+    "backup": "node scripts/backup-database.cjs"
   },
   "dependencies": {
     "@azure/identity": "^4.0.0",
