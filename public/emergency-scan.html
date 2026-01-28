@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SCAN EVERYTHING NOW</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #000; color: #0f0; }
+        button { padding: 20px; font-size: 24px; background: #f00; color: #fff; border: none; cursor: pointer; }
+        pre { background: #111; padding: 10px; border: 1px solid #0f0; }
+    </style>
+</head>
+<body>
+    <h1>EMERGENCY DATA SCAN</h1>
+    <button onclick="scanEverything()">SCAN ALL STORAGE NOW</button>
+    <div id="results"></div>
+
+    <script>
+        function scanEverything() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<h2>SCANNING...</h2>';
+            
+            let output = '<h2>ALL LOCALSTORAGE KEYS:</h2>';
+            
+            // Get EVERY key
+            const allKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                allKeys.push(localStorage.key(i));
+            }
+            
+            output += `<p>Total keys: ${allKeys.length}</p>`;
+            
+            // Check EVERY key for customer data
+            allKeys.forEach(key => {
+                const value = localStorage.getItem(key);
+                output += `<h3>${key}</h3>`;
+                
+                if (!value || value === 'null' || value === 'undefined') {
+                    output += '<p style="color: red;">EMPTY</p>';
+                    return;
+                }
+                
+                try {
+                    const parsed = JSON.parse(value);
+                    
+                    // Check if it's an array with customer-like data
+                    if (Array.isArray(parsed)) {
+                        output += `<p style="color: yellow;">ARRAY with ${parsed.length} items</p>`;
+                        if (parsed.length > 0) {
+                            output += `<pre>${JSON.stringify(parsed, null, 2)}</pre>`;
+                        }
+                    } else if (typeof parsed === 'object') {
+                        output += `<p style="color: cyan;">OBJECT</p>`;
+                        output += `<pre>${JSON.stringify(parsed, null, 2)}</pre>`;
+                    } else {
+                        output += `<p>VALUE: ${value.substring(0, 200)}</p>`;
+                    }
+                } catch (e) {
+                    output += `<p>STRING: ${value.substring(0, 200)}</p>`;
+                }
+            });
+            
+            // Check sessionStorage too
+            output += '<h2>SESSION STORAGE:</h2>';
+            for (let i = 0; i < sessionStorage.length; i++) {
+                const key = sessionStorage.key(i);
+                const value = sessionStorage.getItem(key);
+                output += `<h3>${key}</h3>`;
+                output += `<pre>${value ? value.substring(0, 500) : 'EMPTY'}</pre>`;
+            }
+            
+            // Check IndexedDB
+            output += '<h2>INDEXEDDB:</h2>';
+            indexedDB.databases().then(dbs => {
+                output += `<p>Databases: ${dbs.map(db => db.name).join(', ')}</p>`;
+                results.innerHTML = output;
+            });
+            
+            results.innerHTML = output;
+        }
+        
+        // Auto-run on load
+        window.onload = scanEverything;
+    </script>
+</body>
+</html>
