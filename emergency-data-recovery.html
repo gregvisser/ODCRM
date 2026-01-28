@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Emergency Data Recovery - ODCRM</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { background: white; padding: 30px; border-radius: 10px; max-width: 1200px; margin: 0 auto; }
+        h1 { color: #d9534f; }
+        .success { color: #5cb85c; font-weight: bold; }
+        .warning { color: #f0ad4e; font-weight: bold; }
+        .error { color: #d9534f; font-weight: bold; }
+        pre { background: #f8f8f8; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        button { background: #5cb85c; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; margin: 10px 5px; }
+        button:hover { background: #4cae4c; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚨 EMERGENCY DATA RECOVERY 🚨</h1>
+        <p><strong>Checking all possible storage locations for your customers...</strong></p>
+
+        <div class="section">
+            <h2>Step 1: Check Main Storage</h2>
+            <button onclick="checkMainStorage()">Check Main Storage</button>
+            <div id="mainStorageResult"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 2: Check ALL Backup Keys</h2>
+            <button onclick="checkAllBackups()">Find All Backups</button>
+            <div id="backupResult"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 3: Check Database Sync Status</h2>
+            <button onclick="checkDatabaseSync()">Check Database Sync</button>
+            <div id="databaseSyncResult"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 4: Export ALL Data (BACKUP)</h2>
+            <button onclick="exportAllData()">Export Everything</button>
+            <div id="exportResult"></div>
+        </div>
+
+        <div class="section">
+            <h2>Step 5: Restore from Best Source</h2>
+            <button onclick="restoreData()">Restore Customers</button>
+            <div id="restoreResult"></div>
+        </div>
+    </div>
+
+    <script>
+        let foundData = null;
+        let bestBackup = null;
+
+        function checkMainStorage() {
+            const result = document.getElementById('mainStorageResult');
+            result.innerHTML = '<p>Checking main storage...</p>';
+
+            try {
+                // Check main accounts key
+                const accounts = localStorage.getItem('odcrm_accounts');
+                if (accounts) {
+                    const parsed = JSON.parse(accounts);
+                    const count = Array.isArray(parsed) ? parsed.length : 0;
+                    
+                    if (count > 0) {
+                        foundData = parsed;
+                        result.innerHTML = `
+                            <p class="success">✅ FOUND ${count} CUSTOMERS in main storage!</p>
+                            <pre>${JSON.stringify(parsed, null, 2)}</pre>
+                        `;
+                    } else {
+                        result.innerHTML = `<p class="warning">⚠️ Main storage exists but is empty</p>`;
+                    }
+                } else {
+                    result.innerHTML = `<p class="error">❌ No data in main storage (odcrm_accounts)</p>`;
+                }
+
+                // Check last updated timestamp
+                const lastUpdated = localStorage.getItem('odcrm_accounts_last_updated');
+                if (lastUpdated) {
+                    result.innerHTML += `<p>Last updated: ${lastUpdated}</p>`;
+                }
+
+            } catch (error) {
+                result.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function checkAllBackups() {
+            const result = document.getElementById('backupResult');
+            result.innerHTML = '<p>Scanning for backups...</p>';
+
+            try {
+                const allKeys = Object.keys(localStorage);
+                const backupKeys = allKeys.filter(key => 
+                    key.startsWith('odcrm_accounts_backup_') || 
+                    key.includes('backup') ||
+                    key.includes('accounts')
+                );
+
+                if (backupKeys.length === 0) {
+                    result.innerHTML = '<p class="warning">⚠️ No backup keys found</p>';
+                    return;
+                }
+
+                let html = `<p class="success">✅ Found ${backupKeys.length} potential backup keys:</p>`;
+                
+                backupKeys.forEach(key => {
+                    const value = localStorage.getItem(key);
+                    try {
+                        const parsed = JSON.parse(value);
+                        const count = Array.isArray(parsed) ? parsed.length : 0;
+                        
+                        html += `
+                            <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0;">
+                                <strong>${key}</strong>
+                                <p>${count} items found</p>
+                                <button onclick="viewBackup('${key}')">View Details</button>
+                                <button onclick="useThisBackup('${key}')">Use This Backup</button>
+                            </div>
+                        `;
+
+                        // Track the best backup (most recent with most items)
+                        if (!bestBackup || count > bestBackup.count) {
+                            bestBackup = { key, data: parsed, count };
+                        }
+                    } catch {
+                        html += `<p>${key}: Not JSON data</p>`;
+                    }
+                });
+
+                result.innerHTML = html;
+
+            } catch (error) {
+                result.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function viewBackup(key) {
+            const data = localStorage.getItem(key);
+            const parsed = JSON.parse(data);
+            alert('Backup contents:\n\n' + JSON.stringify(parsed, null, 2));
+        }
+
+        function useThisBackup(key) {
+            const data = localStorage.getItem(key);
+            foundData = JSON.parse(data);
+            alert(`Selected backup from ${key} with ${foundData.length} customers`);
+        }
+
+        function checkDatabaseSync() {
+            const result = document.getElementById('databaseSyncResult');
+            result.innerHTML = '<p>Checking database sync status...</p>';
+
+            try {
+                const syncHash = localStorage.getItem('odcrm_accounts_backend_sync_hash');
+                const syncVersion = localStorage.getItem('odcrm_accounts_backend_sync_version');
+
+                let html = '<h3>Database Sync Information:</h3>';
+                
+                if (syncHash) {
+                    html += `<p>Sync Hash: ${syncHash}</p>`;
+                } else {
+                    html += `<p class="warning">No sync hash found - data may not be synced to database</p>`;
+                }
+
+                if (syncVersion) {
+                    html += `<p>Sync Version: ${syncVersion}</p>`;
+                }
+
+                html += `<p><strong>Note:</strong> If sync hash exists, your data should be in the database.</p>`;
+                html += `<p>Check browser console Network tab for /api/customers requests</p>`;
+
+                result.innerHTML = html;
+
+            } catch (error) {
+                result.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function exportAllData() {
+            const result = document.getElementById('exportResult');
+            
+            try {
+                const allData = {};
+                const allKeys = Object.keys(localStorage);
+                
+                allKeys.forEach(key => {
+                    if (key.startsWith('odcrm_') || key.includes('account') || key.includes('customer')) {
+                        try {
+                            allData[key] = JSON.parse(localStorage.getItem(key));
+                        } catch {
+                            allData[key] = localStorage.getItem(key);
+                        }
+                    }
+                });
+
+                const blob = new Blob([JSON.stringify(allData, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `odcrm-emergency-backup-${new Date().toISOString()}.json`;
+                a.click();
+
+                result.innerHTML = '<p class="success">✅ Backup file downloaded! Save this file immediately!</p>';
+
+            } catch (error) {
+                result.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+            }
+        }
+
+        function restoreData() {
+            const result = document.getElementById('restoreResult');
+
+            if (!foundData && !bestBackup) {
+                result.innerHTML = '<p class="error">❌ No data found to restore! Check backups first.</p>';
+                return;
+            }
+
+            const dataToRestore = foundData || bestBackup.data;
+
+            if (confirm(`Restore ${dataToRestore.length} customers to main storage?`)) {
+                try {
+                    localStorage.setItem('odcrm_accounts', JSON.stringify(dataToRestore));
+                    localStorage.setItem('odcrm_accounts_last_updated', new Date().toISOString());
+                    
+                    result.innerHTML = `
+                        <p class="success">✅ RESTORED ${dataToRestore.length} CUSTOMERS!</p>
+                        <p><strong>Now refresh the page: Ctrl+Shift+R</strong></p>
+                        <pre>${JSON.stringify(dataToRestore, null, 2)}</pre>
+                    `;
+                } catch (error) {
+                    result.innerHTML = `<p class="error">Error: ${error.message}</p>`;
+                }
+            }
+        }
+
+        // Auto-run checks on load
+        window.onload = function() {
+            checkMainStorage();
+            setTimeout(checkAllBackups, 1000);
+            setTimeout(checkDatabaseSync, 2000);
+        };
+    </script>
+</body>
+</html>
