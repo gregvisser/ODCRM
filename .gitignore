@@ -35,3 +35,9 @@ azure-setup-script.sh
 
 # Cursor workspace images
 assets/c__Users_*
+
+# Backup files (local only - not committed)
+server/backups/*.json
+
+# Embedded repositories (should be separate)
+OpensDoorsV2/
