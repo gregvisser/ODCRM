@@ -4416,6 +4416,14 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       return
     }
 
+    // Set sensible defaults for fields not in the form
+    const today = new Date()
+    const oneYearFromNow = new Date(today)
+    oneYearFromNow.setFullYear(today.getFullYear() + 1)
+    
+    const defaultContractStart = today.toISOString().split('T')[0] // YYYY-MM-DD format
+    const defaultContractEnd = oneYearFromNow.toISOString().split('T')[0]
+    
     // Auto-populate company data if available
     let initialAccount: Account = {
       name: newAccountForm.name.trim(),
@@ -4427,13 +4435,13 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       aboutSource: newAccountForm.aboutSource,
       aboutLocked: newAccountForm.aboutLocked,
       status: newAccountForm.status || 'Active',
-      targetLocation: newAccountForm.targetLocation || [],
-      targetTitle: newAccountForm.targetTitle || '',
+      targetLocation: [], // Default to empty - user can add later if needed
+      targetTitle: '', // Default to empty - user can add later if needed
       monthlySpendGBP: newAccountForm.monthlySpendGBP || 0,
       agreements: newAccountForm.agreements || [],
       defcon: newAccountForm.defcon || 3,
-      contractStart: newAccountForm.contractStart || '',
-      contractEnd: newAccountForm.contractEnd || '',
+      contractStart: defaultContractStart, // Default to today
+      contractEnd: defaultContractEnd, // Default to one year from today
       days: newAccountForm.days || 1,
       contacts: newAccountForm.contacts || 0,
       leads: newAccountForm.leads || 0,
@@ -4441,7 +4449,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       weeklyActual: newAccountForm.weeklyActual || 0,
       monthlyTarget: newAccountForm.monthlyTarget || 0,
       monthlyActual: newAccountForm.monthlyActual || 0,
-      weeklyReport: newAccountForm.weeklyReport || '',
+      weeklyReport: '', // Default to empty - user can add later if needed
       users: newAccountForm.users || [],
       clientLeadsSheetUrl: newAccountForm.clientLeadsSheetUrl || undefined,
     }
