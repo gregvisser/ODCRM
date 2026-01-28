@@ -178,20 +178,6 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
 
   return (
     <Box>
-      {/* Info banner */}
-      <Alert status="success" borderRadius="lg" mb={4}>
-        <AlertIcon />
-        <VStack align="start" spacing={1}>
-          <AlertTitle fontSize="sm">Database-Powered System Active</AlertTitle>
-          <AlertDescription fontSize="xs">
-            All data is loaded from Azure PostgreSQL. {customers.length} customers synced.
-            <Button size="xs" ml={2} variant="ghost" onClick={() => refetch()}>
-              Refresh
-            </Button>
-          </AlertDescription>
-        </VStack>
-      </Alert>
-
       {/* Render the existing AccountsTab - it will read from the hydrated localStorage */}
       <AccountsTab focusAccountName={focusAccountName} />
     </Box>
