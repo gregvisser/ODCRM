@@ -63,27 +63,16 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       lastLocalStorageHashRef.current = JSON.stringify(dbAccounts)
       console.log('✅ localStorage hydrated with', dbAccounts.length, 'accounts from database')
     } else {
-      // localStorage has data - merge database changes while preserving local edits
-      console.log('🔄 Merging database updates with local data...')
-      const merged = currentAccounts.map(localAccount => {
-        const dbAccount = dbAccounts.find(db => db._databaseId === localAccount._databaseId)
-        if (!dbAccount) return localAccount // Keep local if not in database
-        
-        // Preserve local edits for key fields that user might have just changed
-        // Only update fields from database that are clearly server-side (like lead counts)
-        return {
-          ...dbAccount, // Start with database data
-          ...localAccount, // Override with local data (preserves user edits)
-          // But keep server-calculated fields from database:
-          weeklyLeadActual: dbAccount.weeklyLeadActual,
-          monthlyLeadActual: dbAccount.monthlyLeadActual,
-          _lastSyncedAt: dbAccount._lastSyncedAt,
-        }
-      })
+      // localStorage has data - use database as source of truth
+      // Only preserve local data if it was modified AFTER last database sync
+      console.log('🔄 Updating localStorage from database (database is source of truth)...')
       
-      setJson(OdcrmStorageKeys.accounts, merged)
-      lastLocalStorageHashRef.current = JSON.stringify(merged)
-      console.log('✅ Merged database updates with local edits')
+      // Always use database data - it's the source of truth
+      // The 2-second auto-sync below handles saving any local changes back to database
+      setJson(OdcrmStorageKeys.accounts, dbAccounts)
+      setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      lastLocalStorageHashRef.current = JSON.stringify(dbAccounts)
+      console.log('✅ localStorage updated from database (database first)')
     }
     
     setIsHydrating(false)
