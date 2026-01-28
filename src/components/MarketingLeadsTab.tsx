@@ -289,10 +289,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
     const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
 
-    // Auto-refresh every 6 hours
+    // Auto-refresh every 30 minutes
     const refreshInterval = setInterval(() => {
       loadLeads(false)
-    }, 6 * 60 * 60 * 1000) // 6 hours in milliseconds
+    }, 30 * 60 * 1000) // 30 minutes in milliseconds
 
     return () => {
       offAccountsUpdated()
@@ -638,6 +638,22 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     }
   }, [leads, performanceAccountFilter])
 
+  // Get all leads for the selected account (for detailed table)
+  const accountPerformanceLeads = useMemo(() => {
+    if (!performanceAccountFilter) return []
+    return leads
+      .filter((lead) => lead.accountName === performanceAccountFilter)
+      .sort((a, b) => {
+        // Sort by date (most recent first)
+        const dateA = parseDate(a['Date'] || a['Week'] || '')
+        const dateB = parseDate(b['Date'] || b['Week'] || '')
+        if (!dateA && !dateB) return 0
+        if (!dateA) return 1
+        if (!dateB) return -1
+        return dateB.getTime() - dateA.getTime()
+      })
+  }, [leads, performanceAccountFilter])
+
   // Filter leads based on filter criteria
   const filteredLeads = leads
     .filter((lead) => {
@@ -746,7 +762,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             All leads from customer data ({filteredLeads.length} of {leads.length} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
-            Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 6 hours
+            Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
           </Text>
         </Box>
         <HStack spacing={2} flexWrap="wrap">
@@ -1052,6 +1068,100 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                 )
               })}
             </SimpleGrid>
+
+            {/* Comprehensive Leads Table for Selected Account */}
+            {performanceAccountFilter && (
+              <Box mt={6}>
+                <Heading size="sm" mb={4}>
+                  Detailed Leads List - {performanceAccountFilter}
+                </Heading>
+                <Box
+                  overflowX="auto"
+                  overflowY="auto"
+                  maxH="600px"
+                  border="1px solid"
+                  borderColor="border.subtle"
+                  borderRadius="lg"
+                  bg="white"
+                >
+                  <Table variant="simple" size="sm">
+                    <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
+                      <Tr>
+                        <Th whiteSpace="nowrap">Week</Th>
+                        <Th whiteSpace="nowrap">Date</Th>
+                        <Th whiteSpace="nowrap">Company</Th>
+                        <Th whiteSpace="nowrap">Name</Th>
+                        <Th whiteSpace="nowrap">Job Title</Th>
+                        <Th whiteSpace="nowrap">Channel of Lead</Th>
+                        <Th whiteSpace="nowrap">OD Team Member</Th>
+                        <Th whiteSpace="nowrap">Contact Info</Th>
+                        <Th whiteSpace="nowrap">Outcome</Th>
+                        <Th whiteSpace="nowrap">Lead Status</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {accountPerformanceLeads.length > 0 ? (
+                        accountPerformanceLeads.map((lead, index) => (
+                          <Tr key={`lead-${index}`} _hover={{ bg: 'gray.50' }}>
+                            <Td whiteSpace="nowrap">{lead['Week'] || '-'}</Td>
+                            <Td whiteSpace="nowrap">{lead['Date'] || '-'}</Td>
+                            <Td>{lead['Company'] || '-'}</Td>
+                            <Td>{lead['Name'] || '-'}</Td>
+                            <Td>{lead['Job Title'] || '-'}</Td>
+                            <Td>
+                              {lead['Channel of Lead'] ? (
+                                <Badge colorScheme="blue" variant="subtle">
+                                  {lead['Channel of Lead']}
+                                </Badge>
+                              ) : (
+                                '-'
+                              )}
+                            </Td>
+                            <Td>
+                              {lead['OD Team Member'] ? (
+                                <Badge colorScheme="purple" variant="subtle">
+                                  {lead['OD Team Member']}
+                                </Badge>
+                              ) : (
+                                '-'
+                              )}
+                            </Td>
+                            <Td>{lead['Contact Info'] || '-'}</Td>
+                            <Td>{lead['Outcome'] || '-'}</Td>
+                            <Td>
+                              {lead['Lead Status'] ? (
+                                <Badge
+                                  colorScheme={
+                                    lead['Lead Status'].toLowerCase().includes('closed')
+                                      ? 'green'
+                                      : lead['Lead Status'].toLowerCase().includes('meeting')
+                                      ? 'orange'
+                                      : 'gray'
+                                  }
+                                >
+                                  {lead['Lead Status']}
+                                </Badge>
+                              ) : (
+                                '-'
+                              )}
+                            </Td>
+                          </Tr>
+                        ))
+                      ) : (
+                        <Tr>
+                          <Td colSpan={10} textAlign="center" py={8} color="gray.500">
+                            No leads found for this account
+                          </Td>
+                        </Tr>
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+                <Text fontSize="xs" color="gray.500" mt={2}>
+                  Total: {accountPerformanceLeads.length} leads for {performanceAccountFilter}
+                </Text>
+              </Box>
+            )}
           </Box>
         )}
       </Box>
