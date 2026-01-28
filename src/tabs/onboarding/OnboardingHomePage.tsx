@@ -215,6 +215,7 @@ export default function OnboardingHomePage() {
   const [headOfficeOptions, setHeadOfficeOptions] = useState<TargetGeographicalArea[]>([])
   const [headOfficeLoading, setHeadOfficeLoading] = useState(false)
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
+  const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
 
   const selectedCustomer = useMemo(
@@ -425,6 +426,42 @@ export default function OnboardingHomePage() {
       accreditations: clientProfile.accreditations.map((acc) =>
         acc.id === id ? { ...acc, fileName: undefined, fileUrl: undefined } : acc,
       ),
+    })
+  }
+
+  const handleCaseStudiesFileChange = (file: File | null) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (!dataUrl) return
+      setUploadingCaseStudies(true)
+      const { data, error } = await api.post<{ fileUrl: string; fileName: string }>(
+        '/api/uploads',
+        { fileName: file.name, dataUrl },
+      )
+      if (error || !data?.fileUrl) {
+        toast({
+          title: 'Upload failed',
+          description: error || 'Unable to upload file',
+          status: 'error',
+          duration: 4000,
+        })
+      } else {
+        updateProfile({
+          caseStudiesFileName: data.fileName,
+          caseStudiesFileUrl: data.fileUrl,
+        })
+      }
+      setUploadingCaseStudies(false)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleRemoveCaseStudiesFile = () => {
+    updateProfile({
+      caseStudiesFileName: undefined,
+      caseStudiesFileUrl: undefined,
     })
   }
 
@@ -1226,12 +1263,54 @@ export default function OnboardingHomePage() {
 
             <FormControl>
               <FormLabel>Case Studies or Testimonials</FormLabel>
-              <Textarea
-                value={clientProfile.caseStudiesOrTestimonials}
-                onChange={(e) => updateProfile({ caseStudiesOrTestimonials: e.target.value })}
-                minH="120px"
-                placeholder="Capture relevant case studies or testimonials..."
-              />
+              <Stack spacing={3}>
+                <Textarea
+                  value={clientProfile.caseStudiesOrTestimonials}
+                  onChange={(e) => updateProfile({ caseStudiesOrTestimonials: e.target.value })}
+                  minH="120px"
+                  placeholder="Capture relevant case studies or testimonials..."
+                />
+                <Stack spacing={2}>
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                    display="none"
+                    id="case-studies-upload"
+                    onChange={(e) => handleCaseStudiesFileChange(e.target.files?.[0] || null)}
+                  />
+                  <HStack spacing={3}>
+                    <Button
+                      as="label"
+                      htmlFor="case-studies-upload"
+                      leftIcon={<AttachmentIcon />}
+                      variant="outline"
+                      size="sm"
+                      isLoading={uploadingCaseStudies}
+                      isDisabled={uploadingCaseStudies}
+                    >
+                      {clientProfile.caseStudiesFileUrl ? 'Replace attachment' : 'Attach file'}
+                    </Button>
+                    {clientProfile.caseStudiesFileUrl ? (
+                      <HStack spacing={2}>
+                        <Link href={clientProfile.caseStudiesFileUrl} isExternal fontSize="sm" color="teal.600">
+                          {clientProfile.caseStudiesFileName || 'View file'}
+                        </Link>
+                        <IconButton
+                          aria-label="Remove file"
+                          icon={<CloseIcon />}
+                          size="xs"
+                          variant="ghost"
+                          onClick={handleRemoveCaseStudiesFile}
+                        />
+                      </HStack>
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">
+                        No file attached
+                      </Text>
+                    )}
+                  </HStack>
+                </Stack>
+              </Stack>
             </FormControl>
           </Stack>
         </Box>

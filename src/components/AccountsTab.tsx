@@ -162,6 +162,8 @@ export type ClientProfile = {
   socialMediaPresence: SocialMediaPresence
   qualifyingQuestions: string
   caseStudiesOrTestimonials: string
+  caseStudiesFileName?: string
+  caseStudiesFileUrl?: string
 }
 
 export type PrimaryContact = {
