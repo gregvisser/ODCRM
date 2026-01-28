@@ -5415,45 +5415,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                 </FormControl>
               </SimpleGrid>
 
-              <FormControl>
-                <FormLabel>Target Title</FormLabel>
-                <Input
-                  placeholder="Enter target title"
-                  value={newAccountForm.targetTitle || ''}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, targetTitle: e.target.value })}
-                />
-              </FormControl>
-
-              <FormControl>
-                <FormLabel>Target Location</FormLabel>
-                <Box position="relative">
-                  <TargetLocationMultiSelect
-                    locations={newAccountForm.targetLocation || []}
-                    onLocationsChange={(locations) => setNewAccountForm({ ...newAccountForm, targetLocation: locations })}
-                  />
-                </Box>
-              </FormControl>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Contract Start</FormLabel>
-                  <Input
-                    type="date"
-                    value={newAccountForm.contractStart || ''}
-                    onChange={(e) => setNewAccountForm({ ...newAccountForm, contractStart: e.target.value })}
-                  />
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Contract End</FormLabel>
-                  <Input
-                    type="date"
-                    value={newAccountForm.contractEnd || ''}
-                    onChange={(e) => setNewAccountForm({ ...newAccountForm, contractEnd: e.target.value })}
-                  />
-                </FormControl>
-              </SimpleGrid>
-
               <SimpleGrid columns={2} gap={4}>
                 <FormControl>
                   <FormLabel>Monthly Revenue (GBP)</FormLabel>
@@ -5527,15 +5488,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   </NumberInput>
                 </FormControl>
               </SimpleGrid>
-
-              <FormControl>
-                <FormLabel>Weekly Perform Report</FormLabel>
-                <Input
-                  placeholder="Enter weekly report URL"
-                  value={newAccountForm.weeklyReport || ''}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, weeklyReport: e.target.value })}
-                />
-              </FormControl>
 
               <FormControl>
                 <FormLabel>Client Leads Sheet URL</FormLabel>
