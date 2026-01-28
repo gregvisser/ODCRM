@@ -138,6 +138,12 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   })
   const toast = useToast()
   const lastErrorToastAtRef = useRef(0)
+  
+  // Use refs to prevent infinite refresh loops
+  const cachedLeadsRef = useRef(cachedLeads)
+  useEffect(() => {
+    cachedLeadsRef.current = cachedLeads
+  }, [cachedLeads])
 
   // Allow parent navigators (top-tab shell) to focus an account's performance view.
   useEffect(() => {
@@ -194,8 +200,9 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     // Check if we should refresh (unless forced)
     if (!forceRefresh && !shouldRefresh()) {
       console.log('Skipping refresh - less than 6 hours since last refresh')
-      if (cachedLeads.length > 0) {
-        setLeads(cachedLeads)
+      const currentCached = cachedLeadsRef.current
+      if (currentCached.length > 0) {
+        setLeads(currentCached)
       }
       setLoading(false)
       return
@@ -238,8 +245,9 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         isClosable: true,
       })
     } catch (err) {
-      if (cachedLeads.length > 0) {
-        setLeads(cachedLeads)
+      const currentCached = cachedLeadsRef.current
+      if (currentCached.length > 0) {
+        setLeads(currentCached)
       }
       setError('Failed to load leads data from the server.')
       console.error('Error loading leads:', err)
@@ -257,7 +265,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     } finally {
       setLoading(false)
     }
-  }, [cachedLeads, shouldRefresh, toast])
+  }, [toast])
 
   useEffect(() => {
     // Only load fresh data on mount if 6 hours have passed since last refresh
