@@ -242,10 +242,10 @@ function shouldRefresh(leads: Lead[]): boolean {
 
 export default function DashboardsHomePage() {
   const toast = useToast()
-  const [accountsData, setAccountsData] = useState<Account[]>(() => loadAccountsFromStorage())
-  const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
-  const [loading, setLoading] = useState(leads.length === 0)
-  const [lastRefresh, setLastRefresh] = useState<Date>(() => loadLastRefreshFromStorage() || new Date())
+  const [accountsData, setAccountsData] = useState<Account[]>([])
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
   
   // Use ref to avoid dependency issues that cause glitching
@@ -255,16 +255,21 @@ export default function DashboardsHomePage() {
   }, [leads])
 
   const refreshLeads = useCallback(async (forceRefresh: boolean) => {
-    if (!forceRefresh && !shouldRefresh(leadsRef.current)) return
-
+    // ALWAYS fetch from API (database is source of truth)
     setLoading(true)
     try {
+      console.log('🔄 Dashboard: Fetching fresh leads from API...')
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+      console.log(`✅ Dashboard: Loaded ${allLeads.length} leads from API`)
+      
       persistLeadsToStorage(allLeads, lastSyncAt)
       setLeads(allLeads)
       setLastRefresh(lastSyncAt ? new Date(lastSyncAt) : new Date())
       syncAccountLeadCountsFromLeads(allLeads)
+      
+      console.log('✅ Dashboard: Leads state updated, syncAccountLeadCounts called')
     } catch (err: any) {
+      console.error('❌ Dashboard: Failed to fetch leads:', err)
       toast({
         title: 'Leads refresh failed',
         description: err?.message || 'Unable to refresh leads from the server.',
