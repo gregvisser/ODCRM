@@ -4813,6 +4813,35 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     void syncFromCustomers()
   }, [toast, accountsData.length])
 
+  useEffect(() => {
+    const cachedLeads = loadLeadsFromStorage()
+    if (!shouldRefreshMarketingLeads(cachedLeads)) return
+
+    let cancelled = false
+    const refreshLeads = async () => {
+      try {
+        const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+        if (cancelled) return
+        const sheetAccounts = new Set(
+          accountsData
+            .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
+            .map((account) => account.name),
+        )
+        const filteredLeads = sheetAccounts.size
+          ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
+          : []
+        persistLeadsToStorage(filteredLeads, lastSyncAt)
+      } catch (err) {
+        console.warn('Failed to refresh leads:', err)
+      }
+    }
+
+    void refreshLeads()
+    return () => {
+      cancelled = true
+    }
+  }, [accountsData])
+
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
     if (!isStorageAvailable()) return true
@@ -4823,55 +4852,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
   const fieldConfig = getFieldConfig(contactsData)
 
-  // Load leads data function
-  const loadLeadsData = useCallback(async (forceRefresh: boolean = false) => {
-    const cachedLeads = loadLeadsFromStorage()
-    
-    // Check if we should refresh
-    if (!forceRefresh && !shouldRefreshMarketingLeads(cachedLeads)) {
-      console.log('Skipping leads refresh - less than 30 minutes since last refresh')
-      setLeads(cachedLeads)
-      setLeadsLoading(false)
-      return
-    }
-
-    setLeadsLoading(true)
-    setLeadsError(null)
-
-    try {
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-      const sheetAccounts = new Set(
-        accountsData
-          .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-          .map((account) => account.name),
-      )
-      const filteredLeads = sheetAccounts.size
-        ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
-        : []
-      const refreshTime = persistLeadsToStorage(filteredLeads, lastSyncAt)
-      setLeads(filteredLeads)
-      setLeadsLastRefresh(refreshTime)
-      syncAccountLeadCountsFromLeads(filteredLeads)
-    } catch (err) {
-      setLeadsError('Failed to load leads data from the server.')
-      console.error('Error loading leads:', err)
-    } finally {
-      setLeadsLoading(false)
-    }
-  }, [accountsData])
-
-  useEffect(() => {
-    const cachedLeads = loadLeadsFromStorage()
-    if (!shouldRefreshMarketingLeads(cachedLeads)) {
-      setLeads(cachedLeads)
-      setLeadsLoading(false)
-      return
-    }
-
-    void loadLeadsData(false)
-  }, [loadLeadsData])
-
-  // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
+// Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
     <>
       <HStack justify="space-between" mb={6} flexWrap="wrap" gap={3}>
@@ -6575,3 +6556,5 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 }
 
 export default AccountsTab
+
+

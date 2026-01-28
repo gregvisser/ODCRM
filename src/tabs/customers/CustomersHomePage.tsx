@@ -1,13 +1,15 @@
 import { useState } from 'react'
 import { ChevronLeftIcon, ChevronRightIcon, EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text } from '@chakra-ui/react'
+import { MdAssessment } from 'react-icons/md'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
+import LeadsReportingTab from '../../components/LeadsReportingTab'
 
-export type CustomersViewId = 'accounts' | 'contacts'
+export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
 
 function coerceCustomersViewId(view?: string): CustomersViewId {
-  if (view === 'accounts' || view === 'contacts') return view
+  if (view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
   return 'accounts'
 }
 
@@ -21,14 +23,14 @@ export default function CustomersHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceCustomersViewId(view)
-  const tabIndex = activeView === 'accounts' ? 0 : 1
+  const tabIndex = activeView === 'accounts' ? 0 : activeView === 'contacts' ? 1 : 2
   const [isPanelOpen, setIsPanelOpen] = useState(true)
 
   return (
     <Tabs
       index={tabIndex}
       onChange={(nextIndex) => {
-        const nextView: CustomersViewId = nextIndex === 1 ? 'contacts' : 'accounts'
+        const nextView: CustomersViewId = nextIndex === 0 ? 'accounts' : nextIndex === 1 ? 'contacts' : 'leads-reporting'
         onNavigate?.(nextView)
       }}
       isLazy
@@ -124,6 +126,11 @@ export default function CustomersHomePage({
           <TabPanel px={0}>
             <Box>
               <ContactsTab />
+            </Box>
+          </TabPanel>
+          <TabPanel px={0}>
+            <Box>
+              <LeadsReportingTab />
             </Box>
           </TabPanel>
         </TabPanels>
