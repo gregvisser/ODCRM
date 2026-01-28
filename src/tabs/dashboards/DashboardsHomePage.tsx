@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
@@ -247,9 +247,15 @@ export default function DashboardsHomePage() {
   const [loading, setLoading] = useState(leads.length === 0)
   const [lastRefresh, setLastRefresh] = useState<Date>(() => loadLastRefreshFromStorage() || new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
+  
+  // Use ref to avoid dependency issues that cause glitching
+  const leadsRef = useRef(leads)
+  useEffect(() => {
+    leadsRef.current = leads
+  }, [leads])
 
   const refreshLeads = useCallback(async (forceRefresh: boolean) => {
-    if (!forceRefresh && !shouldRefresh(leads)) return
+    if (!forceRefresh && !shouldRefresh(leadsRef.current)) return
 
     setLoading(true)
     try {
@@ -269,7 +275,7 @@ export default function DashboardsHomePage() {
     } finally {
       setLoading(false)
     }
-  }, [leads, toast])
+  }, [toast])
 
   useEffect(() => {
     const syncFromCustomers = async () => {
