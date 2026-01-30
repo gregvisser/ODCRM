@@ -31,6 +31,7 @@ import { OdcrmStorageKeys } from '../../platform/keys'
 import { getItem, getJson, setItem, setJson } from '../../platform/storage'
 import { api } from '../../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../../utils/leadsApi'
+import { DataTable, type DataTableColumn } from '../../components/DataTable'
 
 type Lead = {
   [key: string]: string
@@ -504,6 +505,98 @@ export default function DashboardsHomePage() {
         : 0,
     }))
     .sort((a, b) => b.monthlySpendGBP - a.monthlySpendGBP)
+  
+  // DataTable columns definition
+  const dashboardColumns: DataTableColumn<typeof accountsWithPercentages[0]>[] = [
+    {
+      id: 'name',
+      header: 'Client',
+      accessorKey: 'name',
+      sortable: true,
+      filterable: true,
+      width: 200,
+    },
+    {
+      id: 'monthlySpendGBP',
+      header: 'Spend (£)',
+      accessorKey: 'monthlySpendGBP',
+      cell: ({ value }) => value.toLocaleString(),
+      sortable: true,
+      width: 120,
+    },
+    {
+      id: 'weeklyActual',
+      header: 'Week Actual',
+      accessorKey: 'weeklyActual',
+      cell: ({ value }) => value || 0,
+      sortable: true,
+      width: 100,
+    },
+    {
+      id: 'weeklyTarget',
+      header: 'Week Target',
+      accessorKey: 'weeklyTarget',
+      cell: ({ value }) => value || 0,
+      sortable: true,
+      width: 100,
+    },
+    {
+      id: 'monthlyActual',
+      header: 'Month Actual',
+      accessorKey: 'monthlyActual',
+      cell: ({ value }) => value || 0,
+      sortable: true,
+      width: 120,
+    },
+    {
+      id: 'monthlyTarget',
+      header: 'Month Target',
+      accessorKey: 'monthlyTarget',
+      cell: ({ value }) => value || 0,
+      sortable: true,
+      width: 120,
+    },
+    {
+      id: 'monthlyPercentage',
+      header: '% Target',
+      accessorKey: 'monthlyPercentage',
+      cell: ({ value }) => (
+        <Text
+          color={
+            value >= 100 ? 'green.600' :
+            value >= 50 ? 'yellow.600' :
+            'red.600'
+          }
+          fontWeight="semibold"
+        >
+          {value.toFixed(1)}%
+        </Text>
+      ),
+      sortable: true,
+      width: 100,
+    },
+    {
+      id: 'defcon',
+      header: 'DEFCON',
+      accessorKey: 'defcon',
+      cell: ({ value }) => (
+        <Badge
+          colorScheme={
+            value <= 2 ? 'red' :
+            value === 3 ? 'yellow' :
+            value >= 4 && value <= 5 ? 'green' :
+            'blue'
+          }
+          fontSize="sm"
+          px={2}
+        >
+          {value}
+        </Badge>
+      ),
+      sortable: true,
+      width: 90,
+    },
+  ]
 
   const weekProgress = totalWeeklyTarget > 0 ? (weekTotal / totalWeeklyTarget) * 100 : 0
   const isWeekOnTrack = weekTotal >= totalWeeklyTarget * 0.8
@@ -570,77 +663,21 @@ export default function DashboardsHomePage() {
       </Box>
 
       {/* Main Client Table */}
-      <Box bg="white" borderRadius="md" shadow="sm" border="1px" borderColor="gray.200" overflow="hidden">
-        <Box overflowX="auto">
-          <Table size="sm" variant="simple" sx={{ 'td, th': { py: 1, px: 2 } }}>
-            <Thead bg="gray.100">
-              <Tr>
-                <Th fontSize="xs">Client</Th>
-                <Th isNumeric fontSize="xs">Spend (£)</Th>
-                <Th isNumeric fontSize="xs">Week Actual</Th>
-                <Th isNumeric fontSize="xs">Week Target</Th>
-                <Th isNumeric fontSize="xs">Month Actual</Th>
-                <Th isNumeric fontSize="xs">Month Target</Th>
-                <Th isNumeric fontSize="xs">% Target</Th>
-                <Th textAlign="center" fontSize="xs">DEFCON</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {accountsWithPercentages.map((account) => (
-                <Tr key={account.name} _hover={{ bg: 'gray.50' }}>
-                  <Td fontWeight="medium" fontSize="sm">{account.name}</Td>
-                  <Td isNumeric fontSize="sm">{account.monthlySpendGBP.toLocaleString()}</Td>
-                  <Td isNumeric fontSize="sm">{account.weeklyActual || 0}</Td>
-                  <Td isNumeric fontSize="sm">{account.weeklyTarget || 0}</Td>
-                  <Td isNumeric fontSize="sm">{account.monthlyActual || 0}</Td>
-                  <Td isNumeric fontSize="sm">{account.monthlyTarget || 0}</Td>
-                  <Td isNumeric>
-                    <Text 
-                      color={
-                        account.monthlyPercentage >= 100 ? 'green.600' : 
-                        account.monthlyPercentage >= 50 ? 'yellow.600' : 
-                        'red.600'
-                      }
-                      fontWeight="semibold"
-                      fontSize="sm"
-                    >
-                      {account.monthlyPercentage.toFixed(1)}%
-                    </Text>
-                  </Td>
-                  <Td textAlign="center">
-                    <Badge
-                      colorScheme={
-                        account.defcon <= 2 ? 'red' : 
-                        account.defcon === 3 ? 'yellow' : 
-                        account.defcon >= 4 && account.defcon <= 5 ? 'green' : 
-                        'blue'
-                      }
-                      fontSize="sm"
-                      px={2}
-                    >
-                      {account.defcon}
-                    </Badge>
-                  </Td>
-                </Tr>
-              ))}
-              <Tr bg="gray.100" fontWeight="bold" fontSize="sm">
-                <Td>Totals ({accountsData.length})</Td>
-                <Td isNumeric>{accountsData.reduce((sum, a) => sum + a.monthlySpendGBP, 0).toLocaleString()}</Td>
-                <Td isNumeric>{accountsData.reduce((sum, a) => sum + (a.weeklyActual || 0), 0)}</Td>
-                <Td isNumeric>{totalWeeklyTarget}</Td>
-                <Td isNumeric>{accountsData.reduce((sum, a) => sum + (a.monthlyActual || 0), 0)}</Td>
-                <Td isNumeric>{totalMonthlyTarget}</Td>
-                <Td isNumeric>
-                  {totalMonthlyTarget > 0 
-                    ? ((monthTotal / totalMonthlyTarget) * 100).toFixed(1)
-                    : '0.0'}%
-                </Td>
-                <Td></Td>
-              </Tr>
-            </Tbody>
-          </Table>
-        </Box>
-      </Box>
+      <DataTable
+        data={accountsWithPercentages}
+        columns={dashboardColumns}
+        tableId="dashboard-clients"
+        enableSorting
+        enableFiltering
+        enableColumnReorder
+        enableColumnResize
+        enableColumnVisibility
+        enablePagination={false}
+        enableExport
+        compact
+        loading={loading}
+        emptyMessage="No client data available"
+      />
 
       {/* Channel Breakdown & Progress */}
       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
