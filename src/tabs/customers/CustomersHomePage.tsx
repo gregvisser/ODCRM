@@ -1,15 +1,16 @@
 import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
-import { MdAssessment } from 'react-icons/md'
+import { MdAssessment, MdDashboard } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
+import CustomersOverviewTab from './CustomersOverviewTab'
 
-export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
+export type CustomersViewId = 'overview' | 'accounts' | 'contacts' | 'leads-reporting'
 
 function coerceCustomersViewId(view?: string): CustomersViewId {
-  if (view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
-  return 'accounts'
+  if (view === 'overview' || view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
+  return 'overview'
 }
 
 export default function CustomersHomePage({
@@ -24,6 +25,12 @@ export default function CustomersHomePage({
   const activeView = coerceCustomersViewId(view)
 
   const navItems: SubNavItem[] = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: MdDashboard,
+      content: <CustomersOverviewTab />,
+    },
     {
       id: 'accounts',
       label: 'Accounts',
