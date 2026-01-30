@@ -1,17 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import {
   Avatar,
   Badge,
   Box,
   Heading,
   Text,
-  Table,
-  Tbody,
-  Td,
-  Th,
-  Thead,
-  Tr,
-  Link,
   Button,
   HStack,
   Stack,
@@ -53,6 +46,7 @@ import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getJson, setItem, setJson, keys, removeItem } from '../platform/storage'
 import { useExportImport } from '../utils/exportImport'
+import { DataTable, type DataTableColumn } from './DataTable'
 
 export type Contact = {
   id: string
@@ -1095,6 +1089,250 @@ function ContactsTab() {
     toast,
   })
 
+  // DataTable column definitions with custom cell renderers
+  const contactsColumns = useMemo((): DataTableColumn<Contact>[] => [
+    {
+      id: 'select',
+      header: () => (
+        <Checkbox
+          isChecked={selectedContactIds.size > 0 && selectedContactIds.size === contactsData.length}
+          isIndeterminate={selectedContactIds.size > 0 && selectedContactIds.size < contactsData.length}
+          onChange={(e) => handleSelectAll(e.target.checked)}
+          aria-label="Select all contacts"
+        />
+      ),
+      cell: ({ row }) => (
+        <Checkbox
+          isChecked={selectedContactIds.has(row.original.id)}
+          onChange={(e) => handleSelectContact(row.original.id, e.target.checked)}
+          aria-label={`Select ${row.original.name}`}
+        />
+      ),
+      enableSorting: false,
+      enableColumnFilter: false,
+      size: 50,
+    },
+    {
+      id: 'name',
+      header: 'Contact',
+      accessorKey: 'name',
+      cell: ({ row }) => (
+        <Box display="flex" alignItems="center" gap="3">
+          <Avatar name={row.original.name} size="sm" />
+          <Heading size="sm">{row.original.name}</Heading>
+        </Box>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'title',
+      header: 'Title',
+      accessorKey: 'title',
+      cell: ({ row }) => (
+        <Editable
+          value={row.original.title}
+          onChange={(value) => {
+            setContactsData(
+              contactsData.map((c) =>
+                c.id === row.original.id ? { ...c, title: value } : c
+              )
+            )
+          }}
+          placeholder="Click to add title"
+        >
+          <EditablePreview
+            cursor="pointer"
+            _hover={{ bg: 'gray.50' }}
+            px={2}
+            py={1}
+            borderRadius="md"
+            minW="100px"
+          />
+          <EditableInput px={2} py={1} />
+        </Editable>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'email',
+      header: 'Email address',
+      accessorKey: 'email',
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'phone',
+      header: 'Contact number',
+      accessorKey: 'phone',
+      cell: ({ row }) => (
+        <Editable
+          value={row.original.phone}
+          onChange={(value) => {
+            setContactsData(
+              contactsData.map((c) =>
+                c.id === row.original.id ? { ...c, phone: value } : c
+              )
+            )
+          }}
+          placeholder="Click to add phone"
+        >
+          <EditablePreview
+            cursor="pointer"
+            _hover={{ bg: 'gray.50' }}
+            px={2}
+            py={1}
+            borderRadius="md"
+            minW="120px"
+          />
+          <EditableInput px={2} py={1} />
+        </Editable>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'accounts',
+      header: 'Account',
+      accessorFn: (row) => (row.accounts || []).join(', '),
+      cell: ({ row }) => (
+        <Menu>
+          <MenuButton
+            as={Button}
+            rightIcon={<ChevronDownIcon />}
+            size="sm"
+            variant="outline"
+            w="full"
+            textAlign="left"
+          >
+            {row.original.accounts && row.original.accounts.length > 0
+              ? row.original.accounts.length === 1
+                ? row.original.accounts[0]
+                : `${row.original.accounts.length} accounts`
+              : 'Select account'}
+          </MenuButton>
+          <MenuList maxH="300px" overflowY="auto">
+            {availableAccounts.map((account) => {
+              const isSelected = row.original.accounts?.includes(account)
+              return (
+                <MenuItem
+                  key={account}
+                  onClick={() => {
+                    const currentAccounts = row.original.accounts || []
+                    let newAccounts: string[]
+                    
+                    if (isSelected) {
+                      newAccounts = currentAccounts.filter((a) => a !== account)
+                    } else {
+                      newAccounts = [...currentAccounts, account]
+                    }
+                    
+                    setContactsData(
+                      contactsData.map((c) =>
+                        c.id === row.original.id ? { ...c, accounts: newAccounts } : c
+                      )
+                    )
+                  }}
+                  bg={isSelected ? 'blue.50' : undefined}
+                  fontWeight={isSelected ? 'semibold' : 'normal'}
+                >
+                  {isSelected ? '✓ ' : ''}{account}
+                </MenuItem>
+              )
+            })}
+            {availableAccounts.length === 0 && (
+              <MenuItem isDisabled>
+                <Text fontSize="sm" color="gray.500">
+                  No accounts available
+                </Text>
+              </MenuItem>
+            )}
+            {row.original.accounts && row.original.accounts.length > 0 && (
+              <>
+                <Box borderTop="1px solid" borderColor="gray.200" my={1} />
+                <MenuItem
+                  onClick={() => {
+                    setContactsData(
+                      contactsData.map((c) =>
+                        c.id === row.original.id ? { ...c, accounts: [] } : c
+                      )
+                    )
+                  }}
+                  color="red.500"
+                  fontWeight="semibold"
+                >
+                  Clear all accounts
+                </MenuItem>
+              </>
+            )}
+          </MenuList>
+        </Menu>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'tier',
+      header: 'Tier',
+      accessorKey: 'tier',
+      cell: ({ value }) => (
+        <Badge colorScheme={value === 'Decision maker' ? 'purple' : 'blue'}>
+          {value as string}
+        </Badge>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      accessorKey: 'status',
+      cell: ({ value }) => (
+        <Badge
+          colorScheme={
+            value === 'Engaged' || value === 'Active'
+              ? 'green'
+              : value === 'Nurture'
+                ? 'yellow'
+                : 'gray'
+          }
+        >
+          {value as string}
+        </Badge>
+      ),
+      sortable: true,
+      filterable: true,
+    },
+    {
+      id: 'actions',
+      header: 'Actions',
+      cell: ({ row }) => (
+        <HStack spacing={2}>
+          <IconButton
+            aria-label="Edit contact"
+            icon={<EditIcon />}
+            size="sm"
+            colorScheme="gray"
+            variant="ghost"
+            onClick={() => handleEditClick(row.original)}
+          />
+          <IconButton
+            aria-label="Delete contact"
+            icon={<DeleteIcon />}
+            size="sm"
+            colorScheme="gray"
+            variant="ghost"
+            onClick={() => handleDeleteClick(row.original)}
+          />
+        </HStack>
+      ),
+      enableSorting: false,
+      enableColumnFilter: false,
+      size: 120,
+    },
+  ], [selectedContactIds, contactsData, availableAccounts])
+
   return (
     <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.100" boxShadow="sm">
       <HStack justify="space-between" p={6} pb={4} flexWrap="wrap" gap={4}>
@@ -1110,13 +1348,6 @@ function ContactsTab() {
               Delete Selected ({selectedContactIds.size})
             </Button>
           )}
-          <Button
-            variant="outline"
-            onClick={() => exportContactsData('csv')}
-            isDisabled={contactsData.length === 0}
-          >
-            Export CSV
-          </Button>
           <Button leftIcon={<AttachmentIcon />} colorScheme="blue" variant="outline" onClick={onImportOpen}>
             Import Spreadsheet
           </Button>
@@ -1125,207 +1356,21 @@ function ContactsTab() {
           </Button>
         </HStack>
       </HStack>
-      <Table variant="simple">
-        <Thead bg="gray.50">
-          <Tr>
-            <Th>
-              <Checkbox
-                isChecked={selectedContactIds.size > 0 && selectedContactIds.size === contactsData.length}
-                isIndeterminate={selectedContactIds.size > 0 && selectedContactIds.size < contactsData.length}
-                onChange={(e) => handleSelectAll(e.target.checked)}
-                aria-label="Select all contacts"
-              />
-            </Th>
-            <Th>Contact</Th>
-            <Th>Title</Th>
-            <Th>Email address</Th>
-            <Th>Contact number</Th>
-            <Th>Account</Th>
-            <Th>Tier</Th>
-            <Th>Status</Th>
-            <Th>Actions</Th>
-          </Tr>
-        </Thead>
-        <Tbody>
-          {contactsData.map((contact) => (
-            <Tr key={contact.id}>
-              <Td>
-                <Checkbox
-                  isChecked={selectedContactIds.has(contact.id)}
-                  onChange={(e) => handleSelectContact(contact.id, e.target.checked)}
-                  aria-label={`Select ${contact.name}`}
-                />
-              </Td>
-              <Td>
-                <Box display="flex" alignItems="center" gap="3">
-                  <Avatar name={contact.name} size="sm" />
-                  <Heading size="sm">{contact.name}</Heading>
-                </Box>
-              </Td>
-              <Td>
-                <Editable
-                  value={contact.title}
-                  onChange={(value) => {
-                    setContactsData(
-                      contactsData.map((c) =>
-                        c.id === contact.id ? { ...c, title: value } : c
-                      )
-                    )
-                  }}
-                  placeholder="Click to add title"
-                >
-                  <EditablePreview
-                    cursor="pointer"
-                    _hover={{ bg: 'gray.50' }}
-                    px={2}
-                    py={1}
-                    borderRadius="md"
-                    minW="100px"
-                  />
-                  <EditableInput px={2} py={1} />
-                </Editable>
-              </Td>
-              <Td>{contact.email}</Td>
-              <Td>
-                <Editable
-                  value={contact.phone}
-                  onChange={(value) => {
-                    setContactsData(
-                      contactsData.map((c) =>
-                        c.id === contact.id ? { ...c, phone: value } : c
-                      )
-                    )
-                  }}
-                  placeholder="Click to add phone"
-                >
-                  <EditablePreview
-                    cursor="pointer"
-                    _hover={{ bg: 'gray.50' }}
-                    px={2}
-                    py={1}
-                    borderRadius="md"
-                    minW="120px"
-                  />
-                  <EditableInput px={2} py={1} />
-                </Editable>
-              </Td>
-              <Td>
-                <Menu>
-                  <MenuButton
-                    as={Button}
-                    rightIcon={<ChevronDownIcon />}
-                    size="sm"
-                    variant="outline"
-                    w="full"
-                    textAlign="left"
-                  >
-                    {contact.accounts && contact.accounts.length > 0
-                      ? contact.accounts.length === 1
-                        ? contact.accounts[0]
-                        : `${contact.accounts.length} accounts`
-                      : 'Select account'}
-                  </MenuButton>
-                  <MenuList maxH="300px" overflowY="auto">
-                    {availableAccounts.map((account) => {
-                      const isSelected = contact.accounts?.includes(account)
-                      return (
-                        <MenuItem
-                          key={account}
-                          onClick={() => {
-                            const currentAccounts = contact.accounts || []
-                            let newAccounts: string[]
-                            
-                            if (isSelected) {
-                              // Remove account
-                              newAccounts = currentAccounts.filter((a) => a !== account)
-                            } else {
-                              // Add account
-                              newAccounts = [...currentAccounts, account]
-                            }
-                            
-                            setContactsData(
-                              contactsData.map((c) =>
-                                c.id === contact.id ? { ...c, accounts: newAccounts } : c
-                              )
-                            )
-                          }}
-                          bg={isSelected ? 'blue.50' : undefined}
-                          fontWeight={isSelected ? 'semibold' : 'normal'}
-                        >
-                          {isSelected ? '✓ ' : ''}{account}
-                        </MenuItem>
-                      )
-                    })}
-                    {availableAccounts.length === 0 && (
-                      <MenuItem isDisabled>
-                        <Text fontSize="sm" color="gray.500">
-                          No accounts available
-                        </Text>
-                      </MenuItem>
-                    )}
-                    {contact.accounts && contact.accounts.length > 0 && (
-                      <>
-                        <Box borderTop="1px solid" borderColor="gray.200" my={1} />
-                        <MenuItem
-                          onClick={() => {
-                            setContactsData(
-                              contactsData.map((c) =>
-                                c.id === contact.id ? { ...c, accounts: [] } : c
-                              )
-                            )
-                          }}
-                          color="red.500"
-                          fontWeight="semibold"
-                        >
-                          Clear all accounts
-                        </MenuItem>
-                      </>
-                    )}
-                  </MenuList>
-                </Menu>
-              </Td>
-              <Td>
-                <Badge colorScheme={contact.tier === 'Decision maker' ? 'purple' : 'blue'}>
-                  {contact.tier}
-                </Badge>
-              </Td>
-              <Td>
-                <Badge
-                  colorScheme={
-                    contact.status === 'Engaged' || contact.status === 'Active'
-                      ? 'green'
-                      : contact.status === 'Nurture'
-                        ? 'yellow'
-                        : 'gray'
-                  }
-                >
-                  {contact.status}
-                </Badge>
-              </Td>
-              <Td>
-                <HStack spacing={2}>
-                  <IconButton
-                    aria-label="Edit contact"
-                    icon={<EditIcon />}
-                    size="sm"
-                    colorScheme="gray"
-                    variant="ghost"
-                    onClick={() => handleEditClick(contact)}
-                  />
-                  <IconButton
-                    aria-label="Delete contact"
-                    icon={<DeleteIcon />}
-                    size="sm"
-                    colorScheme="gray"
-                    variant="ghost"
-                    onClick={() => handleDeleteClick(contact)}
-                  />
-                </HStack>
-              </Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
+      
+      <Box px={6} pb={6}>
+        <DataTable
+          columns={contactsColumns}
+          data={contactsData}
+          enableSorting
+          enableFilters
+          enableColumnVisibility
+          enableColumnReordering
+          enableColumnResizing
+          enableExport
+          exportFilename="contacts"
+          tableId="contacts-table"
+        />
+      </Box>
 
       {/* Spreadsheet Import Modal */}
       <Modal isOpen={isImportOpen} onClose={onImportClose} size="xl">
