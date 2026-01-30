@@ -109,6 +109,10 @@ const theme = extendTheme({
         default: 'brand.100',
         _dark: 'brand.700',
       },
+      'bg.transparent': {
+        default: 'transparent',
+        _dark: 'transparent',
+      },
       'border.subtle': {
         default: 'brand.200',
         _dark: 'brand.700',
@@ -116,6 +120,10 @@ const theme = extendTheme({
       'text.muted': {
         default: 'brand.500',
         _dark: 'brand.300',
+      },
+      'text.onAccent': {
+        default: 'white',
+        _dark: 'white',
       },
       'text.primary': {
         default: 'brand.900',

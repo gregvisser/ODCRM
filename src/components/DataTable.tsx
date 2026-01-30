@@ -264,7 +264,13 @@ export function DataTable<T extends Record<string, any>>({
       accessorKey: col.accessorKey as string,
       accessorFn: col.accessorFn,
       header: col.header,
-      cell: col.cell ? (info) => col.cell!({ row: info.row.original, value: info.getValue() }) : undefined,
+      cell: col.cell
+        ? (info) => col.cell!({ row: info.row.original, value: info.getValue() })
+        : (info) => {
+            const value = info.getValue()
+            if (value === null || value === undefined) return ''
+            return value as React.ReactNode
+          },
       enableSorting: enableSorting && col.sortable !== false,
       enableColumnFilter: enableFiltering && col.filterable !== false,
       size: col.width || columnSizing[col.id] || 150,

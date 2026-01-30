@@ -15,10 +15,21 @@ export type LeadsApiResponse = {
 }
 
 export async function fetchLeadsFromApi(): Promise<LeadsApiResponse> {
-  const { data, error } = await api.get<LeadsApiResponse>('/api/leads')
-  if (error) {
-    throw new Error(error)
+  // For leads, we want to fetch from all customers with reporting URLs
+  // So we make a direct fetch without the customer ID header
+  const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+  const response = await fetch(`${API_BASE_URL}/api/leads`, {
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: response.statusText }))
+    throw new Error(errorData.error || `HTTP ${response.status}`)
   }
+
+  const data = await response.json()
   return data || { leads: [], lastSyncAt: null }
 }
 

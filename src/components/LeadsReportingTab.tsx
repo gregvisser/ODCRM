@@ -63,15 +63,12 @@ function loadLastRefreshFromStorage(): Date | null {
 }
 
 function LeadsReportingTab() {
-  // Load initial leads from localStorage
-  const cachedLeads = loadLeadsFromStorage()
-  const [leads, setLeads] = useState<Lead[]>(cachedLeads)
-  const [loading, setLoading] = useState(false) // Don't auto-load on mount
+  // Start with empty state - server is source of truth
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true) // Auto-load on mount from server
   const [error, setError] = useState<string | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date>(() => {
-    const stored = loadLastRefreshFromStorage()
-    return stored || new Date()
-  })
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [hasServerData, setHasServerData] = useState(false)
   const [filters, setFilters] = useState({
     account: '',
     channelOfLead: '',
@@ -100,9 +97,9 @@ function LeadsReportingTab() {
   }, [])
 
   const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
-    // Check if we should refresh (unless forced)
-    if (!forceRefresh && !shouldRefresh()) {
-      console.log('Skipping refresh - less than 30 minutes since last refresh')
+    // Skip auto-refresh if we have recent server data and it's not forced
+    if (!forceRefresh && hasServerData && !shouldRefresh()) {
+      console.log('Skipping refresh - have recent server data and not forced')
       return
     }
 
@@ -110,23 +107,46 @@ function LeadsReportingTab() {
     setError(null)
 
     try {
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-      setLeads(allLeads)
-      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
+      console.log('Fetching leads from server (source of truth)...')
+      const { leads: serverLeads, lastSyncAt } = await fetchLeadsFromApi()
+
+      // Server succeeded - this is our source of truth
+      setLeads(serverLeads)
+      setHasServerData(true)
+      const refreshTime = saveLeadsToStorage(serverLeads, lastSyncAt)
       setLastRefresh(refreshTime)
-      syncAccountLeadCountsFromLeads(allLeads)
-    } catch (err) {
-      setError('Failed to load leads data from the server.')
-      console.error('Error loading leads:', err)
+      syncAccountLeadCountsFromLeads(serverLeads)
+
+      console.log(`✅ Loaded ${serverLeads.length} leads from server`)
+    } catch (serverError) {
+      console.warn('Server fetch failed, trying localStorage fallback:', serverError)
+
+      // Server failed - try localStorage as fallback only
+      try {
+        const cachedLeads = loadLeadsFromStorage()
+        if (cachedLeads.length > 0) {
+          setLeads(cachedLeads)
+          setHasServerData(false) // Mark that this is stale cached data
+          const cachedTime = loadLastRefreshFromStorage()
+          setLastRefresh(cachedTime)
+          setError('Using cached data - server unavailable. Data may be stale.')
+          console.log(`⚠️  Using ${cachedLeads.length} cached leads as fallback`)
+        } else {
+          setError('No data available - server and cache both unavailable.')
+        }
+      } catch (cacheError) {
+        console.error('Both server and cache failed:', cacheError)
+        setError('Unable to load leads data from server or cache.')
+      }
     } finally {
       setLoading(false)
     }
-  }, [shouldRefresh])
+  }, [shouldRefresh, hasServerData])
 
   useEffect(() => {
-    // Don't auto-load on mount - only use cached data
-    // User can manually refresh if needed
-    
+    // Auto-load from server on mount
+    loadLeads(false)
+
     // Auto-refresh every 30 minutes
     const refreshInterval = setInterval(() => {
       loadLeads(false)
@@ -349,10 +369,11 @@ function LeadsReportingTab() {
             Leads Reporting
           </Heading>
           <Text color="gray.600">
-            Live data from Google Sheets ({filteredLeads.length} of {leads.length} leads)
+            {hasServerData ? 'Live data from server' : 'Cached data (server unavailable)'} ({filteredLeads.length} of {leads.length} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
-            Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
+            Last refreshed: {lastRefresh ? formatLastRefresh(lastRefresh) : 'Never'} • Auto-refreshes every 30 minutes
+            {!hasServerData && ' • Using local cache'}
           </Text>
         </Box>
         <IconButton

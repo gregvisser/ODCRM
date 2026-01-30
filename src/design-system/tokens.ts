@@ -178,6 +178,7 @@ export const semanticColor = {
   bgCanvas: 'bg.canvas',
   bgSurface: 'bg.surface',
   bgSubtle: 'bg.subtle',
+  bgTransparent: 'bg.transparent',
   
   // Borders
   borderSubtle: 'border.subtle',
@@ -186,6 +187,7 @@ export const semanticColor = {
   textPrimary: 'text.primary',
   textSecondary: 'text.secondary',
   textMuted: 'text.muted',
+  textOnAccent: 'text.onAccent',
   
   // Sidebar
   sidebarBg: 'sidebar.bg',
