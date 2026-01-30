@@ -200,28 +200,19 @@ function LeadsTab() {
     )
   }
 
-  // Define the specific column order
+  // Define the specific column order - minimized to essential columns
   const columnOrder = [
     'Account',
     'Week',
-    'Lead',
     'Date',
-    'Channel of Lead',
     'Company',
     'Name',
     'Job Title',
     'Industry',
     'Contact Info',
-    'OD Notes',
-    'Link to Website',
+    'OD Team Member',
     'OD Call Recording Available',
-    'First Meeting Booked',
-    'Outcome',
-    'Client Notes',
-    'Qualification',
-    'Lead Status',
-    'Pipeline Stage',
-    'Closed Date',
+    'Channel of Lead',
   ]
 
   // Get all unique column headers from all leads (excluding accountName)
@@ -368,14 +359,24 @@ function LeadsTab() {
       </HStack>
 
       <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-        <Heading size="sm" mb={4}>
-          Filters
-        </Heading>
         <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
           <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
-              Account
-            </Text>
+            <HStack mb={2} justify="space-between">
+              <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+                Account
+              </Text>
+              {(filters.account || filters.channelOfLead) && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  colorScheme="gray"
+                  leftIcon={<RepeatIcon />}
+                  onClick={() => setFilters({ account: '', channelOfLead: '' })}
+                >
+                  Reset
+                </Button>
+              )}
+            </HStack>
             <Select
               placeholder="All Accounts"
               value={filters.account}
@@ -408,34 +409,6 @@ function LeadsTab() {
             </Select>
           </Box>
         </SimpleGrid>
-
-        {(filters.account || filters.channelOfLead) && (
-          <HStack mt={4} flexWrap="wrap" spacing={2}>
-            <Text fontSize="sm" color="gray.600" fontWeight="medium">
-              Active filters:
-            </Text>
-            {filters.account && (
-              <Tag colorScheme="gray" size="md">
-                <TagLabel>Account: {filters.account}</TagLabel>
-                <TagCloseButton onClick={() => setFilters({ ...filters, account: '' })} />
-              </Tag>
-            )}
-            {filters.channelOfLead && (
-              <Tag colorScheme="gray" size="md">
-                <TagLabel>Channel: {filters.channelOfLead}</TagLabel>
-                <TagCloseButton onClick={() => setFilters({ ...filters, channelOfLead: '' })} />
-              </Tag>
-            )}
-            <Button
-              size="xs"
-              variant="ghost"
-              colorScheme="gray"
-              onClick={() => setFilters({ account: '', channelOfLead: '' })}
-            >
-              Clear All
-            </Button>
-          </HStack>
-        )}
       </Box>
 
       {filteredLeads.length === 0 ? (
