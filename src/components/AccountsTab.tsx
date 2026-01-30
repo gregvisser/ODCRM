@@ -5637,12 +5637,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         type="number"
                         placeholder="0"
                         renderDisplay={(value) => (
-                          <HStack spacing={2} align="center">
-                            <Text color="gray.600" fontSize="lg" fontWeight="bold">£</Text>
-                            <Text fontSize="lg" fontWeight="semibold" color="gray.800">
-                              {currencyFormatter.format(parseFloat(String(value)) || 0)}
-                            </Text>
-                          </HStack>
+                          <Text fontSize="lg" fontWeight="semibold" color="gray.800">
+                            {currencyFormatter.format(parseFloat(String(value)) || 0)}
+                          </Text>
                         )}
                       />
                       <FieldRow label="DEFCON Level">
