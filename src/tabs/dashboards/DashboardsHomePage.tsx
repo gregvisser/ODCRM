@@ -243,8 +243,9 @@ function shouldRefresh(leads: Lead[]): boolean {
 
 export default function DashboardsHomePage() {
   const toast = useToast()
-  const [accountsData, setAccountsData] = useState<Account[]>([])
-  const [leads, setLeads] = useState<Lead[]>([])
+  // Load initial data from localStorage (will be replaced by fresh API data)
+  const [accountsData, setAccountsData] = useState<Account[]>(() => loadAccountsFromStorage())
+  const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
