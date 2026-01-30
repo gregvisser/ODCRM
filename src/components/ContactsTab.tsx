@@ -1101,13 +1101,13 @@ function ContactsTab() {
           aria-label="Select all contacts"
         />
       ),
-      cell: ({ row }) => (
+      cell: ({ row }) => row.original ? (
         <Checkbox
           isChecked={selectedContactIds.has(row.original.id)}
           onChange={(e) => handleSelectContact(row.original.id, e.target.checked)}
           aria-label={`Select ${row.original.name}`}
         />
-      ),
+      ) : null,
       enableSorting: false,
       enableColumnFilter: false,
       size: 50,
@@ -1118,8 +1118,8 @@ function ContactsTab() {
       accessorKey: 'name',
       cell: ({ row }) => (
         <Box display="flex" alignItems="center" gap="3">
-          <Avatar name={row.original.name} size="sm" />
-          <Heading size="sm">{row.original.name}</Heading>
+          <Avatar name={row.original?.name || 'Unknown'} size="sm" />
+          <Heading size="sm">{row.original?.name || 'Unknown'}</Heading>
         </Box>
       ),
       sortable: true,
@@ -1131,11 +1131,11 @@ function ContactsTab() {
       accessorKey: 'title',
       cell: ({ row }) => (
         <Editable
-          value={row.original.title}
+          value={row.original?.title || ''}
           onChange={(value) => {
             setContactsData(
               contactsData.map((c) =>
-                c.id === row.original.id ? { ...c, title: value } : c
+                c?.id === row.original?.id ? { ...c, title: value } : c
               )
             )
           }}
@@ -1168,11 +1168,11 @@ function ContactsTab() {
       accessorKey: 'phone',
       cell: ({ row }) => (
         <Editable
-          value={row.original.phone}
+          value={row.original?.phone || ''}
           onChange={(value) => {
             setContactsData(
               contactsData.map((c) =>
-                c.id === row.original.id ? { ...c, phone: value } : c
+                c?.id === row.original?.id ? { ...c, phone: value } : c
               )
             )
           }}
@@ -1195,7 +1195,7 @@ function ContactsTab() {
     {
       id: 'accounts',
       header: 'Account',
-      accessorFn: (row) => (row.accounts || []).join(', '),
+      accessorFn: (row) => (row?.accounts || []).join(', '),
       cell: ({ row }) => (
         <Menu>
           <MenuButton
@@ -1206,7 +1206,7 @@ function ContactsTab() {
             w="full"
             textAlign="left"
           >
-            {row.original.accounts && row.original.accounts.length > 0
+            {row.original?.accounts && row.original.accounts.length > 0
               ? row.original.accounts.length === 1
                 ? row.original.accounts[0]
                 : `${row.original.accounts.length} accounts`
@@ -1214,11 +1214,12 @@ function ContactsTab() {
           </MenuButton>
           <MenuList maxH="300px" overflowY="auto">
             {availableAccounts.map((account) => {
-              const isSelected = row.original.accounts?.includes(account)
+              const isSelected = row.original?.accounts?.includes(account)
               return (
                 <MenuItem
                   key={account}
                   onClick={() => {
+                    if (!row.original) return
                     const currentAccounts = row.original.accounts || []
                     let newAccounts: string[]
                     
@@ -1230,7 +1231,7 @@ function ContactsTab() {
                     
                     setContactsData(
                       contactsData.map((c) =>
-                        c.id === row.original.id ? { ...c, accounts: newAccounts } : c
+                        c?.id === row.original?.id ? { ...c, accounts: newAccounts } : c
                       )
                     )
                   }}
@@ -1248,14 +1249,15 @@ function ContactsTab() {
                 </Text>
               </MenuItem>
             )}
-            {row.original.accounts && row.original.accounts.length > 0 && (
+            {row.original?.accounts && row.original.accounts.length > 0 && (
               <>
                 <Box borderTop="1px solid" borderColor="gray.200" my={1} />
                 <MenuItem
                   onClick={() => {
+                    if (!row.original) return
                     setContactsData(
                       contactsData.map((c) =>
-                        c.id === row.original.id ? { ...c, accounts: [] } : c
+                        c?.id === row.original?.id ? { ...c, accounts: [] } : c
                       )
                     )
                   }}
@@ -1307,7 +1309,7 @@ function ContactsTab() {
     {
       id: 'actions',
       header: 'Actions',
-      cell: ({ row }) => (
+      cell: ({ row }) => row.original ? (
         <HStack spacing={2}>
           <IconButton
             aria-label="Edit contact"
@@ -1326,7 +1328,7 @@ function ContactsTab() {
             onClick={() => handleDeleteClick(row.original)}
           />
         </HStack>
-      ),
+      ) : null,
       enableSorting: false,
       enableColumnFilter: false,
       size: 120,
@@ -1360,7 +1362,7 @@ function ContactsTab() {
       <Box px={6} pb={6}>
         <DataTable
           columns={contactsColumns}
-          data={contactsData}
+          data={contactsData.filter(contact => contact && contact.id && contact.name)}
           enableSorting
           enableFilters
           enableColumnVisibility
