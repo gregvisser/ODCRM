@@ -26,8 +26,14 @@ import {
   TagLabel,
   TagCloseButton,
   Button,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Checkbox,
+  VStack,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon, ViewIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
@@ -77,6 +83,11 @@ function LeadsTab() {
     account: '',
     channelOfLead: '',
   })
+  
+  // Default visible columns as requested by user
+  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead']
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(defaultVisibleColumns))
+  
   const toast = useToast()
 
   // Helper to format last refresh time
@@ -242,6 +253,20 @@ function LeadsTab() {
   })
 
   const columns = [...orderedColumns, ...remainingColumns.sort()]
+  
+  // Filter columns based on visibility
+  const displayedColumns = columns.filter(col => visibleColumns.has(col))
+  
+  // Toggle column visibility
+  const toggleColumnVisibility = (column: string) => {
+    const newVisible = new Set(visibleColumns)
+    if (newVisible.has(column)) {
+      newVisible.delete(column)
+    } else {
+      newVisible.add(column)
+    }
+    setVisibleColumns(newVisible)
+  }
 
   // Filter leads based on filter criteria
   const filteredLeads = leads
@@ -359,7 +384,7 @@ function LeadsTab() {
       </HStack>
 
       <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
-        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+        <SimpleGrid columns={{ base: 1, md: 3 }} gap={4}>
           <Box>
             <HStack mb={2} justify="space-between">
               <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
@@ -408,6 +433,30 @@ function LeadsTab() {
               ))}
             </Select>
           </Box>
+
+          <Box>
+            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
+              Column Visibility
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" leftIcon={<ViewIcon />} width="100%">
+                Show/Hide Columns ({visibleColumns.size})
+              </MenuButton>
+              <MenuList maxH="400px" overflowY="auto">
+                {columns.map((col) => (
+                  <MenuItem key={col} onClick={() => toggleColumnVisibility(col)}>
+                    <Checkbox 
+                      isChecked={visibleColumns.has(col)} 
+                      onChange={() => toggleColumnVisibility(col)}
+                      mr={2}
+                    >
+                      {col}
+                    </Checkbox>
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+          </Box>
         </SimpleGrid>
       </Box>
 
@@ -434,7 +483,7 @@ function LeadsTab() {
           <Table variant="simple" size="sm" minW="max-content">
             <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
               <Tr>
-                {columns.map((col) => (
+                {displayedColumns.map((col) => (
                   <Th key={col} whiteSpace="nowrap" px={3} py={2} bg="gray.50">
                     {col}
                   </Th>
@@ -452,7 +501,7 @@ function LeadsTab() {
                   },
                 }}
               >
-                {columns.map((col) => {
+                {displayedColumns.map((col) => {
                   if (col === 'Account') {
                     return (
                       <Td
