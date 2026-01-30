@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Heading,
@@ -22,17 +22,15 @@ import {
   IconButton,
   Select,
   SimpleGrid,
-  Icon,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
-import { MdArrowUpward, MdArrowDownward } from 'react-icons/md'
 import { type Account } from './AccountsTab'
-import { ExportImportButtons } from './ExportImportButtons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson } from '../platform/storage'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
+import { DataTable, type DataTableColumn } from './DataTable'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -129,13 +127,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     search: '',
   })
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
-  const [sortConfig, setSortConfig] = useState<{
-    column: string | null
-    direction: 'asc' | 'desc'
-  }>({
-    column: 'Date',
-    direction: 'desc',
-  })
   const toast = useToast()
   const lastErrorToastAtRef = useRef(0)
   
@@ -334,24 +325,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
   const columns = [...orderedColumns, ...remainingColumns.sort()]
 
-  // Handle column sorting
-  const handleSort = (column: string) => {
-    setSortConfig((prev) => {
-      if (prev.column === column) {
-        // Toggle direction if clicking the same column
-        return {
-          column,
-          direction: prev.direction === 'asc' ? 'desc' : 'asc',
-        }
-      }
-      // New column, default to ascending
-      return {
-        column,
-        direction: 'asc',
-      }
-    })
-  }
-
   // Helper to parse dates in various formats
   const parseDate = (dateStr: string): Date | null => {
     if (!dateStr || dateStr.trim() === '') return null
@@ -370,30 +343,129 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     return isNaN(parsed.getTime()) ? null : parsed
   }
 
-  // Helper to compare values for sorting
-  const compareValues = (a: string, b: string, column: string): number => {
-    // Special handling for date columns
-    if (column === 'Date' || column === 'First Meeting Date' || column === 'Closed Date') {
-      const dateA = parseDate(a)
-      const dateB = parseDate(b)
-      
-      if (!dateA && !dateB) return 0
-      if (!dateA) return 1 // Put dates without valid date at the end
-      if (!dateB) return -1
-      
-      return dateA.getTime() - dateB.getTime()
+  // Helper to check if a value is a URL
+  const isUrl = (str: string): boolean => {
+    if (!str || str === 'Yes' || str === 'No' || str.trim() === '') return false
+    try {
+      new URL(str)
+      return true
+    } catch {
+      return false
     }
-    
-    // Numeric comparison for numeric columns
-    const numA = parseFloat(a)
-    const numB = parseFloat(b)
-    if (!isNaN(numA) && !isNaN(numB)) {
-      return numA - numB
-    }
-    
-    // String comparison
-    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
   }
+
+  // Helper to format cell content
+  const formatCell = (value: string, header: string): ReactNode => {
+    if (!value || value.trim() === '') return <Text color="gray.400">-</Text>
+
+    // Special handling for certain fields
+    if (header.toLowerCase().includes('link') || header.toLowerCase().includes('recording')) {
+      if (isUrl(value)) {
+        return (
+          <Link href={value} isExternal color="text.muted" display="inline-flex" alignItems="center" gap={1}>
+            View <ExternalLinkIcon />
+          </Link>
+        )
+      }
+    }
+
+    // Handle Yes/No fields
+    if (value === 'Yes' || value === 'No') {
+      return (
+        <Badge colorScheme={value === 'Yes' ? 'green' : 'gray'}>
+          {value}
+        </Badge>
+      )
+    }
+
+    // Truncate very long text
+    if (value.length > 150) {
+      return (
+        <Text title={value} noOfLines={3} fontSize="sm">
+          {value.substring(0, 150)}...
+        </Text>
+      )
+    }
+
+    return <Text fontSize="sm">{value}</Text>
+  }
+
+  // Build dynamic column definitions for DataTable
+  const leadsTableColumns = useMemo((): DataTableColumn<Lead>[] => {
+    const columns: DataTableColumn<Lead>[] = []
+    
+    // Account column (always first, sticky)
+    columns.push({
+      id: 'accountName',
+      header: 'Account',
+      accessorKey: 'accountName',
+      sortable: true,
+      filterable: true,
+      cell: ({ value }) => (
+        <Badge variant="subtle" colorScheme="gray">{value as string}</Badge>
+      ),
+    })
+
+    // Build ordered columns list
+    const orderedColumns: string[] = []
+    const remainingColumns: string[] = []
+    const allColumns = new Set<string>()
+    
+    leads.forEach((lead) => {
+      Object.keys(lead).forEach((key) => {
+        if (key !== 'accountName') {
+          allColumns.add(key)
+        }
+      })
+    })
+
+    preferredColumnOrder.forEach((col) => {
+      if (allColumns.has(col)) {
+        orderedColumns.push(col)
+      }
+    })
+
+    allColumns.forEach((col) => {
+      if (!preferredColumnOrder.includes(col)) {
+        remainingColumns.push(col)
+      }
+    })
+
+    const dynamicColumns = [...orderedColumns, ...remainingColumns.sort()]
+
+    // Add dynamic columns with custom formatters
+    dynamicColumns.forEach((col) => {
+      columns.push({
+        id: col,
+        header: col,
+        accessorKey: col,
+        sortable: true,
+        filterable: col === 'Company' || col === 'Name' || col === 'Channel of Lead' || col === 'OD Team Member',
+        cell: ({ value, row }) => formatCell(String(value || ''), col),
+        // Custom sort for date columns
+        sortingFn: (rowA, rowB, columnId) => {
+          const isDateColumn = columnId === 'Date' || columnId === 'First Meeting Date' || columnId === 'Closed Date'
+          if (isDateColumn) {
+            const dateA = parseDate(String(rowA.getValue(columnId) || ''))
+            const dateB = parseDate(String(rowB.getValue(columnId) || ''))
+            
+            if (!dateA && !dateB) return 0
+            if (!dateA) return 1 // Put rows without valid date at the end
+            if (!dateB) return -1
+            
+            return dateA.getTime() - dateB.getTime()
+          }
+          
+          // Default string comparison
+          const aVal = String(rowA.getValue(columnId) || '')
+          const bVal = String(rowB.getValue(columnId) || '')
+          return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
+        },
+      })
+    })
+
+    return columns
+  }, [leads])
 
   // Unified analytics across all accounts
   const unifiedAnalytics = useMemo(() => {
@@ -640,79 +712,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       })
   }, [leads, performanceAccountFilter])
 
-  // Filter leads based on filter criteria
-  const filteredLeads = leads
-    .filter((lead) => {
-      if (filters.search) {
-        const searchLower = filters.search.toLowerCase()
-        const searchableText = Object.values(lead)
-          .join(' ')
-          .toLowerCase()
-        if (!searchableText.includes(searchLower)) return false
-      }
-      return true
-    })
-    .sort((a, b) => {
-      if (!sortConfig.column) return 0
-      
-      const column = sortConfig.column === 'Account' ? 'accountName' : sortConfig.column
-      const valueA = a[column] || ''
-      const valueB = b[column] || ''
-      
-      const comparison = compareValues(String(valueA), String(valueB), sortConfig.column)
-      
-      return sortConfig.direction === 'asc' ? comparison : -comparison
-    })
-
   // Get unique values for filter dropdowns
   const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
-  
-  // Helper to check if a value is a URL
-  const isUrl = (str: string): boolean => {
-    if (!str || str === 'Yes' || str === 'No' || str.trim() === '') return false
-    try {
-      new URL(str)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  // Helper to format cell content
-  const formatCell = (value: string, header: string): ReactNode => {
-    if (!value || value.trim() === '') return <Text color="gray.400">-</Text>
-
-    // Special handling for certain fields
-    if (header.toLowerCase().includes('link') || header.toLowerCase().includes('recording')) {
-      if (isUrl(value)) {
-        return (
-          <Link href={value} isExternal color="text.muted" display="inline-flex" alignItems="center" gap={1}>
-            View <ExternalLinkIcon />
-          </Link>
-        )
-      }
-    }
-
-    // Handle Yes/No fields
-    if (value === 'Yes' || value === 'No') {
-      return (
-        <Badge colorScheme={value === 'Yes' ? 'green' : 'gray'}>
-          {value}
-        </Badge>
-      )
-    }
-
-    // Truncate very long text
-    if (value.length > 150) {
-      return (
-        <Text title={value} noOfLines={3} fontSize="sm">
-          {value.substring(0, 150)}...
-        </Text>
-      )
-    }
-
-    return <Text fontSize="sm">{value}</Text>
-  }
 
   if (loading && leads.length === 0) {
     return (
@@ -745,30 +746,13 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             Marketing Leads
           </Heading>
           <Text color="gray.600">
-            All leads from customer data ({filteredLeads.length} of {leads.length} leads)
+            All leads from customer data ({leads.length} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
           </Text>
         </Box>
         <HStack spacing={2} flexWrap="wrap">
-          <ExportImportButtons
-            data={filteredLeads}
-            filename="marketing-leads"
-            onImport={(importedLeads) => {
-              setLeads(importedLeads)
-              saveLeadsToStorage(importedLeads)
-              syncAccountLeadCountsFromLeads(importedLeads)
-              toast({
-                title: 'Leads imported',
-                description: `${importedLeads.length} leads loaded successfully.`,
-                status: 'success',
-                duration: 3000,
-                isClosable: true,
-              })
-            }}
-            size="sm"
-          />
           <IconButton
             aria-label="Refresh leads data"
             icon={<RepeatIcon />}
@@ -1161,107 +1145,29 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         </Alert>
       )}
 
-      {filteredLeads.length === 0 ? (
+      {/* Comprehensive Leads Table with DataTable */}
+      {leads.length === 0 ? (
         <Box textAlign="center" py={12} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
           <Text fontSize="lg" color="gray.600">
-            No leads match the selected filters
+            No leads available
           </Text>
           <Text fontSize="sm" color="gray.500" mt={2}>
-            Try adjusting your filters or clear them to see all leads
+            Add Google Sheet URLs to customer accounts to start tracking leads
           </Text>
         </Box>
       ) : (
-        <Box
-          overflowX="auto"
-          overflowY="auto"
-          maxH="calc(100vh - 400px)"
-          maxW="100%"
-          border="1px solid"
-          borderColor="border.subtle"
-          borderRadius="lg"
-          bg="bg.surface"
-        >
-          <Table variant="simple" size="sm" minW="max-content">
-            <Thead bg="bg.subtle" position="sticky" top={0} zIndex={10}>
-              <Tr>
-                <Th 
-                  whiteSpace="nowrap" 
-                  px={3} 
-                  py={2} 
-                  bg="bg.subtle" 
-                  position="sticky" 
-                  left={0} 
-                  zIndex={11}
-                  cursor="pointer"
-                  userSelect="none"
-                  onClick={() => handleSort('Account')}
-                  _hover={{ bg: 'gray.100' }}
-                >
-                  <HStack spacing={1}>
-                    <Text>Account</Text>
-                    {sortConfig.column === 'Account' && (
-                      <Icon as={sortConfig.direction === 'asc' ? MdArrowUpward : MdArrowDownward} boxSize={4} />
-                    )}
-                  </HStack>
-                </Th>
-                {columns.map((col) => (
-                  <Th 
-                    key={col} 
-                    whiteSpace="nowrap" 
-                    px={3} 
-                    py={2} 
-                    bg="bg.subtle"
-                    cursor="pointer"
-                    userSelect="none"
-                    onClick={() => handleSort(col)}
-                    _hover={{ bg: 'bg.subtle' }}
-                  >
-                    <HStack spacing={1}>
-                      <Text>{col}</Text>
-                      {sortConfig.column === col && (
-                        <Icon as={sortConfig.direction === 'asc' ? MdArrowUpward : MdArrowDownward} boxSize={4} />
-                      )}
-                    </HStack>
-                  </Th>
-                ))}
-              </Tr>
-            </Thead>
-            <Tbody>
-              {filteredLeads.map((lead, index) => (
-                <Tr
-                  key={`${lead.accountName}-${index}`}
-                  _hover={{ bg: 'bg.subtle' }}
-                >
-                  <Td
-                    px={3}
-                    py={2}
-                    position="sticky"
-                    left={0}
-                    bg="bg.surface"
-                    zIndex={5}
-                    _hover={{ bg: 'bg.subtle' }}
-                    sx={{
-                      'tr:hover &': {
-                        bg: 'bg.subtle',
-                      },
-                    }}
-                  >
-                    <Badge variant="subtle" colorScheme="gray">{lead.accountName}</Badge>
-                  </Td>
-                  {columns.map((col) => {
-                    // Get value from lead object using the column name
-                    const value = lead[col] || ''
-                    return (
-                      <Td key={col} px={3} py={2} whiteSpace="normal" maxW="300px">
-                        {formatCell(value, col)}
-                      </Td>
-                    )
-                  })}
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </Box>
+        <DataTable
+          columns={leadsTableColumns}
+          data={leads}
+          enableSorting
+          enableFilters
+          enableColumnVisibility
+          enableColumnReordering
+          enableColumnResizing
+          enableExport
+          exportFilename="marketing-leads"
+          tableId="marketing-leads-table"
+        />
       )}
     </Stack>
   )
