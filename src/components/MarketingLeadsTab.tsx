@@ -22,15 +22,20 @@ import {
   IconButton,
   Select,
   SimpleGrid,
+  Button,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Checkbox,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon, ViewIcon } from '@chakra-ui/icons'
 import { type Account } from './AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson } from '../platform/storage'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
-import { DataTable, type DataTableColumn } from './DataTable'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -127,6 +132,11 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     search: '',
   })
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
+  
+  // Default visible columns for Detailed Leads List
+  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead']
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(defaultVisibleColumns))
+  
   const toast = useToast()
   const lastErrorToastAtRef = useRef(0)
   
@@ -390,82 +400,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     return <Text fontSize="sm">{value}</Text>
   }
 
-  // Build dynamic column definitions for DataTable
-  const leadsTableColumns = useMemo((): DataTableColumn<Lead>[] => {
-    const columns: DataTableColumn<Lead>[] = []
-    
-    // Account column (always first, sticky)
-    columns.push({
-      id: 'accountName',
-      header: 'Account',
-      accessorKey: 'accountName',
-      sortable: true,
-      filterable: true,
-      cell: ({ value }) => (
-        <Badge variant="subtle" colorScheme="gray">{value as string}</Badge>
-      ),
-    })
-
-    // Build ordered columns list
-    const orderedColumns: string[] = []
-    const remainingColumns: string[] = []
-    const allColumns = new Set<string>()
-    
-    leads.forEach((lead) => {
-      Object.keys(lead).forEach((key) => {
-        if (key !== 'accountName') {
-          allColumns.add(key)
-        }
-      })
-    })
-
-    preferredColumnOrder.forEach((col) => {
-      if (allColumns.has(col)) {
-        orderedColumns.push(col)
-      }
-    })
-
-    allColumns.forEach((col) => {
-      if (!preferredColumnOrder.includes(col)) {
-        remainingColumns.push(col)
-      }
-    })
-
-    const dynamicColumns = [...orderedColumns, ...remainingColumns.sort()]
-
-    // Add dynamic columns with custom formatters
-    dynamicColumns.forEach((col) => {
-      columns.push({
-        id: col,
-        header: col,
-        accessorKey: col,
-        sortable: true,
-        filterable: col === 'Company' || col === 'Name' || col === 'Channel of Lead' || col === 'OD Team Member',
-        cell: ({ value, row }) => formatCell(String(value || ''), col),
-        // Custom sort for date columns
-        sortingFn: (rowA, rowB, columnId) => {
-          const isDateColumn = columnId === 'Date' || columnId === 'First Meeting Date' || columnId === 'Closed Date'
-          if (isDateColumn) {
-            const dateA = parseDate(String(rowA.getValue(columnId) || ''))
-            const dateB = parseDate(String(rowB.getValue(columnId) || ''))
-            
-            if (!dateA && !dateB) return 0
-            if (!dateA) return 1 // Put rows without valid date at the end
-            if (!dateB) return -1
-            
-            return dateA.getTime() - dateB.getTime()
-          }
-          
-          // Default string comparison
-          const aVal = String(rowA.getValue(columnId) || '')
-          const bVal = String(rowB.getValue(columnId) || '')
-          return aVal.localeCompare(bVal, undefined, { numeric: true, sensitivity: 'base' })
-        },
-      })
-    })
-
-    return columns
-  }, [leads])
 
   // Unified analytics across all accounts
   const unifiedAnalytics = useMemo(() => {
@@ -893,27 +827,78 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
       {/* Account Performance Filter Section */}
       <Box p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
-        <Heading size="sm" mb={4}>
-          Account Performance
-        </Heading>
-        <Box mb={4}>
-          <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
-            Select Account
-          </Text>
-          <Select
-            placeholder="Choose an account to view performance"
-            value={performanceAccountFilter}
-            onChange={(e) => setPerformanceAccountFilter(e.target.value)}
-            size="sm"
-            maxW="400px"
-          >
-            {uniqueAccounts.map((account) => (
-              <option key={account} value={account}>
-                {account}
-              </option>
-            ))}
-          </Select>
-        </Box>
+        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
+          <Box>
+            <HStack mb={2} justify="space-between">
+              <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+                Select Account
+              </Text>
+              {performanceAccountFilter && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  colorScheme="gray"
+                  leftIcon={<RepeatIcon />}
+                  onClick={() => setPerformanceAccountFilter('')}
+                >
+                  Reset
+                </Button>
+              )}
+            </HStack>
+            <Select
+              placeholder="Choose an account to view performance"
+              value={performanceAccountFilter}
+              onChange={(e) => setPerformanceAccountFilter(e.target.value)}
+              size="sm"
+            >
+              {uniqueAccounts.map((account) => (
+                <option key={account} value={account}>
+                  {account}
+                </option>
+              ))}
+            </Select>
+          </Box>
+
+          <Box>
+            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
+              Column Visibility
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" leftIcon={<ViewIcon />} width="100%">
+                Show/Hide Columns ({visibleColumns.size})
+              </MenuButton>
+              <MenuList maxH="400px" overflowY="auto">
+                {['Account', 'Week', 'Date', 'Company', 'Name', 'Job Title', 'Channel of Lead', 'OD Team Member', 'Contact Info', 'Outcome', 'Lead Status'].map((col) => (
+                  <MenuItem key={col} onClick={() => {
+                    const newVisible = new Set(visibleColumns)
+                    if (newVisible.has(col)) {
+                      newVisible.delete(col)
+                    } else {
+                      newVisible.add(col)
+                    }
+                    setVisibleColumns(newVisible)
+                  }}>
+                    <Checkbox 
+                      isChecked={visibleColumns.has(col)} 
+                      onChange={() => {
+                        const newVisible = new Set(visibleColumns)
+                        if (newVisible.has(col)) {
+                          newVisible.delete(col)
+                        } else {
+                          newVisible.add(col)
+                        }
+                        setVisibleColumns(newVisible)
+                      }}
+                      mr={2}
+                    >
+                      {col}
+                    </Checkbox>
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+          </Box>
+        </SimpleGrid>
 
         {accountPerformance && (
           <Box
@@ -1057,69 +1042,81 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                   <Table variant="simple" size="sm">
                     <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
                       <Tr>
-                        <Th whiteSpace="nowrap">Week</Th>
-                        <Th whiteSpace="nowrap">Date</Th>
-                        <Th whiteSpace="nowrap">Company</Th>
-                        <Th whiteSpace="nowrap">Name</Th>
-                        <Th whiteSpace="nowrap">Job Title</Th>
-                        <Th whiteSpace="nowrap">Channel of Lead</Th>
-                        <Th whiteSpace="nowrap">OD Team Member</Th>
-                        <Th whiteSpace="nowrap">Contact Info</Th>
-                        <Th whiteSpace="nowrap">Outcome</Th>
-                        <Th whiteSpace="nowrap">Lead Status</Th>
+                        {visibleColumns.has('Account') && <Th whiteSpace="nowrap">Account</Th>}
+                        {visibleColumns.has('Week') && <Th whiteSpace="nowrap">Week</Th>}
+                        {visibleColumns.has('Date') && <Th whiteSpace="nowrap">Date</Th>}
+                        {visibleColumns.has('Company') && <Th whiteSpace="nowrap">Company</Th>}
+                        {visibleColumns.has('Name') && <Th whiteSpace="nowrap">Name</Th>}
+                        {visibleColumns.has('Job Title') && <Th whiteSpace="nowrap">Job Title</Th>}
+                        {visibleColumns.has('Channel of Lead') && <Th whiteSpace="nowrap">Channel of Lead</Th>}
+                        {visibleColumns.has('OD Team Member') && <Th whiteSpace="nowrap">OD Team Member</Th>}
+                        {visibleColumns.has('Contact Info') && <Th whiteSpace="nowrap">Contact Info</Th>}
+                        {visibleColumns.has('Outcome') && <Th whiteSpace="nowrap">Outcome</Th>}
+                        {visibleColumns.has('Lead Status') && <Th whiteSpace="nowrap">Lead Status</Th>}
                       </Tr>
                     </Thead>
                     <Tbody>
                       {accountPerformanceLeads.length > 0 ? (
                         accountPerformanceLeads.map((lead, index) => (
                           <Tr key={`lead-${index}`} _hover={{ bg: 'gray.50' }}>
-                            <Td whiteSpace="nowrap">{lead['Week'] || '-'}</Td>
-                            <Td whiteSpace="nowrap">{lead['Date'] || '-'}</Td>
-                            <Td>{lead['Company'] || '-'}</Td>
-                            <Td>{lead['Name'] || '-'}</Td>
-                            <Td>{lead['Job Title'] || '-'}</Td>
-                            <Td>
-                              {lead['Channel of Lead'] ? (
-                                <Badge colorScheme="blue" variant="subtle">
-                                  {lead['Channel of Lead']}
-                                </Badge>
-                              ) : (
-                                '-'
-                              )}
-                            </Td>
-                            <Td>
-                              {lead['OD Team Member'] ? (
-                                <Badge colorScheme="purple" variant="subtle">
-                                  {lead['OD Team Member']}
-                                </Badge>
-                              ) : (
-                                '-'
-                              )}
-                            </Td>
-                            <Td>{lead['Contact Info'] || '-'}</Td>
-                            <Td>{lead['Outcome'] || '-'}</Td>
-                            <Td>
-                              {lead['Lead Status'] ? (
-                                <Badge
-                                  colorScheme={
-                                    lead['Lead Status'].toLowerCase().includes('closed')
-                                      ? 'green'
-                                      : lead['Lead Status'].toLowerCase().includes('meeting')
-                                      ? 'orange'
-                                      : 'gray'
-                                  }
-                                >
-                                  {lead['Lead Status']}
-                                </Badge>
-                              ) : (
-                                '-'
-                              )}
-                            </Td>
+                            {visibleColumns.has('Account') && (
+                              <Td whiteSpace="nowrap">
+                                <Badge colorScheme="gray">{lead.accountName}</Badge>
+                              </Td>
+                            )}
+                            {visibleColumns.has('Week') && <Td whiteSpace="nowrap">{lead['Week'] || '-'}</Td>}
+                            {visibleColumns.has('Date') && <Td whiteSpace="nowrap">{lead['Date'] || '-'}</Td>}
+                            {visibleColumns.has('Company') && <Td>{lead['Company'] || '-'}</Td>}
+                            {visibleColumns.has('Name') && <Td>{lead['Name'] || '-'}</Td>}
+                            {visibleColumns.has('Job Title') && <Td>{lead['Job Title'] || '-'}</Td>}
+                            {visibleColumns.has('Channel of Lead') && (
+                              <Td>
+                                {lead['Channel of Lead'] ? (
+                                  <Badge colorScheme="blue" variant="subtle">
+                                    {lead['Channel of Lead']}
+                                  </Badge>
+                                ) : (
+                                  '-'
+                                )}
+                              </Td>
+                            )}
+                            {visibleColumns.has('OD Team Member') && (
+                              <Td>
+                                {lead['OD Team Member'] ? (
+                                  <Badge colorScheme="purple" variant="subtle">
+                                    {lead['OD Team Member']}
+                                  </Badge>
+                                ) : (
+                                  '-'
+                                )}
+                              </Td>
+                            )}
+                            {visibleColumns.has('Contact Info') && <Td>{lead['Contact Info'] || '-'}</Td>}
+                            {visibleColumns.has('Outcome') && <Td>{lead['Outcome'] || '-'}</Td>}
+                            {visibleColumns.has('Lead Status') && (
+                              <Td>
+                                {lead['Lead Status'] ? (
+                                  <Badge
+                                    colorScheme={
+                                      lead['Lead Status'].toLowerCase().includes('closed')
+                                        ? 'green'
+                                        : lead['Lead Status'].toLowerCase().includes('meeting')
+                                        ? 'orange'
+                                        : 'gray'
+                                    }
+                                  >
+                                    {lead['Lead Status']}
+                                  </Badge>
+                                ) : (
+                                  '-'
+                                )}
+                              </Td>
+                            )}
                           </Tr>
                         ))
                       ) : (
                         <Tr>
-                          <Td colSpan={10} textAlign="center" py={8} color="gray.500">
+                          <Td colSpan={visibleColumns.size} textAlign="center" py={8} color="gray.500">
                             No leads found for this account
                           </Td>
                         </Tr>
@@ -1143,31 +1140,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             Some data may be outdated. Last refresh attempt failed. Showing cached data.
           </AlertDescription>
         </Alert>
-      )}
-
-      {/* Comprehensive Leads Table with DataTable */}
-      {leads.length === 0 ? (
-        <Box textAlign="center" py={12} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
-          <Text fontSize="lg" color="gray.600">
-            No leads available
-          </Text>
-          <Text fontSize="sm" color="gray.500" mt={2}>
-            Add Google Sheet URLs to customer accounts to start tracking leads
-          </Text>
-        </Box>
-      ) : (
-        <DataTable
-          columns={leadsTableColumns}
-          data={leads}
-          enableSorting
-          enableFilters
-          enableColumnVisibility
-          enableColumnReordering
-          enableColumnResizing
-          enableExport
-          exportFilename="marketing-leads"
-          tableId="marketing-leads-table"
-        />
       )}
     </Stack>
   )
