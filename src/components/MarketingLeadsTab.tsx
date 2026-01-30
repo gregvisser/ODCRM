@@ -985,7 +985,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
         {accountPerformance && (
           <Box
-            bg="gradient-to-br from-blue-50 to-purple-50"
+            bgGradient="linear(to-br, blue.50, purple.50)"
             borderRadius="xl"
             p={{ base: 4, md: 6 }}
             border="1px solid"
