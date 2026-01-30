@@ -84,6 +84,17 @@ const theme = extendTheme({
     xl: '80em',     // 1280px
     '2xl': '96em',  // 1536px
   },
+  zIndices: {
+    base: 0,
+    raised: 1,
+    dropdown: 10,
+    sticky: 50,
+    fixed: 100,
+    overlay: 500,
+    modal: 1000,
+    toast: 1500,
+    critical: 9999,
+  },
   semanticTokens: {
     colors: {
       'bg.canvas': {

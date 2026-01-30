@@ -1,10 +1,9 @@
-// OpenDoors Email Outreach System - Complete Implementation
-// Based on comprehensive Reply.io architecture exploration
+/**
+ * MarketingHomePage - OpenDoors Email Outreach System
+ * Complete implementation based on Reply.io architecture exploration
+ */
 
-import { useState } from 'react'
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
   EmailIcon,
   InfoIcon,
   RepeatIcon,
@@ -14,13 +13,10 @@ import {
   SearchIcon,
   CopyIcon,
   SettingsIcon,
-  TimeIcon,
   WarningIcon,
   CalendarIcon,
 } from '@chakra-ui/icons'
-import { Box, Flex, HStack, Icon, IconButton, Tab, TabList, TabPanel, TabPanels, Tabs, Text, VStack, Badge } from '@chakra-ui/react'
-
-// Import new OpenDoors components (to be created)
+import { SubNavigation, type SubNavItem } from '../../design-system'
 import SequencesTab from './components/SequencesTab'
 import PeopleTab from './components/PeopleTab'
 import ListsTab from './components/ListsTab'
@@ -78,586 +74,89 @@ export default function MarketingHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceViewId(view)
-  const [isPanelOpen, setIsPanelOpen] = useState(true)
 
-  const tabIndex =
-    activeView === 'overview' ? 0
-    : activeView === 'sequences' ? 1
-    : activeView === 'people' ? 2
-    : activeView === 'cognism-prospects' ? 3
-    : activeView === 'lists' ? 4
-    : activeView === 'campaigns' ? 5
-    : activeView === 'email-accounts' ? 6
-    : activeView === 'compliance' ? 7
-    : activeView === 'schedules' ? 8
-    : activeView === 'reports' ? 9
-    : activeView === 'templates' ? 10
-    : activeView === 'inbox' ? 11
-    : 0
+  const navItems: SubNavItem[] = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: InfoIcon,
+      content: <OverviewDashboard />,
+    },
+    {
+      id: 'sequences',
+      label: 'Sequences',
+      icon: RepeatIcon,
+      content: <SequencesTab />,
+    },
+    {
+      id: 'people',
+      label: 'People',
+      icon: AtSignIcon,
+      content: <PeopleTab />,
+    },
+    {
+      id: 'cognism-prospects',
+      label: 'Prospects',
+      icon: SearchIcon,
+      content: <CognismProspectsTab />,
+    },
+    {
+      id: 'lists',
+      label: 'Lists',
+      icon: ViewIcon,
+      content: <ListsTab />,
+    },
+    {
+      id: 'campaigns',
+      label: 'Campaigns',
+      icon: EmailIcon,
+      content: <CampaignsTab />,
+    },
+    {
+      id: 'email-accounts',
+      label: 'Email Accounts',
+      icon: SettingsIcon,
+      content: <EmailAccountsTab />,
+    },
+    {
+      id: 'compliance',
+      label: 'Compliance',
+      icon: WarningIcon,
+      content: <ComplianceTab />,
+    },
+    {
+      id: 'schedules',
+      label: 'Schedules',
+      icon: CalendarIcon,
+      content: <SchedulesTab />,
+    },
+    {
+      id: 'reports',
+      label: 'Reports',
+      icon: SearchIcon,
+      content: <ReportsTab />,
+    },
+    {
+      id: 'templates',
+      label: 'Templates',
+      icon: CopyIcon,
+      content: <TemplatesTab />,
+    },
+    {
+      id: 'inbox',
+      label: 'Inbox',
+      icon: ChatIcon,
+      content: <InboxTab />,
+    },
+  ]
 
   return (
-    <Box>
-      <VStack spacing={0} align="stretch">
-        {/* Header */}
-        <Box bg="blue.600" color="white" p={4}>
-          <HStack justify="space-between">
-            <VStack align="start" spacing={1}>
-              <Text fontSize="2xl" fontWeight="bold">
-                OpenDoors Email Outreach
-              </Text>
-              <Text fontSize="sm" opacity={0.9}>
-                Professional email automation powered by Reply.io insights
-              </Text>
-            </VStack>
-            <Badge colorScheme="blue" fontSize="sm" px={3} py={1}>
-              BETA
-            </Badge>
-          </HStack>
-        </Box>
-
-        {/* Main Content */}
-        <Tabs
-          index={tabIndex}
-          onChange={(nextIndex) => {
-            const nextView: OpenDoorsViewId =
-              nextIndex === 0 ? 'overview'
-              : nextIndex === 1 ? 'sequences'
-              : nextIndex === 2 ? 'people'
-              : nextIndex === 3 ? 'cognism-prospects'
-              : nextIndex === 4 ? 'lists'
-              : nextIndex === 5 ? 'campaigns'
-              : nextIndex === 6 ? 'email-accounts'
-              : nextIndex === 7 ? 'compliance'
-              : nextIndex === 8 ? 'schedules'
-              : nextIndex === 9 ? 'reports'
-              : nextIndex === 10 ? 'templates'
-              : nextIndex === 11 ? 'inbox'
-              : 'overview'
-            onNavigate?.(nextView)
-          }}
-          isLazy
-          variant="unstyled"
-          orientation="vertical"
-          h="calc(100vh - 120px)"
-        >
-          <Flex direction="row" gap={{ base: 4, md: 6 }} align="flex-start" h="full">
-            {isPanelOpen ? (
-              <Box
-                position="sticky"
-                top={16}
-                alignSelf="flex-start"
-                bg="gray.50"
-                border="1px solid"
-                borderColor="gray.200"
-                borderRadius="xl"
-                p={4}
-                boxShadow="sm"
-                minW="260px"
-                maxW="280px"
-                w="280px"
-                h="fit-content"
-              >
-                <Flex align="center" justify="space-between" mb={4}>
-                  <Text fontSize="xs" textTransform="uppercase" color="gray.600" letterSpacing="0.08em" fontWeight="semibold">
-                    Email Outreach Hub
-                  </Text>
-                  <IconButton
-                    aria-label="Hide navigation panel"
-                    icon={<ChevronLeftIcon />}
-                    size="xs"
-                    variant="ghost"
-                    color="gray.600"
-                    onClick={() => setIsPanelOpen(false)}
-                  />
-                </Flex>
-
-                <TabList flexDirection="column" overflowX="visible" whiteSpace="normal" gap={2}>
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={InfoIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Overview</Text>
-                        <Text fontSize="xs" opacity={0.8}>Dashboard & metrics</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={RepeatIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Sequences</Text>
-                        <Text fontSize="xs" opacity={0.8}>Automated workflows</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={AtSignIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">People</Text>
-                        <Text fontSize="xs" opacity={0.8}>Contact management</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={SearchIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Prospects</Text>
-                        <Text fontSize="xs" opacity={0.8}>Cognism import</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={ViewIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Lists</Text>
-                        <Text fontSize="xs" opacity={0.8}>Segmentation & targeting</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={EmailIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Campaigns</Text>
-                        <Text fontSize="xs" opacity={0.8}>One-off email sends</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={SettingsIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Email Accounts</Text>
-                        <Text fontSize="xs" opacity={0.8}>Sending infrastructure</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={WarningIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Compliance</Text>
-                        <Text fontSize="xs" opacity={0.8}>Suppression & safety</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={CalendarIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Schedules</Text>
-                        <Text fontSize="xs" opacity={0.8}>Delivery windows</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={SearchIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Reports</Text>
-                        <Text fontSize="xs" opacity={0.8}>Analytics & insights</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={CopyIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Templates</Text>
-                        <Text fontSize="xs" opacity={0.8}>Email content library</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-
-                  <Tab
-                    justifyContent={{ md: 'flex-start' }}
-                    fontSize="sm"
-                    fontWeight="600"
-                    borderRadius="lg"
-                    color="gray.700"
-                    bg="white"
-                    border="1px solid"
-                    borderColor="gray.200"
-                    _hover={{
-                      bg: 'blue.50',
-                      color: 'blue.700',
-                      borderColor: 'blue.300',
-                      transform: 'translateY(-1px)',
-                      boxShadow: 'sm'
-                    }}
-                    _selected={{
-                      bg: 'blue.500',
-                      color: 'white',
-                      borderColor: 'blue.500',
-                      boxShadow: 'md',
-                      transform: 'translateY(-1px)'
-                    }}
-                    transition="all 0.2s"
-                    h={12}
-                  >
-                    <HStack spacing={3} w="full">
-                      <Icon as={ChatIcon} boxSize={5} />
-                      <VStack align="start" spacing={0} flex={1}>
-                        <Text fontSize="sm" fontWeight="semibold">Inbox</Text>
-                        <Text fontSize="xs" opacity={0.8}>Replies & conversations</Text>
-                      </VStack>
-                    </HStack>
-                  </Tab>
-                </TabList>
-              </Box>
-            ) : (
-              <Box
-                position="sticky"
-                top={16}
-                alignSelf="flex-start"
-                bg="gray.50"
-                border="1px solid"
-                borderColor="gray.200"
-                borderRadius="xl"
-                p={2}
-                boxShadow="sm"
-              >
-                <IconButton
-                  aria-label="Show navigation panel"
-                  icon={<ChevronRightIcon />}
-                  size="sm"
-                  variant="ghost"
-                  color="gray.600"
-                  onClick={() => setIsPanelOpen(true)}
-                />
-              </Box>
-            )}
-
-            <TabPanels flex="1" pt={1} overflow="auto">
-              <TabPanel px={0} h="full">
-                <OverviewDashboard />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <SequencesTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <PeopleTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <CognismProspectsTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <ListsTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <CampaignsTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <EmailAccountsTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <ComplianceTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <SchedulesTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <ReportsTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <TemplatesTab />
-              </TabPanel>
-              <TabPanel px={0} h="full">
-                <InboxTab />
-              </TabPanel>
-            </TabPanels>
-          </Flex>
-        </Tabs>
-      </VStack>
-    </Box>
+    <SubNavigation
+      items={navItems}
+      activeId={activeView}
+      onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
+      title="Marketing"
+    />
   )
 }
 

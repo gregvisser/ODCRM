@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
-  Divider,
   Flex,
   Tab,
   TabList,
@@ -18,6 +17,7 @@ import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
+import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
 
 function App() {
   const { instance } = useMsal()
@@ -152,37 +152,39 @@ function App() {
   })()
 
   return (
-    <Flex minH="100vh" bg="bg.canvas" direction="column" position="relative">
+    <Flex minH="100vh" bg={semanticColor.bgCanvas} direction="column" position="relative">
       {/* Main Content Area */}
       <Box
         flex="1"
         display="flex"
         flexDirection="column"
         minW={0}
-        px={{ base: 3, md: 5, xl: 6 }}
-        py={{ base: 3, md: 5, xl: 6 }}
+        px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }}
+        py={{ base: spacing[3], md: spacing[4], lg: spacing[6] }}
       >
         <Box
           w="100%"
+          maxW="1600px"
+          mx="auto"
           flex="1"
           display="flex"
           flexDirection="column"
-          gap={{ base: 3, md: 4 }}
+          gap={{ base: spacing[3], md: spacing[4] }}
           position="relative"
-          zIndex={1}
+          zIndex={zIndex.base}
         >
           {/* Top Bar */}
           <Box
-            bg="bg.surface"
-            borderRadius="lg"
+            bg={semanticColor.bgSurface}
+            borderRadius={radius.lg}
             border="1px solid"
-            borderColor="border.subtle"
-            px={{ base: 3, md: 5 }}
-            py={{ base: 2, md: 2 }}
-            boxShadow="sm"
+            borderColor={semanticColor.borderSubtle}
+            px={{ base: spacing[3], md: spacing[4] }}
+            py={{ base: spacing[2], md: spacing[2] }}
+            boxShadow={shadow.sm}
             position="sticky"
             top={0}
-            zIndex={5}
+            zIndex={zIndex.sticky}
           >
             <Tabs
               index={CRM_TOP_TABS.findIndex((tab) => tab.id === activeTab)}
@@ -194,37 +196,37 @@ function App() {
                 setFocusAccountName(undefined)
               }}
               variant="unstyled"
-              mt={{ base: 1, md: 2 }}
+              mt={{ base: spacing[1], md: spacing[2] }}
             >
               <TabList
                 overflowX="auto"
                 whiteSpace="nowrap"
                 borderBottom="1px solid"
-                borderColor="border.subtle"
-                gap={2}
-                pb={1}
+                borderColor={semanticColor.borderSubtle}
+                gap={spacing[2]}
+                pb={spacing[1]}
                 alignItems="center"
               >
                 <Box
                   minW={{ base: '180px', md: '260px' }}
                   maxW={{ base: '240px', md: '320px' }}
-                  mr={{ base: 1, md: 2 }}
+                  mr={{ base: spacing[1], md: spacing[2] }}
                 >
                   <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
                 </Box>
                 {CRM_TOP_TABS.map((tab) => (
                   <Tab
                     key={tab.id}
-                    px={3}
-                    py={1}
+                    px={spacing[3]}
+                    py={spacing[1]}
                     fontSize="xs"
                     fontWeight="600"
-                    color="text.muted"
+                    color={semanticColor.textMuted}
                     border="1px solid"
-                    borderColor="border.subtle"
-                    borderRadius="md"
-                    bg="white"
-                    _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
+                    borderColor={semanticColor.borderSubtle}
+                    borderRadius={radius.md}
+                    bg={semanticColor.bgSurface}
+                    _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
                     _selected={{
                       color: 'accent.700',
                       borderColor: 'accent.500',
@@ -237,13 +239,13 @@ function App() {
                 <Button
                   variant="outline"
                   size="xs"
-                  px={3}
-                  py={1}
+                  px={spacing[3]}
+                  py={spacing[1]}
                   fontSize="xs"
                   fontWeight="600"
-                  color="text.muted"
-                  borderColor="border.subtle"
-                  _hover={{ color: 'text.primary', bg: 'bg.subtle' }}
+                  color={semanticColor.textMuted}
+                  borderColor={semanticColor.borderSubtle}
+                  _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
                   onClick={() => void handleSignOut()}
                 >
                   Sign out
@@ -254,12 +256,12 @@ function App() {
 
           {/* Main Content */}
           <Box
-            bg="bg.surface"
-            borderRadius="lg"
+            bg={semanticColor.bgSurface}
+            borderRadius={radius.lg}
             border="1px solid"
-            borderColor="border.subtle"
-            p={{ base: 3, md: 5, lg: 6 }}
-            boxShadow="md"
+            borderColor={semanticColor.borderSubtle}
+            p={{ base: spacing[3], md: spacing[4], lg: spacing[6] }}
+            boxShadow={shadow.md}
             w="100%"
             minW={0}
             overflowX="auto"
@@ -267,11 +269,10 @@ function App() {
           >
             {page}
           </Box>
-          <Divider mt={6} opacity={0} />
         </Box>
       </Box>
-      <Box px={{ base: 3, md: 5, xl: 6 }} pb={{ base: 3, md: 5 }}>
-        <Text fontSize="xs" color="text.muted" textAlign="center">
+      <Box px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }} pb={{ base: spacing[3], md: spacing[4] }}>
+        <Text fontSize="xs" color={semanticColor.textMuted} textAlign="center">
           Build {__BUILD_STAMP__}
         </Text>
       </Box>
