@@ -673,52 +673,73 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   }
 
   return (
-    <Stack spacing={6}>
-      <HStack justify="space-between" align="flex-start" flexWrap="wrap" spacing={4}>
-        <Box flex="1" minW="200px">
-          <Heading size="lg" mb={2}>
-            Marketing Leads
-          </Heading>
-          <Text color="gray.600">
-            All leads from customer data ({leads.length} leads)
-          </Text>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
-          </Text>
-        </Box>
-        <HStack spacing={2} flexWrap="wrap">
+    <Stack spacing={{ base: 4, md: 6, lg: 8 }} px={{ base: 0, md: 0 }} pb={8}>
+      {/* Header Section */}
+      <Box
+        bg="white"
+        borderRadius="xl"
+        p={{ base: 4, md: 6 }}
+        boxShadow="md"
+        border="1px solid"
+        borderColor="gray.200"
+      >
+        <HStack justify="space-between" align="flex-start" flexWrap="wrap" gap={4}>
+          <Box flex="1" minW={{ base: "full", sm: "200px" }}>
+            <Heading 
+              size={{ base: "md", md: "lg" }} 
+              mb={2} 
+              color="gray.800"
+              fontWeight="bold"
+            >
+              Marketing Leads
+            </Heading>
+            <Text color="gray.600" fontSize={{ base: "sm", md: "md" }}>
+              All leads from customer data ({leads.length} leads)
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={2}>
+              Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
+            </Text>
+          </Box>
           <IconButton
             aria-label="Refresh leads data"
             icon={<RepeatIcon />}
             onClick={() => loadLeads(true)}
             isLoading={loading}
-            variant="ghost"
-            colorScheme="gray"
-            size="sm"
+            colorScheme="blue"
+            size="md"
+            borderRadius="lg"
+            boxShadow="sm"
+            _hover={{ transform: 'scale(1.05)', boxShadow: 'md' }}
+            transition="all 0.2s"
           />
         </HStack>
-      </HStack>
+      </Box>
 
       {/* Unified Analytics Kanban Card */}
       <Box
-        minW="280px"
-        bg="bg.surface"
-        borderRadius="lg"
-        p={4}
+        bg="white"
+        borderRadius="xl"
+        p={{ base: 4, md: 6 }}
         border="1px solid"
-        borderColor="border.subtle"
-        shadow="sm"
+        borderColor="gray.200"
+        boxShadow="md"
       >
-        <HStack justify="space-between" mb={4}>
+        <Stack direction={{ base: "column", md: "row" }} justify="space-between" mb={6} spacing={4}>
           <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+            <Text 
+              fontSize="xs" 
+              textTransform="uppercase" 
+              color="blue.500" 
+              fontWeight="bold"
+              letterSpacing="wide"
+            >
               Unified Lead Performance
             </Text>
-            <Heading size="md" color="gray.700">
+            <Heading size={{ base: "sm", md: "md" }} color="gray.800" mt={1}>
               All Accounts Combined
             </Heading>
           </Box>
-          <Text fontSize="sm" color="gray.500">
+          <Text fontSize="sm" color="gray.500" fontWeight="medium">
             {new Date().toLocaleDateString('en-GB', {
               weekday: 'long',
               day: 'numeric',
@@ -726,8 +747,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               year: 'numeric',
             })}
           </Text>
-        </HStack>
-        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+        </Stack>
+        <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={{ base: 3, md: 4 }}>
           {(['today', 'week', 'month'] as const).map((periodKey) => {
             const period = unifiedAnalytics.periodMetrics[periodKey]
             const variance = period.actual - period.target
@@ -742,79 +763,99 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               <Box
                 key={periodKey}
                 border="1px solid"
-                borderColor="border.subtle"
-                borderRadius="lg"
-                p={4}
-                bg="bg.subtle"
-                minH="280px"
+                borderColor="gray.200"
+                borderRadius="xl"
+                p={{ base: 4, md: 5 }}
+                bg={periodKey === 'today' ? 'blue.50' : periodKey === 'week' ? 'green.50' : 'purple.50'}
+                minH={{ base: "auto", md: "320px" }}
+                boxShadow="sm"
+                _hover={{ boxShadow: 'lg', transform: 'translateY(-2px)' }}
+                transition="all 0.3s"
               >
-                <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+                <Text 
+                  fontSize="xs" 
+                  textTransform="uppercase" 
+                  color={periodKey === 'today' ? 'blue.600' : periodKey === 'week' ? 'green.600' : 'purple.600'}
+                  fontWeight="bold"
+                  letterSpacing="wide"
+                >
                   {period.label}
                 </Text>
-                <Heading size="2xl" mt={2} color="gray.800">
+                <Heading size={{ base: "xl", md: "2xl" }} mt={2} color="gray.800" fontWeight="extrabold">
                   {period.actual}
                 </Heading>
-                <Text fontSize="sm" color="gray.600">
+                <Text fontSize="sm" color="gray.600" fontWeight="medium">
                   Actual Leads
                 </Text>
-                <Stack spacing={1} mt={3} fontSize="sm">
-                  <Text color="gray.600">
-                    Target Leads:{' '}
-                    <Text as="span" fontWeight="semibold">
-                      {period.target}
-                    </Text>
-                  </Text>
-                  <Text color="text.muted">
-                    Variance:{' '}
-                    <Text as="span" fontWeight="semibold">
-                      {variance > 0 ? '+' : ''}
-                      {variance}
-                    </Text>
-                  </Text>
+                <Stack spacing={2} mt={4} fontSize="sm">
+                  <HStack justify="space-between" bg="white" p={2} borderRadius="md">
+                    <Text color="gray.600" fontWeight="medium">Target:</Text>
+                    <Text fontWeight="bold" color="gray.800">{period.target}</Text>
+                  </HStack>
+                  <HStack justify="space-between" bg="white" p={2} borderRadius="md">
+                    <Text color="gray.600" fontWeight="medium">Variance:</Text>
+                    <Badge 
+                      colorScheme={variance >= 0 ? 'green' : 'red'}
+                      fontSize="xs"
+                      px={2}
+                      py={1}
+                      borderRadius="md"
+                    >
+                      {variance > 0 ? '+' : ''}{variance}
+                    </Badge>
+                  </HStack>
                 </Stack>
                 <Box mt={4}>
-                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
+                  <Text fontSize="xs" textTransform="uppercase" color="gray.600" fontWeight="bold" mb={2}>
                     Channels
                   </Text>
                   {allChannels.length > 0 ? (
-                    <Stack spacing={1} maxH="120px" overflowY="auto">
+                    <Stack spacing={2} maxH="100px" overflowY="auto" css={{
+                      '&::-webkit-scrollbar': { width: '4px' },
+                      '&::-webkit-scrollbar-track': { background: 'transparent' },
+                      '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '24px' },
+                    }}>
                       {allChannels.map((channel) => (
-                        <HStack key={channel} justify="space-between">
-                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                        <HStack key={channel} justify="space-between" bg="white" p={2} borderRadius="md">
+                          <Text fontSize="sm" color="gray.700" noOfLines={1} fontWeight="medium">
                             {channel}
                           </Text>
-                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                          <Badge colorScheme="blue" fontSize="xs">
                             {period.breakdown[channel]}
                           </Badge>
                         </HStack>
                       ))}
                     </Stack>
                   ) : (
-                    <Text fontSize="sm" color="gray.400">
+                    <Text fontSize="sm" color="gray.400" fontStyle="italic">
                       No leads recorded
                     </Text>
                   )}
                 </Box>
 
                 <Box mt={4}>
-                  <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold" mb={2}>
+                  <Text fontSize="xs" textTransform="uppercase" color="gray.600" fontWeight="bold" mb={2}>
                     OD Team
                   </Text>
                   {allTeamMembers.length > 0 ? (
-                    <Stack spacing={1} maxH="120px" overflowY="auto">
+                    <Stack spacing={2} maxH="100px" overflowY="auto" css={{
+                      '&::-webkit-scrollbar': { width: '4px' },
+                      '&::-webkit-scrollbar-track': { background: 'transparent' },
+                      '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '24px' },
+                    }}>
                       {allTeamMembers.map((member) => (
-                        <HStack key={member} justify="space-between">
-                          <Text fontSize="sm" color="gray.700" noOfLines={1}>
+                        <HStack key={member} justify="space-between" bg="white" p={2} borderRadius="md">
+                          <Text fontSize="sm" color="gray.700" noOfLines={1} fontWeight="medium">
                             {member}
                           </Text>
-                          <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                          <Badge colorScheme="purple" fontSize="xs">
                             {period.teamBreakdown?.[member] || 0}
                           </Badge>
                         </HStack>
                       ))}
                     </Stack>
                   ) : (
-                    <Text fontSize="sm" color="gray.400">
+                    <Text fontSize="sm" color="gray.400" fontStyle="italic">
                       No team members recorded
                     </Text>
                   )}
@@ -826,20 +867,37 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       </Box>
 
       {/* Account Performance Filter Section */}
-      <Box p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
-        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mb={4}>
+      <Box 
+        p={{ base: 4, md: 6 }} 
+        bg="white" 
+        borderRadius="xl" 
+        border="1px solid" 
+        borderColor="gray.200"
+        boxShadow="md"
+      >
+        <Heading size={{ base: "sm", md: "md" }} mb={4} color="gray.800">
+          Account Performance
+        </Heading>
+        <SimpleGrid columns={{ base: 1, md: 2 }} gap={{ base: 3, md: 4 }} mb={6}>
           <Box>
             <HStack mb={2} justify="space-between">
-              <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+              <Text 
+                fontSize="xs" 
+                textTransform="uppercase" 
+                color="gray.600" 
+                fontWeight="bold"
+                letterSpacing="wide"
+              >
                 Select Account
               </Text>
               {performanceAccountFilter && (
                 <Button
                   size="xs"
                   variant="ghost"
-                  colorScheme="gray"
+                  colorScheme="red"
                   leftIcon={<RepeatIcon />}
                   onClick={() => setPerformanceAccountFilter('')}
+                  fontSize="xs"
                 >
                   Reset
                 </Button>
@@ -849,7 +907,11 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               placeholder="Choose an account to view performance"
               value={performanceAccountFilter}
               onChange={(e) => setPerformanceAccountFilter(e.target.value)}
-              size="sm"
+              size="md"
+              borderColor="gray.300"
+              borderRadius="lg"
+              _hover={{ borderColor: 'blue.400' }}
+              _focus={{ borderColor: 'blue.500', boxShadow: '0 0 0 1px var(--chakra-colors-blue-500)' }}
             >
               {uniqueAccounts.map((account) => (
                 <option key={account} value={account}>
@@ -860,24 +922,44 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
           </Box>
 
           <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
+            <Text 
+              fontSize="xs" 
+              textTransform="uppercase" 
+              color="gray.600" 
+              mb={2} 
+              fontWeight="bold"
+              letterSpacing="wide"
+            >
               Column Visibility
             </Text>
             <Menu closeOnSelect={false}>
-              <MenuButton as={Button} size="sm" leftIcon={<ViewIcon />} width="100%">
+              <MenuButton 
+                as={Button} 
+                size="md" 
+                leftIcon={<ViewIcon />} 
+                width="100%"
+                borderRadius="lg"
+                colorScheme="blue"
+                variant="outline"
+                _hover={{ bg: 'blue.50' }}
+              >
                 Show/Hide Columns ({visibleColumns.size})
               </MenuButton>
-              <MenuList maxH="400px" overflowY="auto">
+              <MenuList maxH="400px" overflowY="auto" borderRadius="lg" boxShadow="lg">
                 {['Account', 'Week', 'Date', 'Company', 'Name', 'Job Title', 'Channel of Lead', 'OD Team Member', 'Contact Info', 'Outcome', 'Lead Status'].map((col) => (
-                  <MenuItem key={col} onClick={() => {
-                    const newVisible = new Set(visibleColumns)
-                    if (newVisible.has(col)) {
-                      newVisible.delete(col)
-                    } else {
-                      newVisible.add(col)
-                    }
-                    setVisibleColumns(newVisible)
-                  }}>
+                  <MenuItem 
+                    key={col} 
+                    onClick={() => {
+                      const newVisible = new Set(visibleColumns)
+                      if (newVisible.has(col)) {
+                        newVisible.delete(col)
+                      } else {
+                        newVisible.add(col)
+                      }
+                      setVisibleColumns(newVisible)
+                    }}
+                    _hover={{ bg: 'blue.50' }}
+                  >
                     <Checkbox 
                       isChecked={visibleColumns.has(col)} 
                       onChange={() => {
@@ -890,6 +972,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                         setVisibleColumns(newVisible)
                       }}
                       mr={2}
+                      colorScheme="blue"
                     >
                       {col}
                     </Checkbox>
@@ -902,24 +985,29 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
         {accountPerformance && (
           <Box
-            minW="280px"
-            bg="bg.surface"
-            borderRadius="lg"
-            p={4}
+            bg="gradient-to-br from-blue-50 to-purple-50"
+            borderRadius="xl"
+            p={{ base: 4, md: 6 }}
             border="1px solid"
-            borderColor="border.subtle"
-            shadow="sm"
+            borderColor="gray.200"
+            boxShadow="lg"
           >
-            <HStack justify="space-between" mb={4}>
+            <Stack direction={{ base: "column", md: "row" }} justify="space-between" mb={6} spacing={4}>
               <Box>
-                <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
+                <Text 
+                  fontSize="xs" 
+                  textTransform="uppercase" 
+                  color="blue.600" 
+                  fontWeight="bold"
+                  letterSpacing="wide"
+                >
                   Account Lead Performance
                 </Text>
-                <Heading size="md" color="gray.700">
+                <Heading size={{ base: "sm", md: "md" }} color="gray.800" mt={1}>
                   {accountPerformance.accountName}
                 </Heading>
               </Box>
-              <Text fontSize="sm" color="gray.500">
+              <Text fontSize="sm" color="gray.600" fontWeight="medium">
                 {new Date().toLocaleDateString('en-GB', {
                   weekday: 'long',
                   day: 'numeric',
@@ -927,8 +1015,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                   year: 'numeric',
                 })}
               </Text>
-            </HStack>
-            <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+            </Stack>
+            <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={{ base: 3, md: 4 }}>
               {(['today', 'week', 'month'] as const).map((periodKey) => {
                 const period = accountPerformance.periodMetrics[periodKey]
                 const variance = period.actual - period.target
@@ -1027,38 +1115,95 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             {/* Comprehensive Leads Table for Selected Account */}
             {performanceAccountFilter && (
               <Box mt={6}>
-                <Heading size="sm" mb={4}>
+                <Heading size={{ base: "sm", md: "md" }} mb={4} color="gray.800">
                   Detailed Leads List - {performanceAccountFilter}
                 </Heading>
                 <Box
                   overflowX="auto"
                   overflowY="auto"
-                  maxH="600px"
+                  maxH={{ base: "400px", md: "600px" }}
                   border="1px solid"
-                  borderColor="border.subtle"
-                  borderRadius="lg"
+                  borderColor="gray.200"
+                  borderRadius="xl"
                   bg="white"
+                  boxShadow="md"
+                  css={{
+                    '&::-webkit-scrollbar': { width: '8px', height: '8px' },
+                    '&::-webkit-scrollbar-track': { background: '#F7FAFC' },
+                    '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '24px' },
+                    '&::-webkit-scrollbar-thumb:hover': { background: '#A0AEC0' },
+                  }}
                 >
-                  <Table variant="simple" size="sm">
-                    <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
+                  <Table variant="simple" size={{ base: "sm", md: "md" }}>
+                    <Thead bg="blue.50" position="sticky" top={0} zIndex={10} borderBottom="2px solid" borderColor="blue.200">
                       <Tr>
-                        {visibleColumns.has('Account') && <Th whiteSpace="nowrap">Account</Th>}
-                        {visibleColumns.has('Week') && <Th whiteSpace="nowrap">Week</Th>}
-                        {visibleColumns.has('Date') && <Th whiteSpace="nowrap">Date</Th>}
-                        {visibleColumns.has('Company') && <Th whiteSpace="nowrap">Company</Th>}
-                        {visibleColumns.has('Name') && <Th whiteSpace="nowrap">Name</Th>}
-                        {visibleColumns.has('Job Title') && <Th whiteSpace="nowrap">Job Title</Th>}
-                        {visibleColumns.has('Channel of Lead') && <Th whiteSpace="nowrap">Channel of Lead</Th>}
-                        {visibleColumns.has('OD Team Member') && <Th whiteSpace="nowrap">OD Team Member</Th>}
-                        {visibleColumns.has('Contact Info') && <Th whiteSpace="nowrap">Contact Info</Th>}
-                        {visibleColumns.has('Outcome') && <Th whiteSpace="nowrap">Outcome</Th>}
-                        {visibleColumns.has('Lead Status') && <Th whiteSpace="nowrap">Lead Status</Th>}
+                        {visibleColumns.has('Account') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Account
+                          </Th>
+                        )}
+                        {visibleColumns.has('Week') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Week
+                          </Th>
+                        )}
+                        {visibleColumns.has('Date') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Date
+                          </Th>
+                        )}
+                        {visibleColumns.has('Company') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Company
+                          </Th>
+                        )}
+                        {visibleColumns.has('Name') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Name
+                          </Th>
+                        )}
+                        {visibleColumns.has('Job Title') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Job Title
+                          </Th>
+                        )}
+                        {visibleColumns.has('Channel of Lead') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Channel
+                          </Th>
+                        )}
+                        {visibleColumns.has('OD Team Member') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Team Member
+                          </Th>
+                        )}
+                        {visibleColumns.has('Contact Info') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Contact
+                          </Th>
+                        )}
+                        {visibleColumns.has('Outcome') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Outcome
+                          </Th>
+                        )}
+                        {visibleColumns.has('Lead Status') && (
+                          <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                            Status
+                          </Th>
+                        )}
                       </Tr>
                     </Thead>
                     <Tbody>
                       {accountPerformanceLeads.length > 0 ? (
                         accountPerformanceLeads.map((lead, index) => (
-                          <Tr key={`lead-${index}`} _hover={{ bg: 'gray.50' }}>
+                          <Tr 
+                            key={`lead-${index}`} 
+                            _hover={{ bg: 'blue.50' }}
+                            borderBottom="1px solid"
+                            borderColor="gray.100"
+                            transition="all 0.2s"
+                          >
                             {visibleColumns.has('Account') && (
                               <Td whiteSpace="nowrap">
                                 <Badge colorScheme="gray">{lead.accountName}</Badge>
@@ -1124,9 +1269,21 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                     </Tbody>
                   </Table>
                 </Box>
-                <Text fontSize="xs" color="gray.500" mt={2}>
-                  Total: {accountPerformanceLeads.length} leads for {performanceAccountFilter}
-                </Text>
+                <HStack 
+                  mt={4} 
+                  p={3} 
+                  bg="blue.50" 
+                  borderRadius="lg"
+                  justify="space-between"
+                  flexWrap="wrap"
+                >
+                  <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                    Total Leads: <Badge colorScheme="blue" ml={2}>{accountPerformanceLeads.length}</Badge>
+                  </Text>
+                  <Text fontSize="xs" color="gray.600">
+                    Account: {performanceAccountFilter}
+                  </Text>
+                </HStack>
               </Box>
             )}
           </Box>
@@ -1134,9 +1291,16 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       </Box>
 
       {error && leads.length > 0 && (
-        <Alert status="warning" borderRadius="lg">
-          <AlertIcon />
-          <AlertDescription>
+        <Alert 
+          status="warning" 
+          borderRadius="xl"
+          boxShadow="md"
+          bg="orange.50"
+          borderLeft="4px solid"
+          borderColor="orange.400"
+        >
+          <AlertIcon color="orange.500" />
+          <AlertDescription color="gray.700" fontWeight="medium">
             Some data may be outdated. Last refresh attempt failed. Showing cached data.
           </AlertDescription>
         </Alert>
