@@ -28,13 +28,32 @@ import {
   MenuList,
   MenuItem,
   Checkbox,
+  Input,
+  InputGroup,
+  InputLeftElement,
+  VStack,
+  Flex,
+  Tag,
+  TagLabel,
+  TagCloseButton,
+  Divider,
+  useDisclosure,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  ModalCloseButton,
+  FormControl,
+  FormLabel,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon, ViewIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon, ViewIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, SettingsIcon, StarIcon } from '@chakra-ui/icons'
 import { type Account } from './AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
-import { getItem, getJson } from '../platform/storage'
+import { getItem, getJson, setItem } from '../platform/storage'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
 // Load accounts from storage (includes any edits made through the UI)
@@ -117,6 +136,42 @@ type LeadWithDate = {
   parsedDate: Date
 }
 
+type FilterState = {
+  search: string
+  accounts: string[]
+  channels: string[]
+  teamMembers: string[]
+  leadStatuses: string[]
+  outcomes: string[]
+  dateRange: {
+    field: 'Date' | 'First Meeting Date' | 'Closed Date' | ''
+    start: string
+    end: string
+  }
+  sortBy: string
+  sortOrder: 'asc' | 'desc'
+}
+
+type SavedFilter = {
+  id: string
+  name: string
+  filters: FilterState
+}
+
+const ITEMS_PER_PAGE = 50
+const LEAD_STATUS_OPTIONS = ['New', 'Qualified', 'Nurturing', 'Closed Won', 'Closed Lost', 'Converted']
+const DEFAULT_FILTERS: FilterState = {
+  search: '',
+  accounts: [],
+  channels: [],
+  teamMembers: [],
+  leadStatuses: [],
+  outcomes: [],
+  dateRange: { field: '', start: '', end: '' },
+  sortBy: 'Date',
+  sortOrder: 'desc',
+}
+
 function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) {
   // Load initial leads from localStorage
   const cachedLeads = loadLeadsFromStorage()
@@ -127,15 +182,62 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     const stored = loadLastRefreshFromStorage()
     return stored || new Date()
   })
-  const [filters] = useState({
-    account: '',
-    search: '',
-  })
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
+  
+  // Advanced filtering state
+  const [filters, setFilters] = useState<FilterState>(() => {
+    // Load from URL params if available
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const saved = params.get('filters')
+      if (saved) {
+        try {
+          return JSON.parse(decodeURIComponent(saved))
+        } catch {
+          return DEFAULT_FILTERS
+        }
+      }
+    }
+    return DEFAULT_FILTERS
+  })
+  
+  const [currentPage, setCurrentPage] = useState(1)
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(() => {
+    const stored = getItem('odcrm_saved_lead_filters')
+    if (stored) {
+      try {
+        return JSON.parse(stored)
+      } catch {
+        return []
+      }
+    }
+    return []
+  })
+  const saveFilterModal = useDisclosure()
+  const [newFilterName, setNewFilterName] = useState('')
   
   // Default visible columns for Detailed Leads List
   const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead']
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(defaultVisibleColumns))
+  
+  // Update URL when filters change
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (JSON.stringify(filters) !== JSON.stringify(DEFAULT_FILTERS)) {
+        params.set('filters', encodeURIComponent(JSON.stringify(filters)))
+      } else {
+        params.delete('filters')
+      }
+      const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`
+      window.history.replaceState({}, '', newUrl)
+    }
+  }, [filters])
+  
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filters])
   
   const toast = useToast()
   const lastErrorToastAtRef = useRef(0)
@@ -803,7 +905,335 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   }, [leads, performanceAccountFilter])
 
   // Get unique values for filter dropdowns
-  const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
+  const uniqueAccounts = useMemo(() => 
+    Array.from(new Set(leads.map((lead) => lead.accountName))).sort(),
+    [leads]
+  )
+  
+  const uniqueChannels = useMemo(() => {
+    const channels = new Set<string>()
+    leads.forEach(lead => {
+      const channel = lead['Channel of Lead'] || lead['channel of lead'] || ''
+      if (channel && channel.trim()) {
+        channels.add(channel.trim())
+      }
+    })
+    return Array.from(channels).sort()
+  }, [leads])
+  
+  const uniqueTeamMembers = useMemo(() => {
+    const members = new Set<string>()
+    leads.forEach(lead => {
+      const teamMember = lead['OD Team Member'] || lead['OD team member'] || lead['OD Team'] || ''
+      if (teamMember && teamMember.trim()) {
+        // Split by common separators
+        teamMember.split(/,|&|\/|\+|\band\b/gi).forEach(m => {
+          const trimmed = m.trim()
+          if (trimmed) members.add(trimmed)
+        })
+      }
+    })
+    return Array.from(members).sort()
+  }, [leads])
+  
+  const uniqueOutcomes = useMemo(() => {
+    const outcomes = new Set<string>()
+    leads.forEach(lead => {
+      const outcome = lead['Outcome'] || lead['outcome'] || ''
+      if (outcome && outcome.trim()) {
+        outcomes.add(outcome.trim())
+      }
+    })
+    return Array.from(outcomes).sort()
+  }, [leads])
+  
+  // Filter and sort leads
+  const filteredAndSortedLeads = useMemo(() => {
+    let filtered = [...leads]
+    
+    // Search filter (multi-column)
+    if (filters.search.trim()) {
+      const searchLower = filters.search.toLowerCase()
+      filtered = filtered.filter(lead => {
+        const searchFields = [
+          lead['Name'] || '',
+          lead['Company'] || '',
+          lead['Contact Info'] || '',
+          lead['Job Title'] || '',
+          lead.accountName || '',
+        ]
+        return searchFields.some(field => field.toLowerCase().includes(searchLower))
+      })
+    }
+    
+    // Account filter
+    if (filters.accounts.length > 0) {
+      filtered = filtered.filter(lead => filters.accounts.includes(lead.accountName))
+    }
+    
+    // Channel filter
+    if (filters.channels.length > 0) {
+      filtered = filtered.filter(lead => {
+        const channel = lead['Channel of Lead'] || lead['channel of lead'] || ''
+        return filters.channels.includes(channel.trim())
+      })
+    }
+    
+    // Team member filter
+    if (filters.teamMembers.length > 0) {
+      filtered = filtered.filter(lead => {
+        const teamMember = lead['OD Team Member'] || lead['OD team member'] || lead['OD Team'] || ''
+        if (!teamMember) return false
+        const members = teamMember.split(/,|&|\/|\+|\band\b/gi).map(m => m.trim())
+        return filters.teamMembers.some(filterMember => members.includes(filterMember))
+      })
+    }
+    
+    // Lead status filter
+    if (filters.leadStatuses.length > 0) {
+      filtered = filtered.filter(lead => {
+        const status = lead['Lead Status'] || lead['lead status'] || ''
+        return filters.leadStatuses.some(filterStatus => 
+          status.toLowerCase().includes(filterStatus.toLowerCase())
+        )
+      })
+    }
+    
+    // Outcome filter
+    if (filters.outcomes.length > 0) {
+      filtered = filtered.filter(lead => {
+        const outcome = lead['Outcome'] || lead['outcome'] || ''
+        return filters.outcomes.includes(outcome.trim())
+      })
+    }
+    
+    // Date range filter
+    if (filters.dateRange.field && (filters.dateRange.start || filters.dateRange.end)) {
+      filtered = filtered.filter(lead => {
+        const dateValue = lead[filters.dateRange.field] || ''
+        if (!dateValue) return false
+        const parsedDate = parseDate(dateValue)
+        if (!parsedDate) return false
+        
+        if (filters.dateRange.start) {
+          const startDate = new Date(filters.dateRange.start)
+          startDate.setHours(0, 0, 0, 0)
+          if (parsedDate < startDate) return false
+        }
+        
+        if (filters.dateRange.end) {
+          const endDate = new Date(filters.dateRange.end)
+          endDate.setHours(23, 59, 59, 999)
+          if (parsedDate > endDate) return false
+        }
+        
+        return true
+      })
+    }
+    
+    // Sorting
+    if (filters.sortBy) {
+      filtered.sort((a, b) => {
+        const aValue = a[filters.sortBy] || ''
+        const bValue = b[filters.sortBy] || ''
+        
+        // Try to parse as date first
+        const aDate = parseDate(aValue)
+        const bDate = parseDate(bValue)
+        
+        if (aDate && bDate) {
+          const diff = aDate.getTime() - bDate.getTime()
+          return filters.sortOrder === 'asc' ? diff : -diff
+        }
+        
+        // String comparison
+        const comparison = aValue.localeCompare(bValue)
+        return filters.sortOrder === 'asc' ? comparison : -comparison
+      })
+    }
+    
+    return filtered
+  }, [leads, filters])
+  
+  // Pagination
+  const totalPages = Math.ceil(filteredAndSortedLeads.length / ITEMS_PER_PAGE)
+  const paginatedLeads = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE
+    const end = start + ITEMS_PER_PAGE
+    return filteredAndSortedLeads.slice(start, end)
+  }, [filteredAndSortedLeads, currentPage])
+  
+  // Helper to highlight search terms
+  const highlightSearch = (text: string): ReactNode => {
+    if (!filters.search.trim() || !text) return <Text fontSize="sm">{text}</Text>
+    
+    const parts = text.split(new RegExp(`(${filters.search})`, 'gi'))
+    return (
+      <Text fontSize="sm">
+        {parts.map((part, i) => 
+          part.toLowerCase() === filters.search.toLowerCase() ? (
+            <Text as="span" key={i} bg="yellow.200" fontWeight="bold">{part}</Text>
+          ) : (
+            <Text as="span" key={i}>{part}</Text>
+          )
+        )}
+      </Text>
+    )
+  }
+  
+  // Export filtered results to CSV
+  const exportFilteredToCSV = useCallback(() => {
+    if (filteredAndSortedLeads.length === 0) {
+      toast({
+        title: 'No data to export',
+        description: 'There are no filtered leads to export.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+    
+    try {
+      // Get all unique column headers
+      const allHeaders = new Set<string>()
+      filteredAndSortedLeads.forEach(lead => {
+        Object.keys(lead).forEach(key => {
+          if (key !== 'accountName' || allHeaders.size === 0) {
+            allHeaders.add(key)
+          }
+        })
+      })
+      
+      const headers = Array.from(allHeaders)
+      const csvRows = [
+        headers.join(','),
+        ...filteredAndSortedLeads.map(lead =>
+          headers.map(header => {
+            const value = lead[header] || ''
+            return `"${String(value).replace(/"/g, '""')}"`
+          }).join(',')
+        ),
+      ]
+      
+      const csvContent = csvRows.join('\n')
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `leads-filtered-${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      
+      toast({
+        title: 'Export successful',
+        description: `Exported ${filteredAndSortedLeads.length} lead(s) to CSV.`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    } catch (error) {
+      console.error('Export error:', error)
+      toast({
+        title: 'Export failed',
+        description: 'Failed to export leads. Please try again.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }, [filteredAndSortedLeads, toast])
+  
+  // Save current filter as preset
+  const saveCurrentFilter = useCallback(() => {
+    if (!newFilterName.trim()) {
+      toast({
+        title: 'Name required',
+        description: 'Please enter a name for this filter preset.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+    
+    const newFilter: SavedFilter = {
+      id: Date.now().toString(),
+      name: newFilterName.trim(),
+      filters: { ...filters },
+    }
+    
+    const updated = [...savedFilters, newFilter]
+    setSavedFilters(updated)
+    setItem('odcrm_saved_lead_filters', JSON.stringify(updated))
+    setNewFilterName('')
+    saveFilterModal.onClose()
+    
+    toast({
+      title: 'Filter saved',
+      description: `"${newFilterName}" has been saved as a filter preset.`,
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
+  }, [newFilterName, filters, savedFilters, saveFilterModal, toast])
+  
+  // Load saved filter
+  const loadSavedFilter = useCallback((savedFilter: SavedFilter) => {
+    setFilters(savedFilter.filters)
+    toast({
+      title: 'Filter loaded',
+      description: `Loaded filter preset "${savedFilter.name}".`,
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    })
+  }, [toast])
+  
+  // Delete saved filter
+  const deleteSavedFilter = useCallback((id: string) => {
+    const updated = savedFilters.filter(f => f.id !== id)
+    setSavedFilters(updated)
+    setItem('odcrm_saved_lead_filters', JSON.stringify(updated))
+    toast({
+      title: 'Filter deleted',
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    })
+  }, [savedFilters, toast])
+  
+  // Helper to update filter
+  const updateFilter = useCallback((updates: Partial<FilterState>) => {
+    setFilters(prev => ({ ...prev, ...updates }))
+  }, [])
+  
+  // Helper to toggle array filter value
+  const toggleFilterValue = useCallback((
+    filterKey: 'accounts' | 'channels' | 'teamMembers' | 'leadStatuses' | 'outcomes',
+    value: string
+  ) => {
+    setFilters(prev => {
+      const current = prev[filterKey]
+      const updated = current.includes(value)
+        ? current.filter(v => v !== value)
+        : [...current, value]
+      return { ...prev, [filterKey]: updated }
+    })
+  }, [])
+  
+  // Clear all filters
+  const clearAllFilters = useCallback(() => {
+    setFilters(DEFAULT_FILTERS)
+    toast({
+      title: 'Filters cleared',
+      status: 'info',
+      duration: 2000,
+      isClosable: true,
+    })
+  }, [toast])
 
   if (loading && leads.length === 0) {
     return (
@@ -850,7 +1280,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
               Marketing Leads
             </Heading>
             <Text color="gray.600" fontSize={{ base: "sm", md: "md" }}>
-              All leads from customer data ({leads.length} leads)
+              All leads from customer data ({leads.length} total
+              {filteredAndSortedLeads.length !== leads.length && `, ${filteredAndSortedLeads.length} filtered`})
             </Text>
             <Text fontSize="xs" color="gray.500" mt={2}>
               Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
@@ -1025,6 +1456,351 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         </SimpleGrid>
       </Box>
 
+      {/* Advanced Filtering Section */}
+      <Box 
+        p={{ base: 4, md: 6 }} 
+        bg="white" 
+        borderRadius="xl" 
+        border="1px solid" 
+        borderColor="gray.200"
+        boxShadow="md"
+      >
+        <HStack justify="space-between" mb={4} flexWrap="wrap" gap={4}>
+          <Heading size={{ base: "sm", md: "md" }} color="gray.800">
+            Advanced Filters & Search
+          </Heading>
+          <HStack>
+            <Button
+              size="sm"
+              variant="outline"
+              colorScheme="blue"
+              leftIcon={<SettingsIcon />}
+              onClick={saveFilterModal.onOpen}
+            >
+              Save Filter
+            </Button>
+            {(filters.search || filters.accounts.length > 0 || filters.channels.length > 0 || 
+              filters.teamMembers.length > 0 || filters.leadStatuses.length > 0 || 
+              filters.outcomes.length > 0 || filters.dateRange.field) && (
+              <Button
+                size="sm"
+                variant="ghost"
+                colorScheme="red"
+                onClick={clearAllFilters}
+              >
+                Clear All
+              </Button>
+            )}
+          </HStack>
+        </HStack>
+        
+        {/* Search Bar */}
+        <Box mb={4}>
+          <InputGroup>
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="gray.400" />
+            </InputLeftElement>
+            <Input
+              placeholder="Search by name, company, email, phone, or job title..."
+              value={filters.search}
+              onChange={(e) => updateFilter({ search: e.target.value })}
+              size="md"
+              borderRadius="lg"
+            />
+          </InputGroup>
+        </Box>
+        
+        {/* Filter Chips and Multi-Select Filters */}
+        <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} gap={4} mb={4}>
+          {/* Account Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Accounts
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" width="100%" variant="outline" borderRadius="lg">
+                Accounts {filters.accounts.length > 0 && `(${filters.accounts.length})`}
+              </MenuButton>
+              <MenuList maxH="300px" overflowY="auto">
+                {uniqueAccounts.map(account => (
+                  <MenuItem key={account} onClick={() => toggleFilterValue('accounts', account)}>
+                    <Checkbox isChecked={filters.accounts.includes(account)} mr={2} />
+                    {account}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+            {filters.accounts.length > 0 && (
+              <HStack mt={2} flexWrap="wrap">
+                {filters.accounts.map(account => (
+                  <Tag key={account} size="sm" colorScheme="blue">
+                    <TagLabel>{account}</TagLabel>
+                    <TagCloseButton onClick={() => toggleFilterValue('accounts', account)} />
+                  </Tag>
+                ))}
+              </HStack>
+            )}
+          </Box>
+          
+          {/* Channel Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Channels
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" width="100%" variant="outline" borderRadius="lg">
+                Channels {filters.channels.length > 0 && `(${filters.channels.length})`}
+              </MenuButton>
+              <MenuList maxH="300px" overflowY="auto">
+                {uniqueChannels.map(channel => (
+                  <MenuItem key={channel} onClick={() => toggleFilterValue('channels', channel)}>
+                    <Checkbox isChecked={filters.channels.includes(channel)} mr={2} />
+                    {channel}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+            {filters.channels.length > 0 && (
+              <HStack mt={2} flexWrap="wrap">
+                {filters.channels.map(channel => (
+                  <Tag key={channel} size="sm" colorScheme="green">
+                    <TagLabel>{channel}</TagLabel>
+                    <TagCloseButton onClick={() => toggleFilterValue('channels', channel)} />
+                  </Tag>
+                ))}
+              </HStack>
+            )}
+          </Box>
+          
+          {/* Team Member Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Team Members
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" width="100%" variant="outline" borderRadius="lg">
+                Team Members {filters.teamMembers.length > 0 && `(${filters.teamMembers.length})`}
+              </MenuButton>
+              <MenuList maxH="300px" overflowY="auto">
+                {uniqueTeamMembers.map(member => (
+                  <MenuItem key={member} onClick={() => toggleFilterValue('teamMembers', member)}>
+                    <Checkbox isChecked={filters.teamMembers.includes(member)} mr={2} />
+                    {member}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+            {filters.teamMembers.length > 0 && (
+              <HStack mt={2} flexWrap="wrap">
+                {filters.teamMembers.map(member => (
+                  <Tag key={member} size="sm" colorScheme="purple">
+                    <TagLabel>{member}</TagLabel>
+                    <TagCloseButton onClick={() => toggleFilterValue('teamMembers', member)} />
+                  </Tag>
+                ))}
+              </HStack>
+            )}
+          </Box>
+          
+          {/* Lead Status Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Lead Status
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" width="100%" variant="outline" borderRadius="lg">
+                Status {filters.leadStatuses.length > 0 && `(${filters.leadStatuses.length})`}
+              </MenuButton>
+              <MenuList maxH="300px" overflowY="auto">
+                {LEAD_STATUS_OPTIONS.map(status => (
+                  <MenuItem key={status} onClick={() => toggleFilterValue('leadStatuses', status)}>
+                    <Checkbox isChecked={filters.leadStatuses.includes(status)} mr={2} />
+                    {status}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+            {filters.leadStatuses.length > 0 && (
+              <HStack mt={2} flexWrap="wrap">
+                {filters.leadStatuses.map(status => (
+                  <Tag key={status} size="sm" colorScheme="orange">
+                    <TagLabel>{status}</TagLabel>
+                    <TagCloseButton onClick={() => toggleFilterValue('leadStatuses', status)} />
+                  </Tag>
+                ))}
+              </HStack>
+            )}
+          </Box>
+          
+          {/* Outcome Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Outcomes
+            </Text>
+            <Menu closeOnSelect={false}>
+              <MenuButton as={Button} size="sm" width="100%" variant="outline" borderRadius="lg">
+                Outcomes {filters.outcomes.length > 0 && `(${filters.outcomes.length})`}
+              </MenuButton>
+              <MenuList maxH="300px" overflowY="auto">
+                {uniqueOutcomes.map(outcome => (
+                  <MenuItem key={outcome} onClick={() => toggleFilterValue('outcomes', outcome)}>
+                    <Checkbox isChecked={filters.outcomes.includes(outcome)} mr={2} />
+                    {outcome}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </Menu>
+            {filters.outcomes.length > 0 && (
+              <HStack mt={2} flexWrap="wrap">
+                {filters.outcomes.map(outcome => (
+                  <Tag key={outcome} size="sm" colorScheme="teal">
+                    <TagLabel>{outcome}</TagLabel>
+                    <TagCloseButton onClick={() => toggleFilterValue('outcomes', outcome)} />
+                  </Tag>
+                ))}
+              </HStack>
+            )}
+          </Box>
+          
+          {/* Date Range Filter */}
+          <Box>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Date Range
+            </Text>
+            <VStack spacing={2} align="stretch">
+              <Select
+                size="sm"
+                value={filters.dateRange.field}
+                onChange={(e) => updateFilter({ 
+                  dateRange: { ...filters.dateRange, field: e.target.value as any }
+                })}
+                placeholder="Select date field"
+                borderRadius="lg"
+              >
+                <option value="Date">Date</option>
+                <option value="First Meeting Date">First Meeting Date</option>
+                <option value="Closed Date">Closed Date</option>
+              </Select>
+              {filters.dateRange.field && (
+                <>
+                  <Input
+                    type="date"
+                    size="sm"
+                    value={filters.dateRange.start}
+                    onChange={(e) => updateFilter({
+                      dateRange: { ...filters.dateRange, start: e.target.value }
+                    })}
+                    placeholder="Start date"
+                    borderRadius="lg"
+                  />
+                  <Input
+                    type="date"
+                    size="sm"
+                    value={filters.dateRange.end}
+                    onChange={(e) => updateFilter({
+                      dateRange: { ...filters.dateRange, end: e.target.value }
+                    })}
+                    placeholder="End date"
+                    borderRadius="lg"
+                  />
+                </>
+              )}
+            </VStack>
+          </Box>
+        </SimpleGrid>
+        
+        {/* Saved Filter Presets */}
+        {savedFilters.length > 0 && (
+          <Box mb={4}>
+            <Text fontSize="xs" fontWeight="bold" color="gray.600" mb={2} textTransform="uppercase">
+              Saved Filter Presets
+            </Text>
+            <HStack flexWrap="wrap" gap={2}>
+              {savedFilters.map(saved => (
+                <Tag key={saved.id} size="md" colorScheme="blue" cursor="pointer">
+                  <TagLabel onClick={() => loadSavedFilter(saved)}>
+                    <HStack>
+                      <StarIcon />
+                      <Text>{saved.name}</Text>
+                    </HStack>
+                  </TagLabel>
+                  <TagCloseButton onClick={() => deleteSavedFilter(saved.id)} />
+                </Tag>
+              ))}
+            </HStack>
+          </Box>
+        )}
+        
+        {/* Sort Controls */}
+        <HStack mb={4} flexWrap="wrap" gap={2}>
+          <Text fontSize="xs" fontWeight="bold" color="gray.600" textTransform="uppercase">
+            Sort By:
+          </Text>
+          <Select
+            size="sm"
+            value={filters.sortBy}
+            onChange={(e) => updateFilter({ sortBy: e.target.value })}
+            width="200px"
+            borderRadius="lg"
+          >
+            {columns.map(col => (
+              <option key={col} value={col}>{col}</option>
+            ))}
+          </Select>
+          <IconButton
+            aria-label="Toggle sort order"
+            icon={filters.sortOrder === 'asc' ? <ChevronUpIcon /> : <ChevronDownIcon />}
+            size="sm"
+            onClick={() => updateFilter({ sortOrder: filters.sortOrder === 'asc' ? 'desc' : 'asc' })}
+          />
+        </HStack>
+        
+        {/* Results Summary and Export */}
+        <HStack justify="space-between" mb={4} flexWrap="wrap" gap={2}>
+          <Text fontSize="sm" color="gray.700" fontWeight="medium">
+            Showing <Badge colorScheme="blue">{filteredAndSortedLeads.length}</Badge> of{' '}
+            <Badge colorScheme="gray">{leads.length}</Badge> leads
+            {filters.search && (
+              <Text as="span" color="gray.500" ml={2}>
+                matching "{filters.search}"
+              </Text>
+            )}
+          </Text>
+          <Button
+            size="sm"
+            colorScheme="green"
+            leftIcon={<DownloadIcon />}
+            onClick={exportFilteredToCSV}
+            isDisabled={filteredAndSortedLeads.length === 0}
+          >
+            Export Filtered ({filteredAndSortedLeads.length})
+          </Button>
+        </HStack>
+        
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <HStack justify="center" mt={4}>
+            <IconButton
+              aria-label="Previous page"
+              icon={<ChevronLeftIcon />}
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              isDisabled={currentPage === 1}
+            />
+            <Text fontSize="sm" color="gray.700" fontWeight="medium">
+              Page {currentPage} of {totalPages}
+            </Text>
+            <IconButton
+              aria-label="Next page"
+              icon={<ChevronRightIcon />}
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              isDisabled={currentPage === totalPages}
+            />
+          </HStack>
+        )}
+      </Box>
+      
       {/* Account Performance Filter Section */}
       <Box 
         p={{ base: 4, md: 6 }} 
@@ -1451,6 +2227,227 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
           </Box>
         )}
       </Box>
+
+      {/* Save Filter Modal */}
+      <Modal isOpen={saveFilterModal.isOpen} onClose={saveFilterModal.onClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Save Filter Preset</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <FormControl>
+              <FormLabel>Filter Name</FormLabel>
+              <Input
+                placeholder="e.g., Hot Leads, This Week, My Team"
+                value={newFilterName}
+                onChange={(e) => setNewFilterName(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    saveCurrentFilter()
+                  }
+                }}
+              />
+            </FormControl>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={saveFilterModal.onClose}>
+              Cancel
+            </Button>
+            <Button colorScheme="blue" onClick={saveCurrentFilter}>
+              Save
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+      
+      {/* Comprehensive Filtered Leads Table */}
+      {filteredAndSortedLeads.length > 0 && (
+        <Box 
+          p={{ base: 4, md: 6 }} 
+          bg="white" 
+          borderRadius="xl" 
+          border="1px solid" 
+          borderColor="gray.200"
+          boxShadow="md"
+        >
+          <Heading size={{ base: "sm", md: "md" }} mb={4} color="gray.800">
+            Filtered Leads ({filteredAndSortedLeads.length})
+          </Heading>
+          <Box
+            overflowX="auto"
+            overflowY="auto"
+            maxH={{ base: "400px", md: "600px" }}
+            border="1px solid"
+            borderColor="gray.200"
+            borderRadius="xl"
+            bg="white"
+            boxShadow="md"
+            css={{
+              '&::-webkit-scrollbar': { width: '8px', height: '8px' },
+              '&::-webkit-scrollbar-track': { background: '#F7FAFC' },
+              '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '24px' },
+              '&::-webkit-scrollbar-thumb:hover': { background: '#A0AEC0' },
+            }}
+          >
+            <Table variant="simple" size={{ base: "sm", md: "md" }}>
+              <Thead bg="blue.50" position="sticky" top={0} zIndex={10} borderBottom="2px solid" borderColor="blue.200">
+                <Tr>
+                  {visibleColumns.has('Account') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Account
+                    </Th>
+                  )}
+                  {visibleColumns.has('Week') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Week
+                    </Th>
+                  )}
+                  {visibleColumns.has('Date') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Date
+                    </Th>
+                  )}
+                  {visibleColumns.has('Company') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Company
+                    </Th>
+                  )}
+                  {visibleColumns.has('Name') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Name
+                    </Th>
+                  )}
+                  {visibleColumns.has('Job Title') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Job Title
+                    </Th>
+                  )}
+                  {visibleColumns.has('Channel of Lead') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Channel
+                    </Th>
+                  )}
+                  {visibleColumns.has('OD Team Member') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Team Member
+                    </Th>
+                  )}
+                  {visibleColumns.has('Contact Info') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Contact
+                    </Th>
+                  )}
+                  {visibleColumns.has('Outcome') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Outcome
+                    </Th>
+                  )}
+                  {visibleColumns.has('Lead Status') && (
+                    <Th whiteSpace="nowrap" color="gray.700" fontWeight="bold" fontSize="xs" textTransform="uppercase" letterSpacing="wide">
+                      Status
+                    </Th>
+                  )}
+                </Tr>
+              </Thead>
+              <Tbody>
+                {paginatedLeads.map((lead, index) => (
+                  <Tr 
+                    key={`filtered-lead-${index}`} 
+                    _hover={{ bg: 'blue.50' }}
+                    borderBottom="1px solid"
+                    borderColor="gray.100"
+                    transition="all 0.2s"
+                  >
+                    {visibleColumns.has('Account') && (
+                      <Td whiteSpace="nowrap">
+                        <Badge colorScheme="gray">{lead.accountName}</Badge>
+                      </Td>
+                    )}
+                    {visibleColumns.has('Week') && <Td whiteSpace="nowrap">{highlightSearch(lead['Week'] || '-')}</Td>}
+                    {visibleColumns.has('Date') && <Td whiteSpace="nowrap">{highlightSearch(lead['Date'] || '-')}</Td>}
+                    {visibleColumns.has('Company') && <Td>{highlightSearch(lead['Company'] || '-')}</Td>}
+                    {visibleColumns.has('Name') && <Td>{highlightSearch(lead['Name'] || '-')}</Td>}
+                    {visibleColumns.has('Job Title') && <Td>{highlightSearch(lead['Job Title'] || '-')}</Td>}
+                    {visibleColumns.has('Channel of Lead') && (
+                      <Td>
+                        {lead['Channel of Lead'] ? (
+                          <Badge colorScheme="blue" variant="subtle">
+                            {highlightSearch(lead['Channel of Lead'])}
+                          </Badge>
+                        ) : (
+                          '-'
+                        )}
+                      </Td>
+                    )}
+                    {visibleColumns.has('OD Team Member') && (
+                      <Td>
+                        {lead['OD Team Member'] ? (
+                          <Badge colorScheme="purple" variant="subtle">
+                            {highlightSearch(lead['OD Team Member'])}
+                          </Badge>
+                        ) : (
+                          '-'
+                        )}
+                      </Td>
+                    )}
+                    {visibleColumns.has('Contact Info') && <Td>{highlightSearch(lead['Contact Info'] || '-')}</Td>}
+                    {visibleColumns.has('Outcome') && <Td>{highlightSearch(lead['Outcome'] || '-')}</Td>}
+                    {visibleColumns.has('Lead Status') && (
+                      <Td>
+                        {lead['Lead Status'] ? (
+                          <Badge
+                            colorScheme={
+                              lead['Lead Status'].toLowerCase().includes('closed')
+                                ? 'green'
+                                : lead['Lead Status'].toLowerCase().includes('meeting')
+                                ? 'orange'
+                                : 'gray'
+                            }
+                          >
+                            {highlightSearch(lead['Lead Status'])}
+                          </Badge>
+                        ) : (
+                          '-'
+                        )}
+                      </Td>
+                    )}
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          </Box>
+          {totalPages > 1 && (
+            <HStack justify="center" mt={4}>
+              <IconButton
+                aria-label="Previous page"
+                icon={<ChevronLeftIcon />}
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                isDisabled={currentPage === 1}
+              />
+              <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                Page {currentPage} of {totalPages} ({filteredAndSortedLeads.length} total)
+              </Text>
+              <IconButton
+                aria-label="Next page"
+                icon={<ChevronRightIcon />}
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                isDisabled={currentPage === totalPages}
+              />
+            </HStack>
+          )}
+        </Box>
+      )}
+      
+      {filteredAndSortedLeads.length === 0 && leads.length > 0 && (
+        <Alert status="info" borderRadius="xl">
+          <AlertIcon />
+          <AlertDescription>
+            No leads match the current filters. Try adjusting your search criteria.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {error && leads.length > 0 && (
         <Alert 
