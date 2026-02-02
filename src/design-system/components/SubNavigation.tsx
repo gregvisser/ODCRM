@@ -1,12 +1,12 @@
 /**
  * SubNavigation - Standard secondary navigation for sub-pages
- * 
+ *
  * Replaces the inconsistent sidebar patterns across Customers, Marketing, Settings.
- * - Desktop: Vertical sidebar with collapsible option
+ * - Desktop: Vertical sidebar with collapsible option (DRAG & DROP ENABLED)
  * - Mobile: Horizontal scrollable tabs OR collapsible sidebar
  */
 
-import { useState, type ReactNode } from 'react'
+import React, { useState, type ReactNode } from 'react'
 import {
   Box,
   Flex,
@@ -22,6 +22,25 @@ import {
   useBreakpointValue,
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import {
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { spacing, semanticColor, radius, shadow, fontSize } from '../tokens'
 import type { IconType } from 'react-icons'
 
@@ -36,6 +55,8 @@ export interface SubNavItem {
   content: ReactNode
   /** Badge count (optional) */
   badge?: number
+  /** Sort order (for persistence) */
+  sortOrder?: number
 }
 
 interface SubNavigationProps {
@@ -45,25 +66,122 @@ interface SubNavigationProps {
   activeId?: string
   /** On item change callback */
   onChange?: (itemId: string) => void
+  /** On reorder callback (returns new item order) */
+  onReorder?: (items: SubNavItem[]) => void
   /** Section title */
   title?: string
   /** Force desktop layout on mobile (not recommended) */
   forceDesktopLayout?: boolean
+  /** Enable drag and drop reordering (default: true) */
+  enableDragDrop?: boolean
+}
+
+// Sortable Tab Component for drag and drop
+interface SortableTabProps {
+  item: SubNavItem
+  isActive: boolean
+  onClick: () => void
+}
+
+function SortableTab({ item, isActive, onClick }: SortableTabProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <Box ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <Tab
+        justifyContent="flex-start"
+        fontSize={fontSize.sm}
+        fontWeight="600"
+        borderRadius={radius.md}
+        color={semanticColor.textMuted}
+        px={spacing[3]}
+        py={spacing[2]}
+        cursor={isDragging ? 'grabbing' : 'grab'}
+        _hover={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary }}
+        _selected={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary, boxShadow: shadow.sm }}
+        onClick={onClick}
+      >
+        <HStack spacing={spacing[2]} w="100%">
+          {item.icon && <Icon as={item.icon} boxSize={4} />}
+          <Text flex="1">{item.label}</Text>
+          {item.badge && item.badge > 0 && (
+            <Box
+              as="span"
+              bg="accent.500"
+              color="white"
+              fontSize="xs"
+              fontWeight="bold"
+              px={spacing[2]}
+              py="2px"
+              borderRadius="full"
+              minW="20px"
+              textAlign="center"
+            >
+              {item.badge}
+            </Box>
+          )}
+        </HStack>
+      </Tab>
+    </Box>
+  )
 }
 
 export function SubNavigation({
   items,
   activeId,
   onChange,
+  onReorder,
   title = 'Sections',
   forceDesktopLayout = false,
+  enableDragDrop = true,
 }: SubNavigationProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(true)
+  const [localItems, setLocalItems] = useState(items)
   const isMobile = useBreakpointValue({ base: true, md: false })
   const useMobileLayout = !forceDesktopLayout && isMobile
 
+  // Update local items when props change
+  React.useEffect(() => {
+    setLocalItems(items)
+  }, [items])
+
   // Find active tab index
-  const activeIndex = activeId ? items.findIndex((item) => item.id === activeId) : 0
+  const activeIndex = activeId ? localItems.findIndex((item) => item.id === activeId) : 0
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Handle drag end
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      const oldIndex = localItems.findIndex((item) => item.id === active.id)
+      const newIndex = localItems.findIndex((item) => item.id === over.id)
+
+      const newItems = arrayMove(localItems, oldIndex, newIndex)
+      setLocalItems(newItems)
+      onReorder?.(newItems)
+    }
+  }
 
   // Mobile Layout: Horizontal scrollable tabs
   if (useMobileLayout) {
@@ -191,44 +309,67 @@ export function SubNavigation({
               />
             </Flex>
 
-            {/* Tab List */}
-            <TabList flexDirection="column" gap={spacing[1]}>
-              {items.map((item) => (
-                <Tab
-                  key={item.id}
-                  justifyContent="flex-start"
-                  fontSize={fontSize.sm}
-                  fontWeight="600"
-                  borderRadius={radius.md}
-                  color={semanticColor.textMuted}
-                  px={spacing[3]}
-                  py={spacing[2]}
-                  _hover={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary }}
-                  _selected={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary, boxShadow: shadow.sm }}
-                >
-                  <HStack spacing={spacing[2]} w="100%">
-                    {item.icon && <Icon as={item.icon} boxSize={4} />}
-                    <Text flex="1">{item.label}</Text>
-                    {item.badge && item.badge > 0 && (
-                      <Box
-                        as="span"
-                        bg="accent.500"
-                        color="white"
-                        fontSize="xs"
-                        fontWeight="bold"
-                        px={spacing[2]}
-                        py="2px"
-                        borderRadius="full"
-                        minW="20px"
-                        textAlign="center"
+            {/* Tab List with Drag & Drop */}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={localItems.map(item => item.id)} strategy={verticalListSortingStrategy}>
+                <TabList flexDirection="column" gap={spacing[1]}>
+                  {localItems.map((item) => {
+                    const isActive = activeId === item.id
+                    if (enableDragDrop) {
+                      return (
+                        <SortableTab
+                          key={item.id}
+                          item={item}
+                          isActive={isActive}
+                          onClick={() => onChange?.(item.id)}
+                        />
+                      )
+                    }
+                    // Fallback for when drag drop is disabled
+                    return (
+                      <Tab
+                        key={item.id}
+                        justifyContent="flex-start"
+                        fontSize={fontSize.sm}
+                        fontWeight="600"
+                        borderRadius={radius.md}
+                        color={semanticColor.textMuted}
+                        px={spacing[3]}
+                        py={spacing[2]}
+                        cursor="pointer"
+                        _hover={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary }}
+                        _selected={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary, boxShadow: shadow.sm }}
                       >
-                        {item.badge}
-                      </Box>
-                    )}
-                  </HStack>
-                </Tab>
-              ))}
-            </TabList>
+                        <HStack spacing={spacing[2]} w="100%">
+                          {item.icon && <Icon as={item.icon} boxSize={4} />}
+                          <Text flex="1">{item.label}</Text>
+                          {item.badge && item.badge > 0 && (
+                            <Box
+                              as="span"
+                              bg="accent.500"
+                              color="white"
+                              fontSize="xs"
+                              fontWeight="bold"
+                              px={spacing[2]}
+                              py="2px"
+                              borderRadius="full"
+                              minW="20px"
+                              textAlign="center"
+                            >
+                              {item.badge}
+                            </Box>
+                          )}
+                        </HStack>
+                      </Tab>
+                    )
+                  })}
+                </TabList>
+              </SortableContext>
+            </DndContext>
           </Box>
         ) : (
           /* Desktop Sidebar - Collapsed */
