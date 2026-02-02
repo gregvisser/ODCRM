@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Box,
   Grid,
@@ -22,6 +22,11 @@ import {
   Button,
   Flex,
   Spacer,
+  Spinner,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
 } from '@chakra-ui/react'
 import {
   EmailIcon,
@@ -33,26 +38,237 @@ import {
   ArrowUpIcon,
   AddIcon,
 } from '@chakra-ui/icons'
+import { api } from '../../../utils/api'
+
+// Helper function to format relative time
+function getTimeAgo(date: Date): string {
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  if (diffMins < 60) {
+    return diffMins <= 1 ? '1 min ago' : `${diffMins} min ago`
+  } else if (diffHours < 24) {
+    return diffHours === 1 ? '1 hour ago' : `${diffHours} hours ago`
+  } else {
+    return diffDays === 1 ? '1 day ago' : `${diffDays} days ago`
+  }
+}
+
+// Helper function to parse time ago for sorting
+function parseTimeAgo(timeStr: string): number {
+  const now = new Date().getTime()
+  const match = timeStr.match(/(\d+)\s+(min|hour|day)/)
+  if (!match) return now
+
+  const value = parseInt(match[1])
+  const unit = match[2]
+
+  let multiplier = 1000 * 60 // minutes
+  if (unit === 'hour') multiplier *= 60
+  if (unit === 'day') multiplier *= 60 * 24
+
+  return now - (value * multiplier)
+}
+
+interface DashboardStats {
+  totalContacts: number
+  activeSequences: number
+  emailsSentToday: number
+  replyRate: number
+  openRate: number
+  sequencesRunning: number
+  pendingTasks: number
+  deliverability: number
+}
+
+interface RecentActivity {
+  type: 'sequence_started' | 'email_sent' | 'reply_received' | 'sequence_completed' | 'campaign_sent'
+  message: string
+  time: string
+}
 
 const OverviewDashboard: React.FC = () => {
-  // Mock data - in real implementation, this would come from API calls
-  const stats = {
-    totalContacts: 33519,
-    activeSequences: 12,
-    emailsSentToday: 2340,
-    replyRate: 2.1,
-    openRate: 24.5,
-    sequencesRunning: 8,
-    pendingTasks: 15,
-    deliverability: 98.2,
+  const [stats, setStats] = useState<DashboardStats>({
+    totalContacts: 0,
+    activeSequences: 0,
+    emailsSentToday: 0,
+    replyRate: 0,
+    openRate: 0,
+    sequencesRunning: 0,
+    pendingTasks: 0,
+    deliverability: 0,
+  })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
+
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+
+        // Fetch data from multiple API endpoints
+        const [sequencesRes, campaignsRes, contactsRes, reportsRes, inboxRes] = await Promise.allSettled([
+          api.get('/api/sequences'),
+          api.get('/api/campaigns'),
+          api.get('/api/contacts'),
+          api.get('/api/reports/emails'),
+          api.get('/api/inbox?limit=10'),
+        ])
+
+        // Process sequences data
+        let totalContacts = 0
+        let activeSequences = 0
+        let sequencesRunning = 0
+
+        if (sequencesRes.status === 'fulfilled') {
+          const sequences = sequencesRes.value?.data || []
+          activeSequences = sequences.length
+          sequencesRunning = sequences.filter((s: any) => s.status === 'active').length
+        }
+
+        // Process contacts data
+        if (contactsRes.status === 'fulfilled') {
+          const contacts = contactsRes.value?.data || []
+          totalContacts = contacts.length
+        }
+
+        // Process email reports for today's stats
+        let emailsSentToday = 0
+        let replyRate = 0
+        let openRate = 0
+        let deliverability = 98.2 // Default deliverability
+
+        if (reportsRes.status === 'fulfilled') {
+          const reportData = reportsRes.value?.data || {}
+          const totals = reportData.totals || {}
+
+          // Calculate today's sent emails
+          emailsSentToday = totals.sent || 0
+
+          // Calculate rates
+          const totalSent = totals.sent || 1 // Avoid division by zero
+          const replies = totals.replied || 0
+          const opens = totals.opened || 0
+
+          replyRate = (replies / totalSent) * 100
+          openRate = (opens / totalSent) * 100
+
+          // Calculate deliverability (sent vs bounced)
+          const bounced = totals.bounced || 0
+          if (totalSent > 0) {
+            deliverability = ((totalSent - bounced) / totalSent) * 100
+          }
+        }
+
+        // Mock pending tasks for now (could be calculated from campaigns/tasks)
+        const pendingTasks = 0
+
+        setStats({
+          totalContacts,
+          activeSequences,
+          emailsSentToday,
+          replyRate: Math.round(replyRate * 10) / 10, // Round to 1 decimal
+          openRate: Math.round(openRate * 10) / 10,
+          sequencesRunning,
+          pendingTasks,
+          deliverability: Math.round(deliverability * 10) / 10,
+        })
+
+        // Process recent activity from inbox and campaigns
+        const activity: RecentActivity[] = []
+
+        // Add campaign activity
+        if (campaignsRes.status === 'fulfilled') {
+          const campaigns = campaignsRes.value?.data || []
+          campaigns.slice(0, 3).forEach((campaign: any) => {
+            if (campaign.createdAt) {
+              const timeAgo = getTimeAgo(new Date(campaign.createdAt))
+              activity.push({
+                type: 'campaign_sent',
+                message: `Campaign "${campaign.name}" was created`,
+                time: timeAgo,
+              })
+            }
+          })
+        }
+
+        // Add inbox/reply activity
+        if (inboxRes.status === 'fulfilled') {
+          const inboxItems = inboxRes.value?.data || []
+          inboxItems.slice(0, 3).forEach((item: any) => {
+            if (item.receivedAt) {
+              const timeAgo = getTimeAgo(new Date(item.receivedAt))
+              activity.push({
+                type: 'reply_received',
+                message: `New reply from ${item.from || 'contact'}`,
+                time: timeAgo,
+              })
+            }
+          })
+        }
+
+        // Add sequence activity
+        if (sequencesRes.status === 'fulfilled') {
+          const sequences = sequencesRes.value?.data || []
+          sequences.slice(0, 2).forEach((sequence: any) => {
+            if (sequence.createdAt) {
+              const timeAgo = getTimeAgo(new Date(sequence.createdAt))
+              activity.push({
+                type: 'sequence_started',
+                message: `Sequence "${sequence.name}" was created`,
+                time: timeAgo,
+              })
+            }
+          })
+        }
+
+        // Sort by time and take top 5
+        activity.sort((a, b) => {
+          const timeA = parseTimeAgo(a.time)
+          const timeB = parseTimeAgo(b.time)
+          return timeA - timeB
+        })
+
+        setRecentActivity(activity.slice(0, 5))
+
+      } catch (err) {
+        console.error('Error fetching dashboard stats:', err)
+        setError('Failed to load dashboard statistics')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchDashboardStats()
+  }, [])
+
+  if (loading) {
+    return (
+      <Box p={6} maxW="1200px" mx="auto" textAlign="center">
+        <VStack spacing={4}>
+          <Spinner size="xl" color="blue.500" thickness="4px" />
+          <Text fontSize="lg" color="gray.600">Loading dashboard statistics...</Text>
+        </VStack>
+      </Box>
+    )
   }
 
-  const recentActivity = [
-    { type: 'sequence_started', message: 'Welcome sequence started for 150 contacts', time: '2 min ago' },
-    { type: 'email_sent', message: 'Follow-up emails sent to 89 prospects', time: '15 min ago' },
-    { type: 'reply_received', message: 'New reply from john@techcorp.com', time: '1 hour ago' },
-    { type: 'sequence_completed', message: 'Product demo sequence completed for 23 contacts', time: '2 hours ago' },
-  ]
+  if (error) {
+    return (
+      <Box p={6} maxW="1200px" mx="auto">
+        <Alert status="error" borderRadius="lg">
+          <AlertIcon />
+          <AlertTitle>Error loading dashboard!</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      </Box>
+    )
+  }
 
   return (
     <Box p={6} maxW="1200px" mx="auto">
