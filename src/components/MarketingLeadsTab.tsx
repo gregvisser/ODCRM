@@ -1968,10 +1968,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                   <Box
                     key={periodKey}
                     border="1px solid"
-                    borderColor="border.subtle"
+                    borderColor="gray.200"
                     borderRadius="lg"
                     p={4}
-                    bg="bg.subtle"
+                    bg="gray.50"
                     minH="280px"
                   >
                     <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
@@ -2009,7 +2009,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                               <Text fontSize="sm" color="gray.700" noOfLines={1}>
                                 {channel}
                               </Text>
-                              <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                              <Badge colorScheme="blue" variant="subtle" fontSize="xs">
                                 {period.breakdown[channel]}
                               </Badge>
                             </HStack>
@@ -2033,7 +2033,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                               <Text fontSize="sm" color="gray.700" noOfLines={1}>
                                 {member}
                               </Text>
-                              <Badge variant="subtle" colorScheme="gray" fontSize="xs">
+                              <Badge colorScheme="purple" variant="subtle" fontSize="xs">
                                 {period.teamBreakdown?.[member] || 0}
                               </Badge>
                             </HStack>
