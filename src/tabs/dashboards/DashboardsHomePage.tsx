@@ -292,8 +292,7 @@ export default function DashboardsHomePage() {
       if (error || !data || data.length === 0) return
 
       const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-      setJson(OdcrmStorageKeys.accounts, hydrated)
-      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      // VIOLATION FIX: Removed localStorage persistence - database is single source of truth
       setAccountsData(hydrated)
       emit('accountsUpdated', hydrated)
     }
