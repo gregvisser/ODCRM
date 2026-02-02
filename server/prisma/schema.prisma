@@ -523,6 +523,7 @@ model LeadSyncState {
   lastSuccessAt DateTime?
   lastError     String?
   rowCount      Int?
+  lastChecksum  String?  // MD5 checksum for change detection
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

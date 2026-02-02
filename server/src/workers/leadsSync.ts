@@ -338,7 +338,6 @@ function generateStableLeadId(lead: LeadRow, customerId: string): string {
   const identifier = identifierParts.join('|')
 
   // Create hash for stable ID
-  const crypto = require('crypto')
   const hash = crypto.createHash('sha256').update(identifier).digest('hex')
 
   return `lead_${hash.substring(0, 16)}`
@@ -551,7 +550,6 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
     console.log(`   Total leads processed: ${leads.length}`)
 
     // Calculate data checksum for change detection
-    const crypto = await import('crypto')
     const dataString = JSON.stringify(leads.map(l => ({ ...l, accountName: undefined })).sort((a, b) =>
       generateStableLeadId(a, customer.id).localeCompare(generateStableLeadId(b, customer.id))
     ))
