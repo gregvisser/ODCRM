@@ -292,14 +292,18 @@ export default function DashboardsHomePage() {
       if (error || !data || data.length === 0) return
 
       const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-      // VIOLATION FIX: Removed localStorage persistence - database is single source of truth
+      setJson(OdcrmStorageKeys.accounts, hydrated)
+      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
       setAccountsData(hydrated)
       emit('accountsUpdated', hydrated)
     }
 
     const init = async () => {
-      await syncFromCustomers()
-      await refreshLeads(false)
+      // IMMEDIATE LOAD: Fetch fresh data on mount, don't wait for auto-refresh
+      await Promise.allSettled([
+        syncFromCustomers(),
+        refreshLeads(false)
+      ])
     }
 
     void init()
