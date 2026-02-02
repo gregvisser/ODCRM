@@ -299,11 +299,8 @@ export default function DashboardsHomePage() {
     }
 
     const init = async () => {
-      // IMMEDIATE LOAD: Fetch fresh data on mount, don't wait for auto-refresh
-      await Promise.allSettled([
-        syncFromCustomers(),
-        refreshLeads(false)
-      ])
+      await syncFromCustomers()
+      await refreshLeads(false)
     }
 
     void init()
@@ -656,16 +653,46 @@ export default function DashboardsHomePage() {
                 const { data, error } = await api.get<CustomerApi[]>('/api/customers')
                 if (error || !data || data.length === 0) return
                 const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-                setJson(OdcrmStorageKeys.accounts, hydrated)
-                setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+                // NO localStorage persistence - API is the ONLY source of truth
                 setAccountsData(hydrated)
                 emit('accountsUpdated', hydrated)
               }
 
-              await Promise.all([
+              // Use Promise.allSettled for consistency with auto-refresh
+              const results = await Promise.allSettled([
                 syncFromCustomers(),
                 refreshLeads(true)
               ])
+
+              // Check actual operation success before showing feedback
+              const allSuccessful = results.every(result => result.status === 'fulfilled')
+              const hasPartialSuccess = results.some(result => result.status === 'fulfilled')
+
+              if (allSuccessful) {
+                toast({
+                  title: 'Dashboard refreshed',
+                  description: 'Latest customer and lead data loaded',
+                  status: 'success',
+                  duration: 2000,
+                  isClosable: true,
+                })
+              } else if (hasPartialSuccess) {
+                toast({
+                  title: 'Partial refresh completed',
+                  description: 'Some data refreshed successfully',
+                  status: 'warning',
+                  duration: 3000,
+                  isClosable: true,
+                })
+              } else {
+                toast({
+                  title: 'Refresh failed',
+                  description: 'Could not refresh dashboard data',
+                  status: 'error',
+                  duration: 3000,
+                  isClosable: true,
+                })
+              }
 
               toast({
                 title: 'Dashboard refreshed',
