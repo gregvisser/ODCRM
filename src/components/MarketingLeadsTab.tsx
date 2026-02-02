@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -335,22 +335,75 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
   const columns = [...orderedColumns, ...remainingColumns.sort()]
 
-  // Helper to parse dates in various formats
+  // Helper to parse dates in various formats (European formats prioritized)
   const parseDate = (dateStr: string): Date | null => {
     if (!dateStr || dateStr.trim() === '') return null
     
-    // Try DD.MM.YY or DD.MM.YYYY format (from the Google Sheet)
-    const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
+    const trimmed = dateStr.trim()
+    
+    // Try DD.MM.YY or DD.MM.YYYY format (European format - most common)
+    const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/)
     if (ddmmyy) {
       const day = parseInt(ddmmyy[1], 10)
       const month = parseInt(ddmmyy[2], 10) - 1
-      const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-      return new Date(year, month, day)
+      let year = parseInt(ddmmyy[3], 10)
+      if (year < 100) year += 2000
+      const date = new Date(year, month, day)
+      if (!isNaN(date.getTime())) return date
     }
     
-    // Try standard date parsing
-    const parsed = new Date(dateStr)
-    return isNaN(parsed.getTime()) ? null : parsed
+    // Try DD/MM/YY or DD/MM/YYYY format (European slash format)
+    const ddmmyySlash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/)
+    if (ddmmyySlash) {
+      const day = parseInt(ddmmyySlash[1], 10)
+      const month = parseInt(ddmmyySlash[2], 10) - 1
+      let year = parseInt(ddmmyySlash[3], 10)
+      if (year < 100) year += 2000
+      const date = new Date(year, month, day)
+      if (!isNaN(date.getTime())) return date
+    }
+    
+    // Try DD-MM-YY or DD-MM-YYYY format (European dash format)
+    const ddmmyyDash = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/)
+    if (ddmmyyDash) {
+      const day = parseInt(ddmmyyDash[1], 10)
+      const month = parseInt(ddmmyyDash[2], 10) - 1
+      let year = parseInt(ddmmyyDash[3], 10)
+      if (year < 100) year += 2000
+      const date = new Date(year, month, day)
+      if (!isNaN(date.getTime())) return date
+    }
+    
+    // Try YYYY-MM-DD format (ISO format)
+    const yyyymmdd = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+    if (yyyymmdd) {
+      const year = parseInt(yyyymmdd[1], 10)
+      const month = parseInt(yyyymmdd[2], 10) - 1
+      const day = parseInt(yyyymmdd[3], 10)
+      const date = new Date(year, month, day)
+      if (!isNaN(date.getTime())) return date
+    }
+    
+    // Try MM/DD/YYYY format (US format - less common but handle it)
+    const mmddyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (mmddyyyy) {
+      const month = parseInt(mmddyyyy[1], 10) - 1
+      const day = parseInt(mmddyyyy[2], 10)
+      const year = parseInt(mmddyyyy[3], 10)
+      const date = new Date(year, month, day)
+      if (!isNaN(date.getTime())) return date
+    }
+    
+    // Try native Date parsing as fallback
+    const parsed = new Date(trimmed)
+    if (!isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear()
+      if (year >= 2000 && year <= 2100) {
+        return parsed
+      }
+    }
+    
+    return null
   }
 
   // Helper to check if a value is a URL
@@ -403,230 +456,333 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
   // Unified analytics across all accounts
   const unifiedAnalytics = useMemo(() => {
-    const accountsData = loadAccountsFromStorage()
-    
-    // Calculate total targets across all accounts
-    const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
-    const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
-    
-    const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const endOfToday = new Date(startOfToday)
-    endOfToday.setDate(endOfToday.getDate() + 1)
+    try {
+      const accountsData = loadAccountsFromStorage()
+      
+      // Calculate total targets across all accounts
+      const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
+      const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
+      
+      // Use Europe/London timezone for consistent date calculations
+      const now = new Date()
+      const londonTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now)
+      const [day, month, year] = londonTime.split('/').map(Number)
+      const londonNow = new Date(year, month - 1, day)
+      
+      const startOfToday = new Date(londonNow.getFullYear(), londonNow.getMonth(), londonNow.getDate())
+      const endOfToday = new Date(startOfToday)
+      endOfToday.setDate(endOfToday.getDate() + 1)
 
-    // Current week: Monday -> next Monday (exclusive)
-    const currentWeekStart = new Date(startOfToday)
-    const day = currentWeekStart.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    currentWeekStart.setDate(currentWeekStart.getDate() + diff)
-    const currentWeekEnd = new Date(currentWeekStart)
-    currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
+      // Current week: Monday -> next Monday (exclusive)
+      const currentWeekStart = new Date(startOfToday)
+      const dayOfWeek = currentWeekStart.getDay()
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+      currentWeekStart.setDate(currentWeekStart.getDate() + diff)
+      currentWeekStart.setHours(0, 0, 0, 0)
+      const currentWeekEnd = new Date(currentWeekStart)
+      currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
 
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1) // exclusive (start of next month)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+      const monthStart = new Date(londonNow.getFullYear(), londonNow.getMonth(), 1)
+      monthStart.setHours(0, 0, 0, 0)
+      const monthEnd = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 1) // exclusive (start of next month)
+      const daysInMonth = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 0).getDate()
 
-    // Calculate daily target from weekly/monthly
-    const dailyTargetFromWeekly = totalWeeklyTarget / 7
-    const dailyTargetFromMonthly = totalMonthlyTarget / daysInMonth
-    const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
+      // Calculate daily target from weekly/monthly (with division by zero protection)
+      const dailyTargetFromWeekly = totalWeeklyTarget > 0 ? totalWeeklyTarget / 7 : 0
+      const dailyTargetFromMonthly = totalMonthlyTarget > 0 && daysInMonth > 0 ? totalMonthlyTarget / daysInMonth : 0
+      const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
 
-    // Process all leads (not filtered by account)
-    const leadsWithDates: LeadWithDate[] = leads
-      .map((lead) => {
-        const dateValue =
-          lead['Date'] ||
-          lead['date'] ||
-          lead['Week'] ||
-          lead['week'] ||
-          lead['First Meeting Date'] ||
-          ''
-        const parsedDate = parseDate(dateValue)
-        if (!parsedDate) {
-          return null
-        }
-        return {
-          data: lead,
-          parsedDate,
-        }
-      })
-      .filter((item): item is LeadWithDate => Boolean(item))
-
-    const computeMetrics = (start: Date, end: Date) => {
-      const breakdown: Record<string, number> = {}
-      const teamBreakdown: Record<string, number> = {}
-      let actual = 0
-
-      leadsWithDates.forEach((entry) => {
-        if (entry.parsedDate >= start && entry.parsedDate < end) {
-          actual += 1
-          const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
-          const normalizedSource = normalizeLeadSource(channel)
-          if (normalizedSource) {
-            breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
-          } else if (channel) {
-            // Also track non-normalized channels
-            breakdown[channel] = (breakdown[channel] || 0) + 1
+      // Process all leads (not filtered by account)
+      // Enhanced date field detection - check all fields for date patterns first
+      const leadsWithDates: LeadWithDate[] = leads
+        .map((lead) => {
+          let dateValue = ''
+          let dateFieldName = ''
+          
+          // FIRST: Check ALL fields for DD.MM.YY format (like "05.01.26") - this is the key!
+          for (const key of Object.keys(lead)) {
+            const value = lead[key] || ''
+            if (value && value.trim() && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value.trim())) {
+              dateValue = value.trim()
+              dateFieldName = key
+              break
+            }
           }
-
-          // OD Team Member breakdown
-          const rawTeamMember =
-            entry.data['OD Team Member'] ||
-            entry.data['OD team member'] ||
-            entry.data['od team member'] ||
-            entry.data['OD Team'] ||
-            entry.data['od team'] ||
-            ''
-
-          if (rawTeamMember && rawTeamMember.trim()) {
-            const members = rawTeamMember
-              .split(/,|&|\/|\+|\band\b/gi)
-              .map((m) => m.trim())
-              .filter(Boolean)
-
-            members.forEach((member) => {
-              teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
-            })
+          
+          // SECOND: If no DD.MM.YY format found, check for date fields in preferred order
+          if (!dateValue || !dateValue.trim()) {
+            dateValue =
+              lead['Date'] ||
+              lead['date'] ||
+              lead['Week'] ||
+              lead['week'] ||
+              lead['First Meeting Date'] ||
+              ''
+            
+            if (dateValue) {
+              dateFieldName = lead['Date'] ? 'Date' : lead['date'] ? 'date' : lead['Week'] ? 'Week' : lead['week'] ? 'week' : lead['First Meeting Date'] ? 'First Meeting Date' : 'unknown'
+            }
           }
-        }
-      })
+          
+          const parsedDate = parseDate(dateValue)
+          if (!parsedDate) {
+            return null
+          }
+          return {
+            data: lead,
+            parsedDate,
+          }
+        })
+        .filter((item): item is LeadWithDate => Boolean(item))
 
-      return { actual, breakdown, teamBreakdown }
+      const computeMetrics = (start: Date, end: Date) => {
+        const breakdown: Record<string, number> = {}
+        const teamBreakdown: Record<string, number> = {}
+        let actual = 0
+
+        leadsWithDates.forEach((entry) => {
+          try {
+            if (entry.parsedDate >= start && entry.parsedDate < end) {
+              actual += 1
+              const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
+              const normalizedSource = normalizeLeadSource(channel)
+              if (normalizedSource) {
+                breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
+              } else if (channel && channel.trim()) {
+                // Also track non-normalized channels
+                breakdown[channel] = (breakdown[channel] || 0) + 1
+              }
+
+              // OD Team Member breakdown - enhanced parsing with multiple separators
+              const rawTeamMember =
+                entry.data['OD Team Member'] ||
+                entry.data['OD team member'] ||
+                entry.data['od team member'] ||
+                entry.data['OD Team'] ||
+                entry.data['od team'] ||
+                ''
+
+              if (rawTeamMember && rawTeamMember.trim()) {
+                // Split by comma, &, /, +, and "and" (case insensitive)
+                const members = rawTeamMember
+                  .split(/,|&|\/|\+|\band\b/gi)
+                  .map((m) => m.trim())
+                  .filter(Boolean)
+
+                members.forEach((member) => {
+                  if (member) {
+                    teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
+                  }
+                })
+              }
+            }
+          } catch (error) {
+            console.warn('Error processing lead entry:', error)
+            // Continue processing other leads
+          }
+        })
+
+        return { actual, breakdown, teamBreakdown }
+      }
+
+      const periodMetrics = {
+        today: {
+          label: 'Today',
+          ...computeMetrics(startOfToday, endOfToday),
+          target: Math.max(Math.round(dailyTarget || 0), 0),
+        },
+        week: {
+          label: 'This Week',
+          ...computeMetrics(currentWeekStart, currentWeekEnd),
+          target: Math.max(Math.round(totalWeeklyTarget || 0), 0),
+        },
+        month: {
+          label: 'This Month',
+          ...computeMetrics(monthStart, monthEnd),
+          target: Math.max(Math.round(totalMonthlyTarget || 0), 0),
+        },
+      }
+
+      return { periodMetrics }
+    } catch (error) {
+      console.error('Error calculating unified analytics:', error)
+      // Return safe defaults on error
+      return {
+        periodMetrics: {
+          today: { label: 'Today', actual: 0, breakdown: {}, teamBreakdown: {}, target: 0 },
+          week: { label: 'This Week', actual: 0, breakdown: {}, teamBreakdown: {}, target: 0 },
+          month: { label: 'This Month', actual: 0, breakdown: {}, teamBreakdown: {}, target: 0 },
+        },
+      }
     }
-
-    const periodMetrics = {
-      today: {
-        label: 'Today',
-        ...computeMetrics(startOfToday, endOfToday),
-        target: Math.max(Math.round(dailyTarget), 0),
-      },
-      week: {
-        label: 'This Week',
-        ...computeMetrics(currentWeekStart, currentWeekEnd),
-        target: Math.max(Math.round(totalWeeklyTarget), 0),
-      },
-      month: {
-        label: 'This Month',
-        ...computeMetrics(monthStart, monthEnd),
-        target: Math.max(Math.round(totalMonthlyTarget), 0),
-      },
-    }
-
-    return { periodMetrics }
   }, [leads])
 
   // Account-specific performance analytics
   const accountPerformance = useMemo(() => {
-    if (!performanceAccountFilter) return null
+    try {
+      if (!performanceAccountFilter) return null
 
-    const accountsData = loadAccountsFromStorage()
-    const account = accountsData.find((acc) => acc.name === performanceAccountFilter)
-    if (!account) return null
+      const accountsData = loadAccountsFromStorage()
+      const account = accountsData.find((acc) => acc.name === performanceAccountFilter)
+      if (!account) return null
 
-    const accountLeads = leads.filter((lead) => lead.accountName === performanceAccountFilter)
-    const leadsWithDates: LeadWithDate[] = accountLeads
-      .map((lead) => {
-        const dateValue =
-          lead['Date'] ||
-          lead['date'] ||
-          lead['Week'] ||
-          lead['week'] ||
-          lead['First Meeting Date'] ||
-          ''
-        const parsedDate = parseDate(dateValue)
-        if (!parsedDate) {
-          return null
-        }
-        return {
-          data: lead,
-          parsedDate,
-        }
-      })
-      .filter((item): item is LeadWithDate => Boolean(item))
-
-    const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const endOfToday = new Date(startOfToday)
-    endOfToday.setDate(endOfToday.getDate() + 1)
-
-    // Current week: Monday -> next Monday (exclusive)
-    const currentWeekStart = new Date(startOfToday)
-    const day = currentWeekStart.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    currentWeekStart.setDate(currentWeekStart.getDate() + diff)
-    const currentWeekEnd = new Date(currentWeekStart)
-    currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
-
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1) // exclusive (start of next month)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-
-    const computeMetrics = (start: Date, end: Date) => {
-      const breakdown: Record<string, number> = {}
-      const teamBreakdown: Record<string, number> = {}
-      let actual = 0
-
-      leadsWithDates.forEach((entry) => {
-        if (entry.parsedDate >= start && entry.parsedDate < end) {
-          actual += 1
-          const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
-          const normalizedSource = normalizeLeadSource(channel)
-          if (normalizedSource) {
-            breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
-          } else if (channel) {
-            breakdown[channel] = (breakdown[channel] || 0) + 1
+      const accountLeads = leads.filter((lead) => lead.accountName === performanceAccountFilter)
+      
+      // Enhanced date field detection - check all fields for date patterns first
+      const leadsWithDates: LeadWithDate[] = accountLeads
+        .map((lead) => {
+          let dateValue = ''
+          let dateFieldName = ''
+          
+          // FIRST: Check ALL fields for DD.MM.YY format (like "05.01.26")
+          for (const key of Object.keys(lead)) {
+            const value = lead[key] || ''
+            if (value && value.trim() && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value.trim())) {
+              dateValue = value.trim()
+              dateFieldName = key
+              break
+            }
           }
-
-          // OD Team Member breakdown
-          const rawTeamMember =
-            entry.data['OD Team Member'] ||
-            entry.data['OD team member'] ||
-            entry.data['od team member'] ||
-            entry.data['OD Team'] ||
-            entry.data['od team'] ||
-            ''
-
-          if (rawTeamMember && rawTeamMember.trim()) {
-            const members = rawTeamMember
-              .split(/,|&|\/|\+|\band\b/gi)
-              .map((m) => m.trim())
-              .filter(Boolean)
-
-            members.forEach((member) => {
-              teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
-            })
+          
+          // SECOND: If no DD.MM.YY format found, check for date fields in preferred order
+          if (!dateValue || !dateValue.trim()) {
+            dateValue =
+              lead['Date'] ||
+              lead['date'] ||
+              lead['Week'] ||
+              lead['week'] ||
+              lead['First Meeting Date'] ||
+              ''
+            
+            if (dateValue) {
+              dateFieldName = lead['Date'] ? 'Date' : lead['date'] ? 'date' : lead['Week'] ? 'Week' : lead['week'] ? 'week' : lead['First Meeting Date'] ? 'First Meeting Date' : 'unknown'
+            }
           }
-        }
-      })
+          
+          const parsedDate = parseDate(dateValue)
+          if (!parsedDate) {
+            return null
+          }
+          return {
+            data: lead,
+            parsedDate,
+          }
+        })
+        .filter((item): item is LeadWithDate => Boolean(item))
 
-      return { actual, breakdown, teamBreakdown }
-    }
+      // Use Europe/London timezone for consistent date calculations
+      const now = new Date()
+      const londonTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Europe/London',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(now)
+      const [day, month, year] = londonTime.split('/').map(Number)
+      const londonNow = new Date(year, month - 1, day)
+      
+      const startOfToday = new Date(londonNow.getFullYear(), londonNow.getMonth(), londonNow.getDate())
+      const endOfToday = new Date(startOfToday)
+      endOfToday.setDate(endOfToday.getDate() + 1)
 
-    const dailyTargetFromWeekly = account.weeklyTarget ? account.weeklyTarget / 7 : 0
-    const dailyTargetFromMonthly = account.monthlyTarget ? account.monthlyTarget / daysInMonth : 0
-    const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
+      // Current week: Monday -> next Monday (exclusive)
+      const currentWeekStart = new Date(startOfToday)
+      const dayOfWeek = currentWeekStart.getDay()
+      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
+      currentWeekStart.setDate(currentWeekStart.getDate() + diff)
+      currentWeekStart.setHours(0, 0, 0, 0)
+      const currentWeekEnd = new Date(currentWeekStart)
+      currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
 
-    const periodMetrics = {
-      today: {
-        label: 'Today',
-        ...computeMetrics(startOfToday, endOfToday),
-        target: Math.max(Math.round(dailyTarget), 0),
-      },
-      week: {
-        label: 'This Week',
-        ...computeMetrics(currentWeekStart, currentWeekEnd),
-        target: Math.max(Math.round(account.weeklyTarget || 0), 0),
-      },
-      month: {
-        label: 'This Month',
-        ...computeMetrics(monthStart, monthEnd),
-        target: Math.max(Math.round(account.monthlyTarget || 0), 0),
-      },
-    }
+      const monthStart = new Date(londonNow.getFullYear(), londonNow.getMonth(), 1)
+      monthStart.setHours(0, 0, 0, 0)
+      const monthEnd = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 1) // exclusive (start of next month)
+      const daysInMonth = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 0).getDate()
 
-    return {
-      accountName: account.name,
-      periodMetrics,
+      const computeMetrics = (start: Date, end: Date) => {
+        const breakdown: Record<string, number> = {}
+        const teamBreakdown: Record<string, number> = {}
+        let actual = 0
+
+        leadsWithDates.forEach((entry) => {
+          try {
+            if (entry.parsedDate >= start && entry.parsedDate < end) {
+              actual += 1
+              const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
+              const normalizedSource = normalizeLeadSource(channel)
+              if (normalizedSource) {
+                breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
+              } else if (channel && channel.trim()) {
+                breakdown[channel] = (breakdown[channel] || 0) + 1
+              }
+
+              // OD Team Member breakdown - enhanced parsing with multiple separators
+              const rawTeamMember =
+                entry.data['OD Team Member'] ||
+                entry.data['OD team member'] ||
+                entry.data['od team member'] ||
+                entry.data['OD Team'] ||
+                entry.data['od team'] ||
+                ''
+
+              if (rawTeamMember && rawTeamMember.trim()) {
+                // Split by comma, &, /, +, and "and" (case insensitive)
+                const members = rawTeamMember
+                  .split(/,|&|\/|\+|\band\b/gi)
+                  .map((m) => m.trim())
+                  .filter(Boolean)
+
+                members.forEach((member) => {
+                  if (member) {
+                    teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
+                  }
+                })
+              }
+            }
+          } catch (error) {
+            console.warn('Error processing lead entry:', error)
+            // Continue processing other leads
+          }
+        })
+
+        return { actual, breakdown, teamBreakdown }
+      }
+
+      // Calculate daily target with division by zero protection
+      const dailyTargetFromWeekly = account.weeklyTarget && account.weeklyTarget > 0 ? account.weeklyTarget / 7 : 0
+      const dailyTargetFromMonthly = account.monthlyTarget && account.monthlyTarget > 0 && daysInMonth > 0 ? account.monthlyTarget / daysInMonth : 0
+      const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
+
+      const periodMetrics = {
+        today: {
+          label: 'Today',
+          ...computeMetrics(startOfToday, endOfToday),
+          target: Math.max(Math.round(dailyTarget || 0), 0),
+        },
+        week: {
+          label: 'This Week',
+          ...computeMetrics(currentWeekStart, currentWeekEnd),
+          target: Math.max(Math.round(account.weeklyTarget || 0), 0),
+        },
+        month: {
+          label: 'This Month',
+          ...computeMetrics(monthStart, monthEnd),
+          target: Math.max(Math.round(account.monthlyTarget || 0), 0),
+        },
+      }
+
+      return {
+        accountName: account.name,
+        periodMetrics,
+      }
+    } catch (error) {
+      console.error('Error calculating account performance analytics:', error)
+      return null
     }
   }, [leads, performanceAccountFilter])
 
@@ -751,7 +907,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
         <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={{ base: 3, md: 4 }}>
           {(['today', 'week', 'month'] as const).map((periodKey) => {
             const period = unifiedAnalytics.periodMetrics[periodKey]
-            const variance = period.actual - period.target
+            // Ensure variance calculation handles NaN/undefined safely
+            const actual = period.actual || 0
+            const target = period.target || 0
+            const variance = actual - target
             // Get all channels (both normalized and raw)
             const allChannels = Object.keys(period.breakdown).sort(
               (a, b) => period.breakdown[b] - period.breakdown[a],
@@ -782,7 +941,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                   {period.label}
                 </Text>
                 <Heading size={{ base: "xl", md: "2xl" }} mt={2} color="gray.800" fontWeight="extrabold">
-                  {period.actual}
+                  {actual}
                 </Heading>
                 <Text fontSize="sm" color="gray.600" fontWeight="medium">
                   Actual Leads
@@ -790,7 +949,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                 <Stack spacing={2} mt={4} fontSize="sm">
                   <HStack justify="space-between" bg="white" p={2} borderRadius="md">
                     <Text color="gray.600" fontWeight="medium">Target:</Text>
-                    <Text fontWeight="bold" color="gray.800">{period.target}</Text>
+                    <Text fontWeight="bold" color="gray.800">{target}</Text>
                   </HStack>
                   <HStack justify="space-between" bg="white" p={2} borderRadius="md">
                     <Text color="gray.600" fontWeight="medium">Variance:</Text>
@@ -1019,7 +1178,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={{ base: 3, md: 4 }}>
               {(['today', 'week', 'month'] as const).map((periodKey) => {
                 const period = accountPerformance.periodMetrics[periodKey]
-                const variance = period.actual - period.target
+                // Ensure variance calculation handles NaN/undefined safely
+                const actual = period.actual || 0
+                const target = period.target || 0
+                const variance = actual - target
                 const allChannels = Object.keys(period.breakdown).sort(
                   (a, b) => period.breakdown[b] - period.breakdown[a],
                 )
@@ -1040,7 +1202,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                       {period.label}
                     </Text>
                     <Heading size="2xl" mt={2} color="gray.800">
-                      {period.actual}
+                      {actual}
                     </Heading>
                     <Text fontSize="sm" color="gray.600">
                       Actual Leads
@@ -1049,7 +1211,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
                       <Text color="gray.600">
                         Target Leads:{' '}
                         <Text as="span" fontWeight="semibold">
-                          {period.target}
+                          {target}
                         </Text>
                       </Text>
                       <Text color="text.muted">
