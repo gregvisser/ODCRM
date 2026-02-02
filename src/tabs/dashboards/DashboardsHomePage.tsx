@@ -27,10 +27,8 @@ import { CheckCircleIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons'
 import { type Account } from '../../components/AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
-import { OdcrmStorageKeys } from '../../platform/keys'
-import { getItem, getJson, setItem, setJson } from '../../platform/storage'
 import { api } from '../../utils/api'
-import { fetchLeadsFromApi, persistLeadsToStorage } from '../../utils/leadsApi'
+import { fetchLeadsFromApi } from '../../utils/leadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 
 type Lead = {
@@ -201,51 +199,13 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   return applyCustomerFieldsToAccount(base, customer)
 }
 
-function loadAccountsFromStorage(): Account[] {
-  const parsed = getJson<Account[]>(OdcrmStorageKeys.accounts)
-  if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed
-  return []
-}
-
-function loadLeadsFromStorage(): Lead[] {
-  const parsed = getJson<Lead[]>(OdcrmStorageKeys.marketingLeads)
-  return parsed && Array.isArray(parsed) ? parsed : []
-}
-
-function loadLastRefreshFromStorage(): Date | null {
-  const stored = getItem(OdcrmStorageKeys.marketingLeadsLastRefresh)
-  if (!stored) return null
-  const parsed = new Date(stored)
-  return isNaN(parsed.getTime()) ? null : parsed
-}
-
-function shouldRefresh(leads: Lead[]): boolean {
-  if (leads.length === 0) return true
-  const lastRefreshTime = loadLastRefreshFromStorage()
-  if (!lastRefreshTime) return true
-
-  try {
-    const accountsUpdatedIso = getItem(OdcrmStorageKeys.accountsLastUpdated)
-    if (accountsUpdatedIso) {
-      const accountsUpdatedAt = new Date(accountsUpdatedIso)
-      if (!isNaN(accountsUpdatedAt.getTime()) && accountsUpdatedAt > lastRefreshTime) {
-        return true
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const now = new Date()
-  const sixHoursInMs = 6 * 60 * 60 * 1000
-  return now.getTime() - lastRefreshTime.getTime() >= sixHoursInMs
-}
+// localStorage helper functions removed - dashboard now uses API as single source of truth
 
 export default function DashboardsHomePage() {
   const toast = useToast()
-  // Load initial data from localStorage (will be replaced by fresh API data)
-  const [accountsData, setAccountsData] = useState<Account[]>(() => loadAccountsFromStorage())
-  const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
+  // Start with empty arrays - API will load fresh data immediately
+  const [accountsData, setAccountsData] = useState<Account[]>([])
+  const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
@@ -264,7 +224,7 @@ export default function DashboardsHomePage() {
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
       console.log(`✅ Dashboard: Loaded ${allLeads.length} leads from API`)
       
-      persistLeadsToStorage(allLeads, lastSyncAt)
+      // NO localStorage persistence - keep data in memory only
       setLeads(allLeads)
       setLastRefresh(lastSyncAt ? new Date(lastSyncAt) : new Date())
       syncAccountLeadCountsFromLeads(allLeads)
@@ -292,8 +252,7 @@ export default function DashboardsHomePage() {
       if (error || !data || data.length === 0) return
 
       const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-      setJson(OdcrmStorageKeys.accounts, hydrated)
-      setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+      // NO localStorage persistence - API is the ONLY source of truth
       setAccountsData(hydrated)
       emit('accountsUpdated', hydrated)
     }
@@ -305,13 +264,19 @@ export default function DashboardsHomePage() {
 
     void init()
 
-    const offAccountsUpdated = on('accountsUpdated', () => {
-      setAccountsData(loadAccountsFromStorage())
+    const offAccountsUpdated = on<Account[]>('accountsUpdated', (accounts) => {
+      // Use the passed data instead of loading from localStorage
+      if (accounts && accounts.length > 0) {
+        setAccountsData(accounts)
+      }
       void refreshLeads(true)
     })
-    const offLeadsUpdated = on('leadsUpdated', () => {
-      setLeads(loadLeadsFromStorage())
-      setLastRefresh(loadLastRefreshFromStorage() || new Date())
+    const offLeadsUpdated = on<Lead[]>('leadsUpdated', (updatedLeads) => {
+      // Use the passed data instead of loading from localStorage
+      if (updatedLeads && updatedLeads.length > 0) {
+        setLeads(updatedLeads)
+        setLastRefresh(new Date())
+      }
     })
 
     // Auto-refresh every 30 seconds to keep dashboard current
@@ -321,8 +286,7 @@ export default function DashboardsHomePage() {
         const { data, error } = await api.get<CustomerApi[]>('/api/customers')
         if (error || !data || data.length === 0) return
         const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-        setJson(OdcrmStorageKeys.accounts, hydrated)
-        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+        // NO localStorage persistence - API is the ONLY source of truth
         setAccountsData(hydrated)
         emit('accountsUpdated', hydrated)
       }
@@ -693,6 +657,14 @@ export default function DashboardsHomePage() {
                   isClosable: true,
                 })
               }
+
+              toast({
+                title: 'Dashboard refreshed',
+                description: 'Latest customer and lead data loaded',
+                status: 'success',
+                duration: 2000,
+                isClosable: true,
+              })
             }}
             isLoading={loading}
             colorScheme="blue"

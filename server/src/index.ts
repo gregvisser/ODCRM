@@ -22,6 +22,7 @@ import jobRolesRoutes from './routes/jobRoles.js'
 import placesRoutes from './routes/places.js'
 import uploadsRoutes from './routes/uploads.js'
 import suppressionRoutes from './routes/suppression.js'
+import usersRoutes from './routes/users.js'
 import { startEmailScheduler } from './workers/emailScheduler.js'
 import { startReplyDetectionWorker } from './workers/replyDetection.js'
 import { startLeadsSyncWorker } from './workers/leadsSync.js'
@@ -97,6 +98,7 @@ app.use('/api/job-roles', jobRolesRoutes)
 app.use('/api/places', placesRoutes)
 app.use('/api/uploads', uploadsRoutes)
 app.use('/api/suppression', suppressionRoutes)
+app.use('/api/users', usersRoutes)
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

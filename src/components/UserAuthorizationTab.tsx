@@ -36,25 +36,12 @@ import {
   Text,
   FormHelperText,
   Flex,
+  Spinner,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
+import { useUsersFromDatabase, type DatabaseUser } from '../hooks/useUsersFromDatabase'
 
-export type User = {
-  id: string
-  userId: string
-  firstName: string
-  lastName: string
-  email: string
-  username: string
-  password: string
-  phoneNumber: string
-  role: string
-  department: string
-  accountStatus: 'Active' | 'Inactive'
-  lastLoginDate: string
-  createdDate: string
-  profilePhoto?: string
-}
+export type User = DatabaseUser
 
 const parseAllowlistEmails = (): string[] => {
   const raw = import.meta.env.VITE_AUTH_ALLOWED_EMAILS
@@ -101,69 +88,9 @@ const buildSeedUsers = (emails: string[]): User[] => {
   })
 }
 
-// Load users from localStorage and remove duplicates
-const loadUsersFromStorage = (): User[] => {
-  try {
-    const stored = localStorage.getItem('users')
-    if (stored) {
-      const users = JSON.parse(stored) as User[]
-      // Remove duplicates based on userId (primary) or email (fallback)
-      const seenUserIds = new Set<string>()
-      const seenEmails = new Set<string>()
-      const uniqueUsers: User[] = []
-      
-      for (const user of users) {
-        const userId = user.userId || user.id
-        const email = user.email?.toLowerCase().trim()
-        
-        // Skip if we've seen this userId or email before
-        if (userId && seenUserIds.has(userId)) {
-          continue
-        }
-        if (email && seenEmails.has(email)) {
-          continue
-        }
-        
-        // Add to seen sets and unique users
-        if (userId) seenUserIds.add(userId)
-        if (email) seenEmails.add(email)
-        uniqueUsers.push(user)
-      }
-      
-      // If duplicates were removed, save the cleaned list
-      if (uniqueUsers.length < users.length) {
-        saveUsersToStorage(uniqueUsers)
-      }
-      
-      return uniqueUsers
-    }
-  } catch (error) {
-    console.error('Error loading users from storage:', error)
-  }
-  const allowlist = parseAllowlistEmails()
-  if (allowlist.length > 0) {
-    const seeded = buildSeedUsers(allowlist)
-    saveUsersToStorage(seeded)
-    return seeded
-  }
-  return []
-}
-
-// Save users to localStorage
-const saveUsersToStorage = (users: User[]) => {
-  try {
-    localStorage.setItem('users', JSON.stringify(users))
-    window.dispatchEvent(new Event('usersUpdated'))
-  } catch (error) {
-    console.error('Error saving users to storage:', error)
-  }
-}
-
 // Generate a unique user ID in format ODS + 8 numbers
-const generateUserId = (): string => {
-  // Get existing user IDs to ensure uniqueness
-  const existingUsers = loadUsersFromStorage()
-  const existingIds = new Set(existingUsers.map((u) => u.userId))
+const generateUserId = (existingUserIds: string[]): string => {
+  const existingIds = new Set(existingUserIds)
   
   let newId: string
   let attempts = 0
@@ -184,7 +111,9 @@ const generateUserId = (): string => {
 }
 
 function UserAuthorizationTab() {
-  const [users, setUsers] = useState<User[]>(() => loadUsersFromStorage())
+  // Use database hook for user management
+  const { users, loading, error, createUser, updateUser, deleteUser } = useUsersFromDatabase()
+  
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -202,7 +131,6 @@ function UserAuthorizationTab() {
     lastName: '',
     email: '',
     username: '',
-    password: '',
     phoneNumber: '',
     role: '',
     department: '',
@@ -243,13 +171,13 @@ function UserAuthorizationTab() {
   }, [formData.email, isEditing])
 
   const handleCreate = () => {
+    const newUserId = generateUserId(users.map(u => u.userId))
     setFormData({
-      userId: generateUserId(),
+      userId: newUserId,
       firstName: '',
       lastName: '',
       email: '',
       username: '',
-      password: '',
       phoneNumber: '',
       role: '',
       department: '',
@@ -300,11 +228,21 @@ function UserAuthorizationTab() {
     onDeleteOpen()
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (selectedUser) {
-      const updatedUsers = users.filter((u) => u.id !== selectedUser.id)
-      setUsers(updatedUsers)
-      saveUsersToStorage(updatedUsers)
+      const { error } = await deleteUser(selectedUser.id)
+      
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return
+      }
+      
       toast({
         title: 'User deleted',
         description: `${selectedUser.firstName} ${selectedUser.lastName} has been deleted.`,
@@ -317,7 +255,7 @@ function UserAuthorizationTab() {
     }
   }
 
-  const handleSave = () => {
+  const handleSave = async () => {
     // Validation
     if (
       !formData.firstName ||
@@ -350,32 +288,33 @@ function UserAuthorizationTab() {
       return
     }
 
-    // Passwords are managed by Microsoft SSO and are not stored here.
-
     if (isEditing && selectedUser) {
       // Update existing user
-      const updatedUsers = users.map((u) =>
-        u.id === selectedUser.id
-          ? {
-              ...u,
-              userId: formData.userId || u.userId,
-              firstName: formData.firstName || '',
-              lastName: formData.lastName || '',
-              email: formData.email || '',
-              username: formData.username || formData.email || '',
-              password: '',
-              phoneNumber: formData.phoneNumber || '',
-              role: formData.role || '',
-              department: formData.department || '',
-              accountStatus: formData.accountStatus || 'Active',
-              lastLoginDate: formData.lastLoginDate || u.lastLoginDate,
-              createdDate: formData.createdDate || u.createdDate,
-              profilePhoto: formData.profilePhoto || u.profilePhoto,
-            }
-          : u
-      )
-      setUsers(updatedUsers)
-      saveUsersToStorage(updatedUsers)
+      const { error } = await updateUser(selectedUser.id, {
+        userId: formData.userId || selectedUser.userId,
+        firstName: formData.firstName || '',
+        lastName: formData.lastName || '',
+        email: formData.email || '',
+        username: formData.username || formData.email || '',
+        phoneNumber: formData.phoneNumber || '',
+        role: formData.role || '',
+        department: formData.department || '',
+        accountStatus: formData.accountStatus || 'Active',
+        lastLoginDate: formData.lastLoginDate || selectedUser.lastLoginDate,
+        profilePhoto: formData.profilePhoto || selectedUser.profilePhoto,
+      } as Partial<User>)
+      
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return
+      }
+      
       toast({
         title: 'User updated',
         description: `${formData.firstName} ${formData.lastName} has been updated.`,
@@ -385,14 +324,13 @@ function UserAuthorizationTab() {
       })
     } else {
       // Create new user
-      const newUser: User = {
-        id: generateUserId(),
-        userId: formData.userId || generateUserId(),
+      const newUserId = formData.userId || generateUserId(users.map(u => u.userId))
+      const { error } = await createUser({
+        userId: newUserId,
         firstName: formData.firstName || '',
         lastName: formData.lastName || '',
         email: formData.email || '',
         username: formData.username || formData.email || '',
-        password: '',
         phoneNumber: formData.phoneNumber || '',
         role: formData.role || '',
         department: formData.department || '',
@@ -400,10 +338,19 @@ function UserAuthorizationTab() {
         lastLoginDate: formData.lastLoginDate || 'Never',
         createdDate: formData.createdDate || new Date().toISOString().split('T')[0],
         profilePhoto: formData.profilePhoto || '',
+      })
+      
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return
       }
-      const updatedUsers = [...users, newUser]
-      setUsers(updatedUsers)
-      saveUsersToStorage(updatedUsers)
+      
       toast({
         title: 'User created',
         description: `${formData.firstName} ${formData.lastName} has been created.`,
@@ -810,7 +757,7 @@ function UserAuthorizationTab() {
             <Button
               variant="outline"
               onClick={() => handleExport('csv')}
-              isDisabled={users.length === 0}
+              isDisabled={users.length === 0 || loading}
               size={{ base: 'sm', md: 'md' }}
             >
               Export CSV
@@ -819,6 +766,7 @@ function UserAuthorizationTab() {
               leftIcon={<AddIcon />}
               colorScheme="gray"
               onClick={handleCreate}
+              isDisabled={loading}
               size={{ base: 'sm', md: 'md' }}
             >
               Create User
@@ -827,7 +775,18 @@ function UserAuthorizationTab() {
         </Flex>
       </Box>
 
-      {users.length === 0 ? (
+      {loading ? (
+        <Box textAlign="center" py={10} flex="1">
+          <Spinner size="xl" color="blue.500" mb={4} />
+          <Text color="gray.500">Loading users from database...</Text>
+        </Box>
+      ) : error ? (
+        <Box textAlign="center" py={10} flex="1">
+          <Text color="red.500" mb={4}>
+            Error loading users: {error}
+          </Text>
+        </Box>
+      ) : users.length === 0 ? (
         <Box textAlign="center" py={10} flex="1">
           <Text color="gray.500" mb={4}>
             No users found. Create your first user to get started.
