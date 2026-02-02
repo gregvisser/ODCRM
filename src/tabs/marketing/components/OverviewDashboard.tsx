@@ -106,7 +106,10 @@ const OverviewDashboard: React.FC = () => {
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
 
   useEffect(() => {
-    const fetchDashboardStats = async () => {
+    const fetchDashboardStats = async (showLoading = true) => {
+      if (showLoading) {
+        setLoading(true)
+      }
       try {
         setLoading(true)
         setError(null)
@@ -245,7 +248,168 @@ const OverviewDashboard: React.FC = () => {
     }
 
     fetchDashboardStats()
+
+    // Set up automatic refresh every 30 seconds
+    const refreshInterval = setInterval(() => {
+      fetchDashboardStats(false) // Don't show loading spinner for auto-refresh
+    }, 30000) // 30 seconds
+
+    // Cleanup interval on unmount
+    return () => clearInterval(refreshInterval)
   }, [])
+
+  // Manual refresh function
+  const handleManualRefresh = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Fetch data from multiple API endpoints
+      const [sequencesRes, campaignsRes, contactsRes, reportsRes, inboxRes] = await Promise.allSettled([
+        api.get('/api/sequences'),
+        api.get('/api/campaigns'),
+        api.get('/api/contacts'),
+        api.get('/api/reports/emails'),
+        api.get('/api/inbox?limit=10'),
+      ])
+
+      // Process sequences data
+      let totalContacts = 0
+      let activeSequences = 0
+      let sequencesRunning = 0
+
+      if (sequencesRes.status === 'fulfilled') {
+        const sequences = sequencesRes.value?.data || []
+        activeSequences = sequences.length
+        sequencesRunning = sequences.filter((s: any) => s.status === 'active').length
+      }
+
+      // Process contacts data
+      if (contactsRes.status === 'fulfilled') {
+        const contacts = contactsRes.value?.data || []
+        totalContacts = contacts.length
+      }
+
+      // Process email reports for today's stats
+      let emailsSentToday = 0
+      let replyRate = 0
+      let openRate = 0
+      let deliverability = 98.2 // Default deliverability
+
+      if (reportsRes.status === 'fulfilled') {
+        const reportData = reportsRes.value?.data || {}
+        const totals = reportData.totals || {}
+
+        // Calculate today's sent emails
+        emailsSentToday = totals.sent || 0
+
+        // Calculate rates
+        const totalSent = totals.sent || 1 // Avoid division by zero
+        const replies = totals.replied || 0
+        const opens = totals.opened || 0
+
+        replyRate = (replies / totalSent) * 100
+        openRate = (opens / totalSent) * 100
+
+        // Calculate deliverability (sent vs bounced)
+        const bounced = totals.bounced || 0
+        if (totalSent > 0) {
+          deliverability = ((totalSent - bounced) / totalSent) * 100
+        }
+      }
+
+      // Mock pending tasks for now (could be calculated from campaigns/tasks)
+      const pendingTasks = 0
+
+      setStats({
+        totalContacts,
+        activeSequences,
+        emailsSentToday,
+        replyRate: Math.round(replyRate * 10) / 10, // Round to 1 decimal
+        openRate: Math.round(openRate * 10) / 10,
+        sequencesRunning,
+        pendingTasks,
+        deliverability: Math.round(deliverability * 10) / 10,
+      })
+
+      // Process recent activity from inbox and campaigns
+      const activity: RecentActivity[] = []
+
+      // Add campaign activity
+      if (campaignsRes.status === 'fulfilled') {
+        const campaigns = campaignsRes.value?.data || []
+        campaigns.slice(0, 3).forEach((campaign: any) => {
+          if (campaign.createdAt) {
+            const timeAgo = getTimeAgo(new Date(campaign.createdAt))
+            activity.push({
+              type: 'campaign_sent',
+              message: `Campaign "${campaign.name}" was created`,
+              time: timeAgo,
+            })
+          }
+        })
+      }
+
+      // Add inbox/reply activity
+      if (inboxRes.status === 'fulfilled') {
+        const inboxItems = inboxRes.value?.data || []
+        inboxItems.slice(0, 3).forEach((item: any) => {
+          if (item.receivedAt) {
+            const timeAgo = getTimeAgo(new Date(item.receivedAt))
+            activity.push({
+              type: 'reply_received',
+              message: `New reply from ${item.from || 'contact'}`,
+              time: timeAgo,
+            })
+          }
+        })
+      }
+
+      // Add sequence activity
+      if (sequencesRes.status === 'fulfilled') {
+        const sequences = sequencesRes.value?.data || []
+        sequences.slice(0, 2).forEach((sequence: any) => {
+          if (sequence.createdAt) {
+            const timeAgo = getTimeAgo(new Date(sequence.createdAt))
+            activity.push({
+              type: 'sequence_started',
+              message: `Sequence "${sequence.name}" was created`,
+              time: timeAgo,
+            })
+          }
+        })
+      }
+
+      // Sort by time and take top 5
+      activity.sort((a, b) => {
+        const timeA = parseTimeAgo(a.time)
+        const timeB = parseTimeAgo(b.time)
+        return timeA - timeB
+      })
+
+      setRecentActivity(activity.slice(0, 5))
+
+      // Show success message
+      toast({
+        title: 'Dashboard refreshed',
+        description: 'Latest data loaded successfully',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+    } catch (err) {
+      console.error('Error refreshing dashboard:', err)
+      toast({
+        title: 'Refresh failed',
+        description: 'Could not update dashboard data',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -274,12 +438,29 @@ const OverviewDashboard: React.FC = () => {
     <Box p={6} maxW="1200px" mx="auto">
       <VStack spacing={6} align="stretch">
         {/* Header */}
-        <Box>
-          <Heading size="lg" mb={2}>Email Outreach Overview</Heading>
-          <Text color="gray.600">
-            Monitor your email campaigns, sequences, and contact engagement in real-time
-          </Text>
-        </Box>
+        <Flex justify="space-between" align="flex-start" flexWrap="wrap" gap={4}>
+          <Box flex="1">
+            <Heading size="lg" mb={2}>Email Outreach Overview</Heading>
+            <Text color="gray.600">
+              Monitor your email campaigns, sequences, and contact engagement in real-time
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1}>
+              Auto-refreshes every 30 seconds • Last updated: {new Date().toLocaleTimeString()}
+            </Text>
+          </Box>
+          <Button
+            leftIcon={<RepeatIcon />}
+            colorScheme="blue"
+            variant="outline"
+            size="sm"
+            onClick={handleManualRefresh}
+            isLoading={loading}
+            loadingText="Refreshing..."
+            alignSelf="flex-start"
+          >
+            Refresh Data
+          </Button>
+        </Flex>
 
         {/* Key Metrics Grid */}
         <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={6}>
