@@ -48,6 +48,14 @@ enum MessageDirection {
   inbound
 }
 
+enum LeadStatus {
+  new
+  qualified
+  nurturing
+  closed
+  converted
+}
+
 enum ProspectStatus {
   pending
   step1_sent
@@ -147,6 +155,8 @@ model Contact {
   customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   emailCampaignProspects   EmailCampaignProspect[]
   contactListMembers       ContactListMember[]
+  convertedFromLead        LeadRecord[]               @relation("LeadToContact")
+  sequenceEnrollments      SequenceEnrollment[]
 
   @@index([customerId, email])
   @@index([customerId])
@@ -471,6 +481,7 @@ model EmailSequence {
   customer    Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
   steps       EmailSequenceStep[]
   campaigns   EmailCampaign[]          @relation("CampaignToSequence")
+  enrollments SequenceEnrollment[]
 
   @@index([customerId])
   @@index([customerId, name])
@@ -496,6 +507,33 @@ model EmailSequenceStep {
   @@map("email_sequence_steps")
 }
 
+// Sequence enrollments (contacts enrolled in sequences)
+model SequenceEnrollment {
+  id                     String          @id @default(cuid())
+  sequenceId             String
+  contactId               String
+  enrolledAt             DateTime        @default(now())
+  enrolledBy             String?
+  status                 String          @default("active") // 'active', 'paused', 'completed', 'stopped', 'bounced', 'unsubscribed'
+  lastStepCompletedAt    DateTime?
+  nextStepScheduledAt    DateTime?
+  completedAt            DateTime?
+  totalEmailsSent        Int             @default(0)
+  totalOpens             Int             @default(0)
+  totalClicks            Int             @default(0)
+  totalReplies           Int             @default(0)
+
+  // Relations
+  sequence               EmailSequence   @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  contact                Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, contactId])
+  @@index([sequenceId])
+  @@index([contactId])
+  @@index([nextStepScheduledAt])
+  @@map("sequence_enrollments")
+}
+
 // Marketing leads imported from customer Google Sheets
 model LeadRecord {
   id         String   @id
@@ -507,12 +545,24 @@ model LeadRecord {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // Lead status and conversion tracking
+  status     LeadStatus @default(new)
+  score      Int?       // Lead score based on channel/outcome (0-100)
+  convertedToContactId String? // ID of contact if converted
+  convertedAt DateTime?
+  qualifiedAt DateTime?
+  enrolledInSequenceId String? // ID of sequence if auto-enrolled
+  
   // Relations
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  convertedContact Contact? @relation("LeadToContact", fields: [convertedToContactId], references: [id])
 
   @@index([customerId])
   @@index([accountName])
   @@index([updatedAt])
+  @@index([status])
+  @@index([score])
+  @@index([convertedToContactId])
   @@map("lead_records")
 }
 
@@ -524,6 +574,24 @@ model LeadSyncState {
   lastError     String?
   rowCount      Int?
   lastChecksum  String?  // MD5 checksum for change detection
+  
+  // Sync status and control
+  isPaused      Boolean  @default(false)
+  isRunning     Boolean  @default(false)
+  
+  // Performance metrics
+  syncDuration  Int?     // Duration in milliseconds
+  rowsProcessed Int?     // Number of rows processed in last sync
+  rowsInserted  Int?     // Number of rows inserted
+  rowsUpdated   Int?     // Number of rows updated
+  rowsDeleted   Int?     // Number of rows deleted
+  errorCount    Int      @default(0)
+  retryCount    Int      @default(0)
+  
+  // Progress tracking
+  progressPercent Int?   // 0-100
+  progressMessage String?
+  
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -532,6 +600,8 @@ model LeadSyncState {
 
   @@index([customerId])
   @@index([lastSyncAt])
+  @@index([isPaused])
+  @@index([isRunning])
   @@map("lead_sync_states")
 }
 

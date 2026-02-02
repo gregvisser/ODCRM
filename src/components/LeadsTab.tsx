@@ -33,15 +33,25 @@ import {
   Checkbox,
   VStack,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon, ViewIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson } from '../platform/storage'
-import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
+import { 
+  fetchLeadsFromApi, 
+  persistLeadsToStorage,
+  convertLeadToContact,
+  bulkConvertLeads,
+  scoreLead,
+  updateLeadStatus,
+  exportLeadsToCSV,
+  getSequences,
+  type LeadRecord
+} from '../utils/leadsApi'
 
-type Lead = {
-  [key: string]: string // Dynamic fields from Google Sheet
+type Lead = LeadRecord & {
+  [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
   accountName: string
 }
 
@@ -85,10 +95,25 @@ function LeadsTab() {
   })
   
   // Default visible columns as requested by user
-  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead']
+  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead', 'Status', 'Score']
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(defaultVisibleColumns))
+  const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
+  const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
+  const [bulkConverting, setBulkConverting] = useState(false)
+  const [sequences, setSequences] = useState<Array<{ id: string; name: string; description?: string }>>([])
   
   const toast = useToast()
+
+  // Load sequences on mount
+  useEffect(() => {
+    getSequences().then(({ data, error }) => {
+      if (data) {
+        setSequences(data)
+      } else if (error) {
+        console.error('Failed to load sequences:', error)
+      }
+    })
+  }, [])
 
   // Helper to format last refresh time
   const formatLastRefresh = (date: Date) => {
@@ -97,6 +122,167 @@ function LeadsTab() {
     if (diff < 60) return `${diff} seconds ago`
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
     return date.toLocaleTimeString()
+  }
+
+  // Get status badge color
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case 'new': return 'gray'
+      case 'qualified': return 'blue'
+      case 'nurturing': return 'purple'
+      case 'closed': return 'red'
+      case 'converted': return 'green'
+      default: return 'gray'
+    }
+  }
+
+  // Handle convert lead to contact
+  const handleConvertLead = async (leadId: string, sequenceId?: string) => {
+    if (!leadId) return
+    
+    setConvertingLeadId(leadId)
+    try {
+      const { data, error } = await convertLeadToContact(leadId, sequenceId)
+      if (error) {
+        toast({
+          title: 'Conversion failed',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      } else if (data) {
+        toast({
+          title: 'Lead converted',
+          description: data.isNewContact 
+            ? `Created new contact and ${data.enrollmentId ? 'enrolled in sequence' : 'ready for outreach'}`
+            : `Linked to existing contact${data.enrollmentId ? ' and enrolled in sequence' : ''}`,
+          status: 'success',
+          duration: 5000,
+          isClosable: true,
+        })
+        // Refresh leads to get updated status
+        await loadLeads(true)
+      }
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: 'Failed to convert lead',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setConvertingLeadId(null)
+    }
+  }
+
+  // Handle bulk convert
+  const handleBulkConvert = async (sequenceId?: string) => {
+    if (selectedLeads.size === 0) {
+      toast({
+        title: 'No leads selected',
+        description: 'Please select leads to convert',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setBulkConverting(true)
+    try {
+      const { data, error } = await bulkConvertLeads(Array.from(selectedLeads), sequenceId)
+      if (error) {
+        toast({
+          title: 'Bulk conversion failed',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      } else if (data) {
+        toast({
+          title: 'Bulk conversion complete',
+          description: `Converted ${data.converted} leads. Created ${data.contactsCreated} new contacts, found ${data.contactsExisting} existing. ${data.enrollments > 0 ? `Enrolled ${data.enrollments} in sequence.` : ''}`,
+          status: 'success',
+          duration: 7000,
+          isClosable: true,
+        })
+        setSelectedLeads(new Set())
+        await loadLeads(true)
+      }
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: 'Failed to bulk convert leads',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setBulkConverting(false)
+    }
+  }
+
+  // Handle export to CSV
+  const handleExportCSV = async () => {
+    try {
+      const { data, error } = await exportLeadsToCSV()
+      if (error) {
+        toast({
+          title: 'Export failed',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      } else if (data) {
+        const url = URL.createObjectURL(data)
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `leads-export-${new Date().toISOString().split('T')[0]}.csv`
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+        toast({
+          title: 'Export successful',
+          description: 'Leads exported to CSV',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      }
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: 'Failed to export leads',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    }
+  }
+
+  // Toggle lead selection
+  const toggleLeadSelection = (leadId: string) => {
+    const newSelected = new Set(selectedLeads)
+    if (newSelected.has(leadId)) {
+      newSelected.delete(leadId)
+    } else {
+      newSelected.add(leadId)
+    }
+    setSelectedLeads(newSelected)
+  }
+
+  // Toggle all leads selection
+  const toggleAllLeads = () => {
+    if (selectedLeads.size === filteredLeads.length) {
+      setSelectedLeads(new Set())
+    } else {
+      setSelectedLeads(new Set(filteredLeads.filter(l => l.id).map(l => l.id!)))
+    }
   }
 
   // Check if 6 hours have passed since last refresh
@@ -122,8 +308,9 @@ function LeadsTab() {
     setError(null)
 
     try {
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
-      setLeads(allLeads)
+      const customerId = localStorage.getItem('currentCustomerId') || undefined
+      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
+      setLeads(allLeads as Lead[])
       const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
       setLastRefresh(refreshTime)
       syncAccountLeadCountsFromLeads(allLeads)
@@ -224,6 +411,8 @@ function LeadsTab() {
     'OD Team Member',
     'OD Call Recording Available',
     'Channel of Lead',
+    'Status',
+    'Score',
   ]
 
   // Get all unique column headers from all leads (excluding accountName)
@@ -373,14 +562,47 @@ function LeadsTab() {
             Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 6 hours
           </Text>
         </Box>
-        <IconButton
-          aria-label="Refresh leads data"
-          icon={<RepeatIcon />}
-          onClick={() => loadLeads(true)}
-          isLoading={loading}
-          colorScheme="gray"
-          size="sm"
-        />
+        <HStack spacing={2}>
+          {selectedLeads.size > 0 && (
+            <Menu>
+              <MenuButton as={Button} size="sm" colorScheme="blue" leftIcon={<AddIcon />}>
+                Bulk Actions ({selectedLeads.size})
+              </MenuButton>
+              <MenuList>
+                <MenuItem onClick={() => handleBulkConvert()}>
+                  Convert to Contacts
+                </MenuItem>
+                {sequences.length > 0 && (
+                  <>
+                    <MenuItem isDisabled>Enroll in Sequence:</MenuItem>
+                    {sequences.map((seq) => (
+                      <MenuItem key={seq.id} onClick={() => handleBulkConvert(seq.id)}>
+                        {seq.name}
+                      </MenuItem>
+                    ))}
+                  </>
+                )}
+              </MenuList>
+            </Menu>
+          )}
+          <Button
+            size="sm"
+            leftIcon={<DownloadIcon />}
+            onClick={handleExportCSV}
+            colorScheme="gray"
+            variant="outline"
+          >
+            Export CSV
+          </Button>
+          <IconButton
+            aria-label="Refresh leads data"
+            icon={<RepeatIcon />}
+            onClick={() => loadLeads(true)}
+            isLoading={loading}
+            colorScheme="gray"
+            size="sm"
+          />
+        </HStack>
       </HStack>
 
       <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
@@ -483,6 +705,16 @@ function LeadsTab() {
           <Table variant="simple" size="sm" minW="max-content">
             <Thead bg="gray.50" position="sticky" top={0} zIndex={10}>
               <Tr>
+                <Th px={3} py={2} bg="gray.50" position="sticky" left={0} zIndex={11}>
+                  <Checkbox
+                    isChecked={selectedLeads.size > 0 && selectedLeads.size === filteredLeads.filter(l => l.id).length}
+                    isIndeterminate={selectedLeads.size > 0 && selectedLeads.size < filteredLeads.filter(l => l.id).length}
+                    onChange={toggleAllLeads}
+                  />
+                </Th>
+                <Th px={3} py={2} bg="gray.50" position="sticky" left={10} zIndex={10} whiteSpace="nowrap">
+                  Actions
+                </Th>
                 {displayedColumns.map((col) => (
                   <Th key={col} whiteSpace="nowrap" px={3} py={2} bg="gray.50">
                     {col}
@@ -491,48 +723,117 @@ function LeadsTab() {
               </Tr>
             </Thead>
             <Tbody>
-              {filteredLeads.map((lead, index) => (
-              <Tr
-                key={`${lead.accountName}-${index}`}
-                _hover={{ bg: 'gray.50' }}
-                sx={{
-                  '&:hover td': {
-                    bg: 'gray.50',
-                  },
-                }}
-              >
-                {displayedColumns.map((col) => {
-                  if (col === 'Account') {
-                    return (
-                      <Td
-                        key={col}
-                        px={3}
-                        py={2}
-                        position="sticky"
-                        left={0}
-                        bg="white"
-                        zIndex={5}
-                        _hover={{ bg: 'gray.50' }}
-                        sx={{
-                          'tr:hover &': {
-                            bg: 'gray.50',
-                          },
-                        }}
-                      >
-                        <Badge colorScheme="gray">{lead.accountName}</Badge>
-                      </Td>
-                    )
-                  }
-                  // Get value from lead object using the column name
-                  const value = lead[col] || ''
-                  return (
-                    <Td key={col} px={3} py={2} whiteSpace="normal" maxW="300px">
-                      {formatCell(value, col)}
+              {filteredLeads.map((lead, index) => {
+                const leadId = lead.id || `${lead.accountName}-${index}`
+                const isSelected = selectedLeads.has(leadId)
+                const isConverted = lead.status === 'converted' || !!lead.convertedToContactId
+                
+                return (
+                  <Tr
+                    key={leadId}
+                    bg={isSelected ? 'blue.50' : 'white'}
+                    _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
+                    sx={{
+                      '&:hover td': {
+                        bg: isSelected ? 'blue.100' : 'gray.50',
+                      },
+                    }}
+                  >
+                    <Td px={3} py={2} position="sticky" left={0} bg={isSelected ? 'blue.50' : 'white'} zIndex={5}>
+                      <Checkbox
+                        isChecked={isSelected}
+                        onChange={() => toggleLeadSelection(leadId)}
+                      />
                     </Td>
-                  )
-                })}
-              </Tr>
-              ))}
+                    <Td px={3} py={2} position="sticky" left={10} bg={isSelected ? 'blue.50' : 'white'} zIndex={5} whiteSpace="nowrap">
+                      {!isConverted ? (
+                        <Menu>
+                          <MenuButton 
+                            as={Button} 
+                            size="xs" 
+                            colorScheme="blue"
+                            isLoading={convertingLeadId === leadId}
+                            isDisabled={convertingLeadId !== null}
+                          >
+                            Convert
+                          </MenuButton>
+                          <MenuList>
+                            <MenuItem onClick={() => handleConvertLead(leadId)}>
+                              Convert to Contact
+                            </MenuItem>
+                            {sequences.length > 0 && (
+                              <>
+                                <MenuItem isDisabled>Convert & Enroll:</MenuItem>
+                                {sequences.map((seq) => (
+                                  <MenuItem key={seq.id} onClick={() => handleConvertLead(leadId, seq.id)}>
+                                    {seq.name}
+                                  </MenuItem>
+                                ))}
+                              </>
+                            )}
+                          </MenuList>
+                        </Menu>
+                      ) : (
+                        <Badge colorScheme="green" fontSize="xs">Converted</Badge>
+                      )}
+                    </Td>
+                    {displayedColumns.map((col) => {
+                      if (col === 'Account') {
+                        return (
+                          <Td
+                            key={col}
+                            px={3}
+                            py={2}
+                            bg={isSelected ? 'blue.50' : 'white'}
+                            _hover={{ bg: isSelected ? 'blue.100' : 'gray.50' }}
+                            sx={{
+                              'tr:hover &': {
+                                bg: isSelected ? 'blue.100' : 'gray.50',
+                              },
+                            }}
+                          >
+                            <Badge colorScheme="gray">{lead.accountName}</Badge>
+                          </Td>
+                        )
+                      }
+                      if (col === 'Status') {
+                        const status = lead.status || 'new'
+                        return (
+                          <Td key={col} px={3} py={2} bg={isSelected ? 'blue.50' : 'white'}>
+                            <Badge colorScheme={getStatusColor(status)} fontSize="xs" textTransform="capitalize">
+                              {status}
+                            </Badge>
+                          </Td>
+                        )
+                      }
+                      if (col === 'Score') {
+                        const score = lead.score
+                        return (
+                          <Td key={col} px={3} py={2} bg={isSelected ? 'blue.50' : 'white'}>
+                            {score !== null && score !== undefined ? (
+                              <Badge 
+                                colorScheme={score >= 70 ? 'green' : score >= 50 ? 'yellow' : 'gray'} 
+                                fontSize="xs"
+                              >
+                                {score}
+                              </Badge>
+                            ) : (
+                              <Text fontSize="xs" color="gray.400">-</Text>
+                            )}
+                          </Td>
+                        )
+                      }
+                      // Get value from lead object using the column name
+                      const value = String(lead[col] || '')
+                      return (
+                        <Td key={col} px={3} py={2} whiteSpace="normal" maxW="300px" bg={isSelected ? 'blue.50' : 'white'}>
+                          {formatCell(value, col)}
+                        </Td>
+                      )
+                    })}
+                  </Tr>
+                )
+              })}
             </Tbody>
           </Table>
         </Box>

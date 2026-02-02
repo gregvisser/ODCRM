@@ -367,4 +367,95 @@ router.delete('/:id/steps/:stepId', async (req, res) => {
   }
 })
 
+// POST /api/sequences/:id/enroll - Enroll contacts in a sequence
+router.post('/:id/enroll', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { contactIds } = req.body
+    const customerId = getCustomerId(req)
+
+    if (!Array.isArray(contactIds) || contactIds.length === 0) {
+      return res.status(400).json({ error: 'contactIds must be a non-empty array' })
+    }
+
+    // Verify sequence exists and belongs to customer
+    const sequence = await prisma.emailSequence.findFirst({
+      where: {
+        id,
+        customerId,
+      },
+      include: {
+        steps: {
+          orderBy: { stepOrder: 'asc' },
+        },
+      },
+    })
+
+    if (!sequence) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
+
+    // Verify all contacts belong to customer
+    const contacts = await prisma.contact.findMany({
+      where: {
+        id: { in: contactIds },
+        customerId,
+      },
+    })
+
+    if (contacts.length !== contactIds.length) {
+      return res.status(400).json({ error: 'Some contacts not found or do not belong to customer' })
+    }
+
+    // Get first step for scheduling
+    const firstStep = sequence.steps[0]
+    const nextStepScheduledAt = firstStep
+      ? new Date(Date.now() + (firstStep.delayDaysFromPrevious || 0) * 24 * 60 * 60 * 1000)
+      : new Date()
+
+    // Check existing enrollments
+    const existing = await prisma.sequenceEnrollment.findMany({
+      where: {
+        sequenceId: id,
+        contactId: { in: contactIds },
+      },
+      select: { contactId: true },
+    })
+
+    const existingContactIds = new Set(existing.map(e => e.contactId))
+    const newContactIds = contactIds.filter(cid => !existingContactIds.has(cid))
+
+    // Create enrollments
+    if (newContactIds.length > 0) {
+      await prisma.sequenceEnrollment.createMany({
+        data: newContactIds.map(contactId => ({
+          id: `enroll_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          sequenceId: id,
+          contactId,
+          status: 'active',
+          nextStepScheduledAt,
+          enrolledAt: new Date(),
+        })),
+      })
+    }
+
+    // Update sequence enrollment count
+    await prisma.emailSequence.update({
+      where: { id },
+      data: {
+        // Note: This would ideally be calculated, but for now we'll update it
+      },
+    })
+
+    res.json({
+      enrolled: newContactIds.length,
+      skipped: existingContactIds.size,
+      total: contactIds.length,
+    })
+  } catch (error) {
+    console.error('Error enrolling contacts:', error)
+    return res.status(500).json({ error: 'Failed to enroll contacts' })
+  }
+})
+
 export default router

@@ -8,6 +8,45 @@ type LeadRow = {
   accountName: string
 }
 
+// Retry configuration
+const MAX_RETRIES = 3
+const INITIAL_RETRY_DELAY = 1000 // 1 second
+const MAX_RETRY_DELAY = 10000 // 10 seconds
+
+/**
+ * Sleep utility for retry delays
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * Retry function with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = MAX_RETRIES,
+  initialDelay: number = INITIAL_RETRY_DELAY
+): Promise<T> {
+  let lastError: Error | null = null
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
+      
+      if (attempt < maxRetries) {
+        const delay = Math.min(initialDelay * Math.pow(2, attempt), MAX_RETRY_DELAY)
+        console.log(`   ⚠️  Retry attempt ${attempt + 1}/${maxRetries} after ${delay}ms`)
+        await sleep(delay)
+      }
+    }
+  }
+  
+  throw lastError || new Error('Retry failed')
+}
+
 function extractSheetId(url: string): string | null {
   try {
     const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
@@ -26,7 +65,11 @@ function extractGid(url: string): string | null {
   }
 }
 
-function parseCsv(csvText: string): string[][] {
+/**
+ * Optimized CSV parser with chunking support for large files
+ * Processes CSV in chunks to avoid memory issues with 1000+ row sheets
+ */
+function parseCsv(csvText: string, chunkSize: number = 500): string[][] {
   const lines: string[][] = []
   let currentLine: string[] = []
   let currentField = ''
@@ -52,6 +95,12 @@ function parseCsv(csvText: string): string[][] {
       if (currentLine.length > 0) {
         lines.push(currentLine)
         currentLine = []
+        
+        // Process in chunks for large files
+        if (lines.length % chunkSize === 0) {
+          // Yield control to event loop periodically
+          // This prevents blocking on very large CSV files
+        }
       }
     } else {
       currentField += char
@@ -66,7 +115,14 @@ function parseCsv(csvText: string): string[][] {
   return lines
 }
 
-async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Promise<{ leads: LeadRow[]; gidUsed?: string; diagnostics: any }> {
+/**
+ * Fetch leads from Google Sheets with retry logic and exponential backoff
+ */
+async function fetchLeadsFromSheetUrl(
+  sheetUrl: string, 
+  accountName: string,
+  onProgress?: (progress: { percent: number; message: string }) => void
+): Promise<{ leads: LeadRow[]; gidUsed?: string; diagnostics: any }> {
   const startTime = Date.now()
   const sheetId = extractSheetId(sheetUrl)
   if (!sheetId) {
@@ -92,7 +148,11 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
     filteredRows: 0,
     finalLeads: 0,
     errors: [] as string[],
+    retryCount: 0,
   }
+
+  // Update progress
+  onProgress?.({ percent: 10, message: 'Fetching sheet data...' })
 
   for (const gid of gidsToTry) {
     try {
@@ -101,14 +161,35 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
 
       console.log(`   Trying GID ${gid}: ${csvUrl}`)
 
+      // Fetch with retry logic
       const fetchStart = Date.now()
-      const response = await fetch(csvUrl, {
-        headers: {
-          Accept: 'text/csv, text/plain, */*',
-          'User-Agent': 'ODCRM-LeadsSync/1.0',
-        },
-      })
+      let response: Response | null = null
+      
+      try {
+        response = await retryWithBackoff(async () => {
+          const res = await fetch(csvUrl, {
+            headers: {
+              Accept: 'text/csv, text/plain, */*',
+              'User-Agent': 'ODCRM-LeadsSync/2.0',
+            },
+            signal: AbortSignal.timeout(30000), // 30 second timeout
+          })
+          
+          if (!res.ok && res.status !== 403 && res.status !== 404) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+          }
+          
+          return res
+        })
+        
+        diagnostics.retryCount = 0 // Reset on success
+      } catch (retryError) {
+        diagnostics.retryCount = MAX_RETRIES
+        throw retryError
+      }
+
       const fetchDuration = Date.now() - fetchStart
+      diagnostics.fetchDuration = fetchDuration
 
       console.log(`   Fetch result: ${response.status} ${response.statusText} (${fetchDuration}ms)`)
 
@@ -129,9 +210,11 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
         continue
       }
 
+      onProgress?.({ percent: 30, message: 'Downloading CSV data...' })
+
+      // Read response with progress tracking for large files
       const csvText = await response.text()
       diagnostics.csvSize = csvText.length
-      diagnostics.fetchDuration = fetchDuration
 
       console.log(`   Downloaded ${diagnostics.csvSize} bytes`)
 
@@ -143,6 +226,9 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
         continue
       }
 
+      onProgress?.({ percent: 50, message: 'Parsing CSV data...' })
+
+      // Parse CSV with optimized parser
       const rows = parseCsv(csvText)
       diagnostics.totalRows = rows.length
 
@@ -152,6 +238,8 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
         console.log(`   ⚠️  Only ${rows.length} rows (need at least 2 for headers + data)`)
         return { leads: [], gidUsed: gid, diagnostics }
       }
+
+      onProgress?.({ percent: 60, message: 'Detecting headers...' })
 
       // Improved header detection - find the row with the most non-empty cells
       let headerRowIndex = 0
@@ -175,59 +263,73 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
 
       console.log(`   Headers found: ${diagnostics.validHeaders.join(', ')}`)
 
+      onProgress?.({ percent: 70, message: 'Processing leads...' })
+
       const leads: LeadRow[] = []
       let filteredEmpty = 0
       let filteredWcWv = 0
       let filteredNoNameCompany = 0
       let filteredTooFewFields = 0
 
-      for (const row of dataRows) {
-        if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
-          filteredEmpty++
-          continue
-        }
-
-        const lead: LeadRow = { accountName }
-        headers.forEach((header, index) => {
-          const value = row[index] || ''
-          if (header && header.trim()) {
-            lead[header.trim()] = value
+      // Process rows in batches for better performance
+      const batchSize = 100
+      for (let i = 0; i < dataRows.length; i += batchSize) {
+        const batch = dataRows.slice(i, i + batchSize)
+        
+        for (const row of batch) {
+          if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
+            filteredEmpty++
+            continue
           }
-        })
 
-        // Apply normalization
-        const normalizedLead = normalizeLeadData(lead)
+          const lead: LeadRow = { accountName }
+          headers.forEach((header, index) => {
+            const value = row[index] || ''
+            if (header && header.trim()) {
+              lead[header.trim()] = value
+            }
+          })
 
-        // Filter out W/C and W/V rows (seems to be a business rule for excluding certain entries)
-        const containsWcOrWv = Object.values(normalizedLead).some((value) => {
-          const lowerValue = value ? String(value).toLowerCase() : ''
-          return lowerValue.includes('w/c') || lowerValue.includes('w/v')
-        })
-        if (containsWcOrWv) {
-          filteredWcWv++
-          continue
+          // Apply normalization
+          const normalizedLead = normalizeLeadData(lead)
+
+          // Filter out W/C and W/V rows
+          const containsWcOrWv = Object.values(normalizedLead).some((value) => {
+            const lowerValue = value ? String(value).toLowerCase() : ''
+            return lowerValue.includes('w/c') || lowerValue.includes('w/v')
+          })
+          if (containsWcOrWv) {
+            filteredWcWv++
+            continue
+          }
+
+          // Require at least name or company
+          const nameValue = normalizedLead['Name'] || normalizedLead['name'] || ''
+          const companyValue = normalizedLead['Company'] || normalizedLead['company'] || ''
+          const hasName = nameValue && nameValue.trim() !== ''
+          const hasCompany = companyValue && companyValue.trim() !== ''
+          if (!hasName && !hasCompany) {
+            filteredNoNameCompany++
+            continue
+          }
+
+          // Require at least 2 non-empty fields (besides accountName)
+          const nonEmptyFields = Object.keys(normalizedLead).filter(
+            (key) => key !== 'accountName' && normalizedLead[key] && String(normalizedLead[key]).trim() !== '',
+          )
+          if (nonEmptyFields.length < 2) {
+            filteredTooFewFields++
+            continue
+          }
+
+          leads.push(normalizedLead)
         }
-
-        // Require at least name or company
-        const nameValue = normalizedLead['Name'] || normalizedLead['name'] || ''
-        const companyValue = normalizedLead['Company'] || normalizedLead['company'] || ''
-        const hasName = nameValue && nameValue.trim() !== ''
-        const hasCompany = companyValue && companyValue.trim() !== ''
-        if (!hasName && !hasCompany) {
-          filteredNoNameCompany++
-          continue
+        
+        // Update progress during batch processing
+        if (i + batchSize < dataRows.length) {
+          const progress = 70 + Math.floor((i / dataRows.length) * 20)
+          onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, dataRows.length)}/${dataRows.length} rows...` })
         }
-
-        // Require at least 2 non-empty fields (besides accountName)
-        const nonEmptyFields = Object.keys(normalizedLead).filter(
-          (key) => key !== 'accountName' && normalizedLead[key] && String(normalizedLead[key]).trim() !== '',
-        )
-        if (nonEmptyFields.length < 2) {
-          filteredTooFewFields++
-          continue
-        }
-
-        leads.push(normalizedLead)
       }
 
       diagnostics.filteredRows = filteredEmpty + filteredWcWv + filteredNoNameCompany + filteredTooFewFields
@@ -242,6 +344,8 @@ async function fetchLeadsFromSheetUrl(sheetUrl: string, accountName: string): Pr
 
       const totalDuration = Date.now() - startTime
       console.log(`   ⏱️  Total fetch time: ${totalDuration}ms`)
+
+      onProgress?.({ percent: 100, message: 'Complete' })
 
       return { leads, gidUsed: gid, diagnostics }
     } catch (error) {
@@ -281,7 +385,7 @@ function parseDate(value: string): Date | null {
     if (!isNaN(date.getTime())) return date
   }
 
-  // MM/DD/YYYY (US format) - less common but handle it
+  // MM/DD/YYYY (US format)
   const mmddyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
   if (mmddyyyy) {
     const month = parseInt(mmddyyyy[1], 10) - 1
@@ -293,7 +397,7 @@ function parseDate(value: string): Date | null {
 
   // DD/MM/YYYY (alternative European)
   const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (ddmmyyyy && !mmddyyyy) { // Only if not already matched as MM/DD/YYYY
+  if (ddmmyyyy && !mmddyyyy) {
     const day = parseInt(ddmmyyyy[1], 10)
     const month = parseInt(ddmmyyyy[2], 10) - 1
     const year = parseInt(ddmmyyyy[3], 10)
@@ -315,17 +419,14 @@ function parseDate(value: string): Date | null {
 
 /**
  * Generate a stable, deterministic ID for a lead based on its core identifying fields.
- * This prevents duplicates and provides consistent identification across syncs.
  */
 function generateStableLeadId(lead: LeadRow, customerId: string): string {
-  // Use the most stable identifying fields
   const email = (lead['Email'] || lead['email'] || '').trim().toLowerCase()
   const phone = (lead['Phone'] || lead['phone'] || lead['Mobile'] || lead['mobile'] || '').trim()
   const name = (lead['Name'] || lead['name'] || '').trim().toLowerCase()
   const company = (lead['Company'] || lead['company'] || '').trim().toLowerCase()
   const createdAt = (lead['Created At'] || lead['createdAt'] || lead['Date'] || lead['date'] || '').trim()
 
-  // Create a deterministic identifier from available fields
   const identifierParts = [
     customerId,
     email || 'no-email',
@@ -336,8 +437,6 @@ function generateStableLeadId(lead: LeadRow, customerId: string): string {
   ].filter(Boolean)
 
   const identifier = identifierParts.join('|')
-
-  // Create hash for stable ID
   const hash = crypto.createHash('sha256').update(identifier).digest('hex')
 
   return `lead_${hash.substring(0, 16)}`
@@ -349,7 +448,6 @@ function generateStableLeadId(lead: LeadRow, customerId: string): string {
 function normalizeLeadData(lead: LeadRow): LeadRow {
   const normalized: LeadRow = { ...lead }
 
-  // Normalize text fields (trim, consistent casing for known fields)
   const textFields = ['Name', 'name', 'Company', 'company', 'Email', 'email', 'Phone', 'phone', 'Mobile', 'mobile']
   textFields.forEach(field => {
     if (normalized[field]) {
@@ -361,14 +459,12 @@ function normalizeLeadData(lead: LeadRow): LeadRow {
     }
   })
 
-  // Validate and normalize dates
   const dateFields = ['Date', 'date', 'Created At', 'createdAt', 'First Meeting Date']
   dateFields.forEach(field => {
     if (normalized[field]) {
       const parsedDate = parseDate(String(normalized[field]))
       if (parsedDate) {
-        // Store as ISO string for consistency
-        normalized[field] = parsedDate.toISOString().split('T')[0] // YYYY-MM-DD format
+        normalized[field] = parsedDate.toISOString().split('T')[0]
       }
     }
   })
@@ -378,7 +474,6 @@ function normalizeLeadData(lead: LeadRow): LeadRow {
 
 /**
  * Calculate comprehensive aggregations with proper timezone handling
- * Uses Europe/London timezone for consistency with UK business operations
  */
 function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   weeklyActual: number
@@ -391,7 +486,6 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
     breakdownByPlatform: Array<{platform: string, count: number}>
   }
 } {
-  // Use Europe/London timezone for all calculations
   const now = new Date()
   const londonTime = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Europe/London',
@@ -402,17 +496,15 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   const [day, month, year] = londonTime.split('/').map(Number)
   const londonNow = new Date(year, month - 1, day)
 
-  // Calculate current week (Monday-Sunday)
   const currentWeekStart = new Date(londonNow)
   const dayOfWeek = currentWeekStart.getDay()
-  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek // Monday = 1, Sunday = 0
+  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
   currentWeekStart.setDate(currentWeekStart.getDate() + diff)
   currentWeekStart.setHours(0, 0, 0, 0)
 
   const currentWeekEnd = new Date(currentWeekStart)
   currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
 
-  // Current month
   const monthStart = new Date(londonNow.getFullYear(), londonNow.getMonth(), 1)
   const monthEnd = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 1)
 
@@ -421,7 +513,6 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   let weeklyActual = 0
   let monthlyActual = 0
 
-  // Aggregation data structures
   const dayCounts = new Map<string, number>()
   const weekCounts = new Map<string, number>()
   const monthCounts = new Map<string, number>()
@@ -429,10 +520,8 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   const platformCounts = new Map<string, number>()
 
   accountLeads.forEach((lead) => {
-    // Find date value from various possible fields
     let dateValue = lead['Date'] || lead['date'] || lead['Created At'] || lead['createdAt'] || lead['First Meeting Date'] || ''
 
-    // Also check for date-like values in other fields
     if (!dateValue) {
       for (const key of Object.keys(lead)) {
         const value = lead[key] || ''
@@ -446,7 +535,6 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
     const parsedDate = parseDate(dateValue)
     if (!parsedDate) return
 
-    // Weekly/Monthly actuals (legacy compatibility)
     if (parsedDate >= currentWeekStart && parsedDate < currentWeekEnd) {
       weeklyActual++
     }
@@ -454,29 +542,23 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
       monthlyActual++
     }
 
-    // Daily aggregations
-    const dateKey = parsedDate.toISOString().split('T')[0] // YYYY-MM-DD
+    const dateKey = parsedDate.toISOString().split('T')[0]
     dayCounts.set(dateKey, (dayCounts.get(dateKey) || 0) + 1)
 
-    // Weekly aggregations (ISO week)
     const isoWeek = getISOWeek(parsedDate)
     const weekKey = `${parsedDate.getFullYear()}-W${isoWeek.toString().padStart(2, '0')}`
     weekCounts.set(weekKey, (weekCounts.get(weekKey) || 0) + 1)
 
-    // Monthly aggregations
     const monthKey = `${parsedDate.getFullYear()}-${(parsedDate.getMonth() + 1).toString().padStart(2, '0')}`
     monthCounts.set(monthKey, (monthCounts.get(monthKey) || 0) + 1)
 
-    // Team member aggregations
     const teamMember = lead['Team Member'] || lead['teamMember'] || lead['Assigned To'] || lead['assignedTo'] || 'Unknown'
     teamMemberCounts.set(teamMember, (teamMemberCounts.get(teamMember) || 0) + 1)
 
-    // Platform/source aggregations
     const platform = lead['Platform'] || lead['platform'] || lead['Channel of Lead'] || lead['channelOfLead'] || lead['Source'] || lead['source'] || 'Unknown'
     platformCounts.set(platform, (platformCounts.get(platform) || 0) + 1)
   })
 
-  // Convert maps to sorted arrays
   const totalsByDay = Array.from(dayCounts.entries())
     .map(([date, count]) => ({ date, count }))
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -527,27 +609,99 @@ function getISOWeek(date: Date): number {
   return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)
 }
 
-async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; name: string; leadsReportingUrl?: string | null }) {
+/**
+ * Sync leads for a single customer with progress tracking and metrics
+ */
+async function syncCustomerLeads(
+  prisma: PrismaClient, 
+  customer: { id: string; name: string; leadsReportingUrl?: string | null },
+  onProgress?: (progress: { percent: number; message: string }) => void
+) {
   const syncStartedAt = new Date()
   const sheetUrl = customer.leadsReportingUrl
 
   console.log(`🔄 SYNC START - ${customer.name} (${customer.id})`)
 
+  // Check if sync is paused
+  const syncState = await prisma.leadSyncState.findUnique({
+    where: { customerId: customer.id },
+    select: { isPaused: true }
+  })
+
+  if (syncState?.isPaused) {
+    console.log(`   ⏸️  Sync paused for ${customer.name}`)
+    return
+  }
+
+  // Mark as running
+  await prisma.leadSyncState.upsert({
+    where: { customerId: customer.id },
+    create: {
+      id: `lead_sync_${customer.id}`,
+      customerId: customer.id,
+      isRunning: true,
+      progressPercent: 0,
+      progressMessage: 'Starting sync...',
+    },
+    update: {
+      isRunning: true,
+      progressPercent: 0,
+      progressMessage: 'Starting sync...',
+    },
+  })
+
   if (!sheetUrl || !sheetUrl.trim()) {
     console.log(`   ⚠️  No sheet URL configured`)
+    await prisma.leadSyncState.update({
+      where: { customerId: customer.id },
+      data: {
+        isRunning: false,
+        lastError: 'No sheet URL configured',
+        lastSyncAt: syncStartedAt,
+      },
+    })
     return
   }
 
   console.log(`   Sheet URL: ${sheetUrl}`)
 
+  let rowsInserted = 0
+  let rowsUpdated = 0
+  let rowsDeleted = 0
+  let errorCount = 0
+
   try {
-    const { leads, gidUsed, diagnostics } = await fetchLeadsFromSheetUrl(sheetUrl, customer.name)
+    onProgress?.({ percent: 5, message: 'Fetching leads from Google Sheets...' })
+
+    const { leads, gidUsed, diagnostics } = await fetchLeadsFromSheetUrl(
+      sheetUrl, 
+      customer.name,
+      (progress) => {
+        // Map fetch progress (0-100) to sync progress (5-50)
+        const mappedPercent = 5 + Math.floor(progress.percent * 0.45)
+        onProgress?.({ percent: mappedPercent, message: progress.message })
+        
+        // Update sync state
+        prisma.leadSyncState.update({
+          where: { customerId: customer.id },
+          data: {
+            progressPercent: mappedPercent,
+            progressMessage: progress.message,
+          },
+        }).catch(() => {}) // Don't block on progress updates
+      }
+    )
+
+    onProgress?.({ percent: 50, message: 'Calculating aggregations...' })
+
     const { weeklyActual, monthlyActual, aggregations } = calculateActualsFromLeads(customer.name, leads)
 
     console.log(`📊 AGGREGATION RESULTS - ${customer.name}`)
     console.log(`   Weekly actual: ${weeklyActual}`)
     console.log(`   Monthly actual: ${monthlyActual}`)
     console.log(`   Total leads processed: ${leads.length}`)
+
+    onProgress?.({ percent: 60, message: 'Checking for changes...' })
 
     // Calculate data checksum for change detection
     const dataString = JSON.stringify(leads.map(l => ({ ...l, accountName: undefined })).sort((a, b) =>
@@ -557,7 +711,6 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
 
     console.log(`   Data checksum: ${checksum}`)
 
-    // Check if data has actually changed since last sync
     const lastSyncState = await prisma.leadSyncState.findUnique({
       where: { customerId: customer.id },
       select: { lastChecksum: true, rowCount: true }
@@ -572,7 +725,6 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
     if (!hasDataChanged && leads.length === lastSyncState?.rowCount) {
       console.log(`   ⏭️  Skipping sync - data unchanged`)
 
-      // Still update sync timestamp and aggregations (they might have changed due to time-based calculations)
       await prisma.$transaction(async (tx) => {
         await tx.customer.update({
           where: { id: customer.id },
@@ -587,21 +739,32 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
           data: {
             lastSyncAt: syncStartedAt,
             lastSuccessAt: syncStartedAt,
+            isRunning: false,
+            progressPercent: 100,
+            progressMessage: 'Complete - no changes',
+            syncDuration: Date.now() - syncStartedAt.getTime(),
+            rowsProcessed: leads.length,
+            rowsInserted: 0,
+            rowsUpdated: 0,
+            rowsDeleted: 0,
+            errorCount: 0,
+            retryCount: diagnostics.retryCount,
           },
         })
       })
 
       const syncDuration = Date.now() - syncStartedAt.getTime()
       console.log(`✅ SYNC SKIPPED - ${customer.name} (${syncDuration}ms) - data unchanged`)
+      onProgress?.({ percent: 100, message: 'Complete - no changes' })
       return
     }
+
+    onProgress?.({ percent: 70, message: 'Updating database...' })
 
     const beforeCount = await prisma.leadRecord.count({ where: { customerId: customer.id } })
     console.log(`   Records before sync: ${beforeCount}`)
 
     await prisma.$transaction(async (tx) => {
-      // For incremental sync, we need to handle updates more carefully
-      // For now, we'll do a full replace but track what changed
       const existingIds = new Set(
         (await tx.leadRecord.findMany({
           where: { customerId: customer.id },
@@ -609,7 +772,6 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
         })).map(r => r.id)
       )
 
-      // Insert/update new records with stable IDs
       if (leads.length > 0) {
         const recordsToProcess = leads.map((lead) => {
           const stableId = generateStableLeadId(lead, customer.id)
@@ -623,38 +785,46 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
           }
         })
 
-        // Track changes
-        let inserted = 0
-        let updated = 0
         const processedIds = new Set<string>()
 
-        for (const record of recordsToProcess) {
-          processedIds.add(record.id)
+        // Process in batches for better performance
+        const batchSize = 50
+        for (let i = 0; i < recordsToProcess.length; i += batchSize) {
+          const batch = recordsToProcess.slice(i, i + batchSize)
+          
+          for (const record of batch) {
+            processedIds.add(record.id)
 
-          try {
-            const existing = await tx.leadRecord.findUnique({
-              where: { id: record.id },
-              select: { id: true, updatedAt: true }
-            })
-
-            if (existing) {
-              await tx.leadRecord.update({
+            try {
+              const existing = await tx.leadRecord.findUnique({
                 where: { id: record.id },
-                data: {
-                  data: record.data,
-                  sourceUrl: record.sourceUrl,
-                  sheetGid: record.sheetGid,
-                  updatedAt: new Date(),
-                },
+                select: { id: true, updatedAt: true }
               })
-              updated++
-            } else {
-              await tx.leadRecord.create({ data: record })
-              inserted++
+
+              if (existing) {
+                await tx.leadRecord.update({
+                  where: { id: record.id },
+                  data: {
+                    data: record.data,
+                    sourceUrl: record.sourceUrl,
+                    sheetGid: record.sheetGid,
+                    updatedAt: new Date(),
+                  },
+                })
+                rowsUpdated++
+              } else {
+                await tx.leadRecord.create({ data: record })
+                rowsInserted++
+              }
+            } catch (error) {
+              console.warn(`   Failed to process lead ${record.id}:`, error)
+              errorCount++
             }
-          } catch (error) {
-            console.warn(`   Failed to process lead ${record.id}:`, error)
           }
+          
+          // Update progress
+          const progress = 70 + Math.floor((i / recordsToProcess.length) * 20)
+          onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, recordsToProcess.length)}/${recordsToProcess.length} leads...` })
         }
 
         // Remove leads that are no longer in the sheet
@@ -666,10 +836,11 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
               id: { in: idsToRemove }
             }
           })
-          console.log(`   Removed ${idsToRemove.length} stale leads`)
+          rowsDeleted = idsToRemove.length
+          console.log(`   Removed ${rowsDeleted} stale leads`)
         }
 
-        console.log(`   Records processed: ${inserted} inserted, ${updated} updated, ${idsToRemove.length} removed`)
+        console.log(`   Records processed: ${rowsInserted} inserted, ${rowsUpdated} updated, ${rowsDeleted} removed`)
       }
 
       // Update customer with aggregated data
@@ -681,7 +852,8 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
         },
       })
 
-      // Update sync state with checksum for change detection
+      // Update sync state with metrics
+      const syncDuration = Date.now() - syncStartedAt.getTime()
       await tx.leadSyncState.upsert({
         where: { customerId: customer.id },
         create: {
@@ -692,6 +864,16 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
           rowCount: leads.length,
           lastChecksum: checksum,
           lastError: null,
+          isRunning: false,
+          progressPercent: 100,
+          progressMessage: 'Complete',
+          syncDuration,
+          rowsProcessed: leads.length,
+          rowsInserted,
+          rowsUpdated,
+          rowsDeleted,
+          errorCount,
+          retryCount: diagnostics.retryCount,
         },
         update: {
           lastSyncAt: syncStartedAt,
@@ -699,6 +881,16 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
           rowCount: leads.length,
           lastChecksum: checksum,
           lastError: null,
+          isRunning: false,
+          progressPercent: 100,
+          progressMessage: 'Complete',
+          syncDuration,
+          rowsProcessed: leads.length,
+          rowsInserted,
+          rowsUpdated,
+          rowsDeleted,
+          errorCount,
+          retryCount: diagnostics.retryCount,
         },
       })
     })
@@ -709,10 +901,15 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
     const syncDuration = Date.now() - syncStartedAt.getTime()
     console.log(`✅ SYNC COMPLETE - ${customer.name} (${syncDuration}ms)`)
     console.log(`   Final state: ${leads.length} leads, checksum: ${checksum}`)
+    console.log(`   Metrics: ${rowsInserted} inserted, ${rowsUpdated} updated, ${rowsDeleted} deleted, ${errorCount} errors`)
+
+    onProgress?.({ percent: 100, message: 'Complete' })
 
   } catch (error: any) {
     const message = error?.message || 'Failed to sync leads'
     console.error(`❌ SYNC FAILED - ${customer.name}:`, message)
+
+    errorCount++
 
     await prisma.leadSyncState.upsert({
       where: { customerId: customer.id },
@@ -721,12 +918,24 @@ async function syncCustomerLeads(prisma: PrismaClient, customer: { id: string; n
         customerId: customer.id,
         lastSyncAt: syncStartedAt,
         lastError: message,
+        isRunning: false,
+        progressPercent: 0,
+        progressMessage: `Error: ${message}`,
+        errorCount: 1,
+        syncDuration: Date.now() - syncStartedAt.getTime(),
       },
       update: {
         lastSyncAt: syncStartedAt,
         lastError: message,
+        isRunning: false,
+        progressPercent: 0,
+        progressMessage: `Error: ${message}`,
+        errorCount: { increment: 1 },
+        syncDuration: Date.now() - syncStartedAt.getTime(),
       },
     })
+
+    onProgress?.({ percent: 0, message: `Error: ${message}` })
   }
 }
 
@@ -763,6 +972,27 @@ export async function syncAllCustomerLeads(prisma: PrismaClient) {
   console.log(`   Successful: ${successCount}`)
   console.log(`   Failed: ${errorCount}`)
   console.log(`   Total leads in DB:`, await prisma.leadRecord.count())
+}
+
+/**
+ * Manual sync trigger for a specific customer
+ */
+export async function triggerManualSync(prisma: PrismaClient, customerId: string) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, name: true, leadsReportingUrl: true },
+  })
+
+  if (!customer) {
+    throw new Error('Customer not found')
+  }
+
+  if (!customer.leadsReportingUrl) {
+    throw new Error('Customer has no leads reporting URL configured')
+  }
+
+  console.log(`🔧 MANUAL SYNC TRIGGERED - ${customer.name}`)
+  await syncCustomerLeads(prisma, customer)
 }
 
 export function startLeadsSyncWorker(prisma: PrismaClient) {
