@@ -693,14 +693,6 @@ export default function DashboardsHomePage() {
                   isClosable: true,
                 })
               }
-
-              toast({
-                title: 'Dashboard refreshed',
-                description: 'Latest customer and lead data loaded',
-                status: 'success',
-                duration: 2000,
-                isClosable: true,
-              })
             }}
             isLoading={loading}
             colorScheme="blue"
