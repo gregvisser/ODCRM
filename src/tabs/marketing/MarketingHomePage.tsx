@@ -30,7 +30,7 @@ import OverviewDashboard from './components/OverviewDashboard'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
 import CognismProspectsTab from './components/CognismProspectsTab'
-import MarketingLeadsTab from '../MarketingLeadsTab'
+import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 
 export type OpenDoorsViewId =
   | 'overview'
