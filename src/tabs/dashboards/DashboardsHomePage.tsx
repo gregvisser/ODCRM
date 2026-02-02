@@ -314,9 +314,24 @@ export default function DashboardsHomePage() {
       setLastRefresh(loadLastRefreshFromStorage() || new Date())
     })
 
-    const refreshInterval = setInterval(() => {
-      void refreshLeads(false)
-    }, 6 * 60 * 60 * 1000)
+    // Auto-refresh every 30 seconds to keep dashboard current
+    const refreshInterval = setInterval(async () => {
+      // Refresh both customers and leads automatically
+      const syncFromCustomers = async () => {
+        const { data, error } = await api.get<CustomerApi[]>('/api/customers')
+        if (error || !data || data.length === 0) return
+        const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
+        setJson(OdcrmStorageKeys.accounts, hydrated)
+        setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+        setAccountsData(hydrated)
+        emit('accountsUpdated', hydrated)
+      }
+
+      await Promise.allSettled([
+        syncFromCustomers(),
+        refreshLeads(false)
+      ])
+    }, 30 * 1000)
 
     return () => {
       offAccountsUpdated()
@@ -621,16 +636,46 @@ export default function DashboardsHomePage() {
       {/* Header Stats */}
       <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
         <HStack justify="space-between" mb={2} flexWrap="wrap">
-          <Heading size="md" color="gray.700">
-            Client Lead Generation Dashboard
-          </Heading>
+          <Box>
+            <Heading size="md" color="gray.700">
+              Client Lead Generation Dashboard
+            </Heading>
+            <Text fontSize="xs" color="gray.500" mt={1}>
+              Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
+            </Text>
+          </Box>
           <IconButton
-            aria-label="Refresh"
+            aria-label="Refresh dashboard data"
             icon={<RepeatIcon />}
-            onClick={() => refreshLeads(true)}
+            onClick={async () => {
+              // Refresh both customers and leads
+              const syncFromCustomers = async () => {
+                const { data, error } = await api.get<CustomerApi[]>('/api/customers')
+                if (error || !data || data.length === 0) return
+                const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
+                setJson(OdcrmStorageKeys.accounts, hydrated)
+                setItem(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
+                setAccountsData(hydrated)
+                emit('accountsUpdated', hydrated)
+              }
+
+              await Promise.all([
+                syncFromCustomers(),
+                refreshLeads(true)
+              ])
+
+              toast({
+                title: 'Dashboard refreshed',
+                description: 'Latest customer and lead data loaded',
+                status: 'success',
+                duration: 2000,
+                isClosable: true,
+              })
+            }}
             isLoading={loading}
             colorScheme="blue"
             size="sm"
+            title="Refresh all dashboard data"
           />
         </HStack>
 
