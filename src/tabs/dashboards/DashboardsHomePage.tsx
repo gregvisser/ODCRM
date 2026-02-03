@@ -379,14 +379,39 @@ export default function DashboardsHomePage() {
 
     const parseLeadDate = (dateStr: string): Date | null => {
       if (!dateStr || dateStr.trim() === '') return null
-      const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
+      
+      const trimmed = dateStr.trim()
+      
+      // Try dd.mm.yy format (e.g., 03.02.26)
+      const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
       if (ddmmyy) {
         const day = parseInt(ddmmyy[1], 10)
         const month = parseInt(ddmmyy[2], 10) - 1
         const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
         return new Date(year, month, day)
       }
-      const parsed = new Date(dateStr)
+      
+      // Try dd/mm/yyyy format (e.g., 03/02/2026)
+      const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+      if (ddmmyyyy) {
+        const day = parseInt(ddmmyyyy[1], 10)
+        const month = parseInt(ddmmyyyy[2], 10) - 1
+        const year = parseInt(ddmmyyyy[3], 10)
+        return new Date(year, month, day)
+      }
+      
+      // Try Week format (e.g., "Week 5 - 03 Feb")
+      const weekMatch = trimmed.match(/Week\s+(\d+)/i)
+      if (weekMatch) {
+        const dateAfterDash = trimmed.split('-')[1]
+        if (dateAfterDash) {
+          const parsed = new Date(dateAfterDash.trim())
+          if (!isNaN(parsed.getTime())) return parsed
+        }
+      }
+      
+      // Try standard Date parsing as fallback
+      const parsed = new Date(trimmed)
       return isNaN(parsed.getTime()) ? null : parsed
     }
 
@@ -470,16 +495,50 @@ export default function DashboardsHomePage() {
   // Use the SAME parseLeadDate function from unifiedAnalytics (supports multiple date formats)
   const parseLeadDateFlexible = (dateStr: string): Date | null => {
     if (!dateStr || dateStr.trim() === '') return null
-    // Try dd.mm.yy format first
-    const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
+    
+    const trimmed = dateStr.trim()
+    
+    // Try dd.mm.yy format (e.g., 03.02.26)
+    const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
     if (ddmmyy) {
       const day = parseInt(ddmmyy[1], 10)
       const month = parseInt(ddmmyy[2], 10) - 1
       const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
       return new Date(year, month, day)
     }
-    // Try standard Date parsing as fallback (handles ISO, US dates, etc.)
-    const parsed = new Date(dateStr)
+    
+    // Try dd/mm/yyyy format (e.g., 03/02/2026)
+    const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (ddmmyyyy) {
+      const day = parseInt(ddmmyyyy[1], 10)
+      const month = parseInt(ddmmyyyy[2], 10) - 1
+      const year = parseInt(ddmmyyyy[3], 10)
+      return new Date(year, month, day)
+    }
+    
+    // Try mm/dd/yyyy format (US format, e.g., 02/03/2026)
+    const mmddyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (mmddyyyy) {
+      const month = parseInt(mmddyyyy[1], 10) - 1
+      const day = parseInt(mmddyyyy[2], 10)
+      const year = parseInt(mmddyyyy[3], 10)
+      const usDate = new Date(year, month, day)
+      if (!isNaN(usDate.getTime())) return usDate
+    }
+    
+    // Try Week format (e.g., "Week 5 - 03 Feb" or "Week 5")
+    const weekMatch = trimmed.match(/Week\s+(\d+)/i)
+    if (weekMatch) {
+      // Try to extract date after the dash
+      const dateAfterDash = trimmed.split('-')[1]
+      if (dateAfterDash) {
+        const parsed = new Date(dateAfterDash.trim())
+        if (!isNaN(parsed.getTime())) return parsed
+      }
+    }
+    
+    // Try standard Date parsing as fallback (handles ISO, other formats)
+    const parsed = new Date(trimmed)
     return isNaN(parsed.getTime()) ? null : parsed
   }
 
@@ -487,6 +546,26 @@ export default function DashboardsHomePage() {
     .map((lead) => {
       const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || lead['First Meeting Date'] || ''
       const parsedDate = parseLeadDateFlexible(dateValue)
+      
+      // DEBUG: Log GreenTheUK leads to see date format issues
+      if (lead.accountName === 'GreenTheUK Limited') {
+        console.log('🔍 GreenTheUK Lead Debug:', {
+          dateValue,
+          parsedDate: parsedDate ? parsedDate.toISOString() : 'NULL',
+          allDateFields: {
+            'Date': lead['Date'],
+            'date': lead['date'],
+            'Week': lead['Week'],
+            'week': lead['week'],
+            'First Meeting Date': lead['First Meeting Date']
+          },
+          leadName: lead['Name'] || lead['name'] || 'unknown',
+          isToday: parsedDate ? (parsedDate >= startOfToday && parsedDate < endOfToday) : false,
+          isThisWeek: parsedDate ? (parsedDate >= weekStart && parsedDate < weekEnd) : false,
+          isThisMonth: parsedDate ? (parsedDate >= monthStart && parsedDate < monthEnd) : false,
+        })
+      }
+      
       if (!parsedDate) return null
       return { data: lead, parsedDate }
     })
@@ -758,6 +837,14 @@ export default function DashboardsHomePage() {
                   isClosable: true,
                 })
               }
+
+              toast({
+                title: 'Dashboard refreshed',
+                description: 'Latest customer and lead data loaded',
+                status: 'success',
+                duration: 2000,
+                isClosable: true,
+              })
             }}
               isLoading={loading}
               colorScheme="blue"
