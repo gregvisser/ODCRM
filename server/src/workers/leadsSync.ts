@@ -615,7 +615,8 @@ function getISOWeek(date: Date): number {
 async function syncCustomerLeads(
   prisma: PrismaClient, 
   customer: { id: string; name: string; leadsReportingUrl?: string | null },
-  onProgress?: (progress: { percent: number; message: string }) => void
+  onProgress?: (progress: { percent: number; message: string }) => void,
+  forceSync: boolean = false
 ) {
   const syncStartedAt = new Date()
   const sheetUrl = customer.leadsReportingUrl
@@ -713,7 +714,7 @@ async function syncCustomerLeads(
 
     const lastSyncState = await prisma.leadSyncState.findUnique({
       where: { customerId: customer.id },
-      select: { lastChecksum: true, rowCount: true }
+      select: { lastChecksum: true, rowCount: true, lastSuccessAt: true }
     })
 
     const lastChecksum = lastSyncState?.lastChecksum
@@ -721,9 +722,18 @@ async function syncCustomerLeads(
 
     console.log(`   Last checksum: ${lastChecksum || 'NONE'}`)
     console.log(`   Data changed: ${hasDataChanged}`)
+    console.log(`   Lead count: ${leads.length} (was: ${lastSyncState?.rowCount || 0})`)
+    
+    // CRITICAL FIX: Always sync if manual trigger, or if it's been more than 1 hour since last success
+    const lastSuccess = lastSyncState?.lastSuccessAt ? new Date(lastSyncState.lastSuccessAt) : null
+    const hoursSinceLastSync = lastSuccess ? (Date.now() - lastSuccess.getTime()) / (1000 * 60 * 60) : 999
+    const forceSync = hoursSinceLastSync > 1 // Force sync if more than 1 hour
+    
+    console.log(`   Hours since last sync: ${hoursSinceLastSync.toFixed(2)}`)
+    console.log(`   Force sync: ${forceSync}`)
 
-    if (!hasDataChanged && leads.length === lastSyncState?.rowCount) {
-      console.log(`   ⏭️  Skipping sync - data unchanged`)
+    if (!hasDataChanged && leads.length === lastSyncState?.rowCount && !forceSync) {
+      console.log(`   ⏭️  Skipping sync - data unchanged and recent`)
 
       await prisma.$transaction(async (tx) => {
         await tx.customer.update({
@@ -991,8 +1001,9 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
     throw new Error('Customer has no leads reporting URL configured')
   }
 
-  console.log(`🔧 MANUAL SYNC TRIGGERED - ${customer.name}`)
-  await syncCustomerLeads(prisma, customer)
+  console.log(`🔧 MANUAL SYNC TRIGGERED - ${customer.name} (FORCE=true)`)
+  // Force sync bypasses checksum comparison - always updates database
+  await syncCustomerLeads(prisma, customer, undefined, true)
 }
 
 export function startLeadsSyncWorker(prisma: PrismaClient) {

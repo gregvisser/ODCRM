@@ -210,6 +210,8 @@ export default function DashboardsHomePage() {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+  const [showDebugPanel, setShowDebugPanel] = useState(false)
+  const [debugInfo, setDebugInfo] = useState<any[]>([])
   
   // Use ref to avoid dependency issues that cause glitching
   const leadsRef = useRef(leads)
@@ -547,9 +549,9 @@ export default function DashboardsHomePage() {
       const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || lead['First Meeting Date'] || ''
       const parsedDate = parseLeadDateFlexible(dateValue)
       
-      // DEBUG: Log GreenTheUK leads to see date format issues
+      // DEBUG: Collect GreenTheUK leads info for visual display
       if (lead.accountName === 'GreenTheUK Limited') {
-        console.log('🔍 GreenTheUK Lead Debug:', {
+        const debugData = {
           dateValue,
           parsedDate: parsedDate ? parsedDate.toISOString() : 'NULL',
           allDateFields: {
@@ -563,7 +565,9 @@ export default function DashboardsHomePage() {
           isToday: parsedDate ? (parsedDate >= startOfToday && parsedDate < endOfToday) : false,
           isThisWeek: parsedDate ? (parsedDate >= weekStart && parsedDate < weekEnd) : false,
           isThisMonth: parsedDate ? (parsedDate >= monthStart && parsedDate < monthEnd) : false,
-        })
+        }
+        console.log('🔍 GreenTheUK Lead Debug:', debugData)
+        setDebugInfo(prev => [...prev.slice(-20), debugData]) // Keep last 20 leads
       }
       
       if (!parsedDate) return null
@@ -741,6 +745,14 @@ export default function DashboardsHomePage() {
             </Text>
           </Box>
           <HStack spacing={2}>
+            <IconButton
+              aria-label="Toggle debug panel"
+              icon={<WarningIcon />}
+              onClick={() => setShowDebugPanel(!showDebugPanel)}
+              colorScheme={showDebugPanel ? 'yellow' : 'gray'}
+              size="sm"
+              title="Show GreenTheUK date debugging"
+            />
             <IconButton
               aria-label="Sync from Google Sheets"
               icon={<DownloadIcon />}
