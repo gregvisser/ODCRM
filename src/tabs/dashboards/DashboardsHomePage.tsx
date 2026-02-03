@@ -466,8 +466,10 @@ export default function DashboardsHomePage() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
 
-  const parseLeadDate = (dateStr: string): Date | null => {
+  // Use the SAME parseLeadDate function from unifiedAnalytics (supports multiple date formats)
+  const parseLeadDateFlexible = (dateStr: string): Date | null => {
     if (!dateStr || dateStr.trim() === '') return null
+    // Try dd.mm.yy format first
     const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
     if (ddmmyy) {
       const day = parseInt(ddmmyy[1], 10)
@@ -475,13 +477,15 @@ export default function DashboardsHomePage() {
       const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
       return new Date(year, month, day)
     }
-    return null
+    // Try standard Date parsing as fallback (handles ISO, US dates, etc.)
+    const parsed = new Date(dateStr)
+    return isNaN(parsed.getTime()) ? null : parsed
   }
 
   const leadsWithDates = leads
     .map((lead) => {
-      const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || ''
-      const parsedDate = parseLeadDate(dateValue)
+      const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || lead['First Meeting Date'] || ''
+      const parsedDate = parseLeadDateFlexible(dateValue)
       if (!parsedDate) return null
       return { data: lead, parsedDate }
     })
