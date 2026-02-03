@@ -723,14 +723,7 @@ async function syncCustomerLeads(
     console.log(`   Last checksum: ${lastChecksum || 'NONE'}`)
     console.log(`   Data changed: ${hasDataChanged}`)
     console.log(`   Lead count: ${leads.length} (was: ${lastSyncState?.rowCount || 0})`)
-    
-    // CRITICAL FIX: Always sync if manual trigger, or if it's been more than 1 hour since last success
-    const lastSuccess = lastSyncState?.lastSuccessAt ? new Date(lastSyncState.lastSuccessAt) : null
-    const hoursSinceLastSync = lastSuccess ? (Date.now() - lastSuccess.getTime()) / (1000 * 60 * 60) : 999
-    const forceSync = hoursSinceLastSync > 1 // Force sync if more than 1 hour
-    
-    console.log(`   Hours since last sync: ${hoursSinceLastSync.toFixed(2)}`)
-    console.log(`   Force sync: ${forceSync}`)
+    console.log(`   Force sync parameter: ${forceSync}`)
 
     if (!hasDataChanged && leads.length === lastSyncState?.rowCount && !forceSync) {
       console.log(`   ⏭️  Skipping sync - data unchanged and recent`)
