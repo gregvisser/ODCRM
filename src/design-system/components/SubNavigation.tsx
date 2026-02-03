@@ -6,7 +6,7 @@
  * - Mobile: Horizontal scrollable tabs OR collapsible sidebar
  */
 
-import React, { useState, type ReactNode } from 'react'
+import React, { useState, useRef, type ReactNode } from 'react'
 import {
   Box,
   Flex,
@@ -165,10 +165,17 @@ export function SubNavigation({
   const [localItems, setLocalItems] = useState(items)
   const isMobile = useBreakpointValue({ base: true, md: false })
   const useMobileLayout = !forceDesktopLayout && isMobile
+  const prevItemIdsRef = useRef<string>('')
 
-  // Update local items when props change
+  // Update local items only if the item IDs have changed (not just array reference)
   React.useEffect(() => {
-    setLocalItems(items)
+    const itemIds = items.map(item => item.id).sort().join(',')
+    
+    // Only reset if items were added/removed/changed (compare sorted IDs)
+    if (itemIds !== prevItemIdsRef.current) {
+      prevItemIdsRef.current = itemIds
+      setLocalItems(items)
+    }
   }, [items])
 
   // Find active tab index
