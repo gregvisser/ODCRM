@@ -21,7 +21,7 @@ import {
   Text,
   useBreakpointValue,
 } from '@chakra-ui/react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon, DragHandleIcon } from '@chakra-ui/icons'
 import {
   DndContext,
   closestCenter,
@@ -100,7 +100,7 @@ function SortableTab({ item, isActive, onClick }: SortableTabProps) {
   }
 
   return (
-    <Box ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <Box ref={setNodeRef} style={style} {...attributes}>
       <Tab
         justifyContent="flex-start"
         fontSize={fontSize.sm}
@@ -109,12 +109,25 @@ function SortableTab({ item, isActive, onClick }: SortableTabProps) {
         color={semanticColor.textMuted}
         px={spacing[3]}
         py={spacing[2]}
-        cursor={isDragging ? 'grabbing' : 'grab'}
+        cursor="pointer"
         _hover={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary }}
         _selected={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary, boxShadow: shadow.sm }}
         onClick={onClick}
       >
         <HStack spacing={spacing[2]} w="100%">
+          {/* Drag Handle - Only this icon is draggable */}
+          <Box
+            {...listeners}
+            cursor={isDragging ? 'grabbing' : 'grab'}
+            color={isDragging ? semanticColor.textPrimary : semanticColor.textMuted}
+            _hover={{ color: semanticColor.textPrimary }}
+            transition="color 0.2s"
+            display="flex"
+            alignItems="center"
+          >
+            <DragHandleIcon boxSize={3} />
+          </Box>
+          
           {item.icon && <Icon as={item.icon} boxSize={4} />}
           <Text flex="1">{item.label}</Text>
           {item.badge && item.badge > 0 && (
@@ -161,9 +174,13 @@ export function SubNavigation({
   // Find active tab index
   const activeIndex = activeId ? localItems.findIndex((item) => item.id === activeId) : 0
 
-  // Drag and drop sensors
+  // Drag and drop sensors with activation constraints
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // Require 8px movement before drag starts
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
