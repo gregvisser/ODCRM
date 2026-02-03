@@ -241,19 +241,31 @@ async function fetchLeadsFromSheetUrl(
 
       onProgress?.({ percent: 60, message: 'Detecting headers...' })
 
-      // Improved header detection - find the row with the most non-empty cells
+      // SMART header detection - look for rows with header-like keywords
       let headerRowIndex = 0
-      let maxNonEmptyCells = 0
-
-      for (let i = 0; i < Math.min(rows.length, 5); i++) { // Check first 5 rows
-        const nonEmptyCells = rows[i].filter(cell => cell && cell.trim() !== '').length
-        if (nonEmptyCells > maxNonEmptyCells) {
-          maxNonEmptyCells = nonEmptyCells
+      const headerKeywords = ['date', 'name', 'company', 'email', 'phone', 'week', 'status', 'lead', 'contact']
+      
+      for (let i = 0; i < Math.min(rows.length, 5); i++) {
+        const row = rows[i]
+        const cellsLowercase = row.map(cell => (cell || '').toLowerCase().trim())
+        
+        // Count how many header keywords are present
+        const keywordMatches = headerKeywords.filter(keyword => 
+          cellsLowercase.some(cell => cell.includes(keyword))
+        ).length
+        
+        // If this row has at least 3 header keywords, it's likely the header row
+        if (keywordMatches >= 3) {
           headerRowIndex = i
+          console.log(`   Detected header row at index ${i} (${keywordMatches} keyword matches)`)
+          break
         }
       }
-
-      console.log(`   Detected header row at index ${headerRowIndex} (${maxNonEmptyCells} non-empty cells)`)
+      
+      // Fallback: if no header keywords found, assume row 0 is headers
+      if (headerRowIndex === 0 && rows.length > 0) {
+        console.log(`   Using row 0 as headers (fallback)`)
+      }
 
       const headers = rows[headerRowIndex].map((h) => h.trim())
       diagnostics.validHeaders = headers.filter(h => h && h.trim() !== '')
