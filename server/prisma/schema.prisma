@@ -642,8 +642,26 @@ model User {
   createdDate     DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  // Relations
+  preferences     UserPreferences?
+
   @@index([email])
   @@index([userId])
   @@index([accountStatus])
   @@map("users")
+}
+
+// User preferences (UI settings, tab orders, etc.)
+model UserPreferences {
+  id              String   @id @default(cuid())
+  userEmail       String   @unique  // User's email (primary identifier)
+  preferences     Json     // Flexible JSON structure for all preferences
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  user            User?    @relation(fields: [userEmail], references: [email], onDelete: Cascade)
+
+  @@index([userEmail])
+  @@map("user_preferences")
 }

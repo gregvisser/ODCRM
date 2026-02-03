@@ -3,7 +3,7 @@
  * Complete implementation based on Reply.io architecture exploration
  */
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   EmailIcon,
   InfoIcon,
@@ -18,6 +18,7 @@ import {
   CalendarIcon,
 } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
+import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import SequencesTab from './components/SequencesTab'
 import PeopleTab from './components/PeopleTab'
 import ListsTab from './components/ListsTab'
@@ -68,8 +69,7 @@ function coerceViewId(view?: string): OpenDoorsViewId {
   return 'overview'
 }
 
-// Storage key for marketing navigation order
-const MARKETING_NAV_ORDER_KEY = 'odcrm_marketing_nav_order'
+const MARKETING_SECTION_KEY = 'marketing'
 
 export default function MarketingHomePage({
   view,
@@ -81,6 +81,7 @@ export default function MarketingHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceViewId(view)
+  const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
 
   // Default navigation items
   const defaultNavItems: SubNavItem[] = [
@@ -177,39 +178,36 @@ export default function MarketingHomePage({
     },
   ]
 
-  // State for navigation items (supports reordering)
-  const [navItems, setNavItems] = useState<SubNavItem[]>(() => {
-    // Load saved order from localStorage
-    const saved = localStorage.getItem(MARKETING_NAV_ORDER_KEY)
-    if (saved) {
-      try {
-        const savedOrder = JSON.parse(saved)
-        // Merge saved order with default items
-        return defaultNavItems.map(item => {
-          const savedItem = savedOrder.find((s: any) => s.id === item.id)
-          return savedItem ? { ...item, sortOrder: savedItem.sortOrder } : item
-        }).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
-      } catch (error) {
-        console.warn('Failed to load saved navigation order:', error)
+  // Apply saved tab order from database (per-user)
+  const navItems = useMemo(() => {
+    const savedOrder = getTabOrder(MARKETING_SECTION_KEY)
+    if (!savedOrder || savedOrder.length === 0) {
+      return defaultNavItems
+    }
+
+    // Reorder items based on saved preference
+    const orderedItems: SubNavItem[] = []
+    const itemsById = new Map(defaultNavItems.map(item => [item.id, item]))
+
+    // Add items in saved order
+    for (const id of savedOrder) {
+      const item = itemsById.get(id)
+      if (item) {
+        orderedItems.push(item)
+        itemsById.delete(id)
       }
     }
-    return defaultNavItems
-  })
 
-  // Save navigation order when it changes
-  const handleNavReorder = (reorderedItems: SubNavItem[]) => {
-    const updatedItems = reorderedItems.map((item, index) => ({
-      ...item,
-      sortOrder: index,
-    }))
-    setNavItems(updatedItems)
+    // Add any new items that weren't in saved order (at the end)
+    orderedItems.push(...Array.from(itemsById.values()))
 
-    // Save to localStorage
-    const orderToSave = updatedItems.map(item => ({
-      id: item.id,
-      sortOrder: item.sortOrder,
-    }))
-    localStorage.setItem(MARKETING_NAV_ORDER_KEY, JSON.stringify(orderToSave))
+    return orderedItems
+  }, [getTabOrder, defaultNavItems])
+
+  // Save navigation order when it changes (to database, per-user)
+  const handleNavReorder = async (reorderedItems: SubNavItem[]) => {
+    const tabIds = reorderedItems.map(item => item.id)
+    await saveTabOrder(MARKETING_SECTION_KEY, tabIds)
   }
 
   return (

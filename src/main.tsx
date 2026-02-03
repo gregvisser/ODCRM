@@ -8,6 +8,7 @@ import AuthGate from './auth/AuthGate'
 import LoginPage from './auth/LoginPage'
 import { msalConfig } from './auth/msalConfig'
 import ErrorBoundary from './components/ErrorBoundary'
+import { UserPreferencesProvider } from './contexts/UserPreferencesContext'
 import './index.css'
 import theme from './theme'
 
@@ -37,7 +38,9 @@ try {
             {msalInstance ? (
               <MsalProvider instance={msalInstance}>
                 <AuthGate>
-                  <App />
+                  <UserPreferencesProvider>
+                    <App />
+                  </UserPreferencesProvider>
                 </AuthGate>
               </MsalProvider>
             ) : (
