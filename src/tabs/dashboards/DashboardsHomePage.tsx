@@ -221,8 +221,28 @@ export default function DashboardsHomePage() {
     setLoading(true)
     try {
       console.log('🔄 Dashboard: Fetching fresh leads from API...')
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+      const response = await fetchLeadsFromApi()
+      const allLeads = response.leads || []
+      const lastSyncAt = response.lastSyncAt
+      
       console.log(`✅ Dashboard: Loaded ${allLeads.length} leads from API`)
+      console.log('📊 Response details:', { 
+        leadsCount: allLeads.length, 
+        lastSyncAt,
+        diagnostics: response.diagnostics || 'none'
+      })
+      
+      if (allLeads.length === 0) {
+        console.warn('⚠️ Dashboard: ZERO leads returned from API!')
+        console.warn('⚠️ Possible reasons:')
+        console.warn('   1. No customers have Google Sheets URLs configured')
+        console.warn('   2. Leads sync has not been triggered yet')
+        console.warn('   3. Leads sync is failing')
+        console.warn('   4. Check Accounts tab → Ensure customers have Google Sheets URLs')
+      } else {
+        // Sample the first lead to see its structure
+        console.log('📄 Sample lead structure:', Object.keys(allLeads[0] || {}))
+      }
       
       // NO localStorage persistence - keep data in memory only
       setLeads(allLeads)
@@ -248,8 +268,36 @@ export default function DashboardsHomePage() {
     const syncFromCustomers = async () => {
       if (hasSyncedCustomers) return
       setHasSyncedCustomers(true)
+      
+      console.log('🔄 Dashboard: Fetching customers from API...')
       const { data, error } = await api.get<CustomerApi[]>('/api/customers')
-      if (error || !data || data.length === 0) return
+      
+      if (error) {
+        console.error('❌ Dashboard: Failed to fetch customers:', error)
+        return
+      }
+      
+      if (!data || data.length === 0) {
+        console.warn('⚠️ Dashboard: ZERO customers returned from API!')
+        console.warn('⚠️ You need to add customers in the Accounts tab first.')
+        return
+      }
+
+      console.log(`✅ Dashboard: Loaded ${data.length} customers from API`)
+      
+      // Check which customers have Google Sheets URLs
+      const customersWithUrls = data.filter(c => c.leadsReportingUrl)
+      console.log(`📊 Customers with Google Sheets URLs: ${customersWithUrls.length}/${data.length}`)
+      
+      if (customersWithUrls.length === 0) {
+        console.warn('⚠️ Dashboard: NO customers have Google Sheets URLs configured!')
+        console.warn('⚠️ This is why NO leads data is showing!')
+        console.warn('⚠️ Solution: Go to Accounts tab → Edit each customer → Add Google Sheets URL')
+      } else {
+        customersWithUrls.forEach(c => {
+          console.log(`  ✅ ${c.name}: ${c.leadsReportingUrl}`)
+        })
+      }
 
       const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
       // NO localStorage persistence - API is the ONLY source of truth
@@ -708,7 +756,7 @@ export default function DashboardsHomePage() {
         columns={dashboardColumns}
         tableId="dashboard-clients"
         enableSorting
-        enableFiltering
+        enableFiltering={false}
         enableColumnReorder
         enableColumnResize
         enableColumnVisibility
