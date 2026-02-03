@@ -80,7 +80,7 @@ export function persistLeadsToStorage(leads: LeadRecord[], lastSyncAt?: string |
   setItem(OdcrmStorageKeys.leadsLastRefresh, refreshIso)
   setItem(OdcrmStorageKeys.marketingLeadsLastRefresh, refreshIso)
 
-  emit('leadsUpdated')
+  emit('leadsUpdated', leads)
   return refreshTime
 }
 
