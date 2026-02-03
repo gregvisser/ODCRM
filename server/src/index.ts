@@ -43,13 +43,21 @@ const parseAllowedOrigins = () => {
     .filter(Boolean)
 
   // In development, allow localhost by default
-  // In production, ONLY use environment variables (no hardcoded defaults)
   const isDevelopment = process.env.NODE_ENV !== 'production'
   const devDefaults = isDevelopment ? ['http://localhost:5173'] : []
 
-  // Production domains should be set via FRONTEND_URL/FRONTEND_URLS env vars
-  // Example: FRONTEND_URLS=https://www.bidlow.co.uk,https://bidlow.co.uk
-  return Array.from(new Set([...fromEnv, ...devDefaults]))
+  // CRITICAL: Always include production frontend URL as fallback
+  // This prevents CORS issues even if environment variables aren't set in Azure
+  const productionFallback = ['https://odcrm.bidlow.co.uk']
+
+  const allOrigins = Array.from(new Set([...fromEnv, ...devDefaults, ...productionFallback]))
+  
+  console.log('🔒 CORS Configuration:')
+  console.log('   Environment: ', process.env.NODE_ENV || 'development')
+  console.log('   From env vars: ', fromEnv.length > 0 ? fromEnv : 'NONE')
+  console.log('   Allowed origins: ', allOrigins)
+  
+  return allOrigins
 }
 
 const allowedOrigins = parseAllowedOrigins()
@@ -58,10 +66,25 @@ const allowedOrigins = parseAllowedOrigins()
 app.use(
   cors({
     origin(origin, callback) {
+      // Allow requests with no origin (e.g., mobile apps, Postman)
       if (!origin) return callback(null, true)
-      if (allowedOrigins.includes(origin)) return callback(null, true)
-      if (origin.endsWith('.vercel.app')) return callback(null, true)
-      return callback(new Error('Not allowed by CORS'))
+      
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        console.log('✅ CORS: Allowed origin:', origin)
+        return callback(null, true)
+      }
+      
+      // Allow Vercel preview deployments
+      if (origin.endsWith('.vercel.app')) {
+        console.log('✅ CORS: Allowed Vercel preview:', origin)
+        return callback(null, true)
+      }
+      
+      // Block and log rejected origins
+      console.error('❌ CORS: Blocked origin:', origin)
+      console.error('   Allowed origins:', allowedOrigins)
+      return callback(new Error(`CORS: Origin ${origin} not allowed`))
     },
     credentials: true,
   }),
