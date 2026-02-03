@@ -273,7 +273,7 @@ export function SubNavigation({
 
         {/* Mobile Content */}
         <TabPanels>
-          {items.map((item) => (
+          {localItems.map((item) => (
             <TabPanel key={item.id} px={0} py={0}>
               {item.content}
             </TabPanel>
@@ -288,7 +288,7 @@ export function SubNavigation({
     <Tabs
       index={activeIndex}
       onChange={(index) => {
-        const item = items[index]
+        const item = localItems[index]
         if (item) onChange?.(item.id)
       }}
       isLazy
@@ -413,7 +413,7 @@ export function SubNavigation({
 
         {/* Desktop Content */}
         <TabPanels flex="1" pt={spacing[1]}>
-          {items.map((item) => (
+          {localItems.map((item) => (
             <TabPanel key={item.id} px={0} py={0}>
               {item.content}
             </TabPanel>
