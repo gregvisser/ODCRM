@@ -23,7 +23,7 @@ import {
   useToast,
   VStack,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, RepeatIcon, WarningIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, RepeatIcon, WarningIcon, DownloadIcon } from '@chakra-ui/icons'
 import { type Account } from '../../components/AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
@@ -209,6 +209,7 @@ export default function DashboardsHomePage() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
   
   // Use ref to avoid dependency issues that cause glitching
   const leadsRef = useRef(leads)
@@ -660,9 +661,57 @@ export default function DashboardsHomePage() {
               Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
             </Text>
           </Box>
-          <IconButton
-            aria-label="Refresh dashboard data"
-            icon={<RepeatIcon />}
+          <HStack spacing={2}>
+            <IconButton
+              aria-label="Sync from Google Sheets"
+              icon={<DownloadIcon />}
+              onClick={async () => {
+                setIsSyncing(true)
+                try {
+                  const { data: customers, error: customersError } = await api.get<CustomerApi[]>('/api/customers')
+                  if (customersError || !customers) throw new Error('Failed to fetch customers')
+                  
+                  const customersWithUrls = customers.filter(c => c.leadsReportingUrl)
+                  const syncPromises = customersWithUrls.map(async (customer) => {
+                    try {
+                      const { error } = await api.post(`/api/leads/sync/trigger?customerId=${customer.id}`)
+                      return { customer: customer.name, success: !error }
+                    } catch {
+                      return { customer: customer.name, success: false }
+                    }
+                  })
+                  
+                  const results = await Promise.all(syncPromises)
+                  const successCount = results.filter(r => r.success).length
+                  
+                  if (successCount > 0) {
+                    toast({
+                      title: 'Sync triggered',
+                      description: `Syncing ${successCount} customers. Refresh in 10 seconds.`,
+                      status: 'success',
+                      duration: 5000,
+                    })
+                    setTimeout(() => refreshLeads(true), 10000)
+                  }
+                } catch (err: any) {
+                  toast({
+                    title: 'Sync failed',
+                    description: err?.message || 'Could not trigger sync',
+                    status: 'error',
+                    duration: 5000,
+                  })
+                } finally {
+                  setIsSyncing(false)
+                }
+              }}
+              isLoading={isSyncing}
+              colorScheme="green"
+              size="sm"
+              title="Sync from Google Sheets"
+            />
+            <IconButton
+              aria-label="Refresh dashboard data"
+              icon={<RepeatIcon />}
             onClick={async () => {
               // Refresh both customers and leads
               const syncFromCustomers = async () => {
@@ -718,11 +767,12 @@ export default function DashboardsHomePage() {
                 isClosable: true,
               })
             }}
-            isLoading={loading}
-            colorScheme="blue"
-            size="sm"
-            title="Refresh all dashboard data"
-          />
+              isLoading={loading}
+              colorScheme="blue"
+              size="sm"
+              title="Refresh dashboard data"
+            />
+          </HStack>
         </HStack>
 
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
