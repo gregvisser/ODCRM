@@ -5,6 +5,31 @@ import { triggerManualSync } from '../workers/leadsSync.js'
 
 const router = Router()
 
+// Health check endpoint
+router.get('/health', async (req, res) => {
+  try {
+    // Test database connection
+    const leadCount = await prisma.leadRecord.count()
+    const customerCount = await prisma.customer.count()
+    
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      database: {
+        connected: true,
+        leadCount,
+        customerCount,
+      },
+    })
+  } catch (error) {
+    console.error('Health check failed:', error)
+    res.status(500).json({
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
 router.get('/', async (req, res) => {
   try {
     const queryCustomerId = req.query.customerId as string | undefined
@@ -50,18 +75,32 @@ router.get('/', async (req, res) => {
       lastSyncAt = latest?.lastSuccessAt || latest?.lastSyncAt || null
     }
 
-    const leads = leadRows.map((lead) => ({
-      ...(lead.data || {}),
-      id: lead.id,
-      accountName: lead.accountName,
-      customerId: lead.customerId,
-      status: lead.status,
-      score: lead.score,
-      convertedToContactId: lead.convertedToContactId,
-      convertedAt: lead.convertedAt?.toISOString(),
-      qualifiedAt: lead.qualifiedAt?.toISOString(),
-      enrolledInSequenceId: lead.enrolledInSequenceId,
-    }))
+    const leads = leadRows.map((lead) => {
+      try {
+        const leadData = lead.data && typeof lead.data === 'object' ? lead.data as Record<string, any> : {}
+        return {
+          ...leadData,
+          id: lead.id,
+          accountName: lead.accountName,
+          customerId: lead.customerId,
+          status: lead.status,
+          score: lead.score,
+          convertedToContactId: lead.convertedToContactId,
+          convertedAt: lead.convertedAt?.toISOString(),
+          qualifiedAt: lead.qualifiedAt?.toISOString(),
+          enrolledInSequenceId: lead.enrolledInSequenceId,
+        }
+      } catch (mapError) {
+        console.error(`Error mapping lead ${lead.id}:`, mapError)
+        return {
+          id: lead.id,
+          accountName: lead.accountName,
+          customerId: lead.customerId,
+          status: lead.status,
+          error: 'Failed to map lead data',
+        }
+      }
+    })
 
     // Add comprehensive diagnostics logging
     console.log(`📊 LEADS API RESPONSE - ${new Date().toISOString()}`)
@@ -94,8 +133,17 @@ router.get('/', async (req, res) => {
       },
     })
   } catch (error) {
-    console.error('Error fetching leads:', error)
-    return res.status(500).json({ error: 'Failed to fetch leads' })
+    console.error('❌ CRITICAL ERROR in GET /api/leads:', error)
+    console.error('Error details:', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : 'No stack trace',
+      customerId,
+      since: since?.toISOString(),
+    })
+    return res.status(500).json({ 
+      error: 'Failed to fetch leads',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
   }
 })
 
