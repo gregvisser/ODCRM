@@ -78,7 +78,7 @@ router.patch('/:email', async (req, res) => {
       where: { userEmail: email },
     })
 
-    const currentPrefs = existing?.preferences || {}
+    const currentPrefs = (existing?.preferences as Record<string, any>) || {}
     const mergedPrefs = {
       ...currentPrefs,
       ...updates,
