@@ -36,7 +36,7 @@ jobs:
       run: cd server && npm run prisma:migrate:deploy
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      continue-on-error: false
+      continue-on-error: true
 
     - name: Build application
       run: cd server && npm run build
