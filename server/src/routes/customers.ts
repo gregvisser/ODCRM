@@ -166,6 +166,20 @@ router.post('/', async (req, res) => {
     console.log('📝 POST /api/customers - Creating customer:', { name: req.body.name })
     const validated = upsertCustomerSchema.parse(req.body)
 
+    // Check if customer with same name already exists (prevent duplicates)
+    const existing = await prisma.customer.findFirst({
+      where: { name: validated.name }
+    })
+
+    if (existing) {
+      console.log('ℹ️  POST /api/customers - Customer already exists, returning existing:', { id: existing.id, name: existing.name })
+      return res.status(200).json({
+        id: existing.id,
+        name: existing.name,
+        existed: true
+      })
+    }
+
     const customer = await prisma.customer.create({ data: {
         id: `cust_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: validated.name,
@@ -196,9 +210,11 @@ router.post('/', async (req, res) => {
       },
     })
 
+    console.log('✅ POST /api/customers - Created customer:', { id: customer.id, name: customer.name })
     return res.status(201).json({
       id: customer.id,
       name: customer.name,
+      existed: false
     })
   } catch (error) {
     if (error instanceof z.ZodError) {

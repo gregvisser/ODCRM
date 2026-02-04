@@ -1,3 +1,7 @@
+/**
+ * Email templates store: CACHE ONLY. Database (GET/POST /api/templates) is the source of truth.
+ * Do not use getEmailTemplates() as the authority; fetch from API for the selected customer.
+ */
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
 import { getJson, setItem, setJson } from '../storage'

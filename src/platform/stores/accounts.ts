@@ -1,3 +1,7 @@
+/**
+ * Accounts store: CACHE ONLY. Database (API) is the source of truth.
+ * Do not use getAccounts() as the authority for business data; use useCustomersFromDatabase or API.
+ */
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
 import { getJson, setItem, setJson } from '../storage'

@@ -91,11 +91,86 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
 }
 
 /**
- * Convert AccountsTab Account to database Customer format (for updates)
+ * Account shape that may include onboarding data (from localStorage / AccountsTab).
+ * Used when syncing back to database so accountData is preserved.
  */
-export function accountToDatabaseCustomer(account: Account): Partial<DatabaseCustomer> {
+type AccountWithOnboarding = Account & {
+  clientProfile?: unknown
+  primaryContact?: unknown
+  headOfficeAddress?: string
+  headOfficePlaceId?: string
+  headOfficePostcode?: string
+  contactPersons?: string
+  contactEmail?: string
+  contactNumber?: string
+  contactRoleId?: string
+  contactRoleLabel?: string
+  contactActive?: boolean
+  assignedAccountManager?: string
+  assignedAccountManagerId?: string
+  assignedClientDdiNumber?: string
+  emailAccountsSetUp?: boolean
+  emailAccounts?: string[]
+  days?: number
+}
+
+/**
+ * Build accountData JSON for API from account (onboarding / account-details fields).
+ * Matches shape saved by Onboarding tab so DB is single source of truth.
+ */
+function buildAccountDataFromAccount(account: AccountWithOnboarding): Record<string, unknown> | null {
+  const hasOnboarding =
+    account.clientProfile != null ||
+    account.primaryContact != null ||
+    (account.headOfficeAddress != null && account.headOfficeAddress !== '') ||
+    (account.contactPersons != null && account.contactPersons !== '') ||
+    (account.contactEmail != null && account.contactEmail !== '') ||
+    (account.days != null && account.days !== 0)
+  if (!hasOnboarding) return null
+
+  return {
+    clientProfile: account.clientProfile ?? undefined,
+    primaryContact: account.primaryContact ?? undefined,
+    headOfficeAddress: account.headOfficeAddress ?? undefined,
+    headOfficePlaceId: account.headOfficePlaceId ?? undefined,
+    headOfficePostcode: account.headOfficePostcode ?? undefined,
+    contactPersons: account.contactPersons ?? undefined,
+    contactEmail: account.contactEmail ?? undefined,
+    contactNumber: account.contactNumber ?? undefined,
+    contactRoleId: account.contactRoleId ?? undefined,
+    contactRoleLabel: account.contactRoleLabel ?? undefined,
+    contactActive: account.contactActive ?? undefined,
+    assignedAccountManager: account.assignedAccountManager ?? undefined,
+    assignedAccountManagerId: account.assignedAccountManagerId ?? undefined,
+    assignedClientDdiNumber: account.assignedClientDdiNumber ?? undefined,
+    emailAccountsSetUp: account.emailAccountsSetUp ?? undefined,
+    emailAccounts: account.emailAccounts ?? undefined,
+    days: account.days ?? undefined,
+    accountDetails:
+      account.primaryContact != null || account.headOfficeAddress != null || account.days != null
+        ? {
+            primaryContact: account.primaryContact,
+            headOfficeAddress: account.headOfficeAddress,
+            headOfficePlaceId: account.headOfficePlaceId,
+            headOfficePostcode: account.headOfficePostcode,
+            assignedAccountManagerId: account.assignedAccountManagerId,
+            assignedAccountManagerName: account.assignedAccountManager,
+            assignedClientDdiNumber: account.assignedClientDdiNumber,
+            emailAccounts: account.emailAccounts,
+            daysPerWeek: account.days,
+          }
+        : undefined,
+  }
+}
+
+/**
+ * Convert AccountsTab Account to database Customer format (for updates).
+ * Includes accountData so onboarding/client profile data is persisted.
+ */
+export function accountToDatabaseCustomer(account: AccountWithOnboarding): Partial<DatabaseCustomer> {
   // Join target locations back to comma-separated string
   const prospectingLocation = account.targetLocation?.join(', ') || null
+  const accountData = buildAccountDataFromAccount(account)
 
   return {
     name: account.name,
@@ -110,7 +185,7 @@ export function accountToDatabaseCustomer(account: Account): Partial<DatabaseCus
     monthlyIntakeGBP: account.monthlyIntake?.toString() || null,
     defcon: account.defcon || null,
     clientStatus: account.clientStatus || 'active',
-    
+
     // About section
     website: account.website || null,
     whatTheyDo: account.whatTheyDo || null,
@@ -122,6 +197,9 @@ export function accountToDatabaseCustomer(account: Account): Partial<DatabaseCus
     companySize: account.companySize || null,
     headquarters: account.headquarters || null,
     foundingYear: account.foundingYear || null,
+
+    // Onboarding / account details (single source of truth in DB)
+    accountData: accountData ?? null,
   }
 }
 

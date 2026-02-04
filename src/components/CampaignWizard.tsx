@@ -31,9 +31,9 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../utils/api'
 import { getItem, setItem } from '../platform/storage'
-import { getEmailTemplates, type OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
+import type { OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
-import { accountsStore, settingsStore } from '../platform'
+import { settingsStore } from '../platform'
 
 interface EmailIdentity {
   id: string
@@ -102,6 +102,8 @@ export default function CampaignWizard({
   const [, setContacts] = useState<Contact[]>([])
   const toast = useToast()
   const [prospectSearch, setProspectSearch] = useState('')
+  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([])
+  const [templatesFromApi, setTemplatesFromApi] = useState<OdcrmEmailTemplate[]>([])
 
   // Form data
   const [formData, setFormData] = useState({
@@ -153,9 +155,38 @@ export default function CampaignWizard({
   }, [])
 
   const fetchContacts = useCallback(async () => {
-    // TODO: Fetch from contacts API when available
-    // For now, using placeholder
     setContacts([])
+  }, [])
+
+  const fetchCustomers = useCallback(async () => {
+    const { data, error } = await api.get<Array<{ id: string; name: string }>>('/api/customers')
+    if (!error && data && Array.isArray(data)) {
+      setCustomers(data)
+    }
+  }, [])
+
+  const fetchTemplatesForCustomer = useCallback(async (customerId: string) => {
+    const { data, error } = await api.get<Array<{
+      id: string
+      name: string
+      subjectTemplate: string
+      bodyTemplateHtml: string
+      stepNumber: number
+    }>>(`/api/templates?customerId=${customerId}&includeGlobal=true`)
+    if (!error && data && Array.isArray(data)) {
+      const mapped: OdcrmEmailTemplate[] = data.map((t) => ({
+        id: t.id,
+        name: t.name,
+        subject: t.subjectTemplate,
+        body: t.bodyTemplateHtml,
+        stepNumber: t.stepNumber ?? 1,
+        createdAt: '',
+        updatedAt: '',
+      }))
+      setTemplatesFromApi(mapped)
+    } else {
+      setTemplatesFromApi([])
+    }
   }, [])
 
   const fetchCampaign = useCallback(async (id: string) => {
@@ -199,10 +230,10 @@ export default function CampaignWizard({
     fetchIdentities()
     fetchSchedules()
     fetchContacts()
+    fetchCustomers()
     if (campaignId) {
       fetchCampaign(campaignId)
     } else {
-      // Prefill last selections to speed up workflow for OpenDoors users.
       const lastIdentity = getItem('odcrm_last_sender_identity_id') || ''
       const lastAccount = getItem('odcrm_last_campaign_account') || ''
       setFormData((prev) => ({
@@ -211,15 +242,28 @@ export default function CampaignWizard({
         customerAccountName: prev.customerAccountName || lastAccount,
       }))
     }
-  }, [campaignId, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules])
+  }, [campaignId, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules, fetchCustomers])
 
-  const availableAccounts = useMemo(() => {
-    const accounts = accountsStore.getAccounts<{ name: string }>()
-    const names = accounts.map((a) => a?.name).filter(Boolean)
-    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-  }, [])
+  useEffect(() => {
+    const acct = (formData.customerAccountName || '').trim()
+    if (!acct) {
+      setTemplatesFromApi([])
+      return
+    }
+    const customer = customers.find((c) => c.name === acct)
+    if (customer) {
+      fetchTemplatesForCustomer(customer.id)
+    } else {
+      setTemplatesFromApi([])
+    }
+  }, [formData.customerAccountName, customers, fetchTemplatesForCustomer])
 
-  const allTemplates = useMemo(() => getEmailTemplates(), [])
+  const availableAccounts = useMemo(
+    () => customers.map((c) => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [customers]
+  )
+
+  const allTemplates = templatesFromApi
 
   const templatesForAccount = useMemo(() => {
     const acct = (formData.customerAccountName || '').trim()

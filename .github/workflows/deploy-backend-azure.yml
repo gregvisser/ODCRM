@@ -32,6 +32,12 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+    - name: Run database migrations
+      run: cd server && npm run prisma:migrate:deploy
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      continue-on-error: false
+
     - name: Build application
       run: cd server && npm run build
 

@@ -77,6 +77,14 @@ function App() {
     window.history.replaceState({}, '', url)
   }, [activeTab, activeView, focusAccountName])
 
+  // Clear account focus when on tabs that don't use it (keeps URL clean)
+  useEffect(() => {
+    const tabsThatUseFocus = ['customers-home', 'marketing-home', 'onboarding-home']
+    if (!tabsThatUseFocus.includes(activeTab) && focusAccountName) {
+      setFocusAccountName(undefined)
+    }
+  }, [activeTab, focusAccountName])
+
   // Cross-page navigation events (kept for backward compatibility with existing components).
   useEffect(() => {
     const handleNavigateToAccount = (event: Event) => {
@@ -95,11 +103,21 @@ function App() {
       if (accountName) setFocusAccountName(accountName)
     }
 
+    const handleNavigateToOnboarding = (event: Event) => {
+      const customEvent = event as CustomEvent<{ accountName?: string }>
+      const accountName = customEvent.detail?.accountName
+      setActiveTab('onboarding-home')
+      setActiveView('overview')
+      if (accountName) setFocusAccountName(accountName)
+    }
+
     window.addEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
     window.addEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
+    window.addEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
     return () => {
       window.removeEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
       window.removeEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
+      window.removeEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
     }
   }, [])
 
@@ -136,7 +154,7 @@ function App() {
           />
         )
       case 'onboarding-home':
-        return <OnboardingHomePage />
+        return <OnboardingHomePage focusAccountName={focusAccountName} />
       case 'settings-home':
         return (
           <SettingsHomePage
