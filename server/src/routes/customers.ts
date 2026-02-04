@@ -400,4 +400,84 @@ router.post('/:id/enrich-about', async (req, res) => {
   }
 })
 
+// Bulk sync leads URLs from frontend
+router.post('/sync-leads-urls', async (req, res) => {
+  try {
+    const { accounts } = req.body
+
+    if (!Array.isArray(accounts)) {
+      return res.status(400).json({ error: 'accounts must be an array' })
+    }
+
+    console.log(`📥 BULK SYNC LEADS URLS - ${accounts.length} accounts`)
+
+    let updated = 0
+    let skipped = 0
+    const results = []
+
+    for (const account of accounts) {
+      const { name, clientLeadsSheetUrl } = account
+
+      if (!name) {
+        skipped++
+        continue
+      }
+
+      const leadsUrl = clientLeadsSheetUrl?.trim()
+      if (!leadsUrl) {
+        skipped++
+        continue
+      }
+
+      // Find customer by name
+      const customer = await prisma.customer.findFirst({
+        where: {
+          name: { equals: name, mode: 'insensitive' }
+        }
+      })
+
+      if (!customer) {
+        results.push({ name, status: 'not_found' })
+        skipped++
+        continue
+      }
+
+      // Only update if URL is different
+      if (customer.leadsReportingUrl !== leadsUrl) {
+        await prisma.customer.update({
+          where: { id: customer.id },
+          data: { leadsReportingUrl: leadsUrl }
+        })
+        
+        results.push({ 
+          name, 
+          status: 'updated',
+          customerId: customer.id,
+          url: leadsUrl 
+        })
+        updated++
+        console.log(`✅ Updated ${name}: ${leadsUrl}`)
+      } else {
+        results.push({ name, status: 'unchanged' })
+        skipped++
+      }
+    }
+
+    console.log(`📊 Bulk sync complete: ${updated} updated, ${skipped} skipped`)
+
+    res.json({
+      success: true,
+      updated,
+      skipped,
+      results
+    })
+  } catch (error) {
+    console.error('Error in bulk sync leads URLs:', error)
+    res.status(500).json({ 
+      error: 'Failed to sync leads URLs',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
 export default router
