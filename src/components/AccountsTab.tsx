@@ -5563,10 +5563,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
           onClose={handleCloseDrawer}
           closeOnOverlayClick={true}
           closeOnEsc={true}
-          size="full"
+          size="xl"
         >
           <DrawerOverlay bg="blackAlpha.600" />
-          <DrawerContent maxW="100vw">
+          <DrawerContent maxW="66.67vw">
             <DrawerCloseButton />
             <DrawerHeader
               bg="white"
