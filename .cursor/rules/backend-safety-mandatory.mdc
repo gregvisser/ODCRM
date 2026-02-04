@@ -1,0 +1,499 @@
+---
+description: Mandatory backend safety rules - test locally BEFORE deploying, especially for complex sync/worker changes
+alwaysApply: true
+---
+
+# 🚨 MANDATORY: Backend Safety & Testing Protocol
+
+**CREATED IN RESPONSE TO PRODUCTION BACKEND FAILURE (2026-02-04)**
+**THESE RULES ARE NON-NEGOTIABLE**
+
+---
+
+## 🔥 CRITICAL INCIDENT SUMMARY (2026-02-04)
+
+**What Happened:**
+- Agent deployed "comprehensive sync safety features" to backend
+- Backend returned 503 Server Unavailable
+- Production system completely broken
+- User unable to access ODCRM for 10+ minutes
+- Forced to revert multiple commits
+
+**Root Cause:**
+1. ❌ Did NOT test locally before deploying
+2. ❌ Deployed massive changes in one commit (330+ lines)
+3. ❌ Did NOT run `npm run build` to check for TypeScript errors
+4. ❌ Did NOT verify backend starts successfully
+5. ❌ Violated existing quality standards
+
+**Lesson:**
+> **"NEVER deploy backend changes without local testing. NEVER."**
+
+---
+
+## ✅ RULE #1: ALWAYS Test Backend Locally FIRST
+
+### Before EVERY Backend Commit:
+
+```bash
+# Step 1: Navigate to server directory
+cd server
+
+# Step 2: Install dependencies if needed
+npm install
+
+# Step 3: Build the backend
+npm run build
+# Must complete without TypeScript errors
+
+# Step 4: Start backend server
+npm run dev
+# Must start without crashing
+
+# Step 5: Test in another terminal
+# Replace with actual endpoint you changed
+curl http://localhost:3001/api/leads
+curl http://localhost:3001/api/leads/health
+
+# Step 6: Check console output
+# No errors, no crashes, no warnings
+```
+
+**CHECKLIST (Copy for every backend change):**
+```
+BEFORE COMMITTING BACKEND CHANGES:
+[ ] Backend builds successfully (npm run build)
+[ ] Backend starts without crashing (npm run dev)
+[ ] Changed endpoints respond correctly
+[ ] No TypeScript errors in console
+[ ] No runtime errors in console
+[ ] Database connections work
+[ ] Prisma client generates correctly
+[ ] Worker threads start (if applicable)
+
+ONLY THEN: Commit and deploy
+```
+
+---
+
+## ✅ RULE #2: Incremental Deployments for Complex Changes
+
+### What Counts as "Complex"?
+- New worker threads or cron jobs
+- Changes to sync logic (Google Sheets, API integrations)
+- Database schema changes
+- Authentication/authorization changes
+- File system operations
+- Email sending logic
+- Any change affecting multiple files (>3 files)
+
+### How to Deploy Complex Changes:
+
+**❌ WRONG (What Happened):**
+```bash
+# Deploy 330 lines of new code in one commit
+git add server/src/workers/leadsSync.ts
+git commit -m "CRITICAL: Comprehensive sync safety features"
+git push origin main
+# 💥 Backend broken, production down
+```
+
+**✅ RIGHT (Incremental Approach):**
+```bash
+# Step 1: Deploy header detection only (50 lines)
+git add server/src/workers/leadsSync.ts
+git commit -m "Add multi-strategy header detection"
+git push origin main
+# ✅ Test production, verify it works
+
+# Step 2: Deploy column matching (30 lines)
+git commit -m "Add flexible column name matching"
+git push origin main
+# ✅ Test production, verify it works
+
+# Step 3: Deploy data loss prevention (50 lines)
+git commit -m "Add data loss prevention checks"
+git push origin main
+# ✅ Test production, verify it works
+
+# Result: If one step breaks, easy to identify and revert
+```
+
+### Benefits of Incremental Deployment:
+1. ✅ Easy to identify which change broke production
+2. ✅ Smaller rollback if needed
+3. ✅ Each change can be tested independently
+4. ✅ Easier to debug issues
+5. ✅ Less risk per deployment
+
+---
+
+## ✅ RULE #3: Backend-Specific Pre-Deployment Checks
+
+### For Worker/Sync Changes:
+
+**MANDATORY CHECKS:**
+```typescript
+// Check 1: Syntax errors
+npm run build
+
+// Check 2: TypeScript compilation
+npx tsc --noEmit
+
+// Check 3: Linter
+npm run lint
+
+// Check 4: Start workers
+npm run dev
+// Watch console for worker initialization messages
+
+// Check 5: Test sync manually (if applicable)
+node -e "
+const { triggerManualSync } = require('./dist/workers/leadsSync');
+triggerManualSync().then(() => {
+  console.log('✅ Manual sync works');
+  process.exit(0);
+}).catch(err => {
+  console.error('❌ Manual sync failed:', err);
+  process.exit(1);
+});
+"
+```
+
+### For API Endpoint Changes:
+
+**MANDATORY CHECKS:**
+```bash
+# Start backend
+cd server && npm run dev
+
+# In another terminal, test endpoints
+curl -X GET http://localhost:3001/api/leads
+curl -X GET http://localhost:3001/api/customers
+curl -X POST http://localhost:3001/api/leads/sync/trigger
+
+# Check responses:
+# - Status code 200 OK
+# - Valid JSON response
+# - No errors in server console
+```
+
+### For Database Changes:
+
+**MANDATORY CHECKS:**
+```bash
+# Step 1: Create migration
+cd server
+npx prisma migrate dev --name descriptive_name
+
+# Step 2: Test migration
+npx prisma migrate reset --force
+npx prisma migrate deploy
+
+# Step 3: Verify schema
+npx prisma generate
+npx prisma studio
+# Manually check tables in Prisma Studio
+
+# Step 4: Test in code
+npm run dev
+# Verify app starts and database queries work
+```
+
+---
+
+## ✅ RULE #4: Production Deployment Safety Net
+
+### After EVERY Backend Deployment:
+
+**IMMEDIATE ACTIONS (Within 2 minutes):**
+
+```bash
+# Step 1: Monitor GitHub Actions
+gh run watch
+# OR: https://github.com/gregvisser/ODCRM/actions
+
+# Step 2: Wait for deployment to complete
+# Backend: ~2-3 minutes
+# Frontend: ~3-5 minutes
+
+# Step 3: Test backend health endpoint
+curl https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/leads/health
+
+# Step 4: Test production frontend
+# Open: https://odcrm.bidlow.co.uk
+# Hard refresh: Ctrl+Shift+R
+# Check browser console for errors
+
+# Step 5: Test changed functionality
+# Navigate to affected pages
+# Verify data loads correctly
+# Check for errors in console
+```
+
+**IF ANYTHING FAILS:**
+
+```bash
+# IMMEDIATE ROLLBACK (Within 30 seconds):
+# Step 1: Identify last working commit
+git log --oneline -5
+
+# Step 2: Revert to last working version
+git reset --hard <last-working-commit-hash>
+
+# Step 3: Force push (this is the ONE time force push is OK)
+git push origin main --force
+
+# Step 4: Monitor deployment
+gh run watch
+
+# Step 5: Verify production restored
+curl https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/leads/health
+
+# Step 6: Investigate locally what went wrong
+# Step 7: Fix the issue
+# Step 8: Test thoroughly locally
+# Step 9: Re-deploy when confirmed working
+```
+
+---
+
+## ✅ RULE #5: Backend Error Handling Standards
+
+### ALL Backend Routes Must:
+
+```typescript
+// ✅ CORRECT ERROR HANDLING
+app.get('/api/leads', async (req, res) => {
+  try {
+    console.log('📊 GET /api/leads - Starting request')
+    
+    const leads = await prisma.lead.findMany()
+    
+    console.log(`✅ GET /api/leads - Success (${leads.length} leads)`)
+    res.json(leads)
+  } catch (error) {
+    // Log FULL error details
+    console.error('❌ GET /api/leads - ERROR:', error)
+    console.error('Stack trace:', error.stack)
+    console.error('Error details:', JSON.stringify(error, null, 2))
+    
+    // Return user-friendly error
+    res.status(500).json({ 
+      error: 'Failed to fetch leads',
+      message: error.message,
+      // Only include stack in development
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
+    })
+  }
+})
+```
+
+### Worker Error Handling:
+
+```typescript
+// ✅ CORRECT WORKER ERROR HANDLING
+async function syncCustomerLeads(customerId: string) {
+  try {
+    console.log(`🔄 Starting sync for customer ${customerId}`)
+    
+    // Sync logic here
+    
+    console.log(`✅ Sync complete for customer ${customerId}`)
+  } catch (error) {
+    // Log error but don't crash entire worker
+    console.error(`❌ Sync failed for customer ${customerId}:`, error)
+    console.error('Stack trace:', error.stack)
+    
+    // Update sync state with error
+    await prisma.leadSyncState.update({
+      where: { customerId },
+      data: {
+        lastError: error.message,
+        lastErrorAt: new Date(),
+        isRunning: false,
+      },
+    })
+    
+    // Don't throw - allow other customers to sync
+    return { success: false, error: error.message }
+  }
+}
+```
+
+---
+
+## ✅ RULE #6: TypeScript Safety
+
+### Strict Type Checking:
+
+**ALWAYS enable strict mode in `tsconfig.json`:**
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true
+  }
+}
+```
+
+**NEVER use `any` without a good reason:**
+```typescript
+// ❌ WRONG
+const data: any = await fetchData()
+
+// ✅ RIGHT
+interface LeadData {
+  name: string
+  email: string
+  date: string
+}
+const data: LeadData = await fetchData()
+```
+
+---
+
+## 🚫 ABSOLUTE PROHIBITIONS
+
+**NEVER DO THESE (They Break Production):**
+
+1. ❌ **Deploy backend changes without local testing**
+   - "It's a small change" → NO, test it
+   - "I'm confident it works" → NO, test it
+   - "It compiled, should be fine" → NO, test it
+
+2. ❌ **Deploy 300+ lines of backend code in one commit**
+   - Break it into smaller pieces
+   - Test each piece independently
+   - Deploy incrementally
+
+3. ❌ **Skip `npm run build` before committing**
+   - TypeScript errors = production crash
+   - Always verify compilation
+
+4. ❌ **Ignore console errors during local testing**
+   - If it errors locally, it will error in production
+   - Fix ALL errors before deploying
+
+5. ❌ **Deploy on Friday afternoon**
+   - If it breaks, you're debugging all weekend
+   - Deploy early in the week
+
+6. ❌ **Deploy when tired or rushed**
+   - Mistakes happen when rushed
+   - Take your time, test properly
+
+7. ❌ **Assume Azure auto-restart will fix issues**
+   - If backend won't start, Azure can't fix it
+   - Test locally first
+
+---
+
+## 📊 Backend Deployment Checklist
+
+**Copy this for EVERY backend deployment:**
+
+```markdown
+## Backend Deployment Checklist
+Date: [YYYY-MM-DD HH:MM]
+Agent: [Your identifier]
+Changes: [Brief description]
+
+### Pre-Deployment (ALL must be checked):
+- [ ] Changes tested locally
+- [ ] Backend builds: `npm run build` ✅
+- [ ] Backend starts: `npm run dev` ✅
+- [ ] TypeScript check: `npx tsc --noEmit` ✅
+- [ ] Linter passes: `npm run lint` ✅
+- [ ] Changed endpoints tested with curl/Postman
+- [ ] Database migrations tested (if applicable)
+- [ ] Worker threads start correctly (if applicable)
+- [ ] No console errors during local testing
+- [ ] Commit message is descriptive
+- [ ] Changes are incremental (not massive)
+
+### During Deployment:
+- [ ] GitHub Actions status: [✅ | ❌]
+- [ ] Deployment time: [X minutes]
+- [ ] Any errors during build: [YES | NO]
+
+### Post-Deployment (ALL must be verified):
+- [ ] Backend health check: `curl https://odcrm-api.../api/leads/health`
+- [ ] Frontend loads: https://odcrm.bidlow.co.uk
+- [ ] Dashboard shows data correctly
+- [ ] No errors in browser console (F12)
+- [ ] Changed functionality works as expected
+- [ ] User notified of deployment results
+
+### Rollback Plan (if deployment fails):
+- Last working commit: [hash]
+- Rollback command: `git reset --hard [hash] && git push origin main --force`
+- Estimated rollback time: [2-3 minutes]
+
+### Result:
+- Status: [✅ SUCCESS | ❌ FAILED | 🔄 ROLLED BACK]
+- Production healthy: [YES | NO]
+- Issues encountered: [None | List issues]
+```
+
+---
+
+## 💡 Golden Rules for Backend Development
+
+1. **"If it doesn't work locally, it won't work in production."**
+2. **"Deploy small, deploy often, deploy safely."**
+3. **"Test backend before frontend - backend is the foundation."**
+4. **"Console errors are not suggestions - they are blockers."**
+5. **"TypeScript errors = future production crashes."**
+6. **"When in doubt, test more. When confident, test anyway."**
+7. **"Production incidents are always preventable."**
+8. **"Your code affects real users - treat it with respect."**
+
+---
+
+## 🎯 What This Rule Prevents
+
+**Incidents This Rule Would Have Prevented:**
+
+1. **2026-02-04 Backend Failure:**
+   - Cause: Deployed 330 lines without testing
+   - Impact: Production down 10+ minutes
+   - Prevention: Rule #1 (test locally first)
+
+2. **Future Sync Worker Crashes:**
+   - Cause: Complex sync logic deployed untested
+   - Impact: Leads not syncing, data loss
+   - Prevention: Rule #3 (worker-specific checks)
+
+3. **Database Migration Failures:**
+   - Cause: Migrations not tested before deploy
+   - Impact: Backend can't start, schema corrupted
+   - Prevention: Rule #3 (database checks)
+
+---
+
+## ✅ Confirmation
+
+By working on backend code, you confirm that you:
+- [ ] Have read this entire document
+- [ ] Will test EVERY backend change locally FIRST
+- [ ] Will deploy incrementally, not all-at-once
+- [ ] Will monitor production after EVERY deployment
+- [ ] Will rollback immediately if anything breaks
+- [ ] Will follow ALL checklists before deploying
+- [ ] Understand that production incidents are SERIOUS
+- [ ] Will prioritize backend stability over new features
+
+---
+
+**Last Updated:** 2026-02-04
+**Status:** MANDATORY - Automatically enforced
+**Created In Response To:** Production backend failure (503 Server Unavailable)
+**Priority:** HIGHEST - Backend stability is non-negotiable
+
+**If you break production, you own the fix. Test first. Deploy safely. Always.**
