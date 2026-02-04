@@ -89,6 +89,24 @@ function parseCsv(csvText: string, chunkSize: number = 500): string[][] {
     } else if (char === ',' && !inQuotes) {
       currentLine.push(currentField.trim())
       currentField = ''
+    } else if (char === '\r' && !inQuotes) {
+      // Handle carriage return - skip if followed by \n (CRLF), otherwise treat as line break
+      if (nextChar === '\n') {
+        // CRLF - skip the \r, the \n will be handled next iteration
+        continue
+      } else {
+        // Standalone \r - treat as line break (old Mac style)
+        currentLine.push(currentField.trim())
+        currentField = ''
+        if (currentLine.length > 0) {
+          lines.push(currentLine)
+          currentLine = []
+          
+          if (lines.length % chunkSize === 0) {
+            // Yield control to event loop periodically
+          }
+        }
+      }
     } else if (char === '\n' && !inQuotes) {
       currentLine.push(currentField.trim())
       currentField = ''
