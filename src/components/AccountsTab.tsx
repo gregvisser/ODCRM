@@ -3728,54 +3728,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     latestAccountsRef.current = accountsData
   }, [accountsData])
 
-  // One-time sync of leads URLs from localStorage to database
-  useEffect(() => {
-    if (!hasSyncedCustomersRef.current) return
-    if (!hasHydratedFromServerRef.current) return
-
-    const syncLeadsUrlsOnce = async () => {
-      const syncedKey = 'odcrm:leadsUrlsSynced'
-      const alreadySynced = localStorage.getItem(syncedKey)
-      
-      if (alreadySynced === 'true') return
-
-      // Get accounts with URLs
-      const accountsWithUrls = accountsData.filter(a => a.clientLeadsSheetUrl?.trim())
-      
-      if (accountsWithUrls.length === 0) return
-
-      console.log(`📤 One-time sync: ${accountsWithUrls.length} accounts with leads URLs`)
-
-      try {
-        const { data, error } = await api.post('/api/customers/sync-leads-urls', {
-          accounts: accountsWithUrls
-        })
-
-        if (error) {
-          console.error('Failed to sync leads URLs:', error)
-          return
-        }
-
-        console.log('✅ Leads URLs synced:', data)
-        localStorage.setItem(syncedKey, 'true')
-
-        // Trigger leads sync for updated customers
-        if (data?.results) {
-          for (const result of data.results) {
-            if (result.status === 'updated' && result.customerId) {
-              console.log(`🔄 Triggering leads sync for ${result.name}`)
-              await api.post(`/api/leads/sync/trigger?customerId=${result.customerId}`)
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error syncing leads URLs:', err)
-      }
-    }
-
-    void syncLeadsUrlsOnce()
-  }, [accountsData, hasSyncedCustomersRef, hasHydratedFromServerRef])
-
   useEffect(() => {
     if (!hasSyncedCustomersRef.current) return
     if (!hasHydratedFromServerRef.current) return
