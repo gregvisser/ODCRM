@@ -325,7 +325,7 @@ async function fetchLeadsFromSheetUrl(
 
           // Filter out W/C and W/V rows (only check Week column, not all fields)
           // These are week marker rows like "W/C 02.02.26", not actual leads
-          const weekValue = String(normalizedLead['Week'] || normalizedLead['week'] || '').toLowerCase()
+          const weekValue = String(normalizedLead['Week'] || normalizedLead['week'] || '').trim().toLowerCase()
           const isWeekMarker = weekValue.startsWith('w/c') || weekValue.startsWith('w/v')
           if (isWeekMarker) {
             filteredWcWv++
