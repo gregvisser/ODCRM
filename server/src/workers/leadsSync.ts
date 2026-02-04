@@ -323,12 +323,11 @@ async function fetchLeadsFromSheetUrl(
           // Apply normalization
           const normalizedLead = normalizeLeadData(lead)
 
-          // Filter out W/C and W/V rows
-          const containsWcOrWv = Object.values(normalizedLead).some((value) => {
-            const lowerValue = value ? String(value).toLowerCase() : ''
-            return lowerValue.includes('w/c') || lowerValue.includes('w/v')
-          })
-          if (containsWcOrWv) {
+          // Filter out W/C and W/V rows (only check Week column, not all fields)
+          // These are week marker rows like "W/C 02.02.26", not actual leads
+          const weekValue = String(normalizedLead['Week'] || normalizedLead['week'] || '').toLowerCase()
+          const isWeekMarker = weekValue.startsWith('w/c') || weekValue.startsWith('w/v')
+          if (isWeekMarker) {
             filteredWcWv++
             continue
           }
