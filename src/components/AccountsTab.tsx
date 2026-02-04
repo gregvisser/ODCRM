@@ -1319,7 +1319,8 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
   return updated
 }
 
-function buildAccountFromCustomer(customer: CustomerApi): Account {
+/** Build full Account from API customer (including accountData from onboarding). Exported for AccountsTabDatabase hydration. */
+export function buildAccountFromCustomer(customer: CustomerApi): Account {
   // Prioritize website from DB field, fallback to domain
   const website = customer.website || normalizeCustomerWebsite(customer.domain)
   
@@ -3724,6 +3725,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [])
 
+  // When parent (AccountsTabDatabase) hydrates localStorage from the database, re-read so UI shows latest (e.g. after refresh or new account)
+  useEffect(() => {
+    const off = on('accountsHydrated', () => {
+      const loaded = loadAccountsFromStorage()
+      if (loaded && Array.isArray(loaded)) {
+        const deletedAccountsSet = loadDeletedAccountsFromStorage()
+        setAccountsData(loaded.filter((acc) => !deletedAccountsSet.has(acc.name)))
+      }
+    })
+    return () => off()
+  }, [])
+
   useEffect(() => {
     latestAccountsRef.current = accountsData
   }, [accountsData])
@@ -5662,6 +5675,75 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                     </SimpleGrid>
                 </Box>
 
+                {/* Account & contact (from Onboarding – read-only here) */}
+                {(selectedAccount.primaryContact ||
+                  selectedAccount.headOfficeAddress ||
+                  selectedAccount.assignedAccountManager != null) && (
+                  <Box
+                    bg="white"
+                    borderRadius="xl"
+                    p={6}
+                    border="1px solid"
+                    borderColor="gray.200"
+                    boxShadow="sm"
+                  >
+                    <Heading size="md" mb={4} color="gray.700">
+                      Account & contact
+                    </Heading>
+                    <HStack mb={4} justify="space-between" align="center">
+                      <Text fontSize="sm" color="gray.500">
+                        Managed in Onboarding. Open the Onboarding tab to edit.
+                      </Text>
+                      <Button
+                        size="sm"
+                        colorScheme="teal"
+                        variant="outline"
+                        onClick={() => emit('navigateToOnboarding', { accountName: selectedAccount.name })}
+                      >
+                        Open in Onboarding
+                      </Button>
+                    </HStack>
+                    <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                      {selectedAccount.primaryContact && (
+                        <>
+                          <FieldRow label="Primary contact">
+                            <Text fontSize="sm" color="gray.800">
+                              {[selectedAccount.primaryContact.firstName, selectedAccount.primaryContact.lastName]
+                                .filter(Boolean)
+                                .join(' ') || selectedAccount.contactPersons || '—'}
+                            </Text>
+                          </FieldRow>
+                          <FieldRow label="Contact role">
+                            <Text fontSize="sm" color="gray.700">
+                              {selectedAccount.primaryContact.roleLabel || selectedAccount.contactRoleLabel || '—'}
+                            </Text>
+                          </FieldRow>
+                          <FieldRow label="Contact email">
+                            <Text fontSize="sm" color="gray.700">
+                              {selectedAccount.primaryContact.email || selectedAccount.contactEmail || '—'}
+                            </Text>
+                          </FieldRow>
+                          <FieldRow label="Contact phone">
+                            <Text fontSize="sm" color="gray.700">
+                              {selectedAccount.primaryContact.phone || selectedAccount.contactNumber || '—'}
+                            </Text>
+                          </FieldRow>
+                        </>
+                      )}
+                      {selectedAccount.headOfficeAddress && (
+                        <FieldRow label="Head office">
+                          <Text fontSize="sm" color="gray.700">{selectedAccount.headOfficeAddress}</Text>
+                        </FieldRow>
+                      )}
+                      {selectedAccount.assignedAccountManager != null && selectedAccount.assignedAccountManager !== '' && (
+                        <FieldRow label="Assigned account manager">
+                          <Text fontSize="sm" color="gray.700">{selectedAccount.assignedAccountManager}</Text>
+                        </FieldRow>
+                      )}
+                    </SimpleGrid>
+                  </Box>
+                )}
+
                 {/* Client Profile Summary */}
                 <Box
                   bg="white"
@@ -5906,22 +5988,23 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         size="md"
                       />
                     </FieldRow>
-                    <FieldRow label="Days Per Week">
-                      <Select
-                        value={selectedAccount.days}
-                        onChange={(e) => {
-                          updateAccount(selectedAccount.name, {
-                            days: parseInt(e.target.value, 10),
-                          })
-                        }}
-                        size="md"
-                      >
-                        <option value={1}>1 day</option>
-                        <option value={2}>2 days</option>
-                        <option value={3}>3 days</option>
-                        <option value={4}>4 days</option>
-                        <option value={5}>5 days</option>
-                      </Select>
+                    <FieldRow label="Days per week">
+                      <HStack spacing={2}>
+                        <Text fontSize="md" color="gray.700">
+                          {selectedAccount.days ?? 0} day{(selectedAccount.days ?? 0) !== 1 ? 's' : ''}
+                        </Text>
+                        <Link
+                          href="?tab=onboarding-home"
+                          fontSize="sm"
+                          color="teal.600"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            emit('navigateToOnboarding', { accountName: selectedAccount.name })
+                          }}
+                        >
+                          Edit in Onboarding
+                        </Link>
+                      </HStack>
                     </FieldRow>
                     <FieldRow label="Agreements">
                       <Stack spacing={3}>

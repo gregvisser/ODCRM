@@ -31,6 +31,8 @@ import {
   AlertDialogOverlay,
   Alert,
   AlertIcon,
+  Spinner,
+  VStack,
   Checkbox,
   Editable,
   EditableInput,
@@ -46,6 +48,7 @@ import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getJson, setItem, setJson, keys, removeItem } from '../platform/storage'
 import { useExportImport } from '../utils/exportImport'
+import { api } from '../utils/api'
 import { DataTable, type DataTableColumn } from './DataTable'
 
 export type Contact = {
@@ -464,26 +467,8 @@ function parseSpreadsheetContacts(text: string): ParsedContactRow[] {
 
 
 function ContactsTab() {
-  const [contactsData, setContactsData] = useState<Contact[]>(() => {
-    const loaded = loadContactsFromStorage()
-    // If no contacts loaded but backups exist, try to recover from most recent backup
-    if (loaded.length === 0) {
-      const backup = loadMostRecentBackup()
-      if (backup && backup.length > 0) {
-        console.log('🔄 No contacts found, attempting recovery from backup...')
-        // Migrate backup contacts to new format
-        const migrated = backup.map(c => migrateContact(c))
-        try {
-          saveContactsToStorage(migrated)
-          console.log('✅ Recovered', migrated.length, 'contacts from backup')
-          return migrated
-        } catch (e) {
-          console.error('Failed to recover contacts from backup:', e)
-        }
-      }
-    }
-    return loaded
-  })
+  // Database-first: start empty; contacts and account names are set from API on mount (never use localStorage as source of truth)
+  const [contactsData, setContactsData] = useState<Contact[]>([])
   const { isOpen, onOpen, onClose } = useDisclosure()
   const {
     isOpen: isDeleteOpen,
@@ -502,8 +487,9 @@ function ContactsTab() {
   const toast = useToast()
   const cancelRef = useRef<HTMLButtonElement>(null)
 
-  // Load accounts from localStorage (same pattern as AccountsTab)
+  // Account names from database (source of truth). Set when we load customers from API.
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([])
+  const [contactsLoading, setContactsLoading] = useState(true)
   const {
     isOpen: isImportOpen,
     onOpen: onImportOpen,
@@ -511,44 +497,135 @@ function ContactsTab() {
   } = useDisclosure()
   const [importText, setImportText] = useState<string>('')
 
+  // When accounts are updated elsewhere (e.g. Accounts tab), refresh account list from API so we use DB as source of truth
   useEffect(() => {
-    const refresh = () => setAvailableAccounts(loadAccountNamesFromStorage())
-    refresh()
-
-    const handleAccountsUpdated = () => {
-      const names = loadAccountNamesFromStorage()
-      setAvailableAccounts(names)
-
-      // If accounts are deleted, remove those accounts from contacts (but keep contact even if all accounts deleted)
-      // This prevents data loss - contacts can be reassigned to accounts later
-      if (names.length > 0) {
+    const handleAccountsUpdated = async () => {
+      const { data: customers, error } = await api.get<Array<{ name: string }>>('/api/customers')
+      if (!error && customers && Array.isArray(customers)) {
+        const names = customers.map((c) => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b))
+        setAvailableAccounts(names)
         const setNames = new Set(names)
-        setContactsData((prev) => {
-          const next = prev.map((c) => {
-            // Filter out deleted accounts from contact's accounts array
-            const validAccounts = (c.accounts || []).filter(acc => setNames.has(acc))
-            // Keep the contact even if no valid accounts remain (they can be reassigned)
-            return { ...c, accounts: validAccounts }
-          })
-          return next
-        })
-      } else {
-        // If no accounts exist, keep contacts but clear their accounts arrays
-        // This prevents data loss
-        setContactsData((prev) => {
-          return prev.map((c) => ({ ...c, accounts: [] }))
-        })
+        setContactsData((prev) =>
+          prev.map((c) => ({
+            ...c,
+            accounts: (c.accounts || []).filter((acc) => setNames.has(acc)),
+          }))
+        )
       }
     }
-
-    const off = on('accountsUpdated', () => handleAccountsUpdated())
+    const off = on('accountsUpdated', () => void handleAccountsUpdated())
     return () => off()
   }, [])
 
-  // Filter out invalid accounts from contacts' accounts arrays (but keep contacts even if all accounts invalid)
-  // This allows contacts to exist temporarily while accounts are being created
+  // When Onboarding (or another tab) creates/updates contacts, use the emitted list or refetch from API (never use localStorage as source of truth)
   useEffect(() => {
-    const validAccountNames = new Set(loadAccountNamesFromStorage().map(n => n.toLowerCase()))
+    const handler = (detail: unknown) => {
+      if (Array.isArray(detail)) {
+        setContactsData(detail as Contact[])
+      }
+      // If detail is not an array, do not read from localStorage; next mount or accountsUpdated will refetch from API
+    }
+    const off = on('contactsUpdated', handler)
+    return () => off()
+  }, [])
+
+  // Load contacts and account names from database (source of truth) on mount
+  useEffect(() => {
+    let cancelled = false
+    setContactsLoading(true)
+    const loadFromApi = async () => {
+      const { data: customers, error } = await api.get<Array<{
+        id: string
+        name: string
+        customerContacts: Array<{ id: string; name: string; email: string | null; phone: string | null; title: string | null }>
+      }>>('/api/customers')
+      if (cancelled) return
+      setContactsLoading(false)
+      if (error || !customers) return
+      const accountNames = customers.map((c) => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b))
+      setAvailableAccounts(accountNames)
+      const map = new Map<string, { contact: Contact; accountNames: Set<string> }>()
+      for (const customer of customers) {
+        for (const cc of customer.customerContacts || []) {
+          const name = (cc.name || '').trim()
+          const email = (cc.email || '').trim()
+          if (!name && !email) continue
+          const key = `${name}|${email}`.toLowerCase()
+          const existing = map.get(key)
+          if (!existing) {
+            const accountNamesSet = new Set<string>([customer.name])
+            map.set(key, {
+              contact: {
+                id: cc.id,
+                name: name || email,
+                title: (cc.title || '') as string,
+                accounts: [customer.name],
+                tier: 'Decision maker',
+                status: 'Active',
+                email: email || '',
+                phone: (cc.phone || '') as string,
+              },
+              accountNames: accountNamesSet,
+            })
+          } else {
+            existing.accountNames.add(customer.name)
+            existing.contact.accounts = Array.from(existing.accountNames)
+          }
+        }
+      }
+      const fromApi = Array.from(map.values()).map(({ contact }) => contact)
+      setContactsData(fromApi)
+      setJson(OdcrmStorageKeys.contacts, fromApi)
+      setItem(OdcrmStorageKeys.contactsLastUpdated, new Date().toISOString())
+    }
+    loadFromApi()
+    return () => { cancelled = true }
+  }, [])
+
+  // Sync contacts to database when they change (debounced) so data survives refresh
+  const syncContactsToDbRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (syncContactsToDbRef.current) clearTimeout(syncContactsToDbRef.current)
+    syncContactsToDbRef.current = setTimeout(async () => {
+      syncContactsToDbRef.current = null
+      const { data: customers, error } = await api.get<Array<{
+        id: string
+        name: string
+        customerContacts: Array<{ id: string; email: string | null }>
+      }>>('/api/customers')
+      if (error || !customers) return
+      const byName = new Map(customers.map((c) => [c.name, c]))
+      for (const contact of contactsData) {
+        const accountNames = contact.accounts || []
+        for (const accountName of accountNames) {
+          const customer = byName.get(accountName)
+          if (!customer) continue
+          const existing = (customer.customerContacts || []).find(
+            (cc) => (cc.email || '').toLowerCase() === (contact.email || '').toLowerCase(),
+          )
+          const payload = {
+            name: (contact.name || '').trim() || contact.email,
+            email: contact.email || null,
+            phone: contact.phone || null,
+            title: contact.title || null,
+            isPrimary: false,
+          }
+          if (existing) {
+            await api.put(`/api/customers/${customer.id}/contacts/${existing.id}`, payload)
+          } else {
+            await api.post(`/api/customers/${customer.id}/contacts`, payload)
+          }
+        }
+      }
+    }, 2000)
+    return () => {
+      if (syncContactsToDbRef.current) clearTimeout(syncContactsToDbRef.current)
+    }
+  }, [contactsData])
+
+  // Filter out invalid accounts from contacts' accounts arrays (source: API-derived availableAccounts)
+  useEffect(() => {
+    const validAccountNames = new Set(availableAccounts.map((n) => n.toLowerCase()))
     setContactsData(prev => {
       const updated = prev.map(c => {
         // Filter out invalid accounts from contact's accounts array
@@ -607,7 +684,7 @@ function ContactsTab() {
       return
     }
 
-    const existingAccountNames = loadAccountNamesFromStorage()
+    const existingAccountNames = availableAccounts
     const canonicalByLower = new Map(existingAccountNames.map((n) => [n.trim().toLowerCase(), n] as const))
     const deleted = loadDeletedAccountsFromStorage()
 
@@ -1334,6 +1411,17 @@ function ContactsTab() {
       size: 120,
     },
   ], [selectedContactIds, contactsData, availableAccounts])
+
+  if (contactsLoading) {
+    return (
+      <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.100" boxShadow="sm" p={8}>
+        <VStack spacing={4} py={8}>
+          <Spinner size="xl" colorScheme="blue" />
+          <Text color="gray.600">Loading contacts from database...</Text>
+        </VStack>
+      </Box>
+    )
+  }
 
   return (
     <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.100" boxShadow="sm">

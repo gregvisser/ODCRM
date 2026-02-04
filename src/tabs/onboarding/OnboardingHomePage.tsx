@@ -29,20 +29,33 @@ import { emit } from '../../platform/events'
 import { settingsStore } from '../../platform'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import { getJson, setJson } from '../../platform/storage'
+import { useUsersFromDatabase } from '../../hooks/useUsersFromDatabase'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
-import type {
-  Account,
-  Accreditation,
-  ClientProfile,
-  PrimaryContact,
-  SocialMediaPresence,
-  TargetGeographicalArea,
+import {
+  buildAccountFromCustomer,
+  type Account,
+  type Accreditation,
+  type ClientProfile,
+  type PrimaryContact,
+  type SocialMediaPresence,
+  type TargetGeographicalArea,
 } from '../../components/AccountsTab'
+
+type CustomerContactApi = {
+  id: string
+  customerId: string
+  name: string
+  email?: string | null
+  phone?: string | null
+  title?: string | null
+  isPrimary: boolean
+}
 
 type CustomerApi = {
   id: string
   name: string
   accountData?: Record<string, unknown> | null
+  customerContacts?: CustomerContactApi[]
 }
 
 type JobTaxonomyItem = {
@@ -193,7 +206,12 @@ const saveContactRoles = (roles: ContactRoleItem[]) => {
   setJson(CONTACT_ROLES_STORAGE_KEY, roles)
 }
 
-export default function OnboardingHomePage() {
+type OnboardingHomePageProps = {
+  /** When navigating from Accounts tab, focus this account by name (from URL / app state). Data is loaded from API (DB), not localStorage. */
+  focusAccountName?: string
+}
+
+export default function OnboardingHomePage({ focusAccountName }: OnboardingHomePageProps) {
   const toast = useToast()
   const [customers, setCustomers] = useState<CustomerApi[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
@@ -216,18 +234,32 @@ export default function OnboardingHomePage() {
   const [headOfficeLoading, setHeadOfficeLoading] = useState(false)
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
-  const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
+
+  const { users: usersFromDb } = useUsersFromDatabase()
+  const assignedUsers = useMemo<AssignedUser[]>(
+    () =>
+      (usersFromDb || [])
+        .filter((u) => u.accountStatus === 'Active')
+        .map((u) => ({
+          id: u.id,
+          userId: u.userId,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          email: u.email,
+          accountStatus: u.accountStatus,
+        })),
+    [usersFromDb],
+  )
 
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId) || null,
     [customers, selectedCustomerId],
   )
 
+  // Database-first: derive account snapshot from API customer, not localStorage
   const selectedAccountSnapshot = useMemo(() => {
     if (!selectedCustomer) return null
-    const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
-    if (!Array.isArray(storedAccounts)) return null
-    return storedAccounts.find((acc) => acc.name === selectedCustomer.name) || null
+    return buildAccountFromCustomer(selectedCustomer as Parameters<typeof buildAccountFromCustomer>[0])
   }, [selectedCustomer])
 
   const fetchCustomers = useCallback(async () => {
@@ -246,6 +278,13 @@ export default function OnboardingHomePage() {
     }
     setIsLoading(false)
   }, [selectedCustomerId])
+
+  // When opened from Accounts tab with focus (e.g. "Open in Onboarding"), select that account. Data from API (DB).
+  useEffect(() => {
+    if (!focusAccountName || customers.length === 0) return
+    const match = customers.find((c) => c.name === focusAccountName)
+    if (match) setSelectedCustomerId(match.id)
+  }, [focusAccountName, customers])
 
   const fetchTaxonomy = useCallback(async () => {
     const [sectorsResponse, rolesResponse] = await Promise.all([
@@ -278,10 +317,6 @@ export default function OnboardingHomePage() {
     void fetchCustomers()
     void fetchTaxonomy()
     setContactRoles(loadContactRoles())
-    const storedUsers = getJson<AssignedUser[]>(OdcrmStorageKeys.users)
-    if (Array.isArray(storedUsers)) {
-      setAssignedUsers(storedUsers.filter((user) => user.accountStatus === 'Active'))
-    }
   }, [fetchCustomers, fetchTaxonomy])
 
   useEffect(() => {
@@ -637,41 +672,46 @@ export default function OnboardingHomePage() {
       setIsSaving(false)
       return
     }
-    setCustomers((prev) =>
-      prev.map((customer) =>
-        customer.id === selectedCustomer.id ? { ...customer, accountData: nextAccountData } : customer,
-      ),
+    const updatedCustomers = customers.map((customer) =>
+      customer.id === selectedCustomer.id ? { ...customer, accountData: nextAccountData } : customer,
     )
-    const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
-    if (storedAccounts && Array.isArray(storedAccounts)) {
-      const updatedAccounts = storedAccounts.map((acc) =>
-        acc.name === selectedCustomer.name
-          ? {
-              ...acc,
-              clientProfile,
-              primaryContact: nextAccountDetails.primaryContact,
-              contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
-              contactEmail: accountDetails.primaryContact.email,
-              contactNumber: accountDetails.primaryContact.phone,
-              contactRoleId: accountDetails.primaryContact.roleId,
-              contactRoleLabel: accountDetails.primaryContact.roleLabel,
-              contactActive: accountDetails.primaryContact.status === 'Active',
-              headOfficeAddress: accountDetails.headOfficeAddress,
-              headOfficePlaceId: accountDetails.headOfficePlaceId,
-              headOfficePostcode: accountDetails.headOfficePostcode,
-              assignedAccountManager: accountDetails.assignedAccountManagerName,
-              assignedAccountManagerId: accountDetails.assignedAccountManagerId,
-              assignedClientDdiNumber: accountDetails.assignedClientDdiNumber,
-              emailAccounts: accountDetails.emailAccounts,
-              emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
-              days: accountDetails.daysPerWeek,
-            }
-          : acc,
-      )
-      setJson(OdcrmStorageKeys.accounts, updatedAccounts)
-      emit('accountsUpdated', updatedAccounts)
-    }
+    setCustomers(updatedCustomers)
+    // Keep accounts cache in sync from API state (database is source of truth; do not read from localStorage)
+    const updatedAccounts = updatedCustomers.map((c) => {
+      const acc = buildAccountFromCustomer(c as Parameters<typeof buildAccountFromCustomer>[0]) as Account & { _databaseId?: string }
+      acc._databaseId = c.id
+      return acc
+    })
+    setJson(OdcrmStorageKeys.accounts, updatedAccounts)
+    emit('accountsUpdated', updatedAccounts)
     setAccountDetails(nextAccountDetails)
+
+    // Create or update primary contact in database so it appears in Customers → Contacts tab
+    const fullName = `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim()
+    const primaryEmail = accountDetails.primaryContact.email?.trim() || null
+    if (fullName) {
+      const contacts = selectedCustomer.customerContacts ?? []
+      const existingByEmail = primaryEmail
+        ? contacts.find((c) => (c.email || '').toLowerCase() === primaryEmail.toLowerCase())
+        : null
+      const payload = {
+        name: fullName,
+        email: primaryEmail,
+        phone: accountDetails.primaryContact.phone || null,
+        title: accountDetails.primaryContact.roleLabel || null,
+        isPrimary: true,
+      }
+      if (existingByEmail) {
+        await api.put(`/api/customers/${selectedCustomer.id}/contacts/${existingByEmail.id}`, payload)
+      } else {
+        await api.post(`/api/customers/${selectedCustomer.id}/contacts`, payload)
+      }
+      // Refresh customer list so next save sees updated customerContacts (avoid duplicate creates)
+      const { data: refreshed } = await api.get<CustomerApi[]>('/api/customers')
+      if (refreshed) setCustomers(refreshed)
+      // Contact is already in localStorage and contactsUpdated was emitted by upsertContactForAccount above
+    }
+
     toast({ title: 'Onboarding details saved', status: 'success', duration: 2500 })
     setIsSaving(false)
   }

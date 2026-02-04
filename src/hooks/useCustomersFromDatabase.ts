@@ -92,20 +92,33 @@ export function useCustomersFromDatabase(): UseCustomersResult {
   }, [fetchCustomers])
 
   const createCustomer = useCallback(async (data: Partial<DatabaseCustomer>) => {
+    const toNum = (v: unknown): number | null => {
+      if (v === undefined || v === null || v === '') return null
+      const n = typeof v === 'number' ? v : parseFloat(String(v))
+      return Number.isFinite(n) ? n : null
+    }
+    const toUrl = (v: unknown): string | null => {
+      if (v === undefined || v === null || typeof v !== 'string') return null
+      const s = v.trim()
+      return s && (s.startsWith('http://') || s.startsWith('https://')) ? s : null
+    }
     const payload = {
-      name: data.name,
+      name: data.name ?? '',
       domain: data.domain || null,
-      leadsReportingUrl: data.leadsReportingUrl || null,
+      leadsReportingUrl: toUrl(data.leadsReportingUrl),
       sector: data.sector || null,
-      clientStatus: data.clientStatus || 'active',
+      clientStatus: (data.clientStatus || 'active').toString().toLowerCase(),
       targetJobTitle: data.targetJobTitle || null,
       prospectingLocation: data.prospectingLocation || null,
-      monthlyIntakeGBP: data.monthlyIntakeGBP ? parseFloat(data.monthlyIntakeGBP) : null,
-      defcon: data.defcon || null,
-      weeklyLeadTarget: data.weeklyLeadTarget || null,
-      weeklyLeadActual: data.weeklyLeadActual || null,
-      monthlyLeadTarget: data.monthlyLeadTarget || null,
-      monthlyLeadActual: data.monthlyLeadActual || null,
+      monthlyIntakeGBP: toNum(data.monthlyIntakeGBP),
+      defcon: (() => {
+        const n = toNum(data.defcon)
+        return n != null ? Math.min(6, Math.max(1, Math.round(n))) : null
+      })(),
+      weeklyLeadTarget: toNum(data.weeklyLeadTarget),
+      weeklyLeadActual: toNum(data.weeklyLeadActual),
+      monthlyLeadTarget: toNum(data.monthlyLeadTarget),
+      monthlyLeadActual: toNum(data.monthlyLeadActual),
       website: data.website || null,
       whatTheyDo: data.whatTheyDo || null,
       accreditations: data.accreditations || null,
@@ -115,7 +128,9 @@ export function useCustomersFromDatabase(): UseCustomersResult {
       companySize: data.companySize || null,
       headquarters: data.headquarters || null,
       foundingYear: data.foundingYear || null,
-      socialPresence: data.socialPresence || null,
+      socialPresence: Array.isArray(data.socialPresence)
+        ? data.socialPresence.filter((i: { url?: string }) => i && typeof i.url === 'string' && (i.url.startsWith('http://') || i.url.startsWith('https://')))
+        : null,
       accountData: data.accountData || null,
     }
 
@@ -132,20 +147,33 @@ export function useCustomersFromDatabase(): UseCustomersResult {
   }, [fetchCustomers])
 
   const updateCustomer = useCallback(async (id: string, data: Partial<DatabaseCustomer>) => {
+    const toNum = (v: unknown): number | null => {
+      if (v === undefined || v === null || v === '') return null
+      const n = typeof v === 'number' ? v : parseFloat(String(v))
+      return Number.isFinite(n) ? n : null
+    }
+    const toUrl = (v: unknown): string | null => {
+      if (v === undefined || v === null || typeof v !== 'string') return null
+      const s = v.trim()
+      return s && (s.startsWith('http://') || s.startsWith('https://')) ? s : null
+    }
     const payload = {
-      name: data.name,
+      name: data.name ?? '',
       domain: data.domain || null,
-      leadsReportingUrl: data.leadsReportingUrl || null,
+      leadsReportingUrl: toUrl(data.leadsReportingUrl),
       sector: data.sector || null,
-      clientStatus: data.clientStatus || 'active',
+      clientStatus: (data.clientStatus || 'active').toString().toLowerCase(),
       targetJobTitle: data.targetJobTitle || null,
       prospectingLocation: data.prospectingLocation || null,
-      monthlyIntakeGBP: data.monthlyIntakeGBP ? parseFloat(data.monthlyIntakeGBP) : null,
-      defcon: data.defcon || null,
-      weeklyLeadTarget: data.weeklyLeadTarget || null,
-      weeklyLeadActual: data.weeklyLeadActual || null,
-      monthlyLeadTarget: data.monthlyLeadTarget || null,
-      monthlyLeadActual: data.monthlyLeadActual || null,
+      monthlyIntakeGBP: toNum(data.monthlyIntakeGBP),
+      defcon: (() => {
+        const n = toNum(data.defcon)
+        return n != null ? Math.min(6, Math.max(1, Math.round(n))) : null
+      })(),
+      weeklyLeadTarget: toNum(data.weeklyLeadTarget),
+      weeklyLeadActual: toNum(data.weeklyLeadActual),
+      monthlyLeadTarget: toNum(data.monthlyLeadTarget),
+      monthlyLeadActual: toNum(data.monthlyLeadActual),
       website: data.website || null,
       whatTheyDo: data.whatTheyDo || null,
       accreditations: data.accreditations || null,
@@ -155,7 +183,9 @@ export function useCustomersFromDatabase(): UseCustomersResult {
       companySize: data.companySize || null,
       headquarters: data.headquarters || null,
       foundingYear: data.foundingYear || null,
-      socialPresence: data.socialPresence || null,
+      socialPresence: Array.isArray(data.socialPresence)
+        ? data.socialPresence.filter((i: { url?: string }) => i && typeof i.url === 'string' && (i.url.startsWith('http://') || i.url.startsWith('https://')))
+        : null,
       accountData: data.accountData || null,
     }
 

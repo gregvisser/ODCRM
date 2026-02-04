@@ -1,3 +1,7 @@
+/**
+ * Contacts store: CACHE ONLY. Database (API) is the source of truth.
+ * Do not use getContacts() as the authority; load contacts from /api/customers (customerContacts).
+ */
 import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
 import { getJson, setItem, setJson } from '../storage'

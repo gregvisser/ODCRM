@@ -1,10 +1,21 @@
 # ODCRM Architecture - Database-First Approach
 
+## 🚨 Rule: Local Must NEVER Be Source of Truth
+
+**All business data uses the database as the single source of truth. localStorage is never the authority.**
+
+- **Reads:** Always load from the API first. Do not read business data from localStorage as the initial or authoritative source. Use hooks like `useCustomersFromDatabase`, or fetch from `/api/customers`, `/api/templates`, etc., then optionally cache in localStorage for UX.
+- **Writes:** Persist to the API first. Only then update any local cache. New builds and all new data must flow: User → API → Database → (optional cache).
+- **New features:** Any new feature that stores data must use the backend API and database. Do not add new business data to localStorage only.
+
 ## 🎯 Core Principle
 
-**The database is the SINGLE SOURCE OF TRUTH for all customer data.**
+**The deployed backend (Azure PostgreSQL via the API) is the SINGLE SOURCE OF TRUTH.**  
+LocalStorage is used only as a cache or working copy that is overwritten by database data on load and synced back to the database on change.
 
-No more localStorage for critical data. No more stale data issues. No more sync problems.
+- **Reads:** Data is loaded from the API (database). Any localStorage read for business data is filled from the database first (e.g. AccountsTabDatabase hydrates from DB).
+- **Writes:** Changes are persisted to the API (database). LocalStorage may be updated for UI consistency but is not the authority.
+- **Contacts:** Contacts tab and Onboarding load and save via API; Contacts tab shows a loading state until API returns.
 
 ---
 

@@ -5,6 +5,7 @@ import { publishCrossTab, subscribeCrossTab } from './crossTab'
 
 export type OdcrmEventName =
   | 'accountsUpdated'
+  | 'accountsHydrated'
   | 'contactsUpdated'
   | 'leadsUpdated'
   | 'emailTemplatesUpdated'
@@ -15,6 +16,7 @@ export type OdcrmEventName =
   | 'headerImageUpdated'
   | 'navigateToAccount'
   | 'navigateToLeads'
+  | 'navigateToOnboarding'
 
 export function emit<TDetail = unknown>(name: OdcrmEventName, detail?: TDetail): void {
   if (typeof window === 'undefined') return

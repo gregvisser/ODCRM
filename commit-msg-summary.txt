@@ -1,0 +1,40 @@
+MANDATORY RULE: Backend safety protocol - prevent production failures
+
+WHAT:
+- Created .cursor/rules/backend-safety-mandatory.mdc
+- Created SESSION-SUMMARY-2026-02-04.md
+
+WHY:
+- Backend failed (503) after deploying untested safety features
+- Violated existing quality standards
+- Required emergency rollback
+- System down 10+ minutes
+
+NEW RULE ENFORCES:
+1. ALWAYS test backend locally before deploying
+2. Run npm run build before every commit
+3. Deploy incrementally (not 300+ lines at once)
+4. Verify backend starts successfully
+5. Test endpoints with curl
+6. Immediate rollback procedures
+
+IMPACT:
+- Rule auto-applies to ALL future agents
+- No manual enforcement needed
+- Prevents similar production incidents
+- Comprehensive checklists for backend changes
+
+ACCOUNTABILITY:
+- Agent violated existing rules
+- Did not test locally
+- Broke production
+- Created preventive measures
+- Documented incident thoroughly
+
+STATUS:
+- Rule created and active
+- Session summarized
+- Backend recovering (may need manual Azure restart)
+- No data loss
+
+This ensures no future agent repeats this mistake.
