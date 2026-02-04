@@ -1,18 +1,17 @@
 import { useMemo } from 'react'
 import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
-import { MdAssessment, MdDashboard } from 'react-icons/md'
+import { MdAssessment } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
-import CustomersOverviewTab from './CustomersOverviewTab'
 
-export type CustomersViewId = 'overview' | 'accounts' | 'contacts' | 'leads-reporting'
+export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
 
 function coerceCustomersViewId(view?: string): CustomersViewId {
-  if (view === 'overview' || view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
-  return 'overview'
+  if (view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
+  return 'accounts'
 }
 
 const CUSTOMERS_SECTION_KEY = 'customers'
@@ -30,12 +29,6 @@ export default function CustomersHomePage({
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
 
   const defaultNavItems: SubNavItem[] = [
-    {
-      id: 'overview',
-      label: 'Overview',
-      icon: MdDashboard,
-      content: <CustomersOverviewTab />,
-    },
     {
       id: 'accounts',
       label: 'Accounts',

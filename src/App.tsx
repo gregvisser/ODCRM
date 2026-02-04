@@ -22,7 +22,7 @@ import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
 function App() {
   const { instance } = useMsal()
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
-  const [activeView, setActiveView] = useState<string>('overview')
+  const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
@@ -192,7 +192,7 @@ function App() {
                 const nextTab = CRM_TOP_TABS[nextIndex]
                 if (!nextTab) return
                 setActiveTab(nextTab.id)
-                setActiveView('overview')
+                setActiveView('accounts')
                 setFocusAccountName(undefined)
               }}
               variant="unstyled"
