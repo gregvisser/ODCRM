@@ -3,6 +3,25 @@ import path from 'node:path'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { prisma } from './lib/prisma.js'
+
+// CRITICAL: Verify DATABASE_URL exists in production
+// In Azure App Service, environment variables are set in Configuration
+// dotenv.config() only loads .env file (for local dev)
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ CRITICAL: DATABASE_URL environment variable is missing in production!')
+    console.error('   This must be set in Azure App Service Configuration.')
+    console.error('   Application cannot start without database connection.')
+    process.exit(1)
+  }
+  console.log('✅ DATABASE_URL is configured (length:', process.env.DATABASE_URL.length, 'chars)')
+} else {
+  // In development, dotenv loads from .env file
+  dotenv.config()
+  if (!process.env.DATABASE_URL) {
+    console.warn('⚠️  WARNING: DATABASE_URL not found in .env file')
+  }
+}
 import campaignRoutes from './routes/campaigns.js'
 import contactsRoutes from './routes/contacts.js'
 import outlookRoutes from './routes/outlook.js'
@@ -28,8 +47,6 @@ import { startEmailScheduler } from './workers/emailScheduler.js'
 import { startReplyDetectionWorker } from './workers/replyDetection.js'
 import { startLeadsSyncWorker } from './workers/leadsSync.js'
 import { startAboutEnrichmentWorker } from './workers/aboutEnrichment.js'
-
-dotenv.config()
 
 const app = express()
 
@@ -92,14 +109,61 @@ app.use(
 app.use(express.json())
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+// Health check (basic)
+app.get('/health', async (req, res) => {
+  try {
+    // Quick DB connectivity check
+    await prisma.$queryRaw`SELECT 1`
+    res.json({ 
+      ok: true, 
+      env: process.env.NODE_ENV || 'development',
+      db: 'ok',
+      timestamp: new Date().toISOString() 
+    })
+  } catch (error: any) {
+    console.error('Health check failed:', error)
+    res.status(503).json({ 
+      ok: false, 
+      env: process.env.NODE_ENV || 'development',
+      db: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString() 
+    })
+  }
 })
 
-// API health check (kept separate from customer-scoped routes)
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+// API health check (with DB verification)
+app.get('/api/health', async (req, res) => {
+  try {
+    // Verify database connectivity
+    await prisma.$queryRaw`SELECT 1`
+    
+    // Check if we can read from a core table
+    const customerCount = await prisma.customer.count()
+    
+    res.json({ 
+      ok: true, 
+      env: process.env.NODE_ENV || 'development',
+      db: 'ok',
+      database: {
+        connected: true,
+        customerCount
+      },
+      timestamp: new Date().toISOString() 
+    })
+  } catch (error: any) {
+    console.error('API health check failed:', error)
+    res.status(503).json({ 
+      ok: false, 
+      env: process.env.NODE_ENV || 'development',
+      db: 'error',
+      database: {
+        connected: false,
+        error: error.message
+      },
+      timestamp: new Date().toISOString() 
+    })
+  }
 })
 
 // API Routes

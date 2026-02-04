@@ -10,11 +10,29 @@ import { prisma } from '../lib/prisma.js'
 
 const router = Router()
 
-// Schema validation (matches OpensDoorsV2 ClientAccount)
+// Helper: accept URL string or empty/whitespace (coerce to null)
+const optionalUrl = z
+  .string()
+  .optional()
+  .nullable()
+  .transform((v) => (v && v.trim() && v.startsWith('http') ? v.trim() : null))
+
+// Helper: accept number or string (coerce to number; NaN -> null)
+const optionalNumber = z
+  .union([z.number(), z.string()])
+  .optional()
+  .nullable()
+  .transform((v) => {
+    if (v === undefined || v === null || v === '') return null
+    const n = typeof v === 'number' ? v : parseFloat(String(v))
+    return Number.isFinite(n) ? n : null
+  })
+
+// Schema validation (matches OpensDoorsV2 ClientAccount). Lenient so frontend payloads don't 400.
 const upsertCustomerSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(1),
-  domain: z.string().optional(),
+  domain: z.string().optional().nullable(),
   accountData: z.unknown().optional().nullable(),
   website: z.string().optional().nullable(),
   whatTheyDo: z.string().optional().nullable(),
@@ -25,27 +43,42 @@ const upsertCustomerSchema = z.object({
   companySize: z.string().optional().nullable(),
   headquarters: z.string().optional().nullable(),
   foundingYear: z.string().optional().nullable(),
-  socialPresence: z.array(z.object({
-    label: z.string(),
-    url: z.string().url(),
-  })).optional().nullable(),
-  
-  // Business details
-  leadsReportingUrl: z.string().url().optional().nullable(),
+  socialPresence: z
+    .array(
+      z.object({
+        label: z.string().optional().default(''),
+        url: z.string().optional().transform((u) => (u && u.trim().startsWith('http') ? u.trim() : '')),
+      })
+    )
+    .optional()
+    .nullable()
+    .transform((arr) => (arr && arr.length ? arr.filter((i) => i.url) : null)),
+  leadsReportingUrl: optionalUrl,
   sector: z.string().optional().nullable(),
-  clientStatus: z.enum(['active', 'inactive', 'onboarding', 'win_back']).optional(),
+  clientStatus: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const lower = (v || 'active').toString().toLowerCase()
+      return ['active', 'inactive', 'onboarding', 'win_back'].includes(lower) ? lower : 'active'
+    }),
   targetJobTitle: z.string().optional().nullable(),
   prospectingLocation: z.string().optional().nullable(),
-  
-  // Financial & performance
-  monthlyIntakeGBP: z.number().optional().nullable(),
-  defcon: z.number().int().min(1).max(6).optional().nullable(),
-  
-  // Lead targets & actuals
-  weeklyLeadTarget: z.number().int().optional().nullable(),
-  weeklyLeadActual: z.number().int().optional().nullable(),
-  monthlyLeadTarget: z.number().int().optional().nullable(),
-  monthlyLeadActual: z.number().int().optional().nullable(),
+  monthlyIntakeGBP: optionalNumber,
+  defcon: z
+    .union([z.number(), z.string()])
+    .optional()
+    .nullable()
+    .transform((v) => {
+      if (v === undefined || v === null || v === '') return null
+      const n = typeof v === 'number' ? v : parseInt(String(v), 10)
+      if (!Number.isFinite(n) || n < 1 || n > 6) return null
+      return n
+    }),
+  weeklyLeadTarget: optionalNumber,
+  weeklyLeadActual: optionalNumber,
+  monthlyLeadTarget: optionalNumber,
+  monthlyLeadActual: optionalNumber,
 })
 
 const upsertCustomerContactSchema = z.object({
@@ -130,6 +163,7 @@ router.get('/:id', async (req, res) => {
 // POST /api/customers - Create a new customer
 router.post('/', async (req, res) => {
   try {
+    console.log('📝 POST /api/customers - Creating customer:', { name: req.body.name })
     const validated = upsertCustomerSchema.parse(req.body)
 
     const customer = await prisma.customer.create({ data: {
@@ -168,10 +202,15 @@ router.post('/', async (req, res) => {
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
+      console.error('❌ POST /api/customers - Validation error:', error.errors)
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
-    console.error('Error creating customer:', error)
-    return res.status(500).json({ error: 'Failed to create customer' })
+    console.error('❌ POST /api/customers - Error creating customer:', error)
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'N/A')
+    return res.status(500).json({ 
+      error: 'Failed to create customer',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    })
   }
 })
 
@@ -244,16 +283,22 @@ router.put('/:id', async (req, res) => {
       return updatedCustomer
     })
 
+    console.log('✅ PUT /api/customers/:id - Updated customer:', { id: customer.id, name: customer.name })
     return res.json({
       id: customer.id,
       name: customer.name,
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
+      console.error('❌ PUT /api/customers/:id - Validation error:', error.errors)
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
-    console.error('Error updating customer:', error)
-    return res.status(500).json({ error: 'Failed to update customer' })
+    console.error('❌ PUT /api/customers/:id - Error updating customer:', error)
+    console.error('Stack trace:', error instanceof Error ? error.stack : 'N/A')
+    return res.status(500).json({ 
+      error: 'Failed to update customer',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    })
   }
 })
 

@@ -62,6 +62,7 @@ const createContactSchema = z.object({
 router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
+    console.log('📝 POST /api/contacts - Creating contact:', { customerId, email: req.body.email })
     const data = createContactSchema.parse(req.body)
 
     const existing = await prisma.contact.findFirst({
@@ -98,6 +99,7 @@ router.post('/', async (req, res, next) => {
 router.put('/:id', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
+    console.log('📝 PUT /api/contacts/:id - Updating contact:', { id: req.params.id, customerId })
     const data = createContactSchema.partial().parse(req.body)
 
     const existing = await prisma.contact.findFirst({
@@ -117,8 +119,10 @@ router.put('/:id', async (req, res, next) => {
       },
     })
 
+    console.log('✅ PUT /api/contacts/:id - Updated contact:', { id: contact.id })
     res.json(contact)
   } catch (error) {
+    console.error('❌ PUT /api/contacts/:id - Error:', error)
     next(error)
   }
 })
