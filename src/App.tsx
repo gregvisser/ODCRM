@@ -7,6 +7,7 @@ import {
   Tabs,
   Text,
   Button,
+  Badge,
 } from '@chakra-ui/react'
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
@@ -236,6 +237,18 @@ function App() {
                     {tab.label}
                   </Tab>
                 ))}
+                {/* Environment indicator */}
+                <Badge
+                  colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
+                  fontSize="xs"
+                  px={2}
+                  py={1}
+                  borderRadius={radius.md}
+                  textTransform="uppercase"
+                  fontWeight="bold"
+                >
+                  {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
+                </Badge>
                 <Button
                   variant="outline"
                   size="xs"

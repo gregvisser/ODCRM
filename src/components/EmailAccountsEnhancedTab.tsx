@@ -239,7 +239,12 @@ export default function EmailAccountsEnhancedTab() {
     <Box>
       <HStack justify="space-between" mb={6}>
         <Box>
-          <Heading size="lg">Email Accounts</Heading>
+          <HStack spacing={2} mb={1}>
+            <Heading size="lg">Email Accounts</Heading>
+            <Badge colorScheme="green" fontSize="xs" px={2} py={1}>
+              Data source: Database
+            </Badge>
+          </HStack>
           <Text fontSize="sm" color="gray.600">
             Manage OAuth and SMTP email accounts for sending
           </Text>

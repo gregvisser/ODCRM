@@ -27,8 +27,8 @@ import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
 import { emit } from '../../platform/events'
 import { settingsStore } from '../../platform'
+import { getJson } from '../../platform/storage'
 import { OdcrmStorageKeys } from '../../platform/keys'
-import { getJson, setJson } from '../../platform/storage'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import type {
   Account,
@@ -74,17 +74,6 @@ type AssignedUser = {
   lastName: string
   email: string
   accountStatus: 'Active' | 'Inactive'
-}
-
-type StoredContact = {
-  id: string
-  name: string
-  title: string
-  accounts: string[]
-  tier: string
-  status: string
-  email: string
-  phone: string
 }
 
 const EMPTY_SOCIAL: SocialMediaPresence = {
@@ -223,11 +212,17 @@ export default function OnboardingHomePage() {
     [customers, selectedCustomerId],
   )
 
+  // Build account snapshot directly from database customer (NO localStorage)
   const selectedAccountSnapshot = useMemo(() => {
     if (!selectedCustomer) return null
-    const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
-    if (!Array.isArray(storedAccounts)) return null
-    return storedAccounts.find((acc) => acc.name === selectedCustomer.name) || null
+    // Extract data directly from database customer instead of localStorage
+    const accountData = selectedCustomer.accountData as Record<string, unknown> | null
+    return {
+      name: selectedCustomer.name,
+      website: accountData?.website as string | undefined,
+      weeklyTarget: accountData?.weeklyTarget as number | undefined,
+      _databaseId: selectedCustomer.id,
+    } as Partial<Account>
   }, [selectedCustomer])
 
   const fetchCustomers = useCallback(async () => {
@@ -562,51 +557,27 @@ export default function OnboardingHomePage() {
     })
   }
 
-  const upsertContactForAccount = (accountName: string, contact: PrimaryContact): string | null => {
-    const fullName = `${contact.firstName} ${contact.lastName}`.trim()
-    if (!fullName) return null
-    const contacts = getJson<StoredContact[]>(OdcrmStorageKeys.contacts) || []
-    const existingIndex = contacts.findIndex((item) => item.id === contact.id)
-    const nextId =
-      contact.id ||
-      `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    const nextContact: StoredContact = {
-      id: nextId,
-      name: fullName,
-      title: contact.roleLabel || contact.roleId || '',
-      accounts: accountName ? [accountName] : [],
-      tier: 'Decision maker',
-      status: contact.status,
-      email: contact.email,
-      phone: contact.phone,
-    }
-    const updated =
-      existingIndex >= 0
-        ? contacts.map((item, index) => (index === existingIndex ? nextContact : item))
-        : [...contacts, nextContact]
-    setJson(OdcrmStorageKeys.contacts, updated)
-    emit('contactsUpdated', updated)
-    return nextId
-  }
-
   const handleSave = async () => {
     if (!selectedCustomer) return
     setIsSaving(true)
+    
     const currentAccountData =
       selectedCustomer.accountData && typeof selectedCustomer.accountData === 'object'
         ? selectedCustomer.accountData
         : {}
-    const nextContactId = upsertContactForAccount(
-      selectedCustomer.name,
-      accountDetails.primaryContact,
-    )
+    
+    // Generate contact ID locally (no localStorage dependency)
+    const nextContactId = accountDetails.primaryContact.id ||
+      `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    
     const nextAccountDetails = {
       ...accountDetails,
       primaryContact: {
         ...accountDetails.primaryContact,
-        id: nextContactId || accountDetails.primaryContact.id,
+        id: nextContactId,
       },
     }
+    
     const nextAccountData = {
       ...currentAccountData,
       clientProfile,
@@ -628,51 +599,49 @@ export default function OnboardingHomePage() {
       emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
       days: accountDetails.daysPerWeek,
     }
+    
+    // Call API and wait for response before updating UI
     const { error } = await api.put(`/api/customers/${selectedCustomer.id}`, {
       name: selectedCustomer.name,
       accountData: nextAccountData,
     })
+    
     if (error) {
-      toast({ title: 'Save failed', description: error, status: 'error', duration: 4000 })
+      // Show error toast - do NOT update any state
+      toast({ 
+        title: 'Save failed', 
+        description: error, 
+        status: 'error', 
+        duration: 4000,
+        isClosable: true,
+      })
       setIsSaving(false)
       return
     }
+    
+    // SUCCESS: API returned 2xx - NOW update local state
+    // Update customers state with fresh data from API response
     setCustomers((prev) =>
       prev.map((customer) =>
-        customer.id === selectedCustomer.id ? { ...customer, accountData: nextAccountData } : customer,
+        customer.id === selectedCustomer.id 
+          ? { ...customer, accountData: nextAccountData } 
+          : customer,
       ),
     )
-    const storedAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
-    if (storedAccounts && Array.isArray(storedAccounts)) {
-      const updatedAccounts = storedAccounts.map((acc) =>
-        acc.name === selectedCustomer.name
-          ? {
-              ...acc,
-              clientProfile,
-              primaryContact: nextAccountDetails.primaryContact,
-              contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
-              contactEmail: accountDetails.primaryContact.email,
-              contactNumber: accountDetails.primaryContact.phone,
-              contactRoleId: accountDetails.primaryContact.roleId,
-              contactRoleLabel: accountDetails.primaryContact.roleLabel,
-              contactActive: accountDetails.primaryContact.status === 'Active',
-              headOfficeAddress: accountDetails.headOfficeAddress,
-              headOfficePlaceId: accountDetails.headOfficePlaceId,
-              headOfficePostcode: accountDetails.headOfficePostcode,
-              assignedAccountManager: accountDetails.assignedAccountManagerName,
-              assignedAccountManagerId: accountDetails.assignedAccountManagerId,
-              assignedClientDdiNumber: accountDetails.assignedClientDdiNumber,
-              emailAccounts: accountDetails.emailAccounts,
-              emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
-              days: accountDetails.daysPerWeek,
-            }
-          : acc,
-      )
-      setJson(OdcrmStorageKeys.accounts, updatedAccounts)
-      emit('accountsUpdated', updatedAccounts)
-    }
+    
+    // Update local form state
     setAccountDetails(nextAccountDetails)
-    toast({ title: 'Onboarding details saved', status: 'success', duration: 2500 })
+    
+    // Emit event for other components (database is source of truth, this is notification only)
+    emit('customerUpdated', { id: selectedCustomer.id, accountData: nextAccountData })
+    
+    // Show success toast ONLY after successful API response
+    toast({ 
+      title: 'Onboarding details saved', 
+      description: 'Changes saved to database',
+      status: 'success', 
+      duration: 2500,
+    })
     setIsSaving(false)
   }
 

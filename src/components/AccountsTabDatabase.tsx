@@ -4,29 +4,21 @@
  * This component wraps the existing AccountsTab with database-first architecture.
  * It loads data from Azure PostgreSQL (via /api/customers) instead of localStorage.
  * 
- * ARCHITECTURE:
- * - Data Source: Azure PostgreSQL database (single source of truth)
+ * ARCHITECTURE (Fixed - 2026-02-05):
+ * - Data Source: Azure PostgreSQL database (SINGLE source of truth)
  * - Data Flow: Database → API → React Hook → Mapper → AccountsTab UI
- * - Saves: AccountsTab localStorage changes → auto-sync → Database
+ * - NO localStorage sync loops - removed to fix "save then revert" bug
  * 
- * TRANSITIONAL APPROACH:
- * The existing AccountsTab is 6000+ lines with localStorage deeply integrated.
- * Rather than rewriting everything at once, we use a hybrid approach:
- * 1. Load fresh data from database on mount
- * 2. Hydrate localStorage with database data
- * 3. Monitor localStorage for changes
- * 4. Sync changes back to database
- * 
- * This ensures database is ALWAYS the source of truth, while allowing
- * the existing AccountsTab UI to continue working during the transition.
+ * IMPORTANT: localStorage hydration happens ONCE on mount only.
+ * After initial load, AccountsTab changes go directly to database via API.
  * 
  * See ARCHITECTURE.md for full details.
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, useToast } from '@chakra-ui/react'
+import { useEffect, useState, useRef } from 'react'
+import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, Badge, HStack } from '@chakra-ui/react'
 import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
-import { databaseCustomersToAccounts, databaseCustomerToAccount, accountToDatabaseCustomer, type Account } from '../utils/customerAccountMapper'
+import { databaseCustomersToAccounts, type Account } from '../utils/customerAccountMapper'
 import { setJson, getJson } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
 import AccountsTab from './AccountsTab'
@@ -36,131 +28,47 @@ type Props = {
 }
 
 export default function AccountsTabDatabase({ focusAccountName }: Props) {
-  const { customers, loading, error, refetch, updateCustomer, createCustomer } = useCustomersFromDatabase()
+  const { customers, loading, error, refetch } = useCustomersFromDatabase()
   const [isHydrating, setIsHydrating] = useState(true)
-  const toast = useToast()
-  const isSyncingToDbRef = useRef(false)
-  const lastLocalStorageHashRef = useRef<string>('')
+  const [dataReady, setDataReady] = useState(false)
+  const hasHydratedRef = useRef(false)
 
-  // Hydrate localStorage with database data on mount and when customers change
-  // This allows the existing AccountsTab to work while we transition to database-first
+  // ONE-TIME hydration: Load database data into localStorage on mount
+  // This runs ONCE and then stops - no more sync loops
   useEffect(() => {
     if (loading) return
-
-    // Get current localStorage data
-    const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
+    if (hasHydratedRef.current) return // Already hydrated - don't overwrite user changes
     
     // Convert database customers to Account format
     const dbAccounts = databaseCustomersToAccounts(customers)
     
-    // SMART HYDRATION: Only overwrite if localStorage is empty OR if database has more recent data
-    // This prevents destroying user edits that haven't been synced yet
-    if (!currentAccounts || currentAccounts.length === 0) {
-      // localStorage is empty - hydrate from database
-      console.log('🔄 Initial hydration from database...', customers.length, 'customers')
+    // Get current localStorage data
+    const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
+    
+    // ONLY hydrate if localStorage is empty or has fewer accounts than database
+    // This prevents overwriting user changes with stale database data
+    const shouldHydrate = !currentAccounts || 
+                          currentAccounts.length === 0 || 
+                          currentAccounts.length < dbAccounts.length
+    
+    if (shouldHydrate && dbAccounts.length > 0) {
+      console.log('🔄 ONE-TIME hydration from database...', dbAccounts.length, 'accounts')
       setJson(OdcrmStorageKeys.accounts, dbAccounts)
       setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-      lastLocalStorageHashRef.current = JSON.stringify(dbAccounts)
       console.log('✅ localStorage hydrated with', dbAccounts.length, 'accounts from database')
     } else {
-      // localStorage has data - use database as source of truth
-      // Only preserve local data if it was modified AFTER last database sync
-      console.log('🔄 Updating localStorage from database (database is source of truth)...')
-      
-      // Always use database data - it's the source of truth
-      // The 2-second auto-sync below handles saving any local changes back to database
-      setJson(OdcrmStorageKeys.accounts, dbAccounts)
-      setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-      lastLocalStorageHashRef.current = JSON.stringify(dbAccounts)
-      console.log('✅ localStorage updated from database (database first)')
+      console.log('⏭️ Skipping hydration - localStorage already has data or database is empty')
     }
     
+    hasHydratedRef.current = true
     setIsHydrating(false)
+    setDataReady(true)
   }, [customers, loading])
 
-  // Monitor localStorage for changes and sync back to database
-  // This ensures any changes made by AccountsTab are persisted to the database
-  useEffect(() => {
-    const syncToDatabase = async () => {
-      if (isSyncingToDbRef.current) return
-      
-      // Read current accounts from localStorage
-      const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
-      if (!currentAccounts) return
+  // NO MORE localStorage monitoring - removed to fix "save then revert" bug
+  // AccountsTab will save directly to database via API when user saves
 
-      const currentHash = JSON.stringify(currentAccounts)
-      
-      // Check if localStorage has changed
-      if (currentHash === lastLocalStorageHashRef.current) return
-      
-      console.log('🔄 localStorage changed, syncing to database...')
-      isSyncingToDbRef.current = true
-
-      try {
-        // For each account in localStorage, check if it needs to be saved to database
-        for (const account of currentAccounts) {
-          if (!account._databaseId) {
-            // New account - create in database
-            console.log('➕ Creating new account in database:', account.name)
-            const dbData = accountToDatabaseCustomer(account)
-            await createCustomer(dbData)
-          } else {
-            // Existing account - check if it changed
-            const dbCustomer = customers.find(c => c.id === account._databaseId)
-            if (dbCustomer) {
-              const dbAccount = databaseCustomerToAccount(dbCustomer)
-              // Simple change detection - if any field differs, update
-              if (JSON.stringify(dbAccount) !== JSON.stringify(account)) {
-                console.log('✏️ Updating account in database:', account.name)
-                const dbData = accountToDatabaseCustomer(account)
-                await updateCustomer(account._databaseId, dbData)
-              }
-            }
-          }
-        }
-
-        // Update the hash
-        lastLocalStorageHashRef.current = currentHash
-        console.log('✅ Sync to database complete')
-        
-        // Note: We don't refetch here to avoid render loops and glitching
-        // The data will be refreshed on the next periodic refresh (every 60s)
-      } catch (error) {
-        console.error('❌ Failed to sync to database:', error)
-        toast({
-          title: 'Sync Error',
-          description: 'Failed to save changes to database. Your changes are saved locally and will be retried.',
-          status: 'warning',
-          duration: 5000,
-        })
-      } finally {
-        isSyncingToDbRef.current = false
-      }
-    }
-
-    // Check for changes every 2 seconds
-    const interval = setInterval(syncToDatabase, 2000)
-
-    // Also listen for storage events from other tabs
-    window.addEventListener('storage', syncToDatabase)
-
-    return () => {
-      clearInterval(interval)
-      window.removeEventListener('storage', syncToDatabase)
-    }
-  }, [customers, updateCustomer, createCustomer, refetch, toast])
-
-  // Set up periodic refresh to keep data fresh
-  useEffect(() => {
-    const interval = setInterval(() => {
-      console.log('🔄 Auto-refreshing customer data from database...')
-      refetch()
-    }, 60000) // Refresh every 60 seconds
-
-    return () => clearInterval(interval)
-  }, [refetch])
-
-  if (loading && isHydrating) {
+  if (loading && !dataReady) {
     return (
       <VStack py={10} spacing={4}>
         <Spinner size="xl" color="orange.500" thickness="4px" />
@@ -191,8 +99,22 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
 
   return (
     <Box>
-      {/* Render the existing AccountsTab - it will read from the hydrated localStorage */}
-      <AccountsTab focusAccountName={focusAccountName} />
+      {/* Data source indicator */}
+      <HStack mb={2} justify="flex-end">
+        <Badge colorScheme="green" fontSize="xs" px={2} py={1}>
+          Data source: Database
+        </Badge>
+      </HStack>
+      
+      {/* Render AccountsTab - disable until data is ready */}
+      {dataReady ? (
+        <AccountsTab focusAccountName={focusAccountName} />
+      ) : (
+        <Box textAlign="center" py={10}>
+          <Spinner size="lg" />
+          <Text mt={2} color="gray.500">Preparing data...</Text>
+        </Box>
+      )}
     </Box>
   )
 }
