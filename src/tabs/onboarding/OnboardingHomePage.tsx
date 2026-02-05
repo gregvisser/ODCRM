@@ -23,9 +23,9 @@ import {
   useToast,
   VStack,
 } from '@chakra-ui/react'
-import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
+import { AddIcon, AttachmentIcon, CloseIcon, RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
-import { emit } from '../../platform/events'
+import { emit, on } from '../../platform/events'
 import { settingsStore } from '../../platform'
 import { getJson } from '../../platform/storage'
 import { OdcrmStorageKeys } from '../../platform/keys'
@@ -278,6 +278,15 @@ export default function OnboardingHomePage() {
       setAssignedUsers(storedUsers.filter((user) => user.accountStatus === 'Active'))
     }
   }, [fetchCustomers, fetchTaxonomy])
+
+  // Listen for customerCreated event to refresh dropdown when new customer is created
+  useEffect(() => {
+    const unsubscribe = on<{ id: string; name: string }>('customerCreated', () => {
+      console.log('🔄 Customer created event received, refreshing customers list...')
+      void fetchCustomers()
+    })
+    return () => unsubscribe()
+  }, [fetchCustomers])
 
   useEffect(() => {
     if (!selectedCustomer) return
@@ -632,28 +641,8 @@ export default function OnboardingHomePage() {
     // Update local form state
     setAccountDetails(nextAccountDetails)
     
-    // Emit events for other components (database is source of truth, this is notification only)
+    // Emit event for other components (database is source of truth, this is notification only)
     emit('customerUpdated', { id: selectedCustomer.id, accountData: nextAccountData })
-    
-    // Also emit contactsUpdated for backward compatibility with components that listen for it
-    // This ensures ContactsTab and AccountsTab stay in sync
-    if (accountDetails.primaryContact.firstName || accountDetails.primaryContact.lastName) {
-      const contactForEvent = {
-        id: nextContactId,
-        name: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
-        title: accountDetails.primaryContact.roleLabel || accountDetails.primaryContact.roleId || '',
-        accounts: [selectedCustomer.name],
-        tier: 'Decision maker',
-        status: accountDetails.primaryContact.status,
-        email: accountDetails.primaryContact.email,
-        phone: accountDetails.primaryContact.phone,
-      }
-      // Get existing contacts from localStorage and merge
-      const existingContacts = getJson<Array<{ id: string; name: string }>>('odcrm_contacts') || []
-      const updatedContacts = existingContacts.filter(c => c.id !== nextContactId)
-      updatedContacts.push(contactForEvent)
-      emit('contactsUpdated', updatedContacts)
-    }
     
     // Show success toast ONLY after successful API response
     toast({ 
@@ -686,17 +675,35 @@ export default function OnboardingHomePage() {
                 </Text>
               </HStack>
             ) : (
-              <Select
-                value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
-                placeholder={customers.length ? 'Select account' : 'No accounts found'}
-              >
-                {customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </Select>
+              <HStack spacing={2}>
+                <Select
+                  value={selectedCustomerId}
+                  onChange={(e) => setSelectedCustomerId(e.target.value)}
+                  placeholder={customers.length ? 'Select account' : 'No accounts found'}
+                  flex="1"
+                >
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}
+                    </option>
+                  ))}
+                </Select>
+                <IconButton
+                  aria-label="Refresh customers"
+                  icon={<RepeatIcon />}
+                  size="md"
+                  variant="outline"
+                  onClick={() => {
+                    toast({
+                      title: 'Refreshing...',
+                      status: 'info',
+                      duration: 1000,
+                    })
+                    void fetchCustomers()
+                  }}
+                  title="Refresh customer list from database"
+                />
+              </HStack>
             )}
           </FormControl>
 
@@ -1314,5 +1321,4 @@ export default function OnboardingHomePage() {
     </Stack>
   )
 }
-
 

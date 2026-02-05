@@ -4489,24 +4489,51 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       // Continue with initial account if population fails
     }
 
+    // CRITICAL: Save to database FIRST via API, then update local state
+    // This ensures database is the source of truth
+    const payload = buildCustomerPayloadFromAccount(finalAccount)
+    const { data: createdCustomer, error: createError } = await api.post<{ id: string; name: string }>('/api/customers', payload)
+    
+    if (createError || !createdCustomer) {
+      // Show error toast - do NOT close modal, do NOT update local state
+      toast({
+        title: 'Failed to create account',
+        description: createError || 'Unknown error occurred',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return // Don't proceed - let user fix the issue
+    }
+    
+    // SUCCESS: API returned 2xx - NOW update local state
+    // Add the database ID to the account for future updates
+    const accountWithDbId = {
+      ...finalAccount,
+      _databaseId: createdCustomer.id,
+    }
+    
     setAccountsData((prev) => {
-      const updated = [...prev, finalAccount]
+      const updated = [...prev, accountWithDbId]
       saveAccountsToStorage(updated)
       // Dispatch event so LeadsTab can get updated accounts and refresh leads
       emit('accountsUpdated', updated)
       return updated
     })
+    
+    // Emit customerCreated event so Onboarding can refresh its dropdown
+    emit('customerCreated', { id: createdCustomer.id, name: createdCustomer.name })
 
     // Initialize maps for new account (ensure sector is saved)
     const updatedSectorsMap = {
       ...sectorsMap,
-      [finalAccount.name]: finalAccount.sector,
+      [accountWithDbId.name]: accountWithDbId.sector,
     }
     setSectorsMap(updatedSectorsMap)
     saveSectorsToStorage(updatedSectorsMap)
     setTargetLocationsMap((prev) => ({
       ...prev,
-      [finalAccount.name]: finalAccount.targetLocation,
+      [accountWithDbId.name]: accountWithDbId.targetLocation,
     }))
 
     // Reset form
@@ -4537,11 +4564,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     onCreateModalClose()
 
     // Open the new account in the drawer
-    setSelectedAccount(finalAccount)
+    setSelectedAccount(accountWithDbId)
 
     toast({
       title: 'Account created',
-      description: `Successfully created account: ${finalAccount.name}${dataPopulated ? ' (company data auto-populated)' : ''}`,
+      description: `Successfully created account: ${accountWithDbId.name}${dataPopulated ? ' (company data auto-populated)' : ''}`,
       status: 'success',
       duration: 3000,
       isClosable: true,

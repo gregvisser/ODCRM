@@ -15,6 +15,8 @@ export type OdcrmEventName =
   | 'headerImageUpdated'
   | 'navigateToAccount'
   | 'navigateToLeads'
+  | 'customerCreated'
+  | 'customerUpdated'
 
 export function emit<TDetail = unknown>(name: OdcrmEventName, detail?: TDetail): void {
   if (typeof window === 'undefined') return

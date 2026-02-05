@@ -187,97 +187,84 @@ function App() {
             top={0}
             zIndex={zIndex.sticky}
           >
-            {/* Header row: Logo + Tabs + ENV badge + Sign out */}
-            <Flex
-              alignItems="center"
-              gap={spacing[2]}
-              borderBottom="1px solid"
-              borderColor={semanticColor.borderSubtle}
-              pb={spacing[1]}
+            <Tabs
+              index={CRM_TOP_TABS.findIndex((tab) => tab.id === activeTab)}
+              onChange={(nextIndex) => {
+                const nextTab = CRM_TOP_TABS[nextIndex]
+                if (!nextTab) return
+                setActiveTab(nextTab.id)
+                setActiveView('accounts')
+                setFocusAccountName(undefined)
+              }}
+              variant="unstyled"
               mt={{ base: spacing[1], md: spacing[2] }}
-              overflowX="auto"
-              whiteSpace="nowrap"
             >
-              {/* Logo */}
-              <Box
-                minW={{ base: '180px', md: '260px' }}
-                maxW={{ base: '240px', md: '320px' }}
-                mr={{ base: spacing[1], md: spacing[2] }}
-                flexShrink={0}
-              >
-                <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
-              </Box>
-              
-              {/* Tabs - only Tab children inside TabList */}
-              <Tabs
-                index={CRM_TOP_TABS.findIndex((tab) => tab.id === activeTab)}
-                onChange={(nextIndex) => {
-                  const nextTab = CRM_TOP_TABS[nextIndex]
-                  if (!nextTab) return
-                  setActiveTab(nextTab.id)
-                  setActiveView('accounts')
-                  setFocusAccountName(undefined)
-                }}
-                variant="unstyled"
-                flex="1"
-              >
-                <TabList gap={spacing[2]}>
-                  {CRM_TOP_TABS.map((tab) => (
-                    <Tab
-                      key={tab.id}
-                      px={spacing[3]}
-                      py={spacing[1]}
-                      fontSize="xs"
-                      fontWeight="600"
-                      color={semanticColor.textMuted}
-                      border="1px solid"
-                      borderColor={semanticColor.borderSubtle}
-                      borderRadius={radius.md}
-                      bg={semanticColor.bgSurface}
-                      _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
-                      _selected={{
-                        color: 'accent.700',
-                        borderColor: 'accent.500',
-                        bg: 'accent.50',
-                      }}
-                    >
-                      {tab.label}
-                    </Tab>
-                  ))}
-                </TabList>
-              </Tabs>
-              
-              {/* Environment indicator - outside TabList */}
-              <Badge
-                colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
-                fontSize="xs"
-                px={2}
-                py={1}
-                borderRadius={radius.md}
-                textTransform="uppercase"
-                fontWeight="bold"
-                flexShrink={0}
-              >
-                {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
-              </Badge>
-              
-              {/* Sign out button - outside TabList */}
-              <Button
-                variant="outline"
-                size="xs"
-                px={spacing[3]}
-                py={spacing[1]}
-                fontSize="xs"
-                fontWeight="600"
-                color={semanticColor.textMuted}
+              <TabList
+                overflowX="auto"
+                whiteSpace="nowrap"
+                borderBottom="1px solid"
                 borderColor={semanticColor.borderSubtle}
-                _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
-                onClick={() => void handleSignOut()}
-                flexShrink={0}
+                gap={spacing[2]}
+                pb={spacing[1]}
+                alignItems="center"
               >
-                Sign out
-              </Button>
-            </Flex>
+                <Box
+                  minW={{ base: '180px', md: '260px' }}
+                  maxW={{ base: '240px', md: '320px' }}
+                  mr={{ base: spacing[1], md: spacing[2] }}
+                >
+                  <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
+                </Box>
+                {CRM_TOP_TABS.map((tab) => (
+                  <Tab
+                    key={tab.id}
+                    px={spacing[3]}
+                    py={spacing[1]}
+                    fontSize="xs"
+                    fontWeight="600"
+                    color={semanticColor.textMuted}
+                    border="1px solid"
+                    borderColor={semanticColor.borderSubtle}
+                    borderRadius={radius.md}
+                    bg={semanticColor.bgSurface}
+                    _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
+                    _selected={{
+                      color: 'accent.700',
+                      borderColor: 'accent.500',
+                      bg: 'accent.50',
+                    }}
+                  >
+                    {tab.label}
+                  </Tab>
+                ))}
+                {/* Environment indicator */}
+                <Badge
+                  colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
+                  fontSize="xs"
+                  px={2}
+                  py={1}
+                  borderRadius={radius.md}
+                  textTransform="uppercase"
+                  fontWeight="bold"
+                >
+                  {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  px={spacing[3]}
+                  py={spacing[1]}
+                  fontSize="xs"
+                  fontWeight="600"
+                  color={semanticColor.textMuted}
+                  borderColor={semanticColor.borderSubtle}
+                  _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
+                  onClick={() => void handleSignOut()}
+                >
+                  Sign out
+                </Button>
+              </TabList>
+            </Tabs>
           </Box>
 
           {/* Main Content */}
