@@ -130,6 +130,9 @@ export function useUserPreferences(userEmail: string | null) {
 
       const previousPreferences = { ...preferences }
 
+      // Clear any stale error from previous failed attempt
+      setError(null)
+
       try {
         const updatedPreferences = {
           ...preferences,
@@ -149,6 +152,9 @@ export function useUserPreferences(userEmail: string | null) {
         if (response.error) {
           throw new Error(response.error)
         }
+
+        // Success - ensure error is cleared
+        setError(null)
       } catch (err) {
         // Save failed - revert optimistic update and surface error
         console.error('[UserPreferences] Update failed:', err)
