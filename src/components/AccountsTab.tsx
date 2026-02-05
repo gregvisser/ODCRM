@@ -3597,10 +3597,15 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   const [sortColumn, setSortColumn] = useState<string | null>('spend')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   
-  // Leads section state
-  const cachedLeads = loadLeadsFromStorage()
-  const [leads, setLeads] = useState<Lead[]>(cachedLeads)
-  const [leadsLoading, setLeadsLoading] = useState(cachedLeads.length === 0)
+  // Leads section state - load ONCE via useState initializer, not on every render
+  const [leads, setLeads] = useState<Lead[]>(() => {
+    const cached = loadLeadsFromStorage()
+    return cached
+  })
+  const [leadsLoading, setLeadsLoading] = useState(() => {
+    const cached = loadLeadsFromStorage()
+    return cached.length === 0
+  })
   const [leadsError, setLeadsError] = useState<string | null>(null)
   const [leadsLastRefresh, setLeadsLastRefresh] = useState<Date>(() => {
     const stored = getItem(OdcrmStorageKeys.leadsLastRefresh)
@@ -3703,47 +3708,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     emit('accountsUpdated', cleared)
   }, [accountsData])
 
-  // Ensure account changes are persisted immediately (guards against missed save paths and prevents "reverts")
-  // Also keeps multiple tabs in sync via the native `storage` event.
-  // CRITICAL: Create backup before any save operations
-  const accountsAutosaveTimerRef = useRef<number | null>(null)
+  // DISABLED: Auto-backup and autosave effect
+  // This was causing localStorage write storms and backup key proliferation.
+  // Individual update functions (updateAccount, handleCreateAccount, etc.) already save.
+  // DO NOT re-enable automatic backups during hydration.
   const accountsLastSavedJsonRef = useRef<string>('')
-
-  useEffect(() => {
-    if (!hasHydratedFromServerRef.current) return
-    try {
-      const json = JSON.stringify(accountsData)
-      if (json === accountsLastSavedJsonRef.current) return
-
-      if (accountsAutosaveTimerRef.current) window.clearTimeout(accountsAutosaveTimerRef.current)
-      accountsAutosaveTimerRef.current = window.setTimeout(() => {
-        // Create backup before saving
-        try {
-          const currentAccounts = loadAccountsFromStorage()
-          if (currentAccounts && currentAccounts.length > 0) {
-            const backupKey = `odcrm_accounts_backup_${Date.now()}`
-            setJson(backupKey, currentAccounts)
-            // Keep only last 5 backups
-            const backupKeys = Object.keys(localStorage).filter(k => k.startsWith('odcrm_accounts_backup_')).sort()
-            if (backupKeys.length > 5) {
-              backupKeys.slice(0, backupKeys.length - 5).forEach(k => localStorage.removeItem(k))
-            }
-          }
-        } catch (e) {
-          console.warn('Failed to create backup:', e)
-        }
-        
-        saveAccountsToStorage(accountsData)
-        accountsLastSavedJsonRef.current = json
-      }, 200)
-    } catch {
-      // ignore serialization/storage failures (e.g. storage disabled)
-    }
-
-    return () => {
-      if (accountsAutosaveTimerRef.current) window.clearTimeout(accountsAutosaveTimerRef.current)
-    }
-  }, [accountsData])
 
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
@@ -4471,10 +4440,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     }
   }
 
-  // Save to localStorage whenever data changes
-  useEffect(() => {
-    saveAccountsToStorage(accountsData)
-  }, [accountsData])
+  // REMOVED: Blanket "save on every change" effect
+  // This was causing infinite write storms. Individual update functions already save.
+  // DO NOT re-add this effect.
 
   useEffect(() => {
     saveSectorsToStorage(sectorsMap)
@@ -5118,7 +5086,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     }
   }, [accountsData])
 
+  // Load leads ONCE on mount - do NOT depend on loadLeadsData to prevent infinite loops
+  const hasLoadedLeadsRef = useRef(false)
   useEffect(() => {
+    if (hasLoadedLeadsRef.current) return
+    hasLoadedLeadsRef.current = true
+    
     const cachedLeads = loadLeadsFromStorage()
     if (!shouldRefreshMarketingLeads(cachedLeads)) {
       setLeads(cachedLeads)
@@ -5127,7 +5100,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     }
 
     void loadLeadsData(false)
-  }, [loadLeadsData])
+  }, []) // Empty deps - run once on mount only
 
   // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (

@@ -139,11 +139,21 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   // Convert database customers to Account format (derived state, recalculates when customers change)
   const dbAccounts = databaseCustomersToAccounts(customers)
   
-  // ONE-TIME migration: Fix legacy localStorage entries (only runs once)
+  // ONE-TIME migration: Fix legacy localStorage entries
+  // Uses BOTH ref (session) and localStorage flag (persistent) to ensure single execution
   useEffect(() => {
     if (loading) return
     if (hasMigratedRef.current) return
+    
+    // Hard stop: check persistent flag BEFORE doing anything
+    const MIGRATION_COMPLETE_KEY = 'odcrm_migration_v2_complete'
+    if (localStorage.getItem(MIGRATION_COMPLETE_KEY)) {
+      hasMigratedRef.current = true
+      return
+    }
+    
     hasMigratedRef.current = true
+    localStorage.setItem(MIGRATION_COMPLETE_KEY, 'true')
     
     // Get current localStorage data to migrate
     const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
@@ -153,7 +163,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       const { migrated, didMigrate } = migrateAccountIds(currentAccounts, customers)
       
       if (didMigrate) {
-        console.log('[Migration] Updating localStorage with canonical IDs...')
+        console.log('[Migration] Updating localStorage with canonical IDs... (one-time)')
         setJson(OdcrmStorageKeys.accounts, migrated)
         
         // Show one-time toast if not already shown
@@ -171,13 +181,14 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       }
     }
     
-    // Also sync localStorage as a passive cache (for potential offline use)
-    if (dbAccounts.length > 0) {
-      console.log('[Hydration] Syncing localStorage cache with', dbAccounts.length, 'DB accounts')
-      setJson(OdcrmStorageKeys.accounts, dbAccounts)
+    // Sync localStorage as a passive cache ONCE
+    if (customers.length > 0) {
+      console.log('[Hydration] ONE-TIME localStorage sync with', customers.length, 'DB customers')
+      const accountsFromDb = databaseCustomersToAccounts(customers)
+      setJson(OdcrmStorageKeys.accounts, accountsFromDb)
       setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
     }
-  }, [customers, loading, toast, dbAccounts])
+  }, [customers, loading, toast]) // Removed dbAccounts from deps to prevent re-running
 
   // NO MORE localStorage monitoring - removed to fix "save then revert" bug
   // AccountsTab will save directly to database via API when user saves
