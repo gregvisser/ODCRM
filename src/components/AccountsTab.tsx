@@ -3513,7 +3513,15 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
   )
 }
 
-function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
+type AccountsTabProps = {
+  focusAccountName?: string
+  /** When provided, these accounts are used as the source of truth (from DB) */
+  dbAccounts?: Account[]
+  /** Data source indicator for debug display */
+  dataSource?: 'DB' | 'CACHE'
+}
+
+function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: AccountsTabProps) {
   const toast = useToast()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
@@ -3656,12 +3664,27 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     setContactsData(loadContactsFromStorage())
   }, [])
 
-  // Load initial data from localStorage first (backend will sync later).
+  // Load initial data: prefer dbAccounts prop (from DB), fallback to localStorage
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
+    // If DB accounts provided, use them as source of truth
+    if (dbAccounts && dbAccounts.length > 0) {
+      console.log('[AccountsTab] Initializing from DB accounts:', dbAccounts.length)
+      return dbAccounts
+    }
+    // Fallback to localStorage (legacy path)
     const loaded = loadAccountsFromStorage()
     const deletedAccountsSet = loadDeletedAccountsFromStorage()
+    console.log('[AccountsTab] Initializing from localStorage:', loaded.length)
     return loaded.filter(acc => !deletedAccountsSet.has(acc.name))
   })
+  
+  // Sync accountsData when dbAccounts prop changes (DB refresh)
+  useEffect(() => {
+    if (dbAccounts && dbAccounts.length > 0) {
+      console.log('[AccountsTab] DB accounts updated, syncing:', dbAccounts.length)
+      setAccountsData(dbAccounts)
+    }
+  }, [dbAccounts])
 
   useEffect(() => {
     if (!isStorageAvailable()) return
@@ -5847,6 +5870,31 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                 </Stack>
               </Stack>
             </DrawerHeader>
+            
+            {/* DEBUG: Production debug display for customer ID verification */}
+            <Box bg="yellow.50" px={4} py={2} borderBottom="1px solid" borderColor="yellow.200">
+              <HStack spacing={4} fontSize="xs" fontFamily="mono">
+                <Text>
+                  <Text as="span" fontWeight="bold">customerId:</Text>{' '}
+                  <Text as="span" color={selectedCustomerId ? 'green.600' : 'red.600'}>
+                    {selectedCustomerId || 'null'}
+                  </Text>
+                </Text>
+                <Text>
+                  <Text as="span" fontWeight="bold">source:</Text>{' '}
+                  <Text as="span" color={dataSource === 'DB' ? 'green.600' : 'orange.600'}>
+                    {dataSource}
+                  </Text>
+                </Text>
+                <Text>
+                  <Text as="span" fontWeight="bold">account.id:</Text>{' '}
+                  <Text as="span" color={selectedAccount?.id ? 'green.600' : 'red.600'}>
+                    {selectedAccount?.id || 'null'}
+                  </Text>
+                </Text>
+              </HStack>
+            </Box>
+            
             <DrawerBody bg="gray.50" p={6}>
               <Stack spacing={6} w="full">
                 {/* Quick Info Section */}
@@ -5915,6 +5963,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       <Heading size="md" color="gray.700">
                         Connected Email Accounts
                       </Heading>
+                      <Badge colorScheme={connectedEmails.length >= 5 ? 'orange' : 'gray'} variant="subtle" fontSize="xs">
+                        {connectedEmails.length}/5
+                      </Badge>
                       <IconButton
                         aria-label="Refresh email accounts"
                         icon={<RepeatIcon />}
@@ -5927,21 +5978,26 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         title="Refresh email accounts"
                       />
                     </HStack>
-                    <Button
-                      size="sm"
-                      colorScheme="blue"
-                      onClick={handleConnectOutlook}
-                      isDisabled={!selectedCustomerId}
+                    <Tooltip
+                      label={connectedEmails.length >= 5 ? 'Limit reached (5). Disconnect one to add another.' : ''}
+                      isDisabled={connectedEmails.length < 5}
                     >
-                      Connect Outlook
-                    </Button>
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        onClick={handleConnectOutlook}
+                        isDisabled={!selectedCustomerId || connectedEmails.length >= 5}
+                      >
+                        Connect Outlook
+                      </Button>
+                    </Tooltip>
                   </HStack>
                   
-                  {/* Warning: Account missing database ID */}
-                  {selectedAccount && !selectedCustomerId && (
+                  {/* Warning: Account missing database ID - ONLY for truly unsaved accounts */}
+                  {selectedAccount && !selectedAccount.id && !selectedCustomerId && (
                     <Box py={3} px={4} mb={4} bg="orange.50" borderRadius="md" border="1px solid" borderColor="orange.200">
                       <Text fontSize="sm" color="orange.700">
-                        This customer is not saved in the database. Save it first to connect email accounts.
+                        This is a new customer that hasn't been saved to the database yet. Save it first to connect email accounts.
                       </Text>
                     </Box>
                   )}

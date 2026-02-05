@@ -133,21 +133,19 @@ type Props = {
 
 export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const { customers, loading, error, refetch } = useCustomersFromDatabase()
-  const [isHydrating, setIsHydrating] = useState(true)
-  const [dataReady, setDataReady] = useState(false)
-  const hasHydratedRef = useRef(false)
   const toast = useToast()
+  const hasMigratedRef = useRef(false)
 
-  // ONE-TIME hydration + migration: Load database data into localStorage on mount
-  // Also migrates legacy entries to use canonical database IDs
+  // Convert database customers to Account format (derived state, recalculates when customers change)
+  const dbAccounts = databaseCustomersToAccounts(customers)
+  
+  // ONE-TIME migration: Fix legacy localStorage entries (only runs once)
   useEffect(() => {
     if (loading) return
-    if (hasHydratedRef.current) return // Already hydrated - don't overwrite user changes
+    if (hasMigratedRef.current) return
+    hasMigratedRef.current = true
     
-    // Convert database customers to Account format
-    const dbAccounts = databaseCustomersToAccounts(customers)
-    
-    // Get current localStorage data
+    // Get current localStorage data to migrate
     const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
     
     // MIGRATION: Check if we need to fix localStorage IDs
@@ -173,30 +171,18 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       }
     }
     
-    // ONLY hydrate if localStorage is empty or has fewer accounts than database
-    // This prevents overwriting user changes with stale database data
-    const shouldHydrate = !currentAccounts || 
-                          currentAccounts.length === 0 || 
-                          currentAccounts.length < dbAccounts.length
-    
-    if (shouldHydrate && dbAccounts.length > 0) {
-      console.log('[Hydration] ONE-TIME hydration from database...', dbAccounts.length, 'accounts')
+    // Also sync localStorage as a passive cache (for potential offline use)
+    if (dbAccounts.length > 0) {
+      console.log('[Hydration] Syncing localStorage cache with', dbAccounts.length, 'DB accounts')
       setJson(OdcrmStorageKeys.accounts, dbAccounts)
       setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-      console.log('[Hydration] localStorage hydrated with', dbAccounts.length, 'accounts from database')
-    } else {
-      console.log('[Hydration] Skipping - localStorage already has data or database is empty')
     }
-    
-    hasHydratedRef.current = true
-    setIsHydrating(false)
-    setDataReady(true)
-  }, [customers, loading, toast])
+  }, [customers, loading, toast, dbAccounts])
 
   // NO MORE localStorage monitoring - removed to fix "save then revert" bug
   // AccountsTab will save directly to database via API when user saves
 
-  if (loading && !dataReady) {
+  if (loading) {
     return (
       <VStack py={10} spacing={4}>
         <Spinner size="xl" color="orange.500" thickness="4px" />
@@ -230,19 +216,16 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       {/* Data source indicator */}
       <HStack mb={2} justify="flex-end">
         <Badge colorScheme="green" fontSize="xs" px={2} py={1}>
-          Data source: Database
+          Data source: Database ({dbAccounts.length} accounts)
         </Badge>
       </HStack>
       
-      {/* Render AccountsTab - disable until data is ready */}
-      {dataReady ? (
-        <AccountsTab focusAccountName={focusAccountName} />
-      ) : (
-        <Box textAlign="center" py={10}>
-          <Spinner size="lg" />
-          <Text mt={2} color="gray.500">Preparing data...</Text>
-        </Box>
-      )}
+      {/* Render AccountsTab with DB accounts as source of truth */}
+      <AccountsTab 
+        focusAccountName={focusAccountName} 
+        dbAccounts={dbAccounts}
+        dataSource="DB"
+      />
     </Box>
   )
 }
