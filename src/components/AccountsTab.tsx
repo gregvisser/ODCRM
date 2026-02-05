@@ -3521,6 +3521,77 @@ type AccountsTabProps = {
   dataSource?: 'DB' | 'CACHE'
 }
 
+/**
+ * Derive a canonical customerId (cust_...) for API calls like /api/customers/:customerId/email-identities
+ * 
+ * Priority order:
+ * 1. account.customerId (explicit field if present)
+ * 2. account.id only if it's a cust_... string
+ * 3. account._databaseId (legacy backup field)
+ * 4. dbAccounts lookup by stable identifier (_databaseId match)
+ * 5. LAST RESORT: dbAccounts lookup by normalized name (with duplicate safety)
+ * 
+ * Returns { customerId, source } where source is used for dev logging
+ */
+function deriveCustomerId(
+  account: Account,
+  accountName: string,
+  dbAccounts?: Account[]
+): { customerId: string | null; source: string } {
+  // 1. Explicit customerId field (highest priority)
+  const explicitCustomerId = (account as { customerId?: string }).customerId
+  if (explicitCustomerId && typeof explicitCustomerId === 'string' && explicitCustomerId.startsWith('cust_')) {
+    return { customerId: explicitCustomerId, source: 'customerId' }
+  }
+
+  // 2. account.id only if it's a canonical cust_... id
+  if (account.id && typeof account.id === 'string' && account.id.startsWith('cust_')) {
+    return { customerId: account.id, source: 'id(cust_)' }
+  }
+
+  // 3. Legacy _databaseId field
+  if (account._databaseId && typeof account._databaseId === 'string' && account._databaseId.startsWith('cust_')) {
+    return { customerId: account._databaseId, source: '_databaseId' }
+  }
+
+  // 4 & 5. Fallback to dbAccounts lookup
+  if (!dbAccounts || dbAccounts.length === 0) {
+    return { customerId: null, source: 'no_dbAccounts' }
+  }
+
+  // 4. Try stable identifier match first (by _databaseId)
+  if (account._databaseId) {
+    const dbMatch = dbAccounts.find((db) => db._databaseId === account._databaseId || db.id === account._databaseId)
+    if (dbMatch?.id && dbMatch.id.startsWith('cust_')) {
+      return { customerId: dbMatch.id, source: 'dbLookupStable' }
+    }
+  }
+
+  // 5. LAST RESORT: Name matching with normalization and duplicate safety
+  const normalizedName = accountName.trim().toLowerCase()
+  const nameMatches = dbAccounts.filter((db) => db.name.trim().toLowerCase() === normalizedName)
+  
+  if (nameMatches.length === 0) {
+    return { customerId: null, source: 'dbLookupName_noMatch' }
+  }
+  
+  if (nameMatches.length > 1) {
+    // Multiple matches - unsafe to pick arbitrarily
+    if (import.meta.env.DEV) {
+      console.warn(`[deriveCustomerId] Multiple dbAccounts match name "${accountName}" (${nameMatches.length} matches) - not picking arbitrarily`)
+    }
+    return { customerId: null, source: 'dbLookupName_duplicates' }
+  }
+  
+  // Exactly one match
+  const match = nameMatches[0]
+  if (match.id && match.id.startsWith('cust_')) {
+    return { customerId: match.id, source: 'dbLookupName' }
+  }
+  
+  return { customerId: null, source: 'dbLookupName_invalidId' }
+}
+
 function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: AccountsTabProps) {
   const toast = useToast()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
@@ -4107,7 +4178,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     const params = new URLSearchParams(window.location.search)
     const oauthStatus = params.get('oauth')
     const oauthEmail = params.get('email')
-    const oauthCustomerId = params.get('customerId')
+    const rawOauthCustomerId = params.get('customerId')
+    
+    // Validate oauthCustomerId - must be a cust_ prefixed string from server
+    const oauthCustomerId = rawOauthCustomerId?.startsWith('cust_') ? rawOauthCustomerId : null
+    
+    if (import.meta.env.DEV && rawOauthCustomerId && !oauthCustomerId) {
+      console.warn('[OAuth] Invalid customerId from redirect (not cust_ prefixed):', rawOauthCustomerId)
+    }
     
     if (oauthStatus === 'success' && oauthEmail) {
       toast({
@@ -4756,7 +4834,17 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
 
     // Open the new account in the drawer
     setSelectedAccount(accountWithDbId)
-    setSelectedCustomerId(accountWithDbId.id || accountWithDbId._databaseId || null)
+    // For newly created accounts, id should be cust_ prefixed from the DB
+    const newAccountCustomerId = accountWithDbId.id?.startsWith('cust_') 
+      ? accountWithDbId.id 
+      : accountWithDbId._databaseId?.startsWith('cust_') 
+        ? accountWithDbId._databaseId 
+        : null
+    setSelectedCustomerId(newAccountCustomerId)
+    
+    if (import.meta.env.DEV) {
+      console.log('[createAccount]', { accountName: accountWithDbId.name, customerId: newAccountCustomerId })
+    }
 
     toast({
       title: 'Account created',
@@ -4779,12 +4867,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       if (accountName) {
         const account = accountsData.find((acc) => acc.name === accountName)
         if (account) {
-          // Get customerId with dbAccounts fallback
-          let customerId = account.id || account._databaseId || null
-          if (!customerId && dbAccounts && dbAccounts.length > 0) {
-            const dbAccount = dbAccounts.find((db) => db.name === accountName)
-            if (dbAccount?.id) customerId = dbAccount.id
+          // Use robust customerId derivation helper
+          const { customerId, source } = deriveCustomerId(account, accountName, dbAccounts)
+          
+          if (import.meta.env.DEV) {
+            console.log('[navigateToAccount]', { accountName, customerId, source })
           }
+          
           setSelectedAccount(account)
           setSelectedCustomerId(customerId)
         }
@@ -4792,7 +4881,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     }
     const off = on<{ accountName?: string }>('navigateToAccount', (detail) => handleNavigateToAccount(detail))
     return () => off()
-  }, [accountsData])
+  }, [accountsData, dbAccounts])
 
   // Keep contact counts/details live (ContactsTab dispatches contactsUpdated).
   useEffect(() => {
@@ -4838,12 +4927,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     if (!focusAccountName) return
     const account = accountsData.find((acc) => acc.name === focusAccountName)
     if (account) {
-      // Get customerId with dbAccounts fallback
-      let customerId = account.id || account._databaseId || null
-      if (!customerId && dbAccounts && dbAccounts.length > 0) {
-        const dbAccount = dbAccounts.find((db) => db.name === focusAccountName)
-        if (dbAccount?.id) customerId = dbAccount.id
+      // Use robust customerId derivation helper
+      const { customerId, source } = deriveCustomerId(account, focusAccountName, dbAccounts)
+      
+      if (import.meta.env.DEV) {
+        console.log('[focusAccountName]', { accountName: focusAccountName, customerId, source })
       }
+      
       setSelectedAccount(account)
       setSelectedCustomerId(customerId)
     }
@@ -4852,7 +4942,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   const handleAccountClick = (accountName: string, e?: React.MouseEvent) => {
     try {
       e?.stopPropagation()
-      console.log('Account clicked:', accountName)
       
       const account = accountsData.find((acc) => acc.name === accountName)
       
@@ -4861,24 +4950,19 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         return
       }
 
-      // Get customerId - try multiple sources for robustness:
-      // 1. account.id (canonical DB id from mapper)
-      // 2. account._databaseId (deprecated backup field)
-      // 3. Look up in dbAccounts prop (fresh DB data, always has correct id)
-      let customerId = account.id || account._databaseId || null
+      // Use robust customerId derivation helper
+      const { customerId, source } = deriveCustomerId(account, accountName, dbAccounts)
       
-      // If account doesn't have id, look up in dbAccounts prop (DB source of truth)
-      if (!customerId && dbAccounts && dbAccounts.length > 0) {
-        const dbAccount = dbAccounts.find((db) => db.name === accountName)
-        if (dbAccount?.id) {
-          customerId = dbAccount.id
-          console.log('Found customerId from dbAccounts fallback:', customerId)
-        }
+      // Dev-only logging for debugging
+      if (import.meta.env.DEV) {
+        console.log('[handleAccountClick]', {
+          accountName,
+          customerId,
+          source,
+        })
       }
       
-      console.log('Setting selected account:', account.name, 'customerId:', customerId)
       setSelectedAccount(account)
-      // Set selectedCustomerId directly from the clicked account's DB id
       setSelectedCustomerId(customerId)
     } catch (error) {
       console.error('Error in handleAccountClick:', error)
