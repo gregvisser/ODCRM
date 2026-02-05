@@ -74,11 +74,28 @@ export default function EmailSettingsTab() {
   }, [fetchIdentities])
 
   const handleConnectOutlook = () => {
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = settingsStore.getCurrentCustomerId('')
+    
+    // LOCKDOWN: Require valid customerId before connecting
+    if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
+      toast({
+        title: 'Select a customer first',
+        description: 'You must select a valid customer before connecting an Outlook account.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+    
     // Use centralized API URL from environment
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
     window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
   }
+  
+  // Check if a valid customer is selected
+  const customerId = settingsStore.getCurrentCustomerId('')
+  const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
 
   const handleEdit = (identity: EmailIdentity) => {
     setEditingIdentity(identity)
@@ -126,7 +143,13 @@ export default function EmailSettingsTab() {
     <Box>
       <HStack justify="space-between" mb={6}>
         <Heading size="lg">Email Accounts</Heading>
-        <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={handleConnectOutlook}>
+        <Button
+          leftIcon={<AddIcon />}
+          colorScheme="gray"
+          onClick={handleConnectOutlook}
+          isDisabled={!isValidCustomer}
+          title={!isValidCustomer ? 'Select a customer first' : 'Connect Outlook account'}
+        >
           Connect Outlook Account
         </Button>
       </HStack>
@@ -141,7 +164,17 @@ export default function EmailSettingsTab() {
       {identities.length === 0 ? (
         <Box textAlign="center" py={10}>
           <Text color="gray.500" mb={4}>No email accounts connected yet.</Text>
-          <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={handleConnectOutlook}>
+          {!isValidCustomer && (
+            <Text color="orange.500" fontSize="sm" mb={4}>
+              Select a customer first to connect email accounts.
+            </Text>
+          )}
+          <Button
+            leftIcon={<AddIcon />}
+            colorScheme="gray"
+            onClick={handleConnectOutlook}
+            isDisabled={!isValidCustomer}
+          >
             Connect Your First Outlook Account
           </Button>
         </Box>

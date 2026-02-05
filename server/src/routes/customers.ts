@@ -127,6 +127,44 @@ router.get('/:id', async (req, res) => {
   }
 })
 
+// GET /api/customers/:id/email-identities - Get connected email accounts for a customer
+router.get('/:id/email-identities', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    // First verify customer exists
+    const customer = await prisma.customer.findUnique({ where: { id } })
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    // Fetch email identities for this customer
+    const identities = await prisma.emailIdentity.findMany({
+      where: { customerId: id },
+      select: {
+        id: true,
+        emailAddress: true,
+        displayName: true,
+        provider: true,
+        isActive: true,
+        dailySendLimit: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+
+    const serialized = identities.map((identity) => ({
+      ...identity,
+      createdAt: identity.createdAt.toISOString(),
+    }))
+
+    return res.json(serialized)
+  } catch (error) {
+    console.error('Error fetching email identities:', error)
+    return res.status(500).json({ error: 'Failed to fetch email identities' })
+  }
+})
+
 // POST /api/customers - Create a new customer
 router.post('/', async (req, res) => {
   try {

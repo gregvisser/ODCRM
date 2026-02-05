@@ -119,6 +119,17 @@ type AboutSections = {
   foundingYear?: string
 }
 
+// Connected email identity for a customer
+type ConnectedEmailIdentity = {
+  id: string
+  emailAddress: string
+  displayName?: string
+  provider: string
+  isActive: boolean
+  dailySendLimit: number
+  createdAt: string
+}
+
 type AgreementFile = {
   id: string
   name: string
@@ -3809,6 +3820,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+  
+  // Connected email identities for the selected account
+  const [connectedEmails, setConnectedEmails] = useState<ConnectedEmailIdentity[]>([])
+  const [loadingEmails, setLoadingEmails] = useState(false)
   const [contactsData, setContactsData] = useState<StoredContact[]>(() => loadContactsFromStorage())
 
   // Sync contact counts when contactsData changes (initial load and updates)
@@ -3972,6 +3987,85 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     const off = on('leadsUpdated', () => handleLeadsUpdated())
     return () => off()
   }, [selectedAccount])
+
+  // Fetch connected email identities when selectedAccount changes
+  const fetchConnectedEmails = useCallback(async (customerId: string) => {
+    if (!customerId) {
+      setConnectedEmails([])
+      return
+    }
+    setLoadingEmails(true)
+    try {
+      const { data, error } = await api.get<ConnectedEmailIdentity[]>(`/api/customers/${customerId}/email-identities`)
+      if (error) {
+        console.error('Failed to fetch email identities:', error)
+        setConnectedEmails([])
+      } else {
+        setConnectedEmails(data || [])
+      }
+    } catch (err) {
+      console.error('Error fetching email identities:', err)
+      setConnectedEmails([])
+    } finally {
+      setLoadingEmails(false)
+    }
+  }, [])
+
+  // Fetch email identities when selected account changes
+  useEffect(() => {
+    if (selectedAccount?._databaseId) {
+      void fetchConnectedEmails(selectedAccount._databaseId)
+    } else {
+      setConnectedEmails([])
+    }
+  }, [selectedAccount?._databaseId, fetchConnectedEmails])
+
+  // Handle OAuth success redirect (oauth=success in URL)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const oauthStatus = params.get('oauth')
+    const oauthEmail = params.get('email')
+    const oauthCustomerId = params.get('customerId')
+    
+    if (oauthStatus === 'success' && oauthEmail) {
+      toast({
+        title: 'Outlook Connected',
+        description: `Successfully connected ${oauthEmail}`,
+        status: 'success',
+        duration: 5000,
+        isClosable: true,
+      })
+      
+      // Refresh email identities for the customer
+      if (oauthCustomerId) {
+        void fetchConnectedEmails(oauthCustomerId)
+      }
+      
+      // Clear query params from URL
+      const url = new URL(window.location.href)
+      url.searchParams.delete('oauth')
+      url.searchParams.delete('email')
+      url.searchParams.delete('customerId')
+      window.history.replaceState({}, '', url.toString())
+    }
+  }, [toast, fetchConnectedEmails])
+
+  // Connect Outlook handler - ONLY when customer is selected
+  const handleConnectOutlook = useCallback(() => {
+    if (!selectedAccount?._databaseId) {
+      toast({
+        title: 'Select a customer first',
+        description: 'You must select a customer before connecting an Outlook account.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+    
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${selectedAccount._databaseId}`
+  }, [selectedAccount?._databaseId, toast])
 
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
@@ -5687,6 +5781,79 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         </Select>
                       </FieldRow>
                     </SimpleGrid>
+                </Box>
+
+                {/* Connected Email Accounts */}
+                <Box
+                  bg="white"
+                  borderRadius="xl"
+                  p={6}
+                  border="1px solid"
+                  borderColor="gray.200"
+                  boxShadow="sm"
+                >
+                  <HStack justify="space-between" mb={4}>
+                    <Heading size="md" color="gray.700">
+                      Connected Email Accounts
+                    </Heading>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      onClick={handleConnectOutlook}
+                      isDisabled={!selectedAccount?._databaseId}
+                    >
+                      Connect Outlook
+                    </Button>
+                  </HStack>
+                  
+                  {loadingEmails ? (
+                    <HStack justify="center" py={4}>
+                      <Spinner size="sm" />
+                      <Text color="gray.500">Loading email accounts...</Text>
+                    </HStack>
+                  ) : connectedEmails.length === 0 ? (
+                    <Box py={4} textAlign="center">
+                      <Text color="gray.500" mb={2}>No email accounts connected yet.</Text>
+                      {!selectedAccount?._databaseId && (
+                        <Text fontSize="sm" color="orange.500">
+                          Save this customer to the database first to connect email accounts.
+                        </Text>
+                      )}
+                    </Box>
+                  ) : (
+                    <Stack spacing={3}>
+                      {connectedEmails.map((email) => (
+                        <HStack
+                          key={email.id}
+                          p={3}
+                          bg="gray.50"
+                          borderRadius="md"
+                          border="1px solid"
+                          borderColor="gray.200"
+                          justify="space-between"
+                        >
+                          <HStack spacing={3}>
+                            <Badge colorScheme={email.provider === 'outlook' ? 'blue' : 'gray'}>
+                              {email.provider}
+                            </Badge>
+                            <Stack spacing={0}>
+                              <Text fontWeight="medium" fontSize="sm">
+                                {email.emailAddress}
+                              </Text>
+                              {email.displayName && (
+                                <Text fontSize="xs" color="gray.500">
+                                  {email.displayName}
+                                </Text>
+                              )}
+                            </Stack>
+                          </HStack>
+                          <Badge colorScheme={email.isActive ? 'green' : 'red'} variant="subtle">
+                            {email.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </HStack>
+                      ))}
+                    </Stack>
+                  )}
                 </Box>
 
                 {/* Client Profile Summary */}

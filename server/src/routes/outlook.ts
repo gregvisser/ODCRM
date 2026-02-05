@@ -57,7 +57,7 @@ type GraphMeResponse = {
 }
 
 // Initiate Outlook OAuth flow
-router.get('/auth', (req, res) => {
+router.get('/auth', async (req, res) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID
   const tenantId = process.env.MICROSOFT_TENANT_ID || 'common'
   
@@ -73,10 +73,43 @@ router.get('/auth', (req, res) => {
     `)
   }
   
-  // Get customerId from query, header, or default to 'test-customer-1'
-  const customerId = (req.query.customerId as string) || 
-                     (req.headers['x-customer-id'] as string) || 
-                     'test-customer-1'
+  // LOCKDOWN: customerId is REQUIRED and must exist in database
+  const customerId = (req.query.customerId as string) || (req.headers['x-customer-id'] as string)
+  
+  if (!customerId) {
+    return res.status(400).send(`
+      <html>
+        <head><title>Customer Required</title></head>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+          <h1>Customer Required</h1>
+          <p>You must select a customer before connecting an Outlook account.</p>
+          <p>Please go back to the application and select a customer first.</p>
+          <hr>
+          <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
+        </body>
+      </html>
+    `)
+  }
+  
+  // Validate customer exists in database
+  const customer = await prisma.customer.findUnique({ where: { id: customerId } })
+  if (!customer) {
+    console.error('❌ OAuth auth: Invalid customerId:', customerId)
+    return res.status(400).send(`
+      <html>
+        <head><title>Invalid Customer</title></head>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+          <h1>Invalid Customer</h1>
+          <p>The customer ID provided does not exist in our database.</p>
+          <p>Please select a valid customer from the application.</p>
+          <hr>
+          <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
+        </body>
+      </html>
+    `)
+  }
+  
+  console.log('✅ OAuth auth: Valid customer:', { id: customer.id, name: customer.name })
   
   // Get redirect URI based on OAUTH_CALLBACK_MODE
   const redirectUri = getOAuthRedirectUri()
@@ -135,7 +168,7 @@ router.get('/callback', async (req, res) => {
             <p><strong>Error:</strong> ${error}</p>
             <p><strong>Description:</strong> ${req.query.error_description || 'No description provided'}</p>
             <hr>
-            <p><a href="/api/outlook/auth?customerId=test-customer-1">Try again</a></p>
+            <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
           </body>
         </html>
       `)
@@ -151,7 +184,7 @@ router.get('/callback', async (req, res) => {
             <p>No authorization code received from Microsoft</p>
             <p>This usually means the OAuth flow was interrupted.</p>
             <hr>
-            <p><a href="/api/outlook/auth?customerId=test-customer-1">Try again</a></p>
+            <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
           </body>
         </html>
       `)
@@ -183,23 +216,57 @@ router.get('/callback', async (req, res) => {
       `)
     }
 
-    // Extract customerId from state parameter
-    let customerId = 'test-customer-1' // Default fallback
+    // LOCKDOWN: Extract and validate customerId from state parameter
+    let customerId: string | null = null
     if (state) {
       try {
         const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString())
-        customerId = stateData.customerId || customerId
+        customerId = stateData.customerId || null
       } catch (e) {
-        console.warn('⚠️ Failed to parse state, using fallback customerId')
-        customerId = (req.query.customerId as string) || 
-                     (req.headers['x-customer-id'] as string) || 
-                     customerId
+        console.warn('⚠️ Failed to parse state')
       }
-    } else {
-      customerId = (req.query.customerId as string) || 
-                   (req.headers['x-customer-id'] as string) || 
-                   customerId
     }
+    
+    // Fallback to query/header if state parsing failed
+    if (!customerId) {
+      customerId = (req.query.customerId as string) || (req.headers['x-customer-id'] as string) || null
+    }
+    
+    // LOCKDOWN: Validate customerId exists
+    if (!customerId) {
+      return res.status(400).send(`
+        <html>
+          <head><title>Customer Required</title></head>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <h1>Customer Required</h1>
+            <p>No customer ID was provided during the OAuth flow.</p>
+            <p>Please start again from the application with a selected customer.</p>
+            <hr>
+            <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
+          </body>
+        </html>
+      `)
+    }
+    
+    // Validate customer exists in database before saving identity
+    const customer = await prisma.customer.findUnique({ where: { id: customerId } })
+    if (!customer) {
+      console.error('❌ OAuth callback: Invalid customerId:', customerId)
+      return res.status(400).send(`
+        <html>
+          <head><title>Invalid Customer</title></head>
+          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px;">
+            <h1>Invalid Customer</h1>
+            <p>The customer ID "${customerId}" does not exist in our database.</p>
+            <p>Please select a valid customer from the application.</p>
+            <hr>
+            <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
+          </body>
+        </html>
+      `)
+    }
+    
+    console.log('✅ OAuth callback: Valid customer:', { id: customer.id, name: customer.name })
 
     // Exchange code for tokens
     const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`

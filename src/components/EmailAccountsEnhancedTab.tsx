@@ -130,10 +130,25 @@ export default function EmailAccountsEnhancedTab() {
   }, [])
 
   const handleConnectOutlook = () => {
+    // LOCKDOWN: Require valid customerId before connecting
+    if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
+      toast({
+        title: 'Select a customer first',
+        description: 'You must select a valid customer before connecting an Outlook account.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+    
     // Use centralized API URL from environment
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
     window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
   }
+  
+  // Check if a valid customer is selected
+  const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
 
   const handleCreateSMTP = () => {
     setSmtpForm({
@@ -250,7 +265,14 @@ export default function EmailAccountsEnhancedTab() {
           </Text>
         </Box>
         <HStack>
-          <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={handleConnectOutlook} size="sm">
+          <Button
+            leftIcon={<AddIcon />}
+            colorScheme="gray"
+            onClick={handleConnectOutlook}
+            size="sm"
+            isDisabled={!isValidCustomer}
+            title={!isValidCustomer ? 'Select a customer first' : 'Connect Outlook account'}
+          >
             Connect Outlook
           </Button>
           <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={handleCreateSMTP} size="sm">
@@ -286,8 +308,13 @@ export default function EmailAccountsEnhancedTab() {
                   <Text color="gray.500" mb={3}>
                     No email accounts connected yet.
                   </Text>
+                  {!isValidCustomer && (
+                    <Text color="orange.500" fontSize="sm" mb={3}>
+                      Select a customer first to connect email accounts.
+                    </Text>
+                  )}
                   <HStack justify="center" spacing={3}>
-                    <Button size="sm" onClick={handleConnectOutlook}>
+                    <Button size="sm" onClick={handleConnectOutlook} isDisabled={!isValidCustomer}>
                       Connect Outlook
                     </Button>
                     <Button size="sm" colorScheme="teal" onClick={handleCreateSMTP}>
