@@ -16,12 +16,116 @@
  */
 
 import { useEffect, useState, useRef } from 'react'
-import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, Badge, HStack } from '@chakra-ui/react'
+import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, Badge, HStack, useToast } from '@chakra-ui/react'
 import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
 import { databaseCustomersToAccounts, type Account } from '../utils/customerAccountMapper'
+import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
 import { setJson, getJson } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
 import AccountsTab from './AccountsTab'
+
+// Migration flag key - used to show toast only once
+const MIGRATION_TOAST_SHOWN_KEY = 'odcrm_id_migration_toast_shown'
+
+/**
+ * Normalize domain for comparison (lowercase, trim whitespace)
+ */
+function normalizeDomain(domain: string | undefined): string {
+  if (!domain) return ''
+  return domain.toLowerCase().trim()
+}
+
+/**
+ * Check if an ID is a canonical database ID (starts with "cust_")
+ */
+function isCanonicalId(id: string | undefined): boolean {
+  return typeof id === 'string' && id.startsWith('cust_')
+}
+
+/**
+ * Migrate localStorage accounts to use canonical database IDs.
+ * Returns the migrated accounts array and whether migration occurred.
+ */
+function migrateAccountIds(
+  cachedAccounts: Account[],
+  dbCustomers: DatabaseCustomer[]
+): { migrated: Account[]; didMigrate: boolean } {
+  // If all accounts already have canonical IDs, no migration needed
+  const allHaveCanonicalIds = cachedAccounts.every(acc => isCanonicalId(acc.id))
+  if (allHaveCanonicalIds) {
+    return { migrated: cachedAccounts, didMigrate: false }
+  }
+
+  // Build indexes from DB customers
+  const byNormalizedDomain = new Map<string, DatabaseCustomer[]>()
+  const byExactName = new Map<string, DatabaseCustomer[]>()
+
+  for (const customer of dbCustomers) {
+    // Index by normalized domain
+    const domain = normalizeDomain(customer.domain)
+    if (domain) {
+      const existing = byNormalizedDomain.get(domain) || []
+      existing.push(customer)
+      byNormalizedDomain.set(domain, existing)
+    }
+
+    // Index by exact name
+    const name = customer.name?.trim()
+    if (name) {
+      const existing = byExactName.get(name) || []
+      existing.push(customer)
+      byExactName.set(name, existing)
+    }
+  }
+
+  let didMigrate = false
+  const migrated = cachedAccounts.map(account => {
+    // Already has canonical ID - keep as is
+    if (isCanonicalId(account.id)) {
+      return account
+    }
+
+    // Has _databaseId that is canonical - use it
+    if (isCanonicalId(account._databaseId)) {
+      didMigrate = true
+      return { ...account, id: account._databaseId }
+    }
+
+    // Try to match by domain/website (exact normalized match)
+    const accountDomain = normalizeDomain(account.website)
+    if (accountDomain) {
+      const domainMatches = byNormalizedDomain.get(accountDomain) || []
+      if (domainMatches.length === 1) {
+        didMigrate = true
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Migration] Matched by domain:', account.name, '->', domainMatches[0].id)
+        }
+        return { ...account, id: domainMatches[0].id, _databaseId: domainMatches[0].id }
+      }
+    }
+
+    // Try to match by exact name (only if unique)
+    const accountName = account.name?.trim()
+    if (accountName) {
+      const nameMatches = byExactName.get(accountName) || []
+      if (nameMatches.length === 1) {
+        didMigrate = true
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[Migration] Matched by name:', account.name, '->', nameMatches[0].id)
+        }
+        return { ...account, id: nameMatches[0].id, _databaseId: nameMatches[0].id }
+      }
+    }
+
+    // Ambiguous or no match - mark as invalid
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[Migration] No unique match for:', account.name, '- marking invalid')
+    }
+    return { ...account, __invalidId: true }
+  })
+
+  return { migrated, didMigrate }
+}
 
 type Props = {
   focusAccountName?: string
@@ -32,9 +136,10 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const [isHydrating, setIsHydrating] = useState(true)
   const [dataReady, setDataReady] = useState(false)
   const hasHydratedRef = useRef(false)
+  const toast = useToast()
 
-  // ONE-TIME hydration: Load database data into localStorage on mount
-  // This runs ONCE and then stops - no more sync loops
+  // ONE-TIME hydration + migration: Load database data into localStorage on mount
+  // Also migrates legacy entries to use canonical database IDs
   useEffect(() => {
     if (loading) return
     if (hasHydratedRef.current) return // Already hydrated - don't overwrite user changes
@@ -45,6 +150,29 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
     // Get current localStorage data
     const currentAccounts = getJson<Account[]>(OdcrmStorageKeys.accounts)
     
+    // MIGRATION: Check if we need to fix localStorage IDs
+    if (currentAccounts && currentAccounts.length > 0) {
+      const { migrated, didMigrate } = migrateAccountIds(currentAccounts, customers)
+      
+      if (didMigrate) {
+        console.log('[Migration] Updating localStorage with canonical IDs...')
+        setJson(OdcrmStorageKeys.accounts, migrated)
+        
+        // Show one-time toast if not already shown
+        const toastShown = localStorage.getItem(MIGRATION_TOAST_SHOWN_KEY)
+        if (!toastShown) {
+          localStorage.setItem(MIGRATION_TOAST_SHOWN_KEY, 'true')
+          toast({
+            title: 'Cache Updated',
+            description: 'Updated local cache to match database IDs.',
+            status: 'info',
+            duration: 5000,
+            isClosable: true,
+          })
+        }
+      }
+    }
+    
     // ONLY hydrate if localStorage is empty or has fewer accounts than database
     // This prevents overwriting user changes with stale database data
     const shouldHydrate = !currentAccounts || 
@@ -52,18 +180,18 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
                           currentAccounts.length < dbAccounts.length
     
     if (shouldHydrate && dbAccounts.length > 0) {
-      console.log('🔄 ONE-TIME hydration from database...', dbAccounts.length, 'accounts')
+      console.log('[Hydration] ONE-TIME hydration from database...', dbAccounts.length, 'accounts')
       setJson(OdcrmStorageKeys.accounts, dbAccounts)
       setJson(OdcrmStorageKeys.accountsLastUpdated, new Date().toISOString())
-      console.log('✅ localStorage hydrated with', dbAccounts.length, 'accounts from database')
+      console.log('[Hydration] localStorage hydrated with', dbAccounts.length, 'accounts from database')
     } else {
-      console.log('⏭️ Skipping hydration - localStorage already has data or database is empty')
+      console.log('[Hydration] Skipping - localStorage already has data or database is empty')
     }
     
     hasHydratedRef.current = true
     setIsHydrating(false)
     setDataReady(true)
-  }, [customers, loading])
+  }, [customers, loading, toast])
 
   // NO MORE localStorage monitoring - removed to fix "save then revert" bug
   // AccountsTab will save directly to database via API when user saves
