@@ -5793,9 +5793,25 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   boxShadow="sm"
                 >
                   <HStack justify="space-between" mb={4}>
-                    <Heading size="md" color="gray.700">
-                      Connected Email Accounts
-                    </Heading>
+                    <HStack spacing={2}>
+                      <Heading size="md" color="gray.700">
+                        Connected Email Accounts
+                      </Heading>
+                      <IconButton
+                        aria-label="Refresh email accounts"
+                        icon={<RepeatIcon />}
+                        size="xs"
+                        variant="ghost"
+                        colorScheme="gray"
+                        isLoading={loadingEmails}
+                        onClick={() => {
+                          if (selectedAccount?._databaseId) {
+                            void fetchConnectedEmails(selectedAccount._databaseId)
+                          }
+                        }}
+                        title="Refresh email accounts"
+                      />
+                    </HStack>
                     <Button
                       size="sm"
                       colorScheme="blue"
@@ -5823,34 +5839,40 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   ) : (
                     <Stack spacing={3}>
                       {connectedEmails.map((email) => (
-                        <HStack
+                        <Box
                           key={email.id}
                           p={3}
                           bg="gray.50"
                           borderRadius="md"
                           border="1px solid"
                           borderColor="gray.200"
-                          justify="space-between"
                         >
-                          <HStack spacing={3}>
-                            <Badge colorScheme={email.provider === 'outlook' ? 'blue' : 'gray'}>
-                              {email.provider}
-                            </Badge>
-                            <Stack spacing={0}>
-                              <Text fontWeight="medium" fontSize="sm">
-                                {email.emailAddress}
-                              </Text>
-                              {email.displayName && (
-                                <Text fontSize="xs" color="gray.500">
-                                  {email.displayName}
-                                </Text>
-                              )}
-                            </Stack>
+                          <HStack justify="space-between" mb={2}>
+                            <HStack spacing={2}>
+                              <Badge colorScheme={email.provider === 'outlook' ? 'blue' : 'gray'} textTransform="capitalize">
+                                {email.provider}
+                              </Badge>
+                              <Badge colorScheme="green" variant="subtle">
+                                Connected
+                              </Badge>
+                            </HStack>
+                            <Text fontSize="xs" color="gray.500">
+                              {new Date(email.createdAt).toLocaleDateString('en-GB', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                              })}
+                            </Text>
                           </HStack>
-                          <Badge colorScheme={email.isActive ? 'green' : 'red'} variant="subtle">
-                            {email.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                        </HStack>
+                          <Text fontWeight="medium" fontSize="sm">
+                            {email.emailAddress}
+                          </Text>
+                          {email.displayName && (
+                            <Text fontSize="xs" color="gray.500">
+                              {email.displayName}
+                            </Text>
+                          )}
+                        </Box>
                       ))}
                     </Stack>
                   )}
