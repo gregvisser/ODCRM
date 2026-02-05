@@ -5852,8 +5852,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                               <Badge colorScheme={email.provider === 'outlook' ? 'blue' : 'gray'} textTransform="capitalize">
                                 {email.provider}
                               </Badge>
-                              <Badge colorScheme="green" variant="subtle">
-                                Connected
+                              <Badge colorScheme={email.isActive ? 'green' : 'red'} variant="subtle">
+                                {email.isActive ? 'Active' : 'Inactive'}
                               </Badge>
                             </HStack>
                             <Text fontSize="xs" color="gray.500">
