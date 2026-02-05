@@ -31,6 +31,35 @@ import { startAboutEnrichmentWorker } from './workers/aboutEnrichment.js'
 
 dotenv.config()
 
+// ============================================================================
+// STARTUP DIAGNOSTICS - Environment Truth
+// ============================================================================
+const startupDiagnostics = () => {
+  const timestamp = new Date().toISOString()
+  const nodeEnv = process.env.NODE_ENV || 'development'
+  
+  // Extract and mask DATABASE_URL host
+  let maskedDbHost = 'NOT_SET'
+  if (process.env.DATABASE_URL) {
+    try {
+      const url = new URL(process.env.DATABASE_URL)
+      maskedDbHost = url.hostname
+    } catch {
+      maskedDbHost = 'INVALID_URL'
+    }
+  }
+  
+  console.log('========================================')
+  console.log('🔍 STARTUP DIAGNOSTICS')
+  console.log('========================================')
+  console.log(`  Timestamp:    ${timestamp}`)
+  console.log(`  NODE_ENV:     ${nodeEnv}`)
+  console.log(`  DB Host:      ${maskedDbHost}`)
+  console.log(`  ADMIN_SECRET: ${process.env.ADMIN_SECRET ? 'SET' : 'NOT_SET'}`)
+  console.log('========================================')
+}
+startupDiagnostics()
+
 const app = express()
 
 const parseAllowedOrigins = () => {
