@@ -12,6 +12,7 @@ const preferencesSchema = z.object({
 })
 
 // GET /api/user-preferences/:email - Get user preferences
+// CRITICAL: This endpoint NEVER returns 500 - always 200 with fallback to empty
 router.get('/:email', async (req, res) => {
   try {
     const { email } = req.params
@@ -28,13 +29,31 @@ router.get('/:email', async (req, res) => {
       })
     }
 
+    // Safely parse preferences - handle malformed JSON
+    let safePreferences = {}
+    try {
+      if (userPrefs.preferences && typeof userPrefs.preferences === 'object') {
+        safePreferences = userPrefs.preferences
+      } else if (typeof userPrefs.preferences === 'string') {
+        safePreferences = JSON.parse(userPrefs.preferences)
+      }
+    } catch (parseError) {
+      console.warn('[UserPreferences] Malformed preferences JSON for', email, '- returning empty')
+      safePreferences = {}
+    }
+
     res.json({
       userEmail: userPrefs.userEmail,
-      preferences: userPrefs.preferences,
+      preferences: safePreferences,
     })
   } catch (error) {
-    console.error('Error fetching user preferences:', error)
-    res.status(500).json({ error: 'Failed to fetch user preferences' })
+    // NEVER return 500 - always return 200 with empty preferences
+    // This prevents blocking the app on preferences errors
+    console.warn('[UserPreferences] Error fetching preferences, returning empty:', error instanceof Error ? error.message : 'Unknown')
+    res.json({
+      userEmail: req.params.email,
+      preferences: {},
+    })
   }
 })
 
@@ -62,8 +81,13 @@ router.put('/', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request body', details: error.errors })
     }
-    console.error('Error updating user preferences:', error)
-    res.status(500).json({ error: 'Failed to update user preferences' })
+    // Log but don't block - return success with what we have
+    console.warn('[UserPreferences] Error saving preferences:', error instanceof Error ? error.message : 'Unknown')
+    // Return the input as confirmation (optimistic)
+    res.json({
+      userEmail: req.body?.userEmail || '',
+      preferences: req.body?.preferences || {},
+    })
   }
 })
 
@@ -100,8 +124,12 @@ router.patch('/:email', async (req, res) => {
       preferences: userPrefs.preferences,
     })
   } catch (error) {
-    console.error('Error patching user preferences:', error)
-    res.status(500).json({ error: 'Failed to update user preferences' })
+    // Log but don't block - return success with merged data
+    console.warn('[UserPreferences] Error patching preferences:', error instanceof Error ? error.message : 'Unknown')
+    res.json({
+      userEmail: req.params.email,
+      preferences: { ...(req.body || {}) },
+    })
   }
 })
 

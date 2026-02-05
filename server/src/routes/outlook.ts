@@ -124,19 +124,24 @@ router.get('/auth', async (req, res) => {
   // Include customerId in state parameter
   const state = Buffer.from(JSON.stringify({ customerId })).toString('base64')
 
+  // CRITICAL: Force account selection every time to allow connecting different mailboxes
+  // prompt=select_account forces the Microsoft account picker even if user has a cached session
+  // login_hint is intentionally omitted to avoid pre-selecting an account
   const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?` +
     `client_id=${encodeURIComponent(clientId!)}&` +
     `response_type=code&` +
     `redirect_uri=${encodeURIComponent(redirectUri)}&` +
     `response_mode=query&` +
     `scope=${encodeURIComponent(scopes)}&` +
-    `state=${encodeURIComponent(state)}`
+    `state=${encodeURIComponent(state)}&` +
+    `prompt=select_account`
 
   console.log('🔐 OAuth Auth Request:', {
     redirectUri,
     tenantId,
     customerId,
-    scopes
+    scopes,
+    prompt: 'select_account'
   })
 
   res.redirect(authUrl)
@@ -420,28 +425,35 @@ router.get('/callback', async (req, res) => {
         }
       })
 
-      if (!existing) {
-        const activeCount = await prisma.emailIdentity.count({
-          where: { customerId, isActive: true }
-        })
+      const activeCount = await prisma.emailIdentity.count({
+        where: { customerId, isActive: true }
+      })
 
-        if (activeCount >= 5) {
-          return res.status(400).send(`
-            <html>
-              <head><title>Sender Limit Reached</title></head>
-              <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px;">
-                <h1>Sender Limit Reached</h1>
-                <p>This customer already has <strong>${activeCount}</strong> active Outlook sender accounts connected.</p>
-                <p>For deliverability safety, OpenDoors limits each customer to <strong>5</strong> sender identities.</p>
-                <hr>
-                <p>
-                  You can disconnect an existing sender on the identities page, then try connecting this account again.
-                </p>
-                <p><a href="/api/outlook/identities?customerId=${customerId}">View connected accounts</a></p>
-              </body>
-            </html>
-          `)
-        }
+      // DEV logging: Show existing state before save
+      console.log('📧 OAuth Callback - Identity Check:', {
+        customerId,
+        emailAddress,
+        existingIdentity: existing ? 'yes (will update tokens)' : 'no (will append)',
+        currentActiveCount: activeCount,
+        limitReached: !existing && activeCount >= 5
+      })
+
+      if (!existing && activeCount >= 5) {
+        return res.status(400).send(`
+          <html>
+            <head><title>Sender Limit Reached</title></head>
+            <body style="font-family: Arial, sans-serif; max-width: 700px; margin: 50px auto; padding: 20px;">
+              <h1>Sender Limit Reached</h1>
+              <p>This customer already has <strong>${activeCount}</strong> active Outlook sender accounts connected.</p>
+              <p>For deliverability safety, OpenDoors limits each customer to <strong>5</strong> sender identities.</p>
+              <hr>
+              <p>
+                You can disconnect an existing sender on the identities page, then try connecting this account again.
+              </p>
+              <p><a href="/api/outlook/identities?customerId=${customerId}">View connected accounts</a></p>
+            </body>
+          </html>
+        `)
       }
 
       const identity = await prisma.emailIdentity.upsert({
@@ -476,10 +488,18 @@ router.get('/callback', async (req, res) => {
         }
       })
 
+      // Get new count after save
+      const newActiveCount = await prisma.emailIdentity.count({
+        where: { customerId, isActive: true }
+      })
+
       console.log('✅ Email Identity Saved:', {
         id: identity.id,
         email: identity.emailAddress,
-        customerId: identity.customerId
+        customerId: identity.customerId,
+        action: existing ? 'updated' : 'appended',
+        previousCount: activeCount,
+        newCount: newActiveCount
       })
 
       // Redirect back to frontend with success message

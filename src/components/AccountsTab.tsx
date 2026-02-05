@@ -4080,14 +4080,28 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       return
     }
 
+    // VALIDATION: customerId must be a cust_... string - DO NOT fetch with invalid ID
+    if (!selectedCustomerId.startsWith('cust_')) {
+      if (import.meta.env.DEV) {
+        console.warn('[EmailAccounts] INVALID customerId (not cust_ prefixed):', selectedCustomerId)
+      }
+      setConnectedEmails([])
+      setEmailFetchError(null)
+      setLoadingEmails(false)
+      return
+    }
+
     // AbortController for cleanup
     const abortController = new AbortController()
     let isCancelled = false
 
     const fetchEmails = async () => {
       // Debug log (dev only)
-      if (process.env.NODE_ENV === 'development') {
-        console.log('[EmailAccounts] Fetch START for customerId:', selectedCustomerId)
+      if (import.meta.env.DEV) {
+        console.log('[EmailAccounts] Fetch START:', {
+          customerId: selectedCustomerId,
+          endpoint: `/api/customers/${selectedCustomerId}/email-identities`,
+        })
       }
       
       setLoadingEmails(true)
@@ -4100,7 +4114,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         
         // Check if request was cancelled
         if (isCancelled) {
-          if (process.env.NODE_ENV === 'development') {
+          if (import.meta.env.DEV) {
             console.log('[EmailAccounts] Fetch CANCELLED for customerId:', selectedCustomerId)
           }
           return
@@ -4114,8 +4128,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
           setConnectedEmails(data || [])
         }
         
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[EmailAccounts] Fetch END for customerId:', selectedCustomerId, 'emails:', data?.length || 0)
+        if (import.meta.env.DEV) {
+          console.log('[EmailAccounts] Fetch END:', {
+            customerId: selectedCustomerId,
+            responseLength: data?.length || 0,
+            firstIdentityKeys: data?.[0] ? Object.keys(data[0]) : [],
+            firstEmail: data?.[0]?.emailAddress || null,
+          })
         }
       } catch (err) {
         if (!isCancelled) {
@@ -4137,7 +4156,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     return () => {
       isCancelled = true
       abortController.abort()
-      if (process.env.NODE_ENV === 'development') {
+      if (import.meta.env.DEV) {
         console.log('[EmailAccounts] Cleanup for customerId:', selectedCustomerId)
       }
     }
@@ -4147,7 +4166,15 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   const refreshConnectedEmails = useCallback(() => {
     if (!selectedCustomerId) return
     
-    if (process.env.NODE_ENV === 'development') {
+    // VALIDATION: Don't fetch with invalid customerId
+    if (!selectedCustomerId.startsWith('cust_')) {
+      if (import.meta.env.DEV) {
+        console.warn('[EmailAccounts] Manual refresh BLOCKED - invalid customerId:', selectedCustomerId)
+      }
+      return
+    }
+    
+    if (import.meta.env.DEV) {
       console.log('[EmailAccounts] Manual refresh for customerId:', selectedCustomerId)
     }
     
