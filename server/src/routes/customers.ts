@@ -131,6 +131,7 @@ router.get('/:id', async (req, res) => {
 router.get('/:id/email-identities', async (req, res) => {
   try {
     const { id } = req.params
+    console.log('[email-identities] Handler hit for customerId:', id)
 
     // First verify customer exists
     const customer = await prisma.customer.findUnique({ where: { id } })

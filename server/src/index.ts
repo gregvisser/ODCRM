@@ -128,10 +128,55 @@ app.get('/health', (req, res) => {
 
 // API health check (kept separate from customer-scoped routes)
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() })
+  res.json({ 
+    status: 'ok', 
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV || 'development',
+    version: '2026-02-05-v2'
+  })
+})
+
+// Debug routes endpoint (DEV only or DEBUG=true)
+app.get('/api/routes', (req, res) => {
+  const isDebug = process.env.DEBUG === 'true' || process.env.NODE_ENV !== 'production'
+  if (!isDebug) {
+    return res.status(403).json({ error: 'Debug endpoint not available in production' })
+  }
+  
+  // List all mounted route prefixes
+  const mountedRoutes = [
+    '/api/campaigns',
+    '/api/contacts',
+    '/api/outlook',
+    '/api/email',
+    '/api/schedules',
+    '/api/reports',
+    '/api/inbox',
+    '/api/lists',
+    '/api/sequences',
+    '/api/customers',
+    '/api/customers/:id/email-identities',
+    '/api/leads',
+    '/api/templates',
+    '/api/company-data',
+    '/api/admin',
+    '/api/job-sectors',
+    '/api/job-roles',
+    '/api/places',
+    '/api/uploads',
+    '/api/suppression',
+    '/api/users',
+    '/api/user-preferences',
+  ]
+  
+  res.json({ 
+    mountedRoutes,
+    timestamp: new Date().toISOString()
+  })
 })
 
 // API Routes
+console.log('📦 Mounting API routes...')
 app.use('/api/campaigns', campaignRoutes)
 app.use('/api/contacts', contactsRoutes)
 app.use('/api/outlook', outlookRoutes)
@@ -142,6 +187,7 @@ app.use('/api/inbox', inboxRoutes)
 app.use('/api/lists', listsRoutes)
 app.use('/api/sequences', sequencesRoutes)
 app.use('/api/customers', customersRoutes)
+console.log('  ✓ Mounted: /api/customers (includes /:id/email-identities)')
 app.use('/api/leads', leadsRoutes)
 app.use('/api/templates', templatesRoutes)
 app.use('/api/company-data', companyDataRoutes)
@@ -153,6 +199,7 @@ app.use('/api/uploads', uploadsRoutes)
 app.use('/api/suppression', suppressionRoutes)
 app.use('/api/users', usersRoutes)
 app.use('/api/user-preferences', userPreferencesRoutes)
+console.log('📦 All API routes mounted successfully')
 
 // Error handling middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
