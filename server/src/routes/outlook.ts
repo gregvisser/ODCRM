@@ -5,6 +5,43 @@ import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
 
+// ============================================================================
+// OAuth Callback Mode Configuration
+// ============================================================================
+// OAUTH_CALLBACK_MODE: "frontdoor" (default) or "backend"
+//   - frontdoor: redirect URI uses FRONTDOOR_URL (Azure Static Web App proxy)
+//   - backend: redirect URI uses BACKEND_BASE_URL (direct to App Service)
+// 
+// To switch mode in Azure without redeploy:
+//   1. Go to Azure Portal → App Service → Configuration → Application settings
+//   2. Add/update OAUTH_CALLBACK_MODE to "frontdoor" or "backend"
+//   3. Ensure the matching redirect URI is registered in Entra App Registration
+//   4. Save and restart the App Service
+// ============================================================================
+const FRONTDOOR_URL = process.env.FRONTDOOR_URL || 'https://odcrm.bidlow.co.uk'
+const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+const OAUTH_CALLBACK_MODE = process.env.OAUTH_CALLBACK_MODE || 'frontdoor'
+
+function getOAuthRedirectUri(): string {
+  // Explicit REDIRECT_URI env var takes highest precedence (legacy support)
+  if (process.env.REDIRECT_URI) {
+    return process.env.REDIRECT_URI
+  }
+  
+  // Development mode: use local server
+  if (process.env.NODE_ENV === 'development') {
+    return 'http://localhost:3001/api/outlook/callback'
+  }
+  
+  // Production: use configured mode
+  if (OAUTH_CALLBACK_MODE === 'backend') {
+    return `${BACKEND_BASE_URL}/api/outlook/callback`
+  }
+  
+  // Default: frontdoor mode (via Azure Static Web App proxy)
+  return `${FRONTDOOR_URL}/api/outlook/callback`
+}
+
 type TokenResponse = {
   access_token: string
   refresh_token?: string
@@ -41,16 +78,8 @@ router.get('/auth', (req, res) => {
                      (req.headers['x-customer-id'] as string) || 
                      'test-customer-1'
   
-  // Include customerId in state parameter to pass it through OAuth flow
-  // In production, REDIRECT_URI MUST be set and match Azure App Registration
-  const redirectUri = process.env.REDIRECT_URI || 
-    (process.env.NODE_ENV === 'development' ? `${req.protocol}://${req.get('host')}/api/outlook/callback` : undefined)
-  
-  if (!redirectUri) {
-    return res.status(500).json({ 
-      error: 'REDIRECT_URI environment variable must be set in production' 
-    })
-  }
+  // Get redirect URI based on OAUTH_CALLBACK_MODE
+  const redirectUri = getOAuthRedirectUri()
 
   const scopes = [
     'https://graph.microsoft.com/User.Read',
@@ -82,16 +111,16 @@ router.get('/auth', (req, res) => {
 
 // OAuth callback
 router.get('/callback', async (req, res) => {
-  // Debug logging - enable via DEBUG=true env var to verify proxy is working
+  // Debug logging - enable via DEBUG=true to verify proxy is working
   if (process.env.DEBUG === 'true') {
     console.log('[DEBUG] OAuth callback hit:', req.protocol + '://' + req.get('host') + req.originalUrl)
   }
   
   try {
-    console.log('📥 OAuth Callback Received:', {
+    console.log('📥 OAuth Callback:', {
       hasCode: !!req.query.code,
       hasError: !!req.query.error,
-      hasState: !!req.query.state
+      mode: OAUTH_CALLBACK_MODE
     })
 
     const { code, error, state } = req.query
@@ -131,10 +160,9 @@ router.get('/callback', async (req, res) => {
     const clientId = process.env.MICROSOFT_CLIENT_ID
     const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
     const tenantId = process.env.MICROSOFT_TENANT_ID || 'common'
-    const redirectUri = process.env.REDIRECT_URI || 
-      (process.env.NODE_ENV === 'development' ? `${req.protocol}://${req.get('host')}/api/outlook/callback` : undefined)
+    const redirectUri = getOAuthRedirectUri()
 
-    if (!clientId || !clientSecret || !redirectUri) {
+    if (!clientId || !clientSecret) {
       console.error('❌ Missing OAuth credentials:', {
         hasClientId: !!clientId,
         hasClientSecret: !!clientSecret
@@ -387,22 +415,14 @@ router.get('/callback', async (req, res) => {
         customerId: identity.customerId
       })
 
-      // Return success page
-      res.send(`
-        <html>
-          <head><title>Outlook Connected</title></head>
-          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; text-align: center;">
-            <h1 style="color: green;">✅ Outlook Account Connected!</h1>
-            <p><strong>Email:</strong> ${emailAddress}</p>
-            <p><strong>Display Name:</strong> ${userData.displayName || 'N/A'}</p>
-            <p>Your Outlook account has been successfully connected and saved to the database.</p>
-            <p>You can now use this account to send email campaigns.</p>
-            <hr style="margin: 30px 0;">
-            <p><a href="/api/outlook/identities?customerId=${customerId}" style="color: blue;">View connected accounts</a></p>
-            <p><small>Customer ID: ${customerId}</small></p>
-          </body>
-        </html>
-      `)
+      // Redirect back to frontend with success message
+      const successUrl = new URL(FRONTDOOR_URL)
+      successUrl.searchParams.set('oauth', 'success')
+      successUrl.searchParams.set('email', emailAddress)
+      successUrl.searchParams.set('customerId', customerId)
+      
+      console.log('🔄 Redirecting to frontend:', successUrl.toString())
+      res.redirect(successUrl.toString())
     } catch (dbError: any) {
       console.error('❌ Database Error:', dbError)
       return res.status(500).send(`
