@@ -82,22 +82,16 @@ router.get('/auth', (req, res) => {
 
 // OAuth callback
 router.get('/callback', async (req, res) => {
-  // ============================================================
-  // 🔔 OAUTH CALLBACK HIT - This log confirms the route is reached
-  // If you see this in Azure App Service logs, the proxy is working!
-  // ============================================================
-  console.log('========================================')
-  console.log('🔔 OAUTH CALLBACK ROUTE HIT!')
-  console.log('   Timestamp:', new Date().toISOString())
-  console.log('   Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl)
-  console.log('========================================')
+  // Debug logging - enable via DEBUG=true env var to verify proxy is working
+  if (process.env.DEBUG === 'true') {
+    console.log('[DEBUG] OAuth callback hit:', req.protocol + '://' + req.get('host') + req.originalUrl)
+  }
   
   try {
     console.log('📥 OAuth Callback Received:', {
-      query: req.query,
       hasCode: !!req.query.code,
       hasError: !!req.query.error,
-      state: req.query.state
+      hasState: !!req.query.state
     })
 
     const { code, error, state } = req.query
