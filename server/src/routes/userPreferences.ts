@@ -1,5 +1,5 @@
 import express from 'express'
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { z } from 'zod'
 
 const router = express.Router()
@@ -17,20 +17,22 @@ const preferencesSchema = z.object({
 //   400 { error: "..." } - invalid request (missing email)
 //   500 { error: "..." } - database failure
 router.get('/:email', async (req, res) => {
+  const { email } = req.params
+
+  // Validate email param exists
+  if (!email || email.trim() === '') {
+    console.log('[UserPreferences] GET: Missing email parameter')
+    return res.status(400).json({ error: 'Email parameter is required' })
+  }
+
   try {
-    const { email } = req.params
-
-    // Validate email param exists
-    if (!email || email.trim() === '') {
-      return res.status(400).json({ error: 'Email parameter is required' })
-    }
-
     const userPrefs = await prisma.userPreferences.findUnique({
       where: { userEmail: email },
     })
 
     // Record not found - return empty preferences (valid state, not an error)
     if (!userPrefs) {
+      console.log('[UserPreferences] GET: No record for', email, '- returning empty (200)')
       return res.json({ data: {} })
     }
 
@@ -44,15 +46,27 @@ router.get('/:email', async (req, res) => {
       }
     } catch (parseError) {
       // Malformed JSON is not a server error - return empty as fallback
-      console.warn('[UserPreferences] Malformed JSON for', email, '- returning empty')
+      console.warn('[UserPreferences] GET: Malformed JSON for', email, '- returning empty (200)')
       safePreferences = {}
     }
 
-    res.json({ data: safePreferences })
+    console.log('[UserPreferences] GET: Found record for', email, '- returning preferences (200)')
+    return res.json({ data: safePreferences })
   } catch (error) {
-    // Database failure IS a server error - return 500
-    console.error('[UserPreferences] GET failed:', error instanceof Error ? error.message : 'Unknown')
-    res.status(500).json({ error: 'Failed to load user preferences' })
+    // Classify the error for better diagnostics
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+    const isPrismaError = error instanceof Prisma.PrismaClientKnownRequestError
+    const isPrismaInitError = error instanceof Prisma.PrismaClientInitializationError
+    const isConnectionError = errorMessage.includes('connect') || errorMessage.includes('ECONNREFUSED') || errorMessage.includes('timeout')
+    
+    console.error('[UserPreferences] GET failed:', {
+      email,
+      errorType: isPrismaError ? 'PrismaKnownError' : isPrismaInitError ? 'PrismaInitError' : isConnectionError ? 'ConnectionError' : 'UnexpectedException',
+      message: errorMessage,
+      code: isPrismaError ? (error as Prisma.PrismaClientKnownRequestError).code : undefined,
+    })
+    
+    return res.status(500).json({ error: 'Failed to load user preferences' })
   }
 })
 
