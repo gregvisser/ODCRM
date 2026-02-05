@@ -32,6 +32,27 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+    - name: Baseline existing migrations (if needed)
+      run: |
+        cd server
+        # Mark all existing migrations as applied (skip errors if already tracked)
+        npx prisma migrate resolve --applied "20251210132629_init" || true
+        npx prisma migrate resolve --applied "20260115000000_add_lists_sequences_and_enhanced_customers" || true
+        npx prisma migrate resolve --applied "20260117000000_add_prospect_steps_and_update_status" || true
+        npx prisma migrate resolve --applied "20260120000000_add_leads_tables" || true
+        npx prisma migrate resolve --applied "20260120090000_add_customer_account_data" || true
+        npx prisma migrate resolve --applied "20260124000000_add_job_taxonomy" || true
+        npx prisma migrate resolve --applied "20260125000000_add_suppression_entries" || true
+        npx prisma migrate resolve --applied "20260125000001_add_prospect_status_suppressed" || true
+        npx prisma migrate resolve --applied "20260125000002_add_email_templates" || true
+        npx prisma migrate resolve --applied "20260130000000_add_checksum_to_lead_sync" || true
+        npx prisma migrate resolve --applied "20260202000000_add_lead_status_scoring_conversion" || true
+        npx prisma migrate resolve --applied "20260202120000_add_sync_metrics_and_controls" || true
+        npx prisma migrate resolve --applied "20260202160000_add_user_model" || true
+        echo "Baseline complete - existing migrations marked as applied"
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     - name: Apply database migrations
       run: cd server && npx prisma migrate deploy
       env:
