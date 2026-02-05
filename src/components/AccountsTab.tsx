@@ -262,6 +262,8 @@ export type Account = {
   users: AccountUser[]
   clientLeadsSheetUrl?: string
   notes?: AccountNote[]
+  // Database ID (set when account is loaded/synced from database)
+  _databaseId?: string
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-GB', {
@@ -4011,14 +4013,55 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
   }, [])
 
-  // Fetch email identities when selected account changes
-  useEffect(() => {
-    if (selectedAccount?._databaseId) {
-      void fetchConnectedEmails(selectedAccount._databaseId)
-    } else {
-      setConnectedEmails([])
+  // Look up database customer ID by name (fallback when _databaseId is missing)
+  const lookupCustomerIdByName = useCallback(async (accountName: string): Promise<string | null> => {
+    try {
+      const { data, error } = await api.get<Array<{ id: string; name: string }>>('/api/customers')
+      if (error || !data) return null
+      const customer = data.find(c => c.name === accountName)
+      return customer?.id || null
+    } catch {
+      return null
     }
-  }, [selectedAccount?._databaseId, fetchConnectedEmails])
+  }, [])
+
+  // Fetch email identities when selected account changes
+  // If _databaseId is missing, look it up by account name first
+  useEffect(() => {
+    const fetchEmails = async () => {
+      if (!selectedAccount) {
+        setConnectedEmails([])
+        return
+      }
+
+      // Debug log (dev only)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[EmailAccounts] selectedAccount:', selectedAccount.name, '_databaseId:', selectedAccount._databaseId)
+      }
+
+      // If we have a database ID, use it directly
+      if (selectedAccount._databaseId) {
+        void fetchConnectedEmails(selectedAccount._databaseId)
+        return
+      }
+
+      // Fallback: Look up customer ID by name
+      console.log('[EmailAccounts] _databaseId missing, looking up by name:', selectedAccount.name)
+      const customerId = await lookupCustomerIdByName(selectedAccount.name)
+      
+      if (customerId) {
+        console.log('[EmailAccounts] Found customer ID:', customerId)
+        // Update the account with the database ID for future use
+        setSelectedAccount(prev => prev ? { ...prev, _databaseId: customerId } : null)
+        void fetchConnectedEmails(customerId)
+      } else {
+        console.log('[EmailAccounts] No customer found in database for:', selectedAccount.name)
+        setConnectedEmails([])
+      }
+    }
+
+    void fetchEmails()
+  }, [selectedAccount?.name, selectedAccount?._databaseId, fetchConnectedEmails, lookupCustomerIdByName])
 
   // Handle OAuth success redirect (oauth=success in URL)
   useEffect(() => {
@@ -4051,8 +4094,9 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [toast, fetchConnectedEmails])
 
   // Connect Outlook handler - ONLY when customer is selected
-  const handleConnectOutlook = useCallback(() => {
-    if (!selectedAccount?._databaseId) {
+  // Will look up customer ID by name if _databaseId is missing
+  const handleConnectOutlook = useCallback(async () => {
+    if (!selectedAccount) {
       toast({
         title: 'Select a customer first',
         description: 'You must select a customer before connecting an Outlook account.',
@@ -4062,10 +4106,27 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       })
       return
     }
+
+    // Use existing _databaseId or look it up by name
+    let customerId = selectedAccount._databaseId
+    if (!customerId) {
+      customerId = await lookupCustomerIdByName(selectedAccount.name) || undefined
+    }
+
+    if (!customerId) {
+      toast({
+        title: 'Customer not found in database',
+        description: 'This customer must exist in the database before connecting an Outlook account.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
     
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
-    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${selectedAccount._databaseId}`
-  }, [selectedAccount?._databaseId, toast])
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
+  }, [selectedAccount, lookupCustomerIdByName, toast])
 
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
@@ -5830,11 +5891,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   ) : connectedEmails.length === 0 ? (
                     <Box py={4} textAlign="center">
                       <Text color="gray.500" mb={2}>No email accounts connected yet.</Text>
-                      {!selectedAccount?._databaseId && (
-                        <Text fontSize="sm" color="orange.500">
-                          Save this customer to the database first to connect email accounts.
-                        </Text>
-                      )}
                     </Box>
                   ) : (
                     <Stack spacing={3}>
