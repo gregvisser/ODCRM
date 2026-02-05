@@ -4091,19 +4091,30 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
 
   // Manual refresh function for the refresh button
+  // Uses ref to prevent stale response from updating wrong customer's data
   const refreshConnectedEmails = useCallback(() => {
     if (!selectedCustomerId) return
     
+    // Capture the customer ID at request time
+    const requestCustomerId = selectedCustomerId
+    
     if (process.env.NODE_ENV === 'development') {
-      console.log('[EmailAccounts] Manual refresh for customerId:', selectedCustomerId)
+      console.log('[EmailAccounts] Manual refresh for customerId:', requestCustomerId)
     }
     
-    // Trigger refetch by toggling a dummy state (or we can just call the API directly)
     setLoadingEmails(true)
     setEmailFetchError(null)
     
-    api.get<ConnectedEmailIdentity[]>(`/api/customers/${selectedCustomerId}/email-identities`)
+    api.get<ConnectedEmailIdentity[]>(`/api/customers/${requestCustomerId}/email-identities`)
       .then(({ data, error }) => {
+        // Check if customer changed while request was in flight
+        if (selectedCustomerIdRef.current !== requestCustomerId) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[EmailAccounts] Refresh response DISCARDED (customer changed):', requestCustomerId, '->', selectedCustomerIdRef.current)
+          }
+          return // Discard stale response
+        }
+        
         if (error) {
           setEmailFetchError(error)
           setConnectedEmails([])
@@ -4112,11 +4123,18 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       })
       .catch((err) => {
+        // Check if customer changed while request was in flight
+        if (selectedCustomerIdRef.current !== requestCustomerId) {
+          return // Discard stale error
+        }
         setEmailFetchError(err instanceof Error ? err.message : 'Unknown error')
         setConnectedEmails([])
       })
       .finally(() => {
-        setLoadingEmails(false)
+        // Only clear loading if this is still the current customer
+        if (selectedCustomerIdRef.current === requestCustomerId) {
+          setLoadingEmails(false)
+        }
       })
   }, [selectedCustomerId])
 
