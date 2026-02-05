@@ -3823,9 +3823,13 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
   
+  // Stable customer ID for email identity fetching (prevents render loops)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  
   // Connected email identities for the selected account
   const [connectedEmails, setConnectedEmails] = useState<ConnectedEmailIdentity[]>([])
   const [loadingEmails, setLoadingEmails] = useState(false)
+  const [emailFetchError, setEmailFetchError] = useState<string | null>(null)
   const [contactsData, setContactsData] = useState<StoredContact[]>(() => loadContactsFromStorage())
 
   // Sync contact counts when contactsData changes (initial load and updates)
@@ -3990,78 +3994,131 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     return () => off()
   }, [selectedAccount])
 
-  // Fetch connected email identities when selectedAccount changes
-  const fetchConnectedEmails = useCallback(async (customerId: string) => {
-    if (!customerId) {
-      setConnectedEmails([])
+  // Update selectedCustomerId when selectedAccount changes
+  // This is the ONLY place where we set selectedCustomerId from selectedAccount
+  useEffect(() => {
+    if (!selectedAccount) {
+      setSelectedCustomerId(null)
       return
     }
-    setLoadingEmails(true)
-    try {
-      const { data, error } = await api.get<ConnectedEmailIdentity[]>(`/api/customers/${customerId}/email-identities`)
-      if (error) {
-        console.error('Failed to fetch email identities:', error)
-        setConnectedEmails([])
-      } else {
-        setConnectedEmails(data || [])
-      }
-    } catch (err) {
-      console.error('Error fetching email identities:', err)
-      setConnectedEmails([])
-    } finally {
-      setLoadingEmails(false)
+    
+    const dbId = selectedAccount._databaseId
+    
+    // Debug log (dev only)
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[EmailAccounts] selectedAccount changed:', selectedAccount.name, '_databaseId:', dbId)
     }
-  }, [])
-
-  // Look up database customer ID by name (fallback when _databaseId is missing)
-  const lookupCustomerIdByName = useCallback(async (accountName: string): Promise<string | null> => {
-    try {
-      const { data, error } = await api.get<Array<{ id: string; name: string }>>('/api/customers')
-      if (error || !data) return null
-      const customer = data.find(c => c.name === accountName)
-      return customer?.id || null
-    } catch {
-      return null
+    
+    if (dbId) {
+      setSelectedCustomerId(dbId)
+    } else {
+      // No DB id - clear customerId (don't auto-lookup, show warning instead)
+      setSelectedCustomerId(null)
     }
-  }, [])
+  }, [selectedAccount?.name, selectedAccount?._databaseId])
 
-  // Fetch email identities when selected account changes
-  // If _databaseId is missing, look it up by account name first
+  // Fetch email identities when selectedCustomerId changes (stable dependency)
   useEffect(() => {
-    const fetchEmails = async () => {
-      if (!selectedAccount) {
-        setConnectedEmails([])
-        return
-      }
+    // Clear state when no customer selected
+    if (!selectedCustomerId) {
+      setConnectedEmails([])
+      setEmailFetchError(null)
+      setLoadingEmails(false)
+      return
+    }
 
+    // AbortController for cleanup
+    const abortController = new AbortController()
+    let isCancelled = false
+
+    const fetchEmails = async () => {
       // Debug log (dev only)
       if (process.env.NODE_ENV === 'development') {
-        console.log('[EmailAccounts] selectedAccount:', selectedAccount.name, '_databaseId:', selectedAccount._databaseId)
+        console.log('[EmailAccounts] Fetch START for customerId:', selectedCustomerId)
       }
-
-      // If we have a database ID, use it directly
-      if (selectedAccount._databaseId) {
-        void fetchConnectedEmails(selectedAccount._databaseId)
-        return
-      }
-
-      // Fallback: Look up customer ID by name
-      console.log('[EmailAccounts] _databaseId missing, looking up by name:', selectedAccount.name)
-      const customerId = await lookupCustomerIdByName(selectedAccount.name)
       
-      if (customerId) {
-        console.log('[EmailAccounts] Found customer ID:', customerId)
-        // Update the account with the database ID for future use
-        setSelectedAccount(prev => prev ? { ...prev, _databaseId: customerId } : null)
-        void fetchConnectedEmails(customerId)
-      } else {
-        console.log('[EmailAccounts] No customer found in database for:', selectedAccount.name)
-        setConnectedEmails([])
+      setLoadingEmails(true)
+      setEmailFetchError(null)
+      
+      try {
+        const { data, error } = await api.get<ConnectedEmailIdentity[]>(
+          `/api/customers/${selectedCustomerId}/email-identities`
+        )
+        
+        // Check if request was cancelled
+        if (isCancelled) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[EmailAccounts] Fetch CANCELLED for customerId:', selectedCustomerId)
+          }
+          return
+        }
+        
+        if (error) {
+          console.error('[EmailAccounts] Fetch ERROR:', error)
+          setEmailFetchError(error)
+          setConnectedEmails([])
+        } else {
+          setConnectedEmails(data || [])
+        }
+        
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[EmailAccounts] Fetch END for customerId:', selectedCustomerId, 'emails:', data?.length || 0)
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+          console.error('[EmailAccounts] Fetch EXCEPTION:', errorMsg)
+          setEmailFetchError(errorMsg)
+          setConnectedEmails([])
+        }
+      } finally {
+        if (!isCancelled) {
+          setLoadingEmails(false)
+        }
       }
     }
 
     void fetchEmails()
-  }, [selectedAccount?.name, selectedAccount?._databaseId, fetchConnectedEmails, lookupCustomerIdByName])
+
+    // Cleanup: cancel in-flight request when customerId changes
+    return () => {
+      isCancelled = true
+      abortController.abort()
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[EmailAccounts] Cleanup for customerId:', selectedCustomerId)
+      }
+    }
+  }, [selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
+
+  // Manual refresh function for the refresh button
+  const refreshConnectedEmails = useCallback(() => {
+    if (!selectedCustomerId) return
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[EmailAccounts] Manual refresh for customerId:', selectedCustomerId)
+    }
+    
+    // Trigger refetch by toggling a dummy state (or we can just call the API directly)
+    setLoadingEmails(true)
+    setEmailFetchError(null)
+    
+    api.get<ConnectedEmailIdentity[]>(`/api/customers/${selectedCustomerId}/email-identities`)
+      .then(({ data, error }) => {
+        if (error) {
+          setEmailFetchError(error)
+          setConnectedEmails([])
+        } else {
+          setConnectedEmails(data || [])
+        }
+      })
+      .catch((err) => {
+        setEmailFetchError(err instanceof Error ? err.message : 'Unknown error')
+        setConnectedEmails([])
+      })
+      .finally(() => {
+        setLoadingEmails(false)
+      })
+  }, [selectedCustomerId])
 
   // Handle OAuth success redirect (oauth=success in URL)
   useEffect(() => {
@@ -4079,9 +4136,13 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         isClosable: true,
       })
       
-      // Refresh email identities for the customer
-      if (oauthCustomerId) {
-        void fetchConnectedEmails(oauthCustomerId)
+      // Refresh email identities - set the customerId to trigger refetch
+      if (oauthCustomerId && oauthCustomerId === selectedCustomerId) {
+        // Same customer - manually refresh
+        refreshConnectedEmails()
+      } else if (oauthCustomerId) {
+        // Different customer - set it to trigger useEffect
+        setSelectedCustomerId(oauthCustomerId)
       }
       
       // Clear query params from URL
@@ -4091,11 +4152,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       url.searchParams.delete('customerId')
       window.history.replaceState({}, '', url.toString())
     }
-  }, [toast, fetchConnectedEmails])
+  }, [toast, selectedCustomerId, refreshConnectedEmails])
 
-  // Connect Outlook handler - ONLY when customer is selected
-  // Will look up customer ID by name if _databaseId is missing
-  const handleConnectOutlook = useCallback(async () => {
+  // Connect Outlook handler - ONLY when customer with DB id is selected
+  const handleConnectOutlook = useCallback(() => {
     if (!selectedAccount) {
       toast({
         title: 'Select a customer first',
@@ -4107,16 +4167,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
       return
     }
 
-    // Use existing _databaseId or look it up by name
-    let customerId = selectedAccount._databaseId
-    if (!customerId) {
-      customerId = await lookupCustomerIdByName(selectedAccount.name) || undefined
-    }
-
-    if (!customerId) {
+    if (!selectedCustomerId) {
       toast({
-        title: 'Customer not found in database',
-        description: 'This customer must exist in the database before connecting an Outlook account.',
+        title: 'Customer not in database',
+        description: 'This customer is missing a database ID. Please refresh the customer list or run migration.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -4125,8 +4179,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     }
     
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
-    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
-  }, [selectedAccount, lookupCustomerIdByName, toast])
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${selectedCustomerId}`
+  }, [selectedAccount, selectedCustomerId, toast])
 
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
@@ -5865,11 +5919,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         variant="ghost"
                         colorScheme="gray"
                         isLoading={loadingEmails}
-                        onClick={() => {
-                          if (selectedAccount?._databaseId) {
-                            void fetchConnectedEmails(selectedAccount._databaseId)
-                          }
-                        }}
+                        isDisabled={!selectedCustomerId}
+                        onClick={refreshConnectedEmails}
                         title="Refresh email accounts"
                       />
                     </HStack>
@@ -5877,17 +5928,39 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       size="sm"
                       colorScheme="blue"
                       onClick={handleConnectOutlook}
-                      isDisabled={!selectedAccount?._databaseId}
+                      isDisabled={!selectedCustomerId}
                     >
                       Connect Outlook
                     </Button>
                   </HStack>
+                  
+                  {/* Warning: Account missing database ID */}
+                  {selectedAccount && !selectedCustomerId && (
+                    <Box py={3} px={4} mb={4} bg="orange.50" borderRadius="md" border="1px solid" borderColor="orange.200">
+                      <Text fontSize="sm" color="orange.700">
+                        This account is missing a database ID. Refresh the customer list or run migration.
+                      </Text>
+                    </Box>
+                  )}
+                  
+                  {/* Error message */}
+                  {emailFetchError && (
+                    <Box py={3} px={4} mb={4} bg="red.50" borderRadius="md" border="1px solid" borderColor="red.200">
+                      <Text fontSize="sm" color="red.700">
+                        Failed to load email accounts: {emailFetchError}
+                      </Text>
+                    </Box>
+                  )}
                   
                   {loadingEmails ? (
                     <HStack justify="center" py={4}>
                       <Spinner size="sm" />
                       <Text color="gray.500">Loading email accounts...</Text>
                     </HStack>
+                  ) : !selectedCustomerId ? (
+                    <Box py={4} textAlign="center">
+                      <Text color="gray.500">Select a customer with a database ID to view connected emails.</Text>
+                    </Box>
                   ) : connectedEmails.length === 0 ? (
                     <Box py={4} textAlign="center">
                       <Text color="gray.500" mb={2}>No email accounts connected yet.</Text>
