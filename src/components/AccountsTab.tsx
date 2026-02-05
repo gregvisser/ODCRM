@@ -219,6 +219,8 @@ type CustomerApi = {
 }
 
 export type Account = {
+  // Database ID - this is the canonical ID from the database (e.g. "cust_...")
+  id?: string
   name: string
   website: string
   aboutSections: AboutSections
@@ -262,7 +264,7 @@ export type Account = {
   users: AccountUser[]
   clientLeadsSheetUrl?: string
   notes?: AccountNote[]
-  // Database ID (set when account is loaded/synced from database)
+  // DEPRECATED: Use `id` instead. Kept for backward compat with localStorage
   _databaseId?: string
 }
 
@@ -4078,29 +4080,19 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
 
   // Manual refresh function for the refresh button
-  // Uses ref to detect stale responses when customer changes during request
   const refreshConnectedEmails = useCallback(() => {
     if (!selectedCustomerId) return
     
-    // Capture customerId at request start for stale detection
-    const requestCustomerId = selectedCustomerId
-    
     if (process.env.NODE_ENV === 'development') {
-      console.log('[EmailAccounts] Manual refresh for customerId:', requestCustomerId)
+      console.log('[EmailAccounts] Manual refresh for customerId:', selectedCustomerId)
     }
     
+    // Trigger refetch by toggling a dummy state (or we can just call the API directly)
     setLoadingEmails(true)
     setEmailFetchError(null)
     
-    api.get<ConnectedEmailIdentity[]>(`/api/customers/${requestCustomerId}/email-identities`)
+    api.get<ConnectedEmailIdentity[]>(`/api/customers/${selectedCustomerId}/email-identities`)
       .then(({ data, error }) => {
-        // Stale response guard: ignore if customer changed
-        if (selectedCustomerIdRef.current !== requestCustomerId) {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[EmailAccounts] Refresh response DISCARDED (stale):', requestCustomerId)
-          }
-          return
-        }
         if (error) {
           setEmailFetchError(error)
           setConnectedEmails([])
@@ -4109,16 +4101,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       })
       .catch((err) => {
-        // Stale response guard
-        if (selectedCustomerIdRef.current !== requestCustomerId) return
         setEmailFetchError(err instanceof Error ? err.message : 'Unknown error')
         setConnectedEmails([])
       })
       .finally(() => {
-        // Only clear loading if still current customer
-        if (selectedCustomerIdRef.current === requestCustomerId) {
-          setLoadingEmails(false)
-        }
+        setLoadingEmails(false)
       })
   }, [selectedCustomerId])
 
@@ -4721,7 +4708,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     // Add the database ID to the account for future updates
     const accountWithDbId = {
       ...finalAccount,
-      _databaseId: createdCustomer.id,
+      id: createdCustomer.id,
+      _databaseId: createdCustomer.id, // backward compat
     }
     
     setAccountsData((prev) => {
@@ -4776,7 +4764,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
     // Open the new account in the drawer
     setSelectedAccount(accountWithDbId)
-    setSelectedCustomerId(accountWithDbId._databaseId || null)
+    setSelectedCustomerId(accountWithDbId.id || accountWithDbId._databaseId || null)
 
     toast({
       title: 'Account created',
@@ -4800,7 +4788,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         const account = accountsData.find((acc) => acc.name === accountName)
         if (account) {
           setSelectedAccount(account)
-          setSelectedCustomerId(account._databaseId || null)
+          setSelectedCustomerId(account.id || account._databaseId || null)
         }
       }
     }
@@ -4853,7 +4841,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     const account = accountsData.find((acc) => acc.name === focusAccountName)
     if (account) {
       setSelectedAccount(account)
-      setSelectedCustomerId(account._databaseId || null)
+      setSelectedCustomerId(account.id || account._databaseId || null)
     }
   }, [focusAccountName, accountsData])
 
@@ -4869,10 +4857,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         return
       }
 
-      console.log('Setting selected account:', account.name, '_databaseId:', account._databaseId)
+      const customerId = account.id || account._databaseId || null
+      console.log('Setting selected account:', account.name, 'customerId:', customerId)
       setSelectedAccount(account)
       // Set selectedCustomerId directly from the clicked account's DB id
-      setSelectedCustomerId(account._databaseId || null)
+      setSelectedCustomerId(customerId)
     } catch (error) {
       console.error('Error in handleAccountClick:', error)
     }
@@ -5840,6 +5829,12 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                         {selectedAccount.defcon && (
                           <Badge colorScheme="gray" variant="outline" px={3} py={1} fontSize="sm">
                             DEFCON {selectedAccount.defcon}
+                          </Badge>
+                        )}
+                        {/* Debug: Show customerId in dev mode */}
+                        {process.env.NODE_ENV === 'development' && (
+                          <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono">
+                            ID: {selectedCustomerId || 'none'}
                           </Badge>
                         )}
                       </HStack>

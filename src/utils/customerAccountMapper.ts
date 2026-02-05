@@ -7,6 +7,8 @@ import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
 
 // AccountsTab Account type (keeping for backward compatibility with UI)
 export type Account = {
+  // Database ID - canonical identifier from database (e.g. "cust_...")
+  id?: string
   name: string
   clientLeadsSheetUrl?: string
   clientLeadsSheetStatus?: 'active' | 'inactive' | 'cleared'
@@ -41,7 +43,7 @@ export type Account = {
   foundingYear?: string
   
   // Internal tracking
-  _databaseId?: string // Store database ID for updates
+  _databaseId?: string // DEPRECATED: Use `id` instead
   _lastSyncedAt?: string
 }
 
@@ -55,6 +57,8 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
     : undefined
 
   return {
+    // Database ID (canonical)
+    id: customer.id,
     name: customer.name,
     clientLeadsSheetUrl: customer.leadsReportingUrl || undefined,
     clientLeadsSheetStatus: customer.leadsReportingUrl ? 'active' : undefined,
@@ -84,7 +88,7 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
     // Number of contacts from customerContacts array
     numberOfContacts: customer.customerContacts?.length || 0,
     
-    // Internal tracking
+    // Internal tracking (deprecated, use `id` instead)
     _databaseId: customer.id,
     _lastSyncedAt: customer.updatedAt,
   }
