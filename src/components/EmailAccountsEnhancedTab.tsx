@@ -214,20 +214,79 @@ export default function EmailAccountsEnhancedTab() {
     const testEmail = prompt('Send test email to:')
     if (!testEmail) return
 
+    // Validate email format
+    if (!testEmail.includes('@')) {
+      toast({
+        title: 'Invalid email',
+        description: 'Please enter a valid email address',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+
     toast({
       title: 'Sending test email...',
+      description: `From ${identity.emailAddress} to ${testEmail}`,
       status: 'info',
-      duration: 2000,
+      duration: null, // Keep open until replaced
+      isClosable: true,
     })
 
-    // Would need a test send endpoint
-    setTimeout(() => {
-      toast({
-        title: 'Test Send',
-        description: 'Test send functionality would be implemented here',
-        status: 'info',
+    try {
+      const { data, error } = await api.post<{
+        success?: boolean
+        message?: string
+        error?: string
+        code?: string
+        requestId?: string
+        from?: string
+      }>(`/api/outlook/identities/${identity.id}/test-send?customerId=${customerId}`, {
+        toEmail: testEmail
       })
-    }, 2000)
+
+      if (error || data?.error) {
+        const errorMsg = error || data?.error || 'Unknown error'
+        const errorCode = data?.code || ''
+        const requestId = data?.requestId || ''
+        
+        console.error('[TestSend] Failed:', { error: errorMsg, code: errorCode, requestId })
+        
+        toast.closeAll()
+        toast({
+          title: 'Test send failed',
+          description: `${errorMsg}${requestId ? ` (Request ID: ${requestId})` : ''}`,
+          status: 'error',
+          duration: 8000,
+          isClosable: true,
+        })
+      } else {
+        const requestId = data?.requestId || ''
+        
+        if (import.meta.env.DEV) {
+          console.log('[TestSend] Success:', data)
+        }
+        
+        toast.closeAll()
+        toast({
+          title: 'Test email sent!',
+          description: `Sent from ${identity.emailAddress} to ${testEmail}${requestId ? ` (ID: ${requestId.substring(0, 8)}...)` : ''}`,
+          status: 'success',
+          duration: 6000,
+          isClosable: true,
+        })
+      }
+    } catch (err: any) {
+      console.error('[TestSend] Exception:', err)
+      toast.closeAll()
+      toast({
+        title: 'Test send failed',
+        description: err.message || 'Network error',
+        status: 'error',
+        duration: 6000,
+        isClosable: true,
+      })
+    }
   }
 
   const handleDisconnect = async (id: string) => {

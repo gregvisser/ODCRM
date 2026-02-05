@@ -4980,12 +4980,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       // Use robust customerId derivation helper
       const { customerId, source } = deriveCustomerId(account, accountName, dbAccounts)
       
-      // Dev-only logging for debugging
+      // Dev-only logging for debugging - show all ID fields
       if (import.meta.env.DEV) {
         console.log('[handleAccountClick]', {
           accountName,
           customerId,
           source,
+          // Show account's ID fields for debugging
+          'account.id': account.id,
+          'account.customerId': (account as { customerId?: string }).customerId,
+          'account._databaseId': account._databaseId,
+          // Show if dbAccounts is available
+          'dbAccounts.length': dbAccounts?.length || 0,
         })
       }
       

@@ -74,6 +74,9 @@ export function useUserPreferences(userEmail: string | null) {
 
       const previousPreferences = { ...preferences }
       
+      // Clear any stale error from previous failed attempt
+      setError(null)
+      
       try {
         const newTabOrders = {
           ...preferences.tabOrders,
@@ -98,6 +101,9 @@ export function useUserPreferences(userEmail: string | null) {
         if (response.error) {
           throw new Error(response.error)
         }
+
+        // Success - ensure error is cleared
+        setError(null)
 
         if (import.meta.env.DEV) {
           console.log(`[UserPreferences] Saved tab order for ${section}`)

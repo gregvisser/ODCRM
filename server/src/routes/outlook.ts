@@ -127,6 +127,9 @@ router.get('/auth', async (req, res) => {
   // CRITICAL: Force account selection every time to allow connecting different mailboxes
   // prompt=select_account forces the Microsoft account picker even if user has a cached session
   // login_hint is intentionally omitted to avoid pre-selecting an account
+  // nonce is a cache-buster to prevent browser from reusing a cached OAuth response
+  const nonce = Date.now().toString(36) + Math.random().toString(36).substring(2, 8)
+  
   const authUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize?` +
     `client_id=${encodeURIComponent(clientId!)}&` +
     `response_type=code&` +
@@ -134,14 +137,16 @@ router.get('/auth', async (req, res) => {
     `response_mode=query&` +
     `scope=${encodeURIComponent(scopes)}&` +
     `state=${encodeURIComponent(state)}&` +
-    `prompt=select_account`
+    `prompt=select_account&` +
+    `nonce=${encodeURIComponent(nonce)}`
 
   console.log('🔐 OAuth Auth Request:', {
     redirectUri,
     tenantId,
     customerId,
     scopes,
-    prompt: 'select_account'
+    prompt: 'select_account',
+    nonce
   })
 
   res.redirect(authUrl)
@@ -698,6 +703,189 @@ router.delete('/identities/:id', async (req, res, next) => {
     res.json({ message: 'Identity disconnected' })
   } catch (error) {
     next(error)
+  }
+})
+
+// Test send email via Microsoft Graph for a specific identity
+router.post('/identities/:id/test-send', async (req, res, next) => {
+  const { id } = req.params
+  const customerId = getCustomerId(req)
+  const { toEmail, subject, body } = req.body
+
+  console.log('📧 Test Send Request:', { identityId: id, customerId, toEmail })
+
+  if (!toEmail) {
+    return res.status(400).json({ error: 'toEmail is required' })
+  }
+
+  try {
+    // Get the identity with tokens
+    const identity = await prisma.emailIdentity.findFirst({
+      where: { id, customerId }
+    })
+
+    if (!identity) {
+      return res.status(404).json({ error: 'Identity not found' })
+    }
+
+    if (identity.provider !== 'outlook') {
+      return res.status(400).json({ error: 'Test send only supported for Outlook identities' })
+    }
+
+    if (!identity.accessToken) {
+      return res.status(400).json({ 
+        error: 'No access token available. Please reconnect this Outlook account.',
+        code: 'NO_TOKEN'
+      })
+    }
+
+    // Check if token is expired and try to refresh
+    let accessToken = identity.accessToken
+    if (identity.tokenExpiresAt && new Date(identity.tokenExpiresAt) < new Date()) {
+      console.log('🔄 Token expired, attempting refresh for:', identity.emailAddress)
+      
+      if (!identity.refreshToken) {
+        return res.status(401).json({ 
+          error: 'Token expired and no refresh token available. Please reconnect this Outlook account.',
+          code: 'TOKEN_EXPIRED'
+        })
+      }
+
+      // Attempt token refresh
+      const clientId = process.env.MICROSOFT_CLIENT_ID
+      const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
+      const tenantId = identity.outlookTenantId || 'common'
+
+      const tokenResponse = await fetch(
+        `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            client_id: clientId!,
+            client_secret: clientSecret!,
+            refresh_token: identity.refreshToken,
+            grant_type: 'refresh_token',
+            scope: 'https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read offline_access'
+          })
+        }
+      )
+
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text()
+        console.error('❌ Token refresh failed:', errorText)
+        return res.status(401).json({ 
+          error: 'Token refresh failed. Please reconnect this Outlook account.',
+          code: 'REFRESH_FAILED',
+          details: errorText
+        })
+      }
+
+      const tokenData = await tokenResponse.json()
+      accessToken = tokenData.access_token
+
+      // Update tokens in database
+      await prisma.emailIdentity.update({
+        where: { id },
+        data: {
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token || identity.refreshToken,
+          tokenExpiresAt: new Date(Date.now() + (tokenData.expires_in * 1000))
+        }
+      })
+
+      console.log('✅ Token refreshed successfully for:', identity.emailAddress)
+    }
+
+    // Build email message
+    const emailMessage = {
+      message: {
+        subject: subject || 'Test Email from OpenDoors CRM',
+        body: {
+          contentType: 'Text',
+          content: body || `This is a test email sent from ${identity.emailAddress} via OpenDoors CRM at ${new Date().toISOString()}`
+        },
+        toRecipients: [
+          {
+            emailAddress: {
+              address: toEmail
+            }
+          }
+        ],
+        from: {
+          emailAddress: {
+            address: identity.emailAddress
+          }
+        }
+      },
+      saveToSentItems: true
+    }
+
+    console.log('📤 Sending test email via Graph API:', {
+      from: identity.emailAddress,
+      to: toEmail,
+      subject: emailMessage.message.subject
+    })
+
+    // Send via Microsoft Graph
+    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(emailMessage)
+    })
+
+    const requestId = graphResponse.headers.get('request-id') || 'unknown'
+
+    if (!graphResponse.ok) {
+      const errorBody = await graphResponse.text()
+      console.error('❌ Graph sendMail failed:', {
+        status: graphResponse.status,
+        statusText: graphResponse.statusText,
+        requestId,
+        body: errorBody
+      })
+
+      // Parse error for user-friendly message
+      let errorMessage = 'Failed to send test email'
+      let errorCode = 'GRAPH_ERROR'
+      try {
+        const errorJson = JSON.parse(errorBody)
+        errorMessage = errorJson.error?.message || errorMessage
+        errorCode = errorJson.error?.code || errorCode
+      } catch {
+        errorMessage = errorBody || errorMessage
+      }
+
+      return res.status(graphResponse.status).json({
+        error: errorMessage,
+        code: errorCode,
+        requestId,
+        from: identity.emailAddress
+      })
+    }
+
+    console.log('✅ Test email sent successfully:', {
+      from: identity.emailAddress,
+      to: toEmail,
+      requestId
+    })
+
+    res.json({
+      success: true,
+      message: `Test email sent from ${identity.emailAddress} to ${toEmail}`,
+      from: identity.emailAddress,
+      to: toEmail,
+      requestId
+    })
+  } catch (error: any) {
+    console.error('❌ Test send exception:', error)
+    res.status(500).json({
+      error: error.message || 'Unexpected error during test send',
+      code: 'INTERNAL_ERROR'
+    })
   }
 })
 
