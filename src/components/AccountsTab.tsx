@@ -3994,28 +3994,15 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     return () => off()
   }, [selectedAccount])
 
-  // Update selectedCustomerId when selectedAccount changes
-  // This is the ONLY place where we set selectedCustomerId from selectedAccount
+  // Sync selectedCustomerId when selectedAccount becomes null (drawer closed)
+  // Main selection happens in handleAccountClick - this is just cleanup
   useEffect(() => {
     if (!selectedAccount) {
       setSelectedCustomerId(null)
-      return
     }
-    
-    const dbId = selectedAccount._databaseId
-    
-    // Debug log (dev only)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('[EmailAccounts] selectedAccount changed:', selectedAccount.name, '_databaseId:', dbId)
-    }
-    
-    if (dbId) {
-      setSelectedCustomerId(dbId)
-    } else {
-      // No DB id - clear customerId (don't auto-lookup, show warning instead)
-      setSelectedCustomerId(null)
-    }
-  }, [selectedAccount?.name, selectedAccount?._databaseId])
+    // Note: We don't set selectedCustomerId here when account IS selected
+    // That's handled directly in handleAccountClick to avoid loops
+  }, [selectedAccount])
 
   // Fetch email identities when selectedCustomerId changes (stable dependency)
   useEffect(() => {
@@ -4091,30 +4078,19 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
   }, [selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
 
   // Manual refresh function for the refresh button
-  // Uses ref to prevent stale response from updating wrong customer's data
   const refreshConnectedEmails = useCallback(() => {
     if (!selectedCustomerId) return
     
-    // Capture the customer ID at request time
-    const requestCustomerId = selectedCustomerId
-    
     if (process.env.NODE_ENV === 'development') {
-      console.log('[EmailAccounts] Manual refresh for customerId:', requestCustomerId)
+      console.log('[EmailAccounts] Manual refresh for customerId:', selectedCustomerId)
     }
     
+    // Trigger refetch by toggling a dummy state (or we can just call the API directly)
     setLoadingEmails(true)
     setEmailFetchError(null)
     
-    api.get<ConnectedEmailIdentity[]>(`/api/customers/${requestCustomerId}/email-identities`)
+    api.get<ConnectedEmailIdentity[]>(`/api/customers/${selectedCustomerId}/email-identities`)
       .then(({ data, error }) => {
-        // Check if customer changed while request was in flight
-        if (selectedCustomerIdRef.current !== requestCustomerId) {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('[EmailAccounts] Refresh response DISCARDED (customer changed):', requestCustomerId, '->', selectedCustomerIdRef.current)
-          }
-          return // Discard stale response
-        }
-        
         if (error) {
           setEmailFetchError(error)
           setConnectedEmails([])
@@ -4123,18 +4099,11 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         }
       })
       .catch((err) => {
-        // Check if customer changed while request was in flight
-        if (selectedCustomerIdRef.current !== requestCustomerId) {
-          return // Discard stale error
-        }
         setEmailFetchError(err instanceof Error ? err.message : 'Unknown error')
         setConnectedEmails([])
       })
       .finally(() => {
-        // Only clear loading if this is still the current customer
-        if (selectedCustomerIdRef.current === requestCustomerId) {
-          setLoadingEmails(false)
-        }
+        setLoadingEmails(false)
       })
   }, [selectedCustomerId])
 
@@ -4187,8 +4156,8 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
     if (!selectedCustomerId) {
       toast({
-        title: 'Customer not in database',
-        description: 'This customer is missing a database ID. Please refresh the customer list or run migration.',
+        title: 'Cannot connect Outlook',
+        description: 'This customer is not saved in the database yet. Please save it first.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -4792,6 +4761,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
 
     // Open the new account in the drawer
     setSelectedAccount(accountWithDbId)
+    setSelectedCustomerId(accountWithDbId._databaseId || null)
 
     toast({
       title: 'Account created',
@@ -4815,6 +4785,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         const account = accountsData.find((acc) => acc.name === accountName)
         if (account) {
           setSelectedAccount(account)
+          setSelectedCustomerId(account._databaseId || null)
         }
       }
     }
@@ -4867,6 +4838,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
     const account = accountsData.find((acc) => acc.name === focusAccountName)
     if (account) {
       setSelectedAccount(account)
+      setSelectedCustomerId(account._databaseId || null)
     }
   }, [focusAccountName, accountsData])
 
@@ -4882,8 +4854,10 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
         return
       }
 
-      console.log('Setting selected account:', account.name)
+      console.log('Setting selected account:', account.name, '_databaseId:', account._databaseId)
       setSelectedAccount(account)
+      // Set selectedCustomerId directly from the clicked account's DB id
+      setSelectedCustomerId(account._databaseId || null)
     } catch (error) {
       console.error('Error in handleAccountClick:', error)
     }
@@ -5956,7 +5930,7 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                   {selectedAccount && !selectedCustomerId && (
                     <Box py={3} px={4} mb={4} bg="orange.50" borderRadius="md" border="1px solid" borderColor="orange.200">
                       <Text fontSize="sm" color="orange.700">
-                        This account is missing a database ID. Refresh the customer list or run migration.
+                        This customer is not saved in the database. Save it first to connect email accounts.
                       </Text>
                     </Box>
                   )}
@@ -5975,10 +5949,6 @@ function AccountsTab({ focusAccountName }: { focusAccountName?: string }) {
                       <Spinner size="sm" />
                       <Text color="gray.500">Loading email accounts...</Text>
                     </HStack>
-                  ) : !selectedCustomerId ? (
-                    <Box py={4} textAlign="center">
-                      <Text color="gray.500">Select a customer with a database ID to view connected emails.</Text>
-                    </Box>
                   ) : connectedEmails.length === 0 ? (
                     <Box py={4} textAlign="center">
                       <Text color="gray.500" mb={2}>No email accounts connected yet.</Text>
