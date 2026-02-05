@@ -12,24 +12,29 @@ const preferencesSchema = z.object({
 })
 
 // GET /api/user-preferences/:email - Get user preferences
-// CRITICAL: This endpoint NEVER returns 500 - always 200 with fallback to empty
+// Returns:
+//   200 { data: {...} } - success (including empty prefs for missing/malformed)
+//   400 { error: "..." } - invalid request (missing email)
+//   500 { error: "..." } - database failure
 router.get('/:email', async (req, res) => {
   try {
     const { email } = req.params
+
+    // Validate email param exists
+    if (!email || email.trim() === '') {
+      return res.status(400).json({ error: 'Email parameter is required' })
+    }
 
     const userPrefs = await prisma.userPreferences.findUnique({
       where: { userEmail: email },
     })
 
+    // Record not found - return empty preferences (valid state, not an error)
     if (!userPrefs) {
-      // Return empty preferences if none exist
-      return res.json({
-        userEmail: email,
-        preferences: {},
-      })
+      return res.json({ data: {} })
     }
 
-    // Safely parse preferences - handle malformed JSON
+    // Safely parse preferences - handle malformed JSON gracefully
     let safePreferences = {}
     try {
       if (userPrefs.preferences && typeof userPrefs.preferences === 'object') {
@@ -38,26 +43,24 @@ router.get('/:email', async (req, res) => {
         safePreferences = JSON.parse(userPrefs.preferences)
       }
     } catch (parseError) {
-      console.warn('[UserPreferences] Malformed preferences JSON for', email, '- returning empty')
+      // Malformed JSON is not a server error - return empty as fallback
+      console.warn('[UserPreferences] Malformed JSON for', email, '- returning empty')
       safePreferences = {}
     }
 
-    res.json({
-      userEmail: userPrefs.userEmail,
-      preferences: safePreferences,
-    })
+    res.json({ data: safePreferences })
   } catch (error) {
-    // NEVER return 500 - always return 200 with empty preferences
-    // This prevents blocking the app on preferences errors
-    console.warn('[UserPreferences] Error fetching preferences, returning empty:', error instanceof Error ? error.message : 'Unknown')
-    res.json({
-      userEmail: req.params.email,
-      preferences: {},
-    })
+    // Database failure IS a server error - return 500
+    console.error('[UserPreferences] GET failed:', error instanceof Error ? error.message : 'Unknown')
+    res.status(500).json({ error: 'Failed to load user preferences' })
   }
 })
 
 // PUT /api/user-preferences - Update or create user preferences
+// Returns:
+//   200 { data: {...} } - success
+//   400 { error: "..." } - validation error
+//   500 { error: "..." } - database failure
 router.put('/', async (req, res) => {
   try {
     const body = preferencesSchema.parse(req.body)
@@ -73,29 +76,31 @@ router.put('/', async (req, res) => {
       },
     })
 
-    res.json({
-      userEmail: userPrefs.userEmail,
-      preferences: userPrefs.preferences,
-    })
+    res.json({ data: userPrefs.preferences })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid request body', details: error.errors })
     }
-    // Log but don't block - return success with what we have
-    console.warn('[UserPreferences] Error saving preferences:', error instanceof Error ? error.message : 'Unknown')
-    // Return the input as confirmation (optimistic)
-    res.json({
-      userEmail: req.body?.userEmail || '',
-      preferences: req.body?.preferences || {},
-    })
+    // Database failure - return 500 (NOT 200)
+    console.error('[UserPreferences] PUT failed:', error instanceof Error ? error.message : 'Unknown')
+    res.status(500).json({ error: 'Failed to save user preferences' })
   }
 })
 
 // PATCH /api/user-preferences/:email - Partially update user preferences
+// Returns:
+//   200 { data: {...} } - success
+//   400 { error: "..." } - invalid request
+//   500 { error: "..." } - database failure
 router.patch('/:email', async (req, res) => {
   try {
     const { email } = req.params
     const updates = req.body
+
+    // Validate email param
+    if (!email || email.trim() === '') {
+      return res.status(400).json({ error: 'Email parameter is required' })
+    }
 
     // Get existing preferences
     const existing = await prisma.userPreferences.findUnique({
@@ -119,17 +124,11 @@ router.patch('/:email', async (req, res) => {
       },
     })
 
-    res.json({
-      userEmail: userPrefs.userEmail,
-      preferences: userPrefs.preferences,
-    })
+    res.json({ data: userPrefs.preferences })
   } catch (error) {
-    // Log but don't block - return success with merged data
-    console.warn('[UserPreferences] Error patching preferences:', error instanceof Error ? error.message : 'Unknown')
-    res.json({
-      userEmail: req.params.email,
-      preferences: { ...(req.body || {}) },
-    })
+    // Database failure - return 500 (NOT 200)
+    console.error('[UserPreferences] PATCH failed:', error instanceof Error ? error.message : 'Unknown')
+    res.status(500).json({ error: 'Failed to save user preferences' })
   }
 })
 

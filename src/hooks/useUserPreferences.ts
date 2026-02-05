@@ -38,21 +38,24 @@ export function useUserPreferences(userEmail: string | null) {
       try {
         setLoading(true)
         setError(null)
-        const response = await api.get(`/api/user-preferences/${encodeURIComponent(userEmail)}`)
+        const response = await api.get<{ data: UserPreferences }>(
+          `/api/user-preferences/${encodeURIComponent(userEmail)}`
+        )
         
         if (response.error) {
-          // Log once, don't throw - fall back to defaults
-          console.warn('[UserPreferences] API error, using defaults:', response.error)
+          // API returned error (400, 500, etc.) - fall back to defaults silently
+          // This is expected for new users or DB issues - app should not block
+          console.warn('[UserPreferences] Load failed, using defaults:', response.error)
           setPreferences({})
           return
         }
 
-        setPreferences(response.data?.preferences || {})
+        // Success: extract preferences from { data: {...} } response shape
+        setPreferences(response.data?.data || {})
       } catch (err) {
-        // Log once, fall back to defaults - DO NOT retry
-        console.warn('[UserPreferences] Failed to load, using defaults:', err instanceof Error ? err.message : 'Unknown error')
+        // Network/unexpected error - fall back to defaults silently
+        console.warn('[UserPreferences] Load exception, using defaults:', err instanceof Error ? err.message : 'Unknown')
         setPreferences({})
-        // Don't set error state - app should continue without blocking
       } finally {
         setLoading(false)
       }
@@ -69,6 +72,8 @@ export function useUserPreferences(userEmail: string | null) {
         return
       }
 
+      const previousPreferences = { ...preferences }
+      
       try {
         const newTabOrders = {
           ...preferences.tabOrders,
@@ -83,22 +88,25 @@ export function useUserPreferences(userEmail: string | null) {
         // Optimistically update local state
         setPreferences(updatedPreferences)
 
-        // Save to database
-        const response = await api.put('/api/user-preferences', {
+        // Save to database - response shape is { data: {...} } on success, { error: "..." } on failure
+        const response = await api.put<{ data: UserPreferences }>('/api/user-preferences', {
           userEmail,
           preferences: updatedPreferences,
         })
 
+        // CRITICAL: Check for error - 500 responses return { error: "..." }
         if (response.error) {
           throw new Error(response.error)
         }
 
-        console.log(`✅ Saved tab order for ${section}:`, tabIds)
+        if (import.meta.env.DEV) {
+          console.log(`[UserPreferences] Saved tab order for ${section}`)
+        }
       } catch (err) {
-        console.error('Failed to save tab order:', err)
+        // Save failed - revert optimistic update and surface error
+        console.error('[UserPreferences] Save failed:', err)
         setError(err instanceof Error ? err.message : 'Failed to save tab order')
-        // Revert optimistic update
-        setPreferences(preferences)
+        setPreferences(previousPreferences)
       }
     },
     [userEmail, preferences]
@@ -120,6 +128,8 @@ export function useUserPreferences(userEmail: string | null) {
         return
       }
 
+      const previousPreferences = { ...preferences }
+
       try {
         const updatedPreferences = {
           ...preferences,
@@ -129,20 +139,21 @@ export function useUserPreferences(userEmail: string | null) {
         // Optimistically update local state
         setPreferences(updatedPreferences)
 
-        // Save to database
-        const response = await api.put('/api/user-preferences', {
+        // Save to database - response shape is { data: {...} } on success, { error: "..." } on failure
+        const response = await api.put<{ data: UserPreferences }>('/api/user-preferences', {
           userEmail,
           preferences: updatedPreferences,
         })
 
+        // CRITICAL: Check for error - 500 responses return { error: "..." }
         if (response.error) {
           throw new Error(response.error)
         }
       } catch (err) {
-        console.error('Failed to update preference:', err)
+        // Save failed - revert optimistic update and surface error
+        console.error('[UserPreferences] Update failed:', err)
         setError(err instanceof Error ? err.message : 'Failed to update preference')
-        // Revert optimistic update
-        setPreferences(preferences)
+        setPreferences(previousPreferences)
       }
     },
     [userEmail, preferences]
