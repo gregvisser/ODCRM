@@ -4779,8 +4779,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       if (accountName) {
         const account = accountsData.find((acc) => acc.name === accountName)
         if (account) {
+          // Get customerId with dbAccounts fallback
+          let customerId = account.id || account._databaseId || null
+          if (!customerId && dbAccounts && dbAccounts.length > 0) {
+            const dbAccount = dbAccounts.find((db) => db.name === accountName)
+            if (dbAccount?.id) customerId = dbAccount.id
+          }
           setSelectedAccount(account)
-          setSelectedCustomerId(account.id || account._databaseId || null)
+          setSelectedCustomerId(customerId)
         }
       }
     }
@@ -4832,10 +4838,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
     if (!focusAccountName) return
     const account = accountsData.find((acc) => acc.name === focusAccountName)
     if (account) {
+      // Get customerId with dbAccounts fallback
+      let customerId = account.id || account._databaseId || null
+      if (!customerId && dbAccounts && dbAccounts.length > 0) {
+        const dbAccount = dbAccounts.find((db) => db.name === focusAccountName)
+        if (dbAccount?.id) customerId = dbAccount.id
+      }
       setSelectedAccount(account)
-      setSelectedCustomerId(account.id || account._databaseId || null)
+      setSelectedCustomerId(customerId)
     }
-  }, [focusAccountName, accountsData])
+  }, [focusAccountName, accountsData, dbAccounts])
 
   const handleAccountClick = (accountName: string, e?: React.MouseEvent) => {
     try {
@@ -4849,7 +4861,21 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         return
       }
 
-      const customerId = account.id || account._databaseId || null
+      // Get customerId - try multiple sources for robustness:
+      // 1. account.id (canonical DB id from mapper)
+      // 2. account._databaseId (deprecated backup field)
+      // 3. Look up in dbAccounts prop (fresh DB data, always has correct id)
+      let customerId = account.id || account._databaseId || null
+      
+      // If account doesn't have id, look up in dbAccounts prop (DB source of truth)
+      if (!customerId && dbAccounts && dbAccounts.length > 0) {
+        const dbAccount = dbAccounts.find((db) => db.name === accountName)
+        if (dbAccount?.id) {
+          customerId = dbAccount.id
+          console.log('Found customerId from dbAccounts fallback:', customerId)
+        }
+      }
+      
       console.log('Setting selected account:', account.name, 'customerId:', customerId)
       setSelectedAccount(account)
       // Set selectedCustomerId directly from the clicked account's DB id

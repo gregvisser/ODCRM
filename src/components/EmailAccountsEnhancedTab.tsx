@@ -256,27 +256,30 @@ export default function EmailAccountsEnhancedTab() {
         <Box>
           <HStack spacing={2} mb={1}>
             <Heading size="lg">Email Accounts</Heading>
-            <Badge colorScheme="green" fontSize="xs" px={2} py={1}>
-              Data source: Database
+            <Badge colorScheme={identities.length >= 5 ? 'orange' : 'green'} fontSize="xs" px={2} py={1}>
+              {identities.length}/5
             </Badge>
           </HStack>
           <Text fontSize="sm" color="gray.600">
-            Manage OAuth and SMTP email accounts for sending
+            Connect Microsoft Outlook accounts for sending emails
           </Text>
         </Box>
         <HStack>
           <Button
             leftIcon={<AddIcon />}
-            colorScheme="gray"
+            colorScheme="blue"
             onClick={handleConnectOutlook}
             size="sm"
-            isDisabled={!isValidCustomer}
-            title={!isValidCustomer ? 'Select a customer first' : 'Connect Outlook account'}
+            isDisabled={!isValidCustomer || identities.length >= 5}
+            title={
+              !isValidCustomer 
+                ? 'Select a customer first' 
+                : identities.length >= 5 
+                  ? 'Limit reached (5). Disconnect one to add another.'
+                  : 'Connect Outlook account'
+            }
           >
             Connect Outlook
-          </Button>
-          <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={handleCreateSMTP} size="sm">
-            Add SMTP Account
           </Button>
         </HStack>
       </HStack>
@@ -314,11 +317,13 @@ export default function EmailAccountsEnhancedTab() {
                     </Text>
                   )}
                   <HStack justify="center" spacing={3}>
-                    <Button size="sm" onClick={handleConnectOutlook} isDisabled={!isValidCustomer}>
+                    <Button 
+                      size="sm" 
+                      colorScheme="blue"
+                      onClick={handleConnectOutlook} 
+                      isDisabled={!isValidCustomer}
+                    >
                       Connect Outlook
-                    </Button>
-                    <Button size="sm" colorScheme="teal" onClick={handleCreateSMTP}>
-                      Add SMTP Account
                     </Button>
                   </HStack>
                 </Td>
