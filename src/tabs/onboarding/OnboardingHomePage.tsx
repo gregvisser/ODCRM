@@ -632,8 +632,28 @@ export default function OnboardingHomePage() {
     // Update local form state
     setAccountDetails(nextAccountDetails)
     
-    // Emit event for other components (database is source of truth, this is notification only)
+    // Emit events for other components (database is source of truth, this is notification only)
     emit('customerUpdated', { id: selectedCustomer.id, accountData: nextAccountData })
+    
+    // Also emit contactsUpdated for backward compatibility with components that listen for it
+    // This ensures ContactsTab and AccountsTab stay in sync
+    if (accountDetails.primaryContact.firstName || accountDetails.primaryContact.lastName) {
+      const contactForEvent = {
+        id: nextContactId,
+        name: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
+        title: accountDetails.primaryContact.roleLabel || accountDetails.primaryContact.roleId || '',
+        accounts: [selectedCustomer.name],
+        tier: 'Decision maker',
+        status: accountDetails.primaryContact.status,
+        email: accountDetails.primaryContact.email,
+        phone: accountDetails.primaryContact.phone,
+      }
+      // Get existing contacts from localStorage and merge
+      const existingContacts = getJson<Array<{ id: string; name: string }>>('odcrm_contacts') || []
+      const updatedContacts = existingContacts.filter(c => c.id !== nextContactId)
+      updatedContacts.push(contactForEvent)
+      emit('contactsUpdated', updatedContacts)
+    }
     
     // Show success toast ONLY after successful API response
     toast({ 
