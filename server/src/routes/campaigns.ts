@@ -18,41 +18,63 @@ const getCustomerId = (req: express.Request): string => {
   return customerId
 }
 
-// Create campaign
+// Create campaign (allow minimal draft creation)
 const createCampaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
-  senderIdentityId: z.string(),
+  status: z.string().optional(),
+  senderIdentityId: z.string().optional(),
   // sendScheduleId: z.string().optional(),
-  sendWindowHoursStart: z.number().int().min(0).max(23),
-  sendWindowHoursEnd: z.number().int().min(0).max(23),
-  randomizeWithinHours: z.number().int().positive().default(24),
-  followUpDelayDaysMin: z.number().int().positive(),
-  followUpDelayDaysMax: z.number().int().positive()
+  sendWindowHoursStart: z.number().int().min(0).max(23).optional(),
+  sendWindowHoursEnd: z.number().int().min(0).max(23).optional(),
+  randomizeWithinHours: z.number().int().positive().optional(),
+  followUpDelayDaysMin: z.number().int().positive().optional(),
+  followUpDelayDaysMax: z.number().int().positive().optional(),
 })
 
 router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = createCampaignSchema.parse(req.body)
+    const status = data.status || 'draft'
 
-    // Verify sender identity belongs to customer
-    const identity = await prisma.emailIdentity.findFirst({
-      where: {
-        id: data.senderIdentityId,
-        customerId
+    let senderIdentityId = data.senderIdentityId
+    if (senderIdentityId) {
+      const identity = await prisma.emailIdentity.findFirst({
+        where: {
+          id: senderIdentityId,
+          customerId
+        }
+      })
+
+      if (!identity) {
+        return res.status(404).json({ error: 'Sender identity not found' })
       }
-    })
+    } else {
+      const fallbackIdentity = await prisma.emailIdentity.findFirst({
+        where: { customerId, isActive: true },
+        orderBy: { createdAt: 'asc' }
+      })
 
-    if (!identity) {
-      return res.status(404).json({ error: 'Sender identity not found' })
+      if (!fallbackIdentity) {
+        return res.status(400).json({ error: 'No active sender identity available for draft campaign' })
+      }
+
+      senderIdentityId = fallbackIdentity.id
     }
 
     const campaign = await prisma.emailCampaign.create({
       data: {
-        ...data,
+        name: data.name,
+        description: data.description,
+        status,
+        senderIdentityId,
+        sendWindowHoursStart: data.sendWindowHoursStart,
+        sendWindowHoursEnd: data.sendWindowHoursEnd,
+        randomizeWithinHours: data.randomizeWithinHours,
+        followUpDelayDaysMin: data.followUpDelayDaysMin,
+        followUpDelayDaysMax: data.followUpDelayDaysMax,
         customerId,
-        status: 'draft'
       } as any,
       include: {
         email_identities: true
@@ -384,6 +406,19 @@ router.post('/:id/start', async (req, res, next) => {
     const hasStep1 = campaign.email_campaign_templates.some((t) => t.stepNumber === 1)
     if (!hasStep1) {
       return res.status(400).json({ error: 'Campaign must have a Step 1 template before starting' })
+    }
+
+    if (!campaign.senderIdentityId) {
+      return res.status(400).json({ error: 'Campaign must have a sender identity before starting' })
+    }
+    if (campaign.sendWindowHoursStart === null || campaign.sendWindowHoursEnd === null) {
+      return res.status(400).json({ error: 'Campaign must have send window hours configured before starting' })
+    }
+    if (!campaign.randomizeWithinHours) {
+      return res.status(400).json({ error: 'Campaign must have randomizeWithinHours configured before starting' })
+    }
+    if (!campaign.followUpDelayDaysMin || !campaign.followUpDelayDaysMax) {
+      return res.status(400).json({ error: 'Campaign must have follow-up delays configured before starting' })
     }
 
     // Update status
