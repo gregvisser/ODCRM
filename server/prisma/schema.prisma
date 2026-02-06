@@ -131,6 +131,7 @@ model Customer {
   leadSyncState         LeadSyncState?
   suppressionEntries    SuppressionEntry[]
   sheetSourceConfigs    SheetSourceConfig[]
+  contactSourceRows     ContactSourceRow[]
 
   @@index([id])
   @@index([domain])
@@ -159,6 +160,7 @@ model Contact {
   contactListMembers       ContactListMember[]
   convertedFromLead        LeadRecord[]               @relation("LeadToContact")
   sequenceEnrollments      SequenceEnrollment[]
+  sourceRows               ContactSourceRow[]
 
   @@index([customerId, email])
   @@index([customerId])
@@ -214,7 +216,7 @@ model EmailCampaign {
   name                     String
   description              String?
   status                   CampaignStatus             @default(draft)
-  senderIdentityId         String
+  senderIdentityId         String?
   
   // Optional: link to list and sequence (OpensDoorsV2 workflow)
   listId                   String?
@@ -230,7 +232,7 @@ model EmailCampaign {
   
   // Relations
   customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  senderIdentity           EmailIdentity              @relation(fields: [senderIdentityId], references: [id])
+  senderIdentity           EmailIdentity?             @relation(fields: [senderIdentityId], references: [id])
   list                     ContactList?               @relation("CampaignToList", fields: [listId], references: [id])
   sequence                 EmailSequence?             @relation("CampaignToSequence", fields: [sequenceId], references: [id])
   prospects                EmailCampaignProspect[]
@@ -449,11 +451,33 @@ model ContactList {
   // Relations
   customer             Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   contactListMembers   ContactListMember[]
+  sourceRows           ContactSourceRow[]
   emailCampaigns       EmailCampaign[]        @relation("CampaignToList")
 
   @@index([customerId])
   @@index([customerId, name])
   @@map("contact_lists")
+}
+
+model ContactSourceRow {
+  id             String       @id @default(cuid())
+  customerId     String
+  contactId      String
+  listId         String
+  source         SheetSource
+  sheetName      String
+  sheetRowNumber Int
+  rawData        Json
+  createdAt      DateTime     @default(now())
+
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  list           ContactList  @relation(fields: [listId], references: [id], onDelete: Cascade)
+  customer       Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([listId])
+  @@index([contactId])
+  @@map("contact_source_rows")
 }
 
 model ContactListMember {

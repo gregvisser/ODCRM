@@ -38,11 +38,25 @@ router.post('/', async (req, res, next) => {
     const data = createCampaignSchema.parse(req.body)
     const status = data.status || 'draft'
 
-    let senderIdentityId = data.senderIdentityId
-    if (senderIdentityId) {
+    if (status !== 'draft') {
+      if (!data.senderIdentityId) {
+        return res.status(400).json({ error: 'senderIdentityId is required when status is not draft' })
+      }
+      if (data.sendWindowHoursStart === undefined || data.sendWindowHoursEnd === undefined) {
+        return res.status(400).json({ error: 'sendWindowHoursStart and sendWindowHoursEnd are required when status is not draft' })
+      }
+      if (data.randomizeWithinHours === undefined) {
+        return res.status(400).json({ error: 'randomizeWithinHours is required when status is not draft' })
+      }
+      if (data.followUpDelayDaysMin === undefined || data.followUpDelayDaysMax === undefined) {
+        return res.status(400).json({ error: 'followUpDelayDaysMin and followUpDelayDaysMax are required when status is not draft' })
+      }
+    }
+
+    if (data.senderIdentityId) {
       const identity = await prisma.emailIdentity.findFirst({
         where: {
-          id: senderIdentityId,
+          id: data.senderIdentityId,
           customerId
         }
       })
@@ -50,17 +64,6 @@ router.post('/', async (req, res, next) => {
       if (!identity) {
         return res.status(404).json({ error: 'Sender identity not found' })
       }
-    } else {
-      const fallbackIdentity = await prisma.emailIdentity.findFirst({
-        where: { customerId, isActive: true },
-        orderBy: { createdAt: 'asc' }
-      })
-
-      if (!fallbackIdentity) {
-        return res.status(400).json({ error: 'No active sender identity available for draft campaign' })
-      }
-
-      senderIdentityId = fallbackIdentity.id
     }
 
     const campaign = await prisma.emailCampaign.create({
@@ -68,7 +71,7 @@ router.post('/', async (req, res, next) => {
         name: data.name,
         description: data.description,
         status,
-        senderIdentityId,
+        senderIdentityId: data.senderIdentityId,
         sendWindowHoursStart: data.sendWindowHoursStart,
         sendWindowHoursEnd: data.sendWindowHoursEnd,
         randomizeWithinHours: data.randomizeWithinHours,

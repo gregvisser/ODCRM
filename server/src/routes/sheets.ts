@@ -252,6 +252,7 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
 
       const sourceKey = source as ValidSource
       const sheetName = sheetData.sheetTitle || config.sheetName || 'Sheet1'
+      const rawHeaders = sheetData.rawRows[0] || sheetData.headers
       const snapshotName = getSnapshotListName(sourceKey, sheetName, new Date())
 
       let snapshotList = await prisma.contactList.findFirst({
@@ -267,6 +268,17 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
           },
         })
       }
+
+      const rawRowsToInsert: Array<{
+        id: string
+        customerId: string
+        contactId: string
+        listId: string
+        source: SheetSource
+        sheetName: string
+        sheetRowNumber: number
+        rawData: Record<string, string>
+      }> = []
 
       for (let i = 0; i < sheetData.rows.length; i++) {
         const row = sheetData.rows[i]
@@ -292,6 +304,7 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
             where: { customerId, email: normalizedEmail },
           })
 
+          let contactId: string
           if (existing) {
             // UPDATE existing contact:
             // Only include fields that have actual non-empty values from the sheet.
@@ -308,6 +321,7 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
               data: updateData,
             })
             updated++
+            contactId = existing.id
             contactIdsInSheet.add(existing.id)
           } else {
             // CREATE new contact:
@@ -326,8 +340,26 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
               },
             })
             imported++
+            contactId = newContact.id
             contactIdsInSheet.add(newContact.id)
           }
+
+          const rawRow = sheetData.rawRows[i + 1] || []
+          const rawData = rawHeaders.reduce<Record<string, string>>((acc, header, idx) => {
+            acc[header] = rawRow[idx] || ''
+            return acc
+          }, {})
+
+          rawRowsToInsert.push({
+            id: `csr_${randomUUID()}`,
+            customerId,
+            contactId,
+            listId: snapshotList.id,
+            source: source as SheetSource,
+            sheetName,
+            sheetRowNumber: i + 2,
+            rawData,
+          })
         } catch (err: any) {
           skipped++
           errors.push(`Row ${i + 2}: ${err.message}`)
@@ -360,6 +392,16 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
             listId: snapshotList.id,
             contactId: { in: membersToRemove.map(member => member.contactId) },
           },
+        })
+      }
+
+      await prisma.contactSourceRow.deleteMany({
+        where: { listId: snapshotList.id },
+      })
+
+      if (rawRowsToInsert.length > 0) {
+        await prisma.contactSourceRow.createMany({
+          data: rawRowsToInsert,
         })
       }
 
@@ -465,6 +507,51 @@ router.get('/sources/:source/lists', async (req: Request, res: Response, next: N
 })
 
 /**
+ * GET /api/sheets/sources/:source/lists/:listId/rows
+ * Returns raw rows for a snapshot list
+ */
+router.get('/sources/:source/lists/:listId/rows', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { source, listId } = req.params
+
+    if (!isValidSource(source)) {
+      return res.status(400).json({ error: `Invalid source. Must be one of: ${validSources.join(', ')}` })
+    }
+
+    const limit = Math.min(parseInt(String(req.query.limit || '20'), 10) || 20, 100)
+
+    const list = await prisma.contactList.findFirst({
+      where: { id: listId, customerId },
+    })
+
+    if (!list) {
+      return res.status(404).json({ error: 'Snapshot list not found' })
+    }
+
+    const rows = await prisma.contactSourceRow.findMany({
+      where: { listId, customerId },
+      orderBy: { sheetRowNumber: 'asc' },
+      take: limit,
+      select: {
+        rawData: true,
+      },
+    })
+
+    const rawHeaders = rows.length > 0 ? Object.keys(rows[0].rawData as Record<string, string>) : []
+    const rawRows = rows.map(row => rawHeaders.map(header => (row.rawData as Record<string, string>)[header] || ''))
+
+    res.json({
+      listId,
+      rawHeaders,
+      rawRows,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
  * GET /api/sheets/sources/:source/preview
  * Returns a preview of imported contacts for a source
  */
@@ -499,6 +586,8 @@ router.get('/sources/:source/preview', async (req: Request, res: Response, next:
 
     const preview: any[] = []
     const errors: string[] = []
+    const rawHeaders = sheetData.rawRows[0] || sheetData.headers
+    const rawRows = sheetData.rawRows.slice(1, 21)
 
     for (let i = 0; i < sheetData.rows.length; i++) {
       const row = sheetData.rows[i]
@@ -537,6 +626,8 @@ router.get('/sources/:source/preview', async (req: Request, res: Response, next:
       preview,
       totalRows: sheetData.rows.length,
       errors: errors.slice(0, 10),
+      rawHeaders,
+      rawRows,
     })
   } catch (err) {
     next(err)

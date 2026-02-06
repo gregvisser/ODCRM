@@ -59,6 +59,7 @@ import {
   InfoIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { settingsStore } from '../../../platform'
 
 // Types
 interface SheetSourceConfig {
@@ -108,6 +109,8 @@ interface PreviewResult {
   sheetName?: string
   totalRows?: number
   preview?: ContactPreview[]
+  rawHeaders?: string[]
+  rawRows?: string[][]
   errors?: string[]
   lastSyncAt?: string | null
   lastSyncStatus?: 'pending' | 'syncing' | 'success' | 'error'
@@ -125,6 +128,11 @@ interface CampaignOption {
   id: string
   name: string
   status?: string
+}
+
+interface CustomerOption {
+  id: string
+  name: string
 }
 
 interface ContactPreview {
@@ -156,6 +164,14 @@ const LeadSourcesTab: React.FC = () => {
   const [syncResults, setSyncResults] = useState<Record<string, SyncResult>>({})
   const [previewResults, setPreviewResults] = useState<Record<string, PreviewResult>>({})
   const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [currentCustomerId, setCurrentCustomerId] = useState<string>(
+    settingsStore.getCurrentCustomerId('')
+  )
+  const [rawRowsByListId, setRawRowsByListId] = useState<Record<string, { headers: string[]; rows: string[][] }>>({})
+  const [rawRowsLoading, setRawRowsLoading] = useState<Record<string, boolean>>({})
+  const [rawRowsError, setRawRowsError] = useState<Record<string, string | null>>({})
+  const [expandedRawLists, setExpandedRawLists] = useState<Set<string>>(new Set())
   const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([])
   const [campaignsLoading, setCampaignsLoading] = useState(false)
   const [campaignsError, setCampaignsError] = useState<string | null>(null)
@@ -166,10 +182,52 @@ const LeadSourcesTab: React.FC = () => {
   const { isOpen: isCampaignModalOpen, onOpen: onCampaignModalOpen, onClose: onCampaignModalClose } = useDisclosure()
   const toast = useToast()
 
-  // Load sources on mount
+  const loadCustomers = async () => {
+    const res = await api.get<CustomerOption[]>('/api/customers')
+    if (res.error) {
+      toast({
+        title: 'Failed to load customers',
+        description: res.error,
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+
+    const list = (res.data || []).map((customer) => ({
+      id: customer.id,
+      name: customer.name,
+    }))
+
+    setCustomers(list)
+
+    if (!currentCustomerId && list.length > 0) {
+      settingsStore.setCurrentCustomerId(list[0].id)
+      setCurrentCustomerId(list[0].id)
+    } else if (currentCustomerId && !list.some((c) => c.id === currentCustomerId) && list.length > 0) {
+      settingsStore.setCurrentCustomerId(list[0].id)
+      setCurrentCustomerId(list[0].id)
+    }
+  }
+
+  // Load customers on mount
   useEffect(() => {
-    loadSources()
+    loadCustomers()
+    const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
+      const nextId = (detail as { currentCustomerId?: string | null })?.currentCustomerId
+      if (typeof nextId === 'string') {
+        setCurrentCustomerId(nextId)
+      }
+    })
+    return () => unsubscribe()
   }, [])
+
+  // Load sources when customer changes
+  useEffect(() => {
+    if (currentCustomerId) {
+      loadSources()
+    }
+  }, [currentCustomerId])
 
   const loadSnapshotLists = async (source: string) => {
     const res = await api.get<{ source: string; lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
@@ -211,6 +269,16 @@ const LeadSourcesTab: React.FC = () => {
     }
     
     setLoading(false)
+  }
+
+  const handleCustomerChange = (customerId: string) => {
+    settingsStore.setCurrentCustomerId(customerId)
+    setCurrentCustomerId(customerId)
+    setSyncResults({})
+    setPreviewResults({})
+    setSnapshotLists({})
+    setRawRowsByListId({})
+    setExpandedRawLists(new Set())
   }
 
   const handleConnect = async (source: string) => {
@@ -323,6 +391,41 @@ const LeadSourcesTab: React.FC = () => {
         ...prev,
         [source]: res.data!,
       }))
+    }
+  }
+
+  const loadRawRowsForList = async (source: string, listId: string) => {
+    setRawRowsLoading((prev) => ({ ...prev, [listId]: true }))
+    setRawRowsError((prev) => ({ ...prev, [listId]: null }))
+    const res = await api.get<{ rawHeaders: string[]; rawRows: string[][] }>(
+      `/api/sheets/sources/${source}/lists/${listId}/rows?limit=20`
+    )
+    if (res.error) {
+      setRawRowsError((prev) => ({ ...prev, [listId]: res.error || 'Failed to load raw rows' }))
+      setRawRowsLoading((prev) => ({ ...prev, [listId]: false }))
+      return
+    }
+
+    setRawRowsByListId((prev) => ({
+      ...prev,
+      [listId]: { headers: res.data?.rawHeaders || [], rows: res.data?.rawRows || [] },
+    }))
+    setRawRowsLoading((prev) => ({ ...prev, [listId]: false }))
+  }
+
+  const toggleRawRows = async (source: string, listId: string) => {
+    setExpandedRawLists((prev) => {
+      const next = new Set(prev)
+      if (next.has(listId)) {
+        next.delete(listId)
+      } else {
+        next.add(listId)
+      }
+      return next
+    })
+
+    if (!rawRowsByListId[listId]) {
+      await loadRawRowsForList(source, listId)
     }
   }
 
@@ -457,6 +560,10 @@ const LeadSourcesTab: React.FC = () => {
       default:
         return <Badge colorScheme="gray">Not synced</Badge>
     }
+  }
+
+  const getEmailColumnIndex = (headers: string[]) => {
+    return headers.findIndex((header) => header.toLowerCase().includes('email'))
   }
 
   const renderSourceTab = (source: SheetSourceConfig) => {
@@ -754,6 +861,41 @@ const LeadSourcesTab: React.FC = () => {
           </Card>
         )}
 
+        {previewResult && previewResult.rawHeaders && previewResult.rawRows && previewResult.rawRows.length > 0 && (
+          <Card mt={6}>
+            <CardHeader>
+              <Heading size="sm">Raw Fields (first {previewResult.rawRows.length} rows)</Heading>
+            </CardHeader>
+            <CardBody>
+              <Box overflowX="auto">
+                <Table size="sm">
+                  <Thead>
+                    <Tr>
+                      {previewResult.rawHeaders.map((header, idx) => (
+                        <Th
+                          key={`${header}-${idx}`}
+                          bg={idx === getEmailColumnIndex(previewResult.rawHeaders || []) ? 'yellow.50' : undefined}
+                        >
+                          {header || '(blank)'}
+                        </Th>
+                      ))}
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {previewResult.rawRows.map((row, rowIdx) => (
+                      <Tr key={`raw-${rowIdx}`}>
+                        {previewResult.rawHeaders.map((_, colIdx) => (
+                          <Td key={`raw-${rowIdx}-${colIdx}`}>{row[colIdx] || ''}</Td>
+                        ))}
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </Box>
+            </CardBody>
+          </Card>
+        )}
+
         {/* Recent Snapshots */}
         {snapshots.length > 0 && (
           <Card mt={6}>
@@ -763,22 +905,75 @@ const LeadSourcesTab: React.FC = () => {
             <CardBody>
               <VStack align="stretch" spacing={3}>
                 {snapshots.map((list) => (
-                  <Flex key={list.id} align="center" justify="space-between">
-                    <Box>
-                      <Text fontWeight="medium">{list.name}</Text>
-                      <Text fontSize="sm" color="gray.500">
-                        {list.memberCount} members · {new Date(list.lastSyncAt).toLocaleString()}
-                      </Text>
-                    </Box>
-                    <HStack spacing={2}>
-                      <Button size="sm" variant="outline" onClick={() => handleOpenSnapshotList(list.id)}>
-                        Open Snapshot List
-                      </Button>
-                      <Button size="sm" colorScheme="blue" onClick={() => openUseInCampaign(list)}>
-                        Use in Campaign
-                      </Button>
-                    </HStack>
-                  </Flex>
+                  <Box key={list.id}>
+                    <Flex align="center" justify="space-between">
+                      <Box>
+                        <Text fontWeight="medium">{list.name}</Text>
+                        <Text fontSize="sm" color="gray.500">
+                          {list.memberCount} members · {new Date(list.lastSyncAt).toLocaleString()}
+                        </Text>
+                      </Box>
+                      <HStack spacing={2}>
+                        <Button size="sm" variant="outline" onClick={() => handleOpenSnapshotList(list.id)}>
+                          Open Snapshot List
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => toggleRawRows(source.source, list.id)}>
+                          {expandedRawLists.has(list.id) ? 'Hide Raw Fields' : 'Raw Fields'}
+                        </Button>
+                        <Button size="sm" colorScheme="blue" onClick={() => openUseInCampaign(list)}>
+                          Use in Campaign
+                        </Button>
+                      </HStack>
+                    </Flex>
+
+                    {expandedRawLists.has(list.id) && (
+                      <Box mt={3} border="1px solid" borderColor="gray.200" borderRadius="md" p={3}>
+                        {rawRowsLoading[list.id] && (
+                          <HStack spacing={2}>
+                            <Spinner size="sm" />
+                            <Text fontSize="sm">Loading raw fields...</Text>
+                          </HStack>
+                        )}
+                        {rawRowsError[list.id] && (
+                          <Text fontSize="sm" color="red.500">
+                            {rawRowsError[list.id]}
+                          </Text>
+                        )}
+                        {rawRowsByListId[list.id] && rawRowsByListId[list.id].rows.length > 0 && (
+                          <Box overflowX="auto">
+                            <Table size="sm">
+                              <Thead>
+                                <Tr>
+                                  {rawRowsByListId[list.id].headers.map((header, idx) => (
+                                    <Th
+                                      key={`${list.id}-header-${idx}`}
+                                      bg={idx === getEmailColumnIndex(rawRowsByListId[list.id].headers) ? 'yellow.50' : undefined}
+                                    >
+                                      {header || '(blank)'}
+                                    </Th>
+                                  ))}
+                                </Tr>
+                              </Thead>
+                              <Tbody>
+                                {rawRowsByListId[list.id].rows.map((row, rowIdx) => (
+                                  <Tr key={`${list.id}-row-${rowIdx}`}>
+                                    {rawRowsByListId[list.id].headers.map((_, colIdx) => (
+                                      <Td key={`${list.id}-row-${rowIdx}-${colIdx}`}>{row[colIdx] || ''}</Td>
+                                    ))}
+                                  </Tr>
+                                ))}
+                              </Tbody>
+                            </Table>
+                          </Box>
+                        )}
+                        {rawRowsByListId[list.id] && rawRowsByListId[list.id].rows.length === 0 && !rawRowsLoading[list.id] && (
+                          <Text fontSize="sm" color="gray.500">
+                            No raw rows found for this snapshot.
+                          </Text>
+                        )}
+                      </Box>
+                    )}
+                  </Box>
                 ))}
               </VStack>
             </CardBody>
@@ -827,10 +1022,31 @@ const LeadSourcesTab: React.FC = () => {
           <Text color="gray.500">
             Connect Google Sheets to import contacts from Cognism, Apollo, and Blackbook
           </Text>
+          {currentCustomerId && (
+            <Text mt={2} fontSize="sm" color="gray.600">
+              Working as: <strong>{customers.find((c) => c.id === currentCustomerId)?.name || currentCustomerId}</strong>
+            </Text>
+          )}
         </Box>
-        <Button leftIcon={<RepeatIcon />} onClick={loadSources} variant="outline">
-          Refresh
-        </Button>
+        <HStack spacing={3}>
+          <FormControl minW="240px">
+            <FormLabel fontSize="sm" mb={1}>Current Customer</FormLabel>
+            <Select
+              value={currentCustomerId}
+              onChange={(e) => handleCustomerChange(e.target.value)}
+              placeholder={customers.length === 0 ? 'No customers' : 'Select customer'}
+            >
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
+          <Button leftIcon={<RepeatIcon />} onClick={loadSources} variant="outline">
+            Refresh
+          </Button>
+        </HStack>
       </Flex>
 
       {/* Summary Stats */}
