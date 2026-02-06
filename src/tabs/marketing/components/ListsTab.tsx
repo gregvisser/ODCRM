@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Card,
@@ -100,6 +104,7 @@ const ListsTab: React.FC = () => {
   const [selectedLists, setSelectedLists] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const { isOpen: isManageOpen, onOpen: onManageOpen, onClose: onManageClose } = useDisclosure()
   const [editingList, setEditingList] = useState<ProspectList | null>(null)
@@ -112,22 +117,26 @@ const ListsTab: React.FC = () => {
   }, [])
 
   const loadData = async () => {
-    try {
-      setLoading(true)
-      const [listsRes, prospectsRes] = await Promise.all([
-        api.get<ProspectList[]>('/api/lists'),
-        api.get<Prospect[]>('/api/prospects')
-      ])
+    setLoading(true)
+    setError(null)
 
-      setLists(listsRes.data || mockLists)
-      setProspects(prospectsRes.data || mockProspects)
-    } catch (error) {
-      console.error('Failed to load lists:', error)
-      setLists(mockLists)
-      setProspects(mockProspects)
-    } finally {
-      setLoading(false)
+    const [listsRes, prospectsRes] = await Promise.all([
+      api.get<ProspectList[]>('/api/lists'),
+      api.get<Prospect[]>('/api/prospects')
+    ])
+
+    if (listsRes.error) {
+      setError(listsRes.error)
+    } else {
+      setLists(listsRes.data || [])
     }
+
+    // Note: /api/prospects doesn't have a backend yet, so we accept empty data here
+    if (!prospectsRes.error) {
+      setProspects(prospectsRes.data || [])
+    }
+
+    setLoading(false)
   }
 
   const filteredLists = useMemo(() => {
@@ -318,6 +327,20 @@ const ListsTab: React.FC = () => {
           </Button>
         </HStack>
       </Flex>
+
+      {/* Error Display */}
+      {error && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load lists</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadData} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
       {/* Stats */}
       <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4} mb={6}>
@@ -660,72 +683,5 @@ const ListsTab: React.FC = () => {
     </Box>
   )
 }
-
-// Mock data for development
-const mockLists: ProspectList[] = [
-  {
-    id: '1',
-    name: 'Tech CTOs - Bay Area',
-    description: 'Chief Technology Officers at tech companies in the San Francisco Bay Area',
-    prospectCount: 245,
-    activeProspects: 198,
-    createdAt: '2024-01-15T10:00:00Z',
-    updatedAt: '2024-01-25T14:30:00Z',
-    tags: ['tech', 'bay-area', 'executive'],
-    filters: [
-      { field: 'jobTitle', operator: 'contains', value: 'CTO' },
-      { field: 'industry', operator: 'equals', value: 'Technology' },
-      { field: 'location', operator: 'contains', value: 'Bay Area' },
-    ],
-    isDynamic: true,
-  },
-  {
-    id: '2',
-    name: 'Enterprise Accounts',
-    description: 'High-value enterprise prospects for strategic outreach',
-    prospectCount: 89,
-    activeProspects: 89,
-    createdAt: '2024-01-18T09:15:00Z',
-    updatedAt: '2024-01-24T11:20:00Z',
-    tags: ['enterprise', 'high-value'],
-    filters: [],
-    isDynamic: false,
-  },
-  {
-    id: '3',
-    name: 'Recent Responders',
-    description: 'Prospects who have replied to emails in the last 30 days',
-    prospectCount: 156,
-    activeProspects: 134,
-    createdAt: '2024-01-20T16:45:00Z',
-    updatedAt: '2024-01-25T08:30:00Z',
-    tags: ['responders', 'engaged'],
-    filters: [
-      { field: 'status', operator: 'equals', value: 'qualified' },
-    ],
-    isDynamic: true,
-  },
-]
-
-const mockProspects: Prospect[] = [
-  {
-    id: '1',
-    firstName: 'John',
-    lastName: 'Smith',
-    email: 'john.smith@techcorp.com',
-    companyName: 'TechCorp Inc.',
-    jobTitle: 'CTO',
-    status: 'qualified',
-  },
-  {
-    id: '2',
-    firstName: 'Sarah',
-    lastName: 'Johnson',
-    email: 'sarah.johnson@startup.io',
-    companyName: 'Startup.io',
-    jobTitle: 'VP of Engineering',
-    status: 'contacted',
-  },
-]
 
 export default ListsTab

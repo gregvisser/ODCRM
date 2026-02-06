@@ -53,6 +53,10 @@ import {
   Tag,
   TagLabel,
   TagCloseButton,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -107,6 +111,7 @@ const CampaignsTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
   const toast = useToast()
@@ -116,22 +121,25 @@ const CampaignsTab: React.FC = () => {
   }, [])
 
   const loadData = async () => {
-    try {
-      setLoading(true)
-      const [campaignsRes, templatesRes] = await Promise.all([
-        api.get<Campaign[]>('/api/campaigns'),
-        api.get<CampaignTemplate[]>('/api/campaigns/templates')
-      ])
+    setLoading(true)
+    setError(null)
 
-      setCampaigns(campaignsRes.data || mockCampaigns)
-      setTemplates(templatesRes.data || mockTemplates)
-    } catch (error) {
-      console.error('Failed to load campaigns:', error)
-      setCampaigns(mockCampaigns)
-      setTemplates(mockTemplates)
-    } finally {
-      setLoading(false)
+    const [campaignsRes, templatesRes] = await Promise.all([
+      api.get<Campaign[]>('/api/campaigns'),
+      api.get<CampaignTemplate[]>('/api/templates')
+    ])
+
+    if (campaignsRes.error) {
+      setError(campaignsRes.error)
+    } else {
+      setCampaigns(campaignsRes.data || [])
     }
+
+    if (!templatesRes.error) {
+      setTemplates(templatesRes.data || [])
+    }
+
+    setLoading(false)
   }
 
   const filteredCampaigns = useMemo(() => {
@@ -214,22 +222,47 @@ const CampaignsTab: React.FC = () => {
     }
   }
 
-  const handleSendCampaign = async (campaignId: string) => {
-    try {
-      await api.post(`/api/campaigns/${campaignId}/send`, {})
-      await loadData()
+  const handleStartCampaign = async (campaignId: string) => {
+    const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/start`, {})
+    
+    if (apiError) {
       toast({
-        title: 'Campaign sent successfully',
-        status: 'success',
-        duration: 3000,
-      } as any)
-    } catch (error) {
-      toast({
-        title: 'Failed to send campaign',
+        title: 'Failed to start campaign',
+        description: apiError,
         status: 'error',
-        duration: 3000,
+        duration: 5000,
       })
+      return
     }
+
+    await loadData()
+    toast({
+      title: 'Campaign started',
+      description: 'Emails will be sent according to the schedule.',
+      status: 'success',
+      duration: 3000,
+    })
+  }
+
+  const handlePauseCampaign = async (campaignId: string) => {
+    const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/pause`, {})
+    
+    if (apiError) {
+      toast({
+        title: 'Failed to pause campaign',
+        description: apiError,
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+
+    await loadData()
+    toast({
+      title: 'Campaign paused',
+      status: 'info',
+      duration: 3000,
+    })
   }
 
   const handleDeleteCampaign = async (campaignId: string) => {
@@ -272,7 +305,7 @@ const CampaignsTab: React.FC = () => {
     }
   }
 
-  if (loading) {
+  if (loading && campaigns.length === 0) {
     return (
       <Box textAlign="center" py={10}>
         <Text>Loading campaigns...</Text>
@@ -282,6 +315,20 @@ const CampaignsTab: React.FC = () => {
 
   return (
     <Box>
+      {/* Error Banner */}
+      {error && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load campaigns</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadData} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
+
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
@@ -510,11 +557,17 @@ const CampaignsTab: React.FC = () => {
                           <MenuItem icon={<EditIcon />} onClick={() => handleEditCampaign(campaign)}>
                             Edit
                           </MenuItem>
-                          {campaign.status === 'draft' && (
-                            <MenuItem icon={<EmailIcon />} onClick={() => handleSendCampaign(campaign.id)}>
-                              Send Now
+                          {(campaign.status === 'draft' || campaign.status === 'paused') && (
+                            <MenuItem icon={<EmailIcon />} onClick={() => handleStartCampaign(campaign.id)}>
+                              Start Campaign
                             </MenuItem>
                           )}
+                          {campaign.status === 'sending' && (
+                            <MenuItem icon={<TimeIcon />} onClick={() => handlePauseCampaign(campaign.id)}>
+                              Pause Campaign
+                            </MenuItem>
+                          )}
+                          <MenuDivider />
                           <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteCampaign(campaign.id)}>
                             Delete
                           </MenuItem>
@@ -626,89 +679,5 @@ const CampaignsTab: React.FC = () => {
     </Box>
   )
 }
-
-// Mock data for development
-const mockCampaigns: Campaign[] = [
-  {
-    id: '1',
-    name: 'Q1 Product Launch',
-    subject: 'Introducing our new AI-powered features',
-    status: 'sent',
-    recipientCount: 5000,
-    sentCount: 5000,
-    openedCount: 1250,
-    clickedCount: 380,
-    repliedCount: 45,
-    openRate: 25.0,
-    clickRate: 7.6,
-    replyRate: 0.9,
-    sentAt: '2024-01-20T10:00:00Z',
-    createdAt: '2024-01-15T09:00:00Z',
-    senderIdentity: {
-      id: 'default',
-      emailAddress: 'noreply@company.com',
-      displayName: 'Company Name',
-    },
-    tags: ['product', 'launch', 'q1'],
-  },
-  {
-    id: '2',
-    name: 'Newsletter - January',
-    subject: 'January Industry Insights & Trends',
-    status: 'scheduled',
-    recipientCount: 3200,
-    sentCount: 0,
-    openedCount: 0,
-    clickedCount: 0,
-    repliedCount: 0,
-    openRate: 0,
-    clickRate: 0,
-    replyRate: 0,
-    scheduledFor: '2024-01-26T08:00:00Z',
-    createdAt: '2024-01-22T14:30:00Z',
-    senderIdentity: {
-      id: 'default',
-      emailAddress: 'noreply@company.com',
-      displayName: 'Company Name',
-    },
-    tags: ['newsletter', 'monthly'],
-  },
-  {
-    id: '3',
-    name: 'Webinar Invitation',
-    subject: 'Join us: Advanced Email Marketing Strategies',
-    status: 'draft',
-    recipientCount: 0,
-    sentCount: 0,
-    openedCount: 0,
-    clickedCount: 0,
-    repliedCount: 0,
-    openRate: 0,
-    clickRate: 0,
-    replyRate: 0,
-    createdAt: '2024-01-24T11:15:00Z',
-    senderIdentity: {
-      id: 'default',
-      emailAddress: 'noreply@company.com',
-      displayName: 'Company Name',
-    },
-    tags: ['webinar', 'education'],
-  },
-]
-
-const mockTemplates: CampaignTemplate[] = [
-  {
-    id: '1',
-    name: 'Product Launch Template',
-    subject: 'Introducing {{product_name}}',
-    previewText: 'Exciting news about our latest product...',
-  },
-  {
-    id: '2',
-    name: 'Newsletter Template',
-    subject: '{{month}} Industry Insights',
-    previewText: 'Stay updated with the latest trends...',
-  },
-]
 
 export default CampaignsTab

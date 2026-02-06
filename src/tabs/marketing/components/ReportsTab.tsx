@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Card,
   CardBody,
@@ -77,69 +81,35 @@ const ReportsTab: React.FC = () => {
   const [metrics, setMetrics] = useState<ReportMetrics | null>(null)
   const [sequences, setSequences] = useState<SequenceReport[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
 
-  useEffect(() => {
-    const loadReports = async () => {
-      try {
-        setLoading(true)
-        const [metricsRes, sequencesRes] = await Promise.all([
-          api.get<ReportMetrics>(`/api/reports/metrics?range=${timeRange}`),
-          api.get<SequenceReport[]>(`/api/reports/sequences?range=${timeRange}`)
-        ])
+  const loadReports = async () => {
+    setLoading(true)
+    setError(null)
 
+    const [metricsRes, sequencesRes] = await Promise.all([
+      api.get<ReportMetrics>(`/api/reports/metrics?range=${timeRange}`),
+      api.get<SequenceReport[]>(`/api/reports/sequences?range=${timeRange}`)
+    ])
+
+    if (metricsRes.error && sequencesRes.error) {
+      setError(metricsRes.error)
+    } else {
+      if (!metricsRes.error) {
         setMetrics(metricsRes.data || null)
+      }
+      if (!sequencesRes.error) {
         setSequences(sequencesRes.data || [])
-      } catch (error) {
-        console.error('Failed to load reports:', error)
-        // Set mock data for development
-        setMetrics({
-          totalEmails: 15420,
-          deliveredEmails: 14850,
-          openedEmails: 4230,
-          clickedEmails: 845,
-          repliedEmails: 324,
-          bouncedEmails: 570,
-          unsubscribedEmails: 89,
-          openRate: 28.4,
-          clickRate: 5.7,
-          replyRate: 2.2,
-          bounceRate: 3.8,
-          unsubscribeRate: 0.6,
-        })
-        setSequences([
-          {
-            id: '1',
-            name: 'Enterprise Outreach Q1',
-            status: 'active',
-            sent: 2450,
-            delivered: 2380,
-            opened: 680,
-            clicked: 136,
-            replied: 52,
-            replyRate: 2.2,
-            lastActivity: '2024-01-25T10:30:00Z',
-          },
-          {
-            id: '2',
-            name: 'Startup Follow-up',
-            status: 'active',
-            sent: 1820,
-            delivered: 1780,
-            opened: 520,
-            clicked: 104,
-            replied: 38,
-            replyRate: 2.1,
-            lastActivity: '2024-01-25T09:15:00Z',
-          },
-        ])
-      } finally {
-        setLoading(false)
       }
     }
 
+    setLoading(false)
+  }
+
+  useEffect(() => {
     loadReports()
   }, [timeRange])
 
@@ -220,6 +190,20 @@ const ReportsTab: React.FC = () => {
           </Select>
         </HStack>
       </Flex>
+
+      {/* Error Display */}
+      {error && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load reports</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadReports} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
       {/* Key Metrics */}
       <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4} mb={8}>

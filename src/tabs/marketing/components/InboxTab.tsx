@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Card,
@@ -104,6 +108,7 @@ const InboxTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [replyContent, setReplyContent] = useState('')
   const toast = useToast()
@@ -119,25 +124,25 @@ const InboxTab: React.FC = () => {
   }, [selectedThread])
 
   const loadThreads = async () => {
-    try {
-      setLoading(true)
-      const threadsRes = await api.get<EmailThread[]>('/api/inbox/threads')
-      setThreads(threadsRes.data || mockThreads)
-    } catch (error) {
-      console.error('Failed to load threads:', error)
-      setThreads(mockThreads)
-    } finally {
-      setLoading(false)
+    setLoading(true)
+    setError(null)
+
+    const { data, error: apiError } = await api.get<EmailThread[]>('/api/inbox/threads')
+    
+    if (apiError) {
+      setError(apiError)
+    } else {
+      setThreads(data || [])
     }
+    
+    setLoading(false)
   }
 
   const loadMessages = async (threadId: string) => {
-    try {
-      const messagesRes = await api.get<EmailMessage[]>(`/api/inbox/threads/${threadId}/messages`)
-      setMessages(messagesRes.data || mockMessages)
-    } catch (error) {
-      console.error('Failed to load messages:', error)
-      setMessages(mockMessages)
+    const { data, error: apiError } = await api.get<EmailMessage[]>(`/api/inbox/threads/${threadId}/messages`)
+    
+    if (!apiError) {
+      setMessages(data || [])
     }
   }
 
@@ -290,6 +295,20 @@ const InboxTab: React.FC = () => {
           </Button>
         </HStack>
       </Flex>
+
+      {/* Error Display */}
+      {error && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load inbox</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadThreads} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
       {/* Stats */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
@@ -519,90 +538,5 @@ const InboxTab: React.FC = () => {
     </Box>
   )
 }
-
-// Mock data for development
-const mockThreads: EmailThread[] = [
-  {
-    id: '1',
-    subject: 'Following up on our conversation about TechCorp',
-    prospect: {
-      id: '1',
-      firstName: 'John',
-      lastName: 'Smith',
-      email: 'john.smith@techcorp.com',
-      companyName: 'TechCorp Inc.',
-    },
-    status: 'unread',
-    priority: 'high',
-    lastActivity: '2024-01-25T14:30:00Z',
-    messageCount: 3,
-    isStarred: true,
-    tags: ['hot-lead', 'follow-up'],
-    sequence: {
-      id: '1',
-      name: 'Enterprise Outreach',
-      step: 2,
-    },
-  },
-  {
-    id: '2',
-    subject: 'Re: Product demo request',
-    prospect: {
-      id: '2',
-      firstName: 'Sarah',
-      lastName: 'Johnson',
-      email: 'sarah.johnson@startup.io',
-      companyName: 'Startup.io',
-    },
-    status: 'replied',
-    priority: 'medium',
-    lastActivity: '2024-01-25T11:15:00Z',
-    messageCount: 5,
-    isStarred: false,
-    tags: ['demo', 'qualified'],
-  },
-  {
-    id: '3',
-    subject: 'Interested in your solution',
-    prospect: {
-      id: '3',
-      firstName: 'Michael',
-      lastName: 'Chen',
-      email: 'm.chen@enterprise.com',
-      companyName: 'Enterprise Corp',
-    },
-    status: 'read',
-    priority: 'low',
-    lastActivity: '2024-01-24T16:45:00Z',
-    messageCount: 2,
-    isStarred: false,
-    tags: ['inquiry'],
-  },
-]
-
-const mockMessages: EmailMessage[] = [
-  {
-    id: '1',
-    threadId: '1',
-    direction: 'outbound',
-    sender: { email: 'sales@company.com', name: 'Sales Team' },
-    recipient: { email: 'john.smith@techcorp.com', name: 'John Smith' },
-    subject: 'Following up on our conversation about TechCorp',
-    content: 'Hi John,\n\nI wanted to follow up on our conversation about TechCorp and the challenges you\'re facing with scaling your engineering team.\n\nWould you be available for a quick call next week?\n\nBest regards,\nSales Team',
-    sentAt: '2024-01-24T10:00:00Z',
-    isRead: true,
-  },
-  {
-    id: '2',
-    threadId: '1',
-    direction: 'inbound',
-    sender: { email: 'john.smith@techcorp.com', name: 'John Smith' },
-    recipient: { email: 'sales@company.com', name: 'Sales Team' },
-    subject: 'Re: Following up on our conversation about TechCorp',
-    content: 'Hi,\n\nThanks for following up. I\'m interested in learning more about your solution. Would you be able to schedule a demo for next Tuesday?\n\nBest,\nJohn',
-    sentAt: '2024-01-25T14:30:00Z',
-    isRead: false,
-  },
-]
 
 export default InboxTab

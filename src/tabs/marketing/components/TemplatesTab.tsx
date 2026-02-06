@@ -1,5 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Card,
@@ -80,6 +84,7 @@ const TemplatesTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const { isOpen: isPreviewOpen, onOpen: onPreviewOpen, onClose: onPreviewClose } = useDisclosure()
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
@@ -91,16 +96,18 @@ const TemplatesTab: React.FC = () => {
   }, [])
 
   const loadData = async () => {
-    try {
-      setLoading(true)
-      const templatesRes = await api.get<EmailTemplate[]>('/api/templates')
-      setTemplates(templatesRes.data || mockTemplates)
-    } catch (error) {
-      console.error('Failed to load templates:', error)
-      setTemplates(mockTemplates)
-    } finally {
-      setLoading(false)
+    setLoading(true)
+    setError(null)
+
+    const { data, error: apiError } = await api.get<EmailTemplate[]>('/api/templates')
+    
+    if (apiError) {
+      setError(apiError)
+    } else {
+      setTemplates(data || [])
     }
+    
+    setLoading(false)
   }
 
   const categories = useMemo(() => {
@@ -264,6 +271,20 @@ const TemplatesTab: React.FC = () => {
           New Template
         </Button>
       </Flex>
+
+      {/* Error Display */}
+      {error && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load templates</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadData} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
 
       {/* Quick Stats */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
@@ -577,99 +598,4 @@ const TemplatesTab: React.FC = () => {
 }
 
 // Mock data for development
-const mockTemplates: EmailTemplate[] = [
-  {
-    id: '1',
-    name: 'Initial Outreach',
-    subject: 'Following up on our conversation about {{company}}',
-    content: `Hi {{firstName}},
-
-I hope this email finds you well. I wanted to follow up on our conversation about {{company}} and the challenges you're facing with {{pain_point}}.
-
-At {{our_company}}, we've helped similar companies like {{company}} achieve {{benefit}} by {{solution}}.
-
-Would you be open to a quick 15-minute call next week to discuss how we might help {{company}}?
-
-Best regards,
-{{sender_name}}
-{{sender_title}}
-{{sender_company}}
-{{sender_phone}}`,
-    previewText: 'Following up on our conversation about your company...',
-    category: 'Sales',
-    tags: ['outreach', 'follow-up', 'sales'],
-    isFavorite: true,
-    usageCount: 245,
-    lastUsed: '2024-01-25T10:30:00Z',
-    createdAt: '2024-01-15T09:00:00Z',
-    updatedAt: '2024-01-20T14:15:00Z',
-    createdBy: {
-      id: '1',
-      name: 'John Smith',
-      email: 'john@company.com',
-    },
-  },
-  {
-    id: '2',
-    name: 'Product Demo Request',
-    subject: 'Product demo: {{product_name}} for {{company}}',
-    content: `Hello {{firstName}},
-
-Thank you for your interest in {{product_name}}. I'd love to show you how our solution can help {{company}} overcome {{challenge}}.
-
-Our product demo typically takes 30 minutes and covers:
-• Key features and capabilities
-• Integration with your existing systems
-• ROI and implementation timeline
-
-When would be a good time for us to connect?
-
-Looking forward to your response.
-
-Best,
-{{sender_name}}`,
-    category: 'Sales',
-    tags: ['demo', 'product', 'sales'],
-    isFavorite: false,
-    usageCount: 89,
-    createdAt: '2024-01-18T11:30:00Z',
-    updatedAt: '2024-01-22T16:45:00Z',
-    createdBy: {
-      id: '1',
-      name: 'John Smith',
-      email: 'john@company.com',
-    },
-  },
-  {
-    id: '3',
-    name: 'Newsletter Welcome',
-    subject: 'Welcome to {{company}} Insights - Issue #{{issue_number}}',
-    content: `Hi {{firstName}},
-
-Welcome to our monthly newsletter! Each issue brings you:
-• Industry trends and insights
-• Best practices from successful companies
-• Exclusive content and resources
-
-In this issue:
-{{newsletter_content}}
-
-Stay connected,
-The {{company}} Team
-
-P.S. Reply to this email if you'd like to unsubscribe or update your preferences.`,
-    category: 'Newsletter',
-    tags: ['newsletter', 'welcome', 'marketing'],
-    isFavorite: true,
-    usageCount: 1200,
-    createdAt: '2024-01-10T08:00:00Z',
-    updatedAt: '2024-01-25T12:00:00Z',
-    createdBy: {
-      id: '2',
-      name: 'Sarah Johnson',
-      email: 'sarah@company.com',
-    },
-  },
-]
-
 export default TemplatesTab
