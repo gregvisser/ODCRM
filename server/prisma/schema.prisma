@@ -130,6 +130,7 @@ model Customer {
   leadRecords           LeadRecord[]
   leadSyncState         LeadSyncState?
   suppressionEntries    SuppressionEntry[]
+  sheetSourceConfigs    SheetSourceConfig[]
 
   @@index([id])
   @@index([domain])
@@ -667,4 +668,48 @@ model UserPreferences {
 
   @@index([userEmail])
   @@map("user_preferences")
+}
+
+// ============================================================================
+// LEAD SOURCES (Google Sheets Integration)
+// ============================================================================
+
+enum SheetSource {
+  cognism
+  apollo
+  blackbook
+}
+
+enum SheetSyncStatus {
+  pending
+  syncing
+  success
+  error
+}
+
+// Configuration for each lead source sheet per customer
+model SheetSourceConfig {
+  id              String          @id @default(cuid())
+  customerId      String
+  source          SheetSource     // cognism, apollo, blackbook
+  sheetUrl        String?         // Full Google Sheets URL
+  sheetId         String?         // Extracted spreadsheet ID
+  gid             String?         // Sheet tab GID (optional)
+  sheetName       String?         // Sheet tab name (optional)
+  lastSyncAt      DateTime?
+  lastSyncStatus  SheetSyncStatus @default(pending)
+  lastError       String?
+  rowsImported    Int             @default(0)
+  rowsUpdated     Int             @default(0)
+  rowsSkipped     Int             @default(0)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  // Relations
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, source])
+  @@index([customerId])
+  @@index([source])
+  @@map("sheet_source_configs")
 }
