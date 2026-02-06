@@ -130,11 +130,13 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     // If schema/client isn't migrated yet, fall back to legacy 2-step columns.
     let usedNewStepScheduling = false
     try {
+      // Find due steps that haven't been sent AND haven't been claimed
       const dueSteps = await (prisma as any).emailCampaignProspectStep.findMany({
         where: {
           campaignId: campaign.id,
           scheduledAt: { lte: now },
           sentAt: null,
+          claimedAt: null,  // IDEMPOTENCY: Not already claimed
           prospect: {
             unsubscribedAt: null,
             bouncedAt: null,
@@ -164,13 +166,36 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
           })
           if (customerSent >= 160) break
 
+          // ATOMIC CLAIM: Try to claim this step for sending
+          // Only succeeds if claimedAt is still null
+          const claimResult = await (prisma as any).emailCampaignProspectStep.updateMany({
+            where: {
+              id: row.id,
+              sentAt: null,
+              claimedAt: null,  // MUST be unclaimed
+            },
+            data: {
+              claimedAt: new Date(),
+              claimedBy: SCHEDULER_INSTANCE_ID,
+            }
+          })
+
+          if (claimResult.count === 0) {
+            // Another instance claimed this step
+            console.log(
+              `[emailScheduler] CLAIM_FAILED stepId=${row.id} prospectId=${row.campaignProspectId} ` +
+              `step=${row.stepNumber} instance=${SCHEDULER_INSTANCE_ID} - already claimed`
+            )
+            continue
+          }
+
           const prospect = row.prospect
           const stepNumber = row.stepNumber
           const success = await sendCampaignEmail(prisma, campaign, prospect, stepNumber)
           if (success) sentCount++
           else errorCount++
 
-          // Mark row as sent (best-effort)
+          // Mark row as sent (the claim already happened)
           await (prisma as any).emailCampaignProspectStep.update({
             where: { id: row.id },
             data: { sentAt: new Date() } as any })
@@ -216,6 +241,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     if (usedNewStepScheduling) continue
 
     // Legacy fallback: 2-step campaigns using fixed columns.
+    // Note: Only get prospects that are 'pending' (not 'sending')
     const step1Ready = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
@@ -234,6 +260,27 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
 
     for (const prospect of step1Ready) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+      
+      // ATOMIC CLAIM: Change status from 'pending' to 'sending'
+      const claimResult = await prisma.emailCampaignProspect.updateMany({
+        where: {
+          id: prospect.id,
+          lastStatus: 'pending',  // MUST be pending to claim
+          step1SentAt: null,
+        },
+        data: {
+          lastStatus: 'sending',  // ATOMIC: changes the WHERE condition
+        }
+      })
+      
+      if (claimResult.count === 0) {
+        // Another instance claimed this prospect
+        console.log(
+          `[emailScheduler] CLAIM_FAILED prospectId=${prospect.id} step=1 instance=${SCHEDULER_INSTANCE_ID} - already claimed`
+        )
+        continue
+      }
+      
       const success = await sendCampaignEmail(prisma, campaign, prospect, 1)
       if (success) sentCount++
       else errorCount++
@@ -258,6 +305,27 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
 
     for (const prospect of step2Ready) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+      
+      // ATOMIC CLAIM: Change status from 'step1_sent' to 'sending'
+      const claimResult = await prisma.emailCampaignProspect.updateMany({
+        where: {
+          id: prospect.id,
+          lastStatus: 'step1_sent',  // MUST be step1_sent to claim for step 2
+          step2SentAt: null,
+        },
+        data: {
+          lastStatus: 'sending',  // ATOMIC: changes the WHERE condition
+        }
+      })
+      
+      if (claimResult.count === 0) {
+        // Another instance claimed this prospect
+        console.log(
+          `[emailScheduler] CLAIM_FAILED prospectId=${prospect.id} step=2 instance=${SCHEDULER_INSTANCE_ID} - already claimed`
+        )
+        continue
+      }
+      
       const success = await sendCampaignEmail(prisma, campaign, prospect, 2)
       if (success) sentCount++
       else errorCount++
@@ -359,13 +427,14 @@ async function sendCampaignEmail(
           metadata: {
             step: stepNumber,
             messageId: result.messageId,
-            threadId: result.threadId
+            threadId: result.threadId,
+            instanceId: SCHEDULER_INSTANCE_ID
           },
           occurredAt: new Date()
         }
       })
 
-      // Update prospect
+      // Update prospect - finalize with proper status
       const updateData: any = {
         [`step${stepNumber}SentAt`]: new Date(),
         lastStatus: stepNumber === 1 ? 'step1_sent' : (`step${Math.min(stepNumber, 10)}_sent`)
@@ -392,20 +461,28 @@ async function sendCampaignEmail(
           data: { lastStatus: 'completed' } as any })
       }
 
-      console.log(`✅ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Sent step ${stepNumber} to ${prospect.contact.email}`)
+      // SUCCESS LOG with full details
+      console.log(
+        `[emailScheduler] SENT prospectId=${prospect.id} step=${stepNumber} ` +
+        `identityId=${campaign.senderIdentityId} email=${prospect.contact.email} ` +
+        `messageId=${result.messageId} instance=${SCHEDULER_INSTANCE_ID}`
+      )
       return true
     } else {
       // Handle failure
-      console.error(`❌ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Failed to send to ${prospect.contact.email}:`, result.error)
+      console.error(
+        `[emailScheduler] SEND_FAILED prospectId=${prospect.id} step=${stepNumber} ` +
+        `email=${prospect.contact.email} error="${result.error}" instance=${SCHEDULER_INSTANCE_ID}`
+      )
 
-      // Check if it's a bounce
+      // Check if it's a bounce (permanent failure)
       if (result.error?.toLowerCase().includes('bounce') || 
           result.error?.toLowerCase().includes('rejected')) {
         await prisma.emailEvent.create({ data: {
             campaignId: campaign.id,
             campaignProspectId: prospect.id,
             type: 'bounced',
-            metadata: { error: result.error },
+            metadata: { error: result.error, instanceId: SCHEDULER_INSTANCE_ID },
             occurredAt: new Date()
           }
         })
@@ -416,11 +493,37 @@ async function sendCampaignEmail(
             bouncedAt: new Date(),
             lastStatus: 'bounced'
           } as any })
+      } else {
+        // Non-bounce error (possibly transient) - revert 'sending' status so it can be retried
+        // Determine what the previous status should be
+        const previousStatus = stepNumber === 1 ? 'pending' : `step${stepNumber - 1}_sent`
+        await prisma.emailCampaignProspect.updateMany({
+          where: { id: prospect.id, lastStatus: 'sending' },
+          data: { lastStatus: previousStatus } as any
+        })
+        console.log(
+          `[emailScheduler] REVERTED prospectId=${prospect.id} step=${stepNumber} ` +
+          `to status=${previousStatus} instance=${SCHEDULER_INSTANCE_ID}`
+        )
       }
       return false
     }
   } catch (error) {
-    console.error(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Error sending email for prospect ${prospect.id}:`, error)
+    // Unexpected error - revert status so retry is possible
+    const previousStatus = stepNumber === 1 ? 'pending' : `step${stepNumber - 1}_sent`
+    try {
+      await prisma.emailCampaignProspect.updateMany({
+        where: { id: prospect.id, lastStatus: 'sending' },
+        data: { lastStatus: previousStatus } as any
+      })
+    } catch {
+      // ignore - best effort
+    }
+    console.error(
+      `[emailScheduler] ERROR prospectId=${prospect.id} step=${stepNumber} ` +
+      `instance=${SCHEDULER_INSTANCE_ID}`,
+      error
+    )
     return false
   }
 }

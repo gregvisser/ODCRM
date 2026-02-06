@@ -4,7 +4,10 @@
  * Processes running campaigns and sends emails based on sequences
  * Enforces daily sending caps, send windows, and delays between steps
  * 
- * IDEMPOTENCY: Uses atomic updateMany with status check to prevent double-sends
+ * IDEMPOTENCY:
+ * - Uses atomic updateMany with lastStatus change (pending → sending) to claim
+ * - Only one instance can successfully claim a prospect
+ * - After send, status moves to step1_sent (or error state)
  */
 
 import { PrismaClient } from '@prisma/client'
@@ -67,31 +70,69 @@ async function isSuppressed(
 }
 
 /**
- * IDEMPOTENT: Atomically claim a prospect for sending
- * Returns the prospect if successfully claimed, null if already claimed/sent
+ * ATOMIC CLAIM: Claim a prospect for sending using status transition
+ * 
+ * This is a REAL lock because:
+ * 1. WHERE includes lastStatus: 'pending'
+ * 2. DATA changes lastStatus to 'sending'
+ * 3. Only ONE process can successfully do this transition
+ * 
+ * Returns true if successfully claimed, false if already claimed by another process
  */
 async function claimProspectForSending(
   prisma: PrismaClient,
-  prospectId: string,
-  now: Date
+  prospectId: string
 ): Promise<boolean> {
-  // Use updateMany with WHERE clause to atomically claim
-  // This prevents race conditions - only succeeds if status is still 'pending'
   const result = await prisma.emailCampaignProspect.updateMany({
     where: {
       id: prospectId,
-      lastStatus: 'pending',
-      step1SentAt: null, // Double-check: not already sent
+      lastStatus: 'pending',  // MUST be pending to claim
+      step1SentAt: null,      // Extra safety: not already sent
     },
     data: {
-      // Mark as "in progress" by setting a temporary status
-      // We'll update to final status after send
-      updatedAt: now,
+      lastStatus: 'sending',  // ATOMIC: changes the WHERE condition
     }
   })
   
-  // If count is 0, another process already claimed this prospect
+  // count > 0 means we successfully claimed (status was pending, now sending)
+  // count === 0 means another process already claimed it
   return result.count > 0
+}
+
+/**
+ * Release claim on failure - revert to pending so it can be retried
+ */
+async function releaseClaimOnError(
+  prisma: PrismaClient,
+  prospectId: string
+): Promise<void> {
+  await prisma.emailCampaignProspect.updateMany({
+    where: {
+      id: prospectId,
+      lastStatus: 'sending',  // Only if still in sending state
+    },
+    data: {
+      lastStatus: 'pending',  // Revert so another attempt can try
+    }
+  })
+}
+
+/**
+ * Finalize prospect after successful send
+ */
+async function finalizeProspectSent(
+  prisma: PrismaClient,
+  prospectId: string,
+  now: Date
+): Promise<void> {
+  await prisma.emailCampaignProspect.update({
+    where: { id: prospectId },
+    data: {
+      lastStatus: 'step1_sent',
+      step1SentAt: now,
+      updatedAt: now,
+    }
+  })
 }
 
 /**
@@ -187,14 +228,15 @@ export async function processSequenceBasedCampaigns(
 
     // Get prospects for this campaign that are pending
     // Filter out prospects who have replied, bounced, or unsubscribed
+    // NOTE: We also exclude 'sending' status to avoid double-processing
     const prospects = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
-        lastStatus: 'pending',
-        step1SentAt: null, // IDEMPOTENCY: Only get prospects that haven't been sent step 1
-        replyDetectedAt: null,  // Stop-on-reply
-        bouncedAt: null,        // Stop if bounced
-        unsubscribedAt: null,   // Stop if unsubscribed
+        lastStatus: 'pending',       // Only pending (not sending, not sent)
+        step1SentAt: null,           // Extra safety
+        replyDetectedAt: null,       // Stop-on-reply
+        bouncedAt: null,             // Stop if bounced
+        unsubscribedAt: null,        // Stop if unsubscribed
       },
       include: {
         contact: true,
@@ -207,147 +249,162 @@ export async function processSequenceBasedCampaigns(
     for (const prospect of prospects) {
       const contact = prospect.contact
 
-      // IDEMPOTENCY: Atomically claim this prospect
-      // If another process got here first, skip
-      const claimed = await claimProspectForSending(prisma, prospect.id, now)
+      // ATOMIC CLAIM: Try to claim this prospect for sending
+      // This is the REAL idempotency guard
+      const claimed = await claimProspectForSending(prisma, prospect.id)
       if (!claimed) {
-        console.log(`[campaignSender] ${INSTANCE_ID} - Prospect ${prospect.id} already claimed, skipping`)
-        skippedCount++
-        continue
-      }
-
-      // Check global suppression list
-      const suppressed = await isSuppressed(prisma, campaign.customerId, contact.email)
-      if (suppressed) {
-        console.log(`[campaignSender] ${INSTANCE_ID} - Suppressed: ${contact.email}`)
-        await prisma.emailCampaignProspect.update({
-          where: { id: prospect.id },
-          data: { lastStatus: 'suppressed', updatedAt: now },
-        })
-        skippedCount++
-        continue
-      }
-
-      // Check contact status
-      if (contact.status === 'bounced' || contact.status === 'unsubscribed') {
-        skippedCount++
-        continue
-      }
-
-      // Determine which step to send (simplified - step 1 for all pending)
-      const step = sequence.steps[0]
-      if (!step) continue
-
-      // Apply template placeholders
-      const subject = applyTemplatePlaceholders(step.subjectTemplate, {
-        firstName: contact.firstName,
-        lastName: contact.lastName,
-        company: contact.companyName,
-        companyName: contact.companyName,
-        email: contact.email,
-        jobTitle: contact.jobTitle || '',
-        title: contact.jobTitle || '',
-        phone: contact.phone || '',
-      })
-
-      const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
-        firstName: contact.firstName,
-        lastName: contact.lastName,
-        company: contact.companyName,
-        companyName: contact.companyName,
-        email: contact.email,
-        jobTitle: contact.jobTitle || '',
-        title: contact.jobTitle || '',
-        phone: contact.phone || '',
-      })
-
-      const bodyText = step.bodyTemplateText
-        ? applyTemplatePlaceholders(step.bodyTemplateText, {
-            firstName: contact.firstName,
-            lastName: contact.lastName,
-            company: contact.companyName,
-            companyName: contact.companyName,
-            email: contact.email,
-            jobTitle: contact.jobTitle || '',
-            title: contact.jobTitle || '',
-            phone: contact.phone || '',
-          })
-        : undefined
-
-      // Send email via Outlook
-      const result = await sendEmailViaOutlook(prisma, {
-        senderIdentityId: identity.id,
-        toEmail: contact.email,
-        subject,
-        htmlBody: bodyHtml,
-        textBody: bodyText,
-        campaignProspectId: prospect.id,
-      })
-
-      if (result.success) {
-        // Create email event
-        await prisma.emailEvent.create({
-          data: {
-            id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-            campaignId: campaign.id,
-            campaignProspectId: prospect.id,
-            type: 'sent',
-            metadata: {
-              step: step.stepOrder,
-              subject,
-              messageId: result.messageId,
-              instanceId: INSTANCE_ID,
-            },
-          },
-        })
-
-        // Update prospect status - THIS IS THE FINAL IDEMPOTENCY GATE
-        // step1SentAt being non-null prevents re-processing
-        await prisma.emailCampaignProspect.update({
-          where: { id: prospect.id },
-          data: {
-            lastStatus: 'step1_sent',
-            step1SentAt: now,
-            updatedAt: now,
-          },
-        })
-
-        sentCount++
-        console.log(`[campaignSender] ${INSTANCE_ID} - Sent to ${contact.email} (step ${step.stepOrder})`)
-
-        // Check if we hit daily cap
-        if (sentToday + sentCount >= dailyCap) {
-          break
-        }
-      } else {
-        console.error(
-          `[campaignSender] ${INSTANCE_ID} - Failed: ${contact.email}: ${result.error}`
+        console.log(
+          `[campaignSender] CLAIM_FAILED prospectId=${prospect.id} step=1 instance=${INSTANCE_ID} - already claimed`
         )
+        skippedCount++
+        continue
+      }
 
-        // Create bounced event
-        await prisma.emailEvent.create({
-          data: {
-            id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-            campaignId: campaign.id,
-            campaignProspectId: prospect.id,
-            type: 'bounced',
-            metadata: {
-              error: result.error,
-              instanceId: INSTANCE_ID,
+      // We have the lock - now process
+      try {
+        // Check global suppression list
+        const suppressed = await isSuppressed(prisma, campaign.customerId, contact.email)
+        if (suppressed) {
+          console.log(
+            `[campaignSender] SUPPRESSED prospectId=${prospect.id} email=${contact.email} instance=${INSTANCE_ID}`
+          )
+          await prisma.emailCampaignProspect.update({
+            where: { id: prospect.id },
+            data: { lastStatus: 'suppressed', updatedAt: now },
+          })
+          skippedCount++
+          continue
+        }
+
+        // Check contact status
+        if (contact.status === 'bounced' || contact.status === 'unsubscribed') {
+          await releaseClaimOnError(prisma, prospect.id)
+          skippedCount++
+          continue
+        }
+
+        // Determine which step to send (simplified - step 1 for all pending)
+        const step = sequence.steps[0]
+        if (!step) {
+          await releaseClaimOnError(prisma, prospect.id)
+          continue
+        }
+
+        // Apply template placeholders
+        const subject = applyTemplatePlaceholders(step.subjectTemplate, {
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          company: contact.companyName,
+          companyName: contact.companyName,
+          email: contact.email,
+          jobTitle: contact.jobTitle || '',
+          title: contact.jobTitle || '',
+          phone: contact.phone || '',
+        })
+
+        const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          company: contact.companyName,
+          companyName: contact.companyName,
+          email: contact.email,
+          jobTitle: contact.jobTitle || '',
+          title: contact.jobTitle || '',
+          phone: contact.phone || '',
+        })
+
+        const bodyText = step.bodyTemplateText
+          ? applyTemplatePlaceholders(step.bodyTemplateText, {
+              firstName: contact.firstName,
+              lastName: contact.lastName,
+              company: contact.companyName,
+              companyName: contact.companyName,
+              email: contact.email,
+              jobTitle: contact.jobTitle || '',
+              title: contact.jobTitle || '',
+              phone: contact.phone || '',
+            })
+          : undefined
+
+        // Send email via Outlook
+        const result = await sendEmailViaOutlook(prisma, {
+          senderIdentityId: identity.id,
+          toEmail: contact.email,
+          subject,
+          htmlBody: bodyHtml,
+          textBody: bodyText,
+          campaignProspectId: prospect.id,
+        })
+
+        if (result.success) {
+          // Create email event
+          await prisma.emailEvent.create({
+            data: {
+              id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+              campaignId: campaign.id,
+              campaignProspectId: prospect.id,
+              type: 'sent',
+              metadata: {
+                step: step.stepOrder,
+                subject,
+                messageId: result.messageId,
+                instanceId: INSTANCE_ID,
+              },
             },
-          },
-        })
+          })
 
-        // Mark prospect as bounced
-        await prisma.emailCampaignProspect.update({
-          where: { id: prospect.id },
-          data: {
-            lastStatus: 'bounced',
-            bouncedAt: now,
-            updatedAt: now,
-          },
-        })
+          // Finalize: mark as sent
+          await finalizeProspectSent(prisma, prospect.id, now)
 
+          sentCount++
+          console.log(
+            `[campaignSender] SENT prospectId=${prospect.id} step=1 identityId=${identity.id} ` +
+            `email=${contact.email} messageId=${result.messageId} instance=${INSTANCE_ID}`
+          )
+
+          // Check if we hit daily cap
+          if (sentToday + sentCount >= dailyCap) {
+            break
+          }
+        } else {
+          console.error(
+            `[campaignSender] SEND_FAILED prospectId=${prospect.id} step=1 email=${contact.email} ` +
+            `error="${result.error}" instance=${INSTANCE_ID}`
+          )
+
+          // Create bounced event
+          await prisma.emailEvent.create({
+            data: {
+              id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+              campaignId: campaign.id,
+              campaignProspectId: prospect.id,
+              type: 'bounced',
+              metadata: {
+                error: result.error,
+                instanceId: INSTANCE_ID,
+              },
+            },
+          })
+
+          // Mark prospect as bounced (don't release - it's a permanent failure)
+          await prisma.emailCampaignProspect.update({
+            where: { id: prospect.id },
+            data: {
+              lastStatus: 'bounced',
+              bouncedAt: now,
+              updatedAt: now,
+            },
+          })
+
+          skippedCount++
+        }
+      } catch (err) {
+        // Unexpected error - release the claim so it can be retried
+        console.error(
+          `[campaignSender] ERROR prospectId=${prospect.id} step=1 instance=${INSTANCE_ID}`,
+          err
+        )
+        await releaseClaimOnError(prisma, prospect.id)
         skippedCount++
       }
     }
@@ -378,7 +435,8 @@ export async function runCampaignSender(prisma: PrismaClient): Promise<void> {
   // Log result for monitoring
   if (result.sent > 0 || result.skipped > 0) {
     console.log(
-      `[campaignSender] ${INSTANCE_ID} - ${new Date().toISOString()} - Sent: ${result.sent}, Scanned: ${result.scanned}, Skipped: ${result.skipped}`
+      `[campaignSender] ${INSTANCE_ID} - ${new Date().toISOString()} - ` +
+      `sent=${result.sent} scanned=${result.scanned} skipped=${result.skipped}`
     )
   }
 }

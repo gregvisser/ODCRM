@@ -58,6 +58,7 @@ enum LeadStatus {
 
 enum ProspectStatus {
   pending
+  sending      // Atomic lock status - claim before sending
   step1_sent
   step2_sent
   step3_sent
@@ -331,6 +332,8 @@ model EmailCampaignProspectStep {
   campaignProspectId String
   stepNumber         Int
   scheduledAt        DateTime?
+  claimedAt          DateTime?              // Atomic lock for sending
+  claimedBy          String?                // Instance ID that claimed
   sentAt             DateTime?
   createdAt          DateTime               @default(now())
   updatedAt          DateTime               @updatedAt
