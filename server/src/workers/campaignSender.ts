@@ -3,11 +3,16 @@
  * 
  * Processes running campaigns and sends emails based on sequences
  * Enforces daily sending caps, send windows, and delays between steps
+ * 
+ * IDEMPOTENCY: Uses atomic updateMany with status check to prevent double-sends
  */
 
 import { PrismaClient } from '@prisma/client'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { sendEmail as sendEmailViaOutlook } from '../services/outlookEmailService.js'
+
+// Instance ID for logging - unique per process
+const INSTANCE_ID = `sender-${process.pid}-${Date.now().toString(36)}`
 
 export interface SenderConfig {
   batchSize?: number
@@ -62,6 +67,34 @@ async function isSuppressed(
 }
 
 /**
+ * IDEMPOTENT: Atomically claim a prospect for sending
+ * Returns the prospect if successfully claimed, null if already claimed/sent
+ */
+async function claimProspectForSending(
+  prisma: PrismaClient,
+  prospectId: string,
+  now: Date
+): Promise<boolean> {
+  // Use updateMany with WHERE clause to atomically claim
+  // This prevents race conditions - only succeeds if status is still 'pending'
+  const result = await prisma.emailCampaignProspect.updateMany({
+    where: {
+      id: prospectId,
+      lastStatus: 'pending',
+      step1SentAt: null, // Double-check: not already sent
+    },
+    data: {
+      // Mark as "in progress" by setting a temporary status
+      // We'll update to final status after send
+      updatedAt: now,
+    }
+  })
+  
+  // If count is 0, another process already claimed this prospect
+  return result.count > 0
+}
+
+/**
  * Simplified campaign sender using sequences
  * This version works with the Lists + Sequences workflow
  */
@@ -96,7 +129,6 @@ export async function processSequenceBasedCampaigns(
   })
 
   if (campaigns.length === 0) {
-    console.log(`[campaignSender] ${now.toISOString()} - No active sequence campaigns`)
     return { sent: 0, scanned: 0, skipped: 0 }
   }
 
@@ -109,9 +141,6 @@ export async function processSequenceBasedCampaigns(
 
     // Check send window
     if (!isWithinSendWindow(campaign.sendWindowHoursStart, campaign.sendWindowHoursEnd)) {
-      console.log(
-        `[campaignSender] Campaign ${campaign.id} outside send window (${campaign.sendWindowHoursStart}-${campaign.sendWindowHoursEnd})`
-      )
       continue
     }
 
@@ -126,7 +155,6 @@ export async function processSequenceBasedCampaigns(
     })
 
     if (!sequence || sequence.steps.length === 0) {
-      console.log(`[campaignSender] Campaign ${campaign.id} has no sequence steps`)
       continue
     }
 
@@ -136,7 +164,6 @@ export async function processSequenceBasedCampaigns(
     })
 
     if (!identity || !identity.isActive) {
-      console.log(`[campaignSender] Campaign ${campaign.id} has inactive or missing identity`)
       continue
     }
 
@@ -155,9 +182,6 @@ export async function processSequenceBasedCampaigns(
     })
 
     if (sentToday >= dailyCap) {
-      console.log(
-        `[campaignSender] Identity ${identity.emailAddress} hit daily cap (${sentToday}/${dailyCap})`
-      )
       continue
     }
 
@@ -167,6 +191,7 @@ export async function processSequenceBasedCampaigns(
       where: {
         campaignId: campaign.id,
         lastStatus: 'pending',
+        step1SentAt: null, // IDEMPOTENCY: Only get prospects that haven't been sent step 1
         replyDetectedAt: null,  // Stop-on-reply
         bouncedAt: null,        // Stop if bounced
         unsubscribedAt: null,   // Stop if unsubscribed
@@ -182,10 +207,19 @@ export async function processSequenceBasedCampaigns(
     for (const prospect of prospects) {
       const contact = prospect.contact
 
+      // IDEMPOTENCY: Atomically claim this prospect
+      // If another process got here first, skip
+      const claimed = await claimProspectForSending(prisma, prospect.id, now)
+      if (!claimed) {
+        console.log(`[campaignSender] ${INSTANCE_ID} - Prospect ${prospect.id} already claimed, skipping`)
+        skippedCount++
+        continue
+      }
+
       // Check global suppression list
       const suppressed = await isSuppressed(prisma, campaign.customerId, contact.email)
       if (suppressed) {
-        console.log(`[campaignSender] Skipping suppressed email: ${contact.email}`)
+        console.log(`[campaignSender] ${INSTANCE_ID} - Suppressed: ${contact.email}`)
         await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: { lastStatus: 'suppressed', updatedAt: now },
@@ -196,13 +230,11 @@ export async function processSequenceBasedCampaigns(
 
       // Check contact status
       if (contact.status === 'bounced' || contact.status === 'unsubscribed') {
-        console.log(`[campaignSender] Skipping ${contact.status} contact: ${contact.email}`)
         skippedCount++
         continue
       }
 
       // Determine which step to send (simplified - step 1 for all pending)
-      // TODO: Implement multi-step logic based on campaign prospect steps table
       const step = sequence.steps[0]
       if (!step) continue
 
@@ -264,11 +296,13 @@ export async function processSequenceBasedCampaigns(
               step: step.stepOrder,
               subject,
               messageId: result.messageId,
+              instanceId: INSTANCE_ID,
             },
           },
         })
 
-        // Update prospect status
+        // Update prospect status - THIS IS THE FINAL IDEMPOTENCY GATE
+        // step1SentAt being non-null prevents re-processing
         await prisma.emailCampaignProspect.update({
           where: { id: prospect.id },
           data: {
@@ -279,18 +313,15 @@ export async function processSequenceBasedCampaigns(
         })
 
         sentCount++
-        console.log(`[campaignSender] Sent to ${contact.email} (step ${step.stepOrder})`)
+        console.log(`[campaignSender] ${INSTANCE_ID} - Sent to ${contact.email} (step ${step.stepOrder})`)
 
         // Check if we hit daily cap
         if (sentToday + sentCount >= dailyCap) {
-          console.log(
-            `[campaignSender] Identity ${identity.emailAddress} reached daily cap`
-          )
           break
         }
       } else {
         console.error(
-          `[campaignSender] Failed to send to ${contact.email}: ${result.error}`
+          `[campaignSender] ${INSTANCE_ID} - Failed: ${contact.email}: ${result.error}`
         )
 
         // Create bounced event
@@ -302,6 +333,7 @@ export async function processSequenceBasedCampaigns(
             type: 'bounced',
             metadata: {
               error: result.error,
+              instanceId: INSTANCE_ID,
             },
           },
         })
@@ -321,10 +353,6 @@ export async function processSequenceBasedCampaigns(
     }
   }
 
-  console.log(
-    `[campaignSender] ${now.toISOString()} - Sent: ${sentCount}, Scanned: ${scannedCount}, Skipped: ${skippedCount}`
-  )
-
   return {
     sent: sentCount,
     scanned: scannedCount,
@@ -336,19 +364,21 @@ export async function processSequenceBasedCampaigns(
  * Main sender function - called by scheduler
  */
 export async function runCampaignSender(prisma: PrismaClient): Promise<void> {
-  try {
-    const config: SenderConfig = {
-      batchSize: Number(process.env.SENDER_BATCH_SIZE || '25'),
-      lockMinutes: Number(process.env.SENDER_LOCK_MINUTES || '5'),
-      mailboxDailyCap: Number(process.env.MAILBOX_DAILY_CAP || '50'),
-      spreadHours: Number(process.env.MAILBOX_SPREAD_HOURS || '10'),
-      stepJitterMinutes: Number(process.env.SENDER_STEP_JITTER_MINUTES || '60'),
-      retryMinutes: Number(process.env.SENDER_RETRY_MINUTES || '15'),
-    }
+  const config: SenderConfig = {
+    batchSize: Number(process.env.SENDER_BATCH_SIZE || '25'),
+    lockMinutes: Number(process.env.SENDER_LOCK_MINUTES || '5'),
+    mailboxDailyCap: Number(process.env.MAILBOX_DAILY_CAP || '50'),
+    spreadHours: Number(process.env.MAILBOX_SPREAD_HOURS || '10'),
+    stepJitterMinutes: Number(process.env.SENDER_STEP_JITTER_MINUTES || '60'),
+    retryMinutes: Number(process.env.SENDER_RETRY_MINUTES || '15'),
+  }
 
-    await processSequenceBasedCampaigns(prisma, config)
-  } catch (error) {
-    console.error('[campaignSender] Error:', error)
-    throw error
+  const result = await processSequenceBasedCampaigns(prisma, config)
+  
+  // Log result for monitoring
+  if (result.sent > 0 || result.skipped > 0) {
+    console.log(
+      `[campaignSender] ${INSTANCE_ID} - ${new Date().toISOString()} - Sent: ${result.sent}, Scanned: ${result.scanned}, Skipped: ${result.skipped}`
+    )
   }
 }

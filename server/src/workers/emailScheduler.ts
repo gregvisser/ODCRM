@@ -4,23 +4,47 @@ import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 
+// Unique instance ID for multi-instance environments (Azure, scaling)
+const SCHEDULER_INSTANCE_ID = `sched-${process.pid}-${Date.now().toString(36)}`
+
 /**
  * Background worker that runs every minute to send scheduled emails
  */
 export function startEmailScheduler(prisma: PrismaClient) {
+  // Check if workers are disabled
+  if (process.env.EMAIL_WORKERS_DISABLED === 'true') {
+    console.log(`⚠️ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Email scheduler NOT started (EMAIL_WORKERS_DISABLED=true)`)
+    return
+  }
+
   // Run every minute
   cron.schedule('* * * * *', async () => {
+    const startTime = Date.now()
+    const timestamp = new Date().toISOString()
+    
+    // Low-noise heartbeat log (once per interval)
+    console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - ${timestamp} - tick`)
+    
     try {
-      await processScheduledEmails(prisma)
+      const result = await processScheduledEmails(prisma)
+      const elapsedMs = Date.now() - startTime
+      
+      // Only log details if something happened
+      if (result.sent > 0 || result.errors > 0) {
+        console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - ${timestamp} - sent: ${result.sent}, errors: ${result.errors}, elapsed: ${elapsedMs}ms`)
+      }
     } catch (error) {
-      console.error('Error in email scheduler:', error)
+      console.error(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - ${timestamp} - ERROR:`, error)
     }
   })
 
-  console.log('✅ Email scheduler started (runs every minute)')
+  console.log(`✅ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Email scheduler started (runs every minute)`)
 }
 
-async function processScheduledEmails(prisma: PrismaClient) {
+async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: number; errors: number }> {
+  let sentCount = 0
+  let errorCount = 0
+  
   const now = new Date()
   const since24h = new Date(now.getTime() - 24 * 60 * 60 * 1000)
 
@@ -142,7 +166,9 @@ async function processScheduledEmails(prisma: PrismaClient) {
 
           const prospect = row.prospect
           const stepNumber = row.stepNumber
-          await sendCampaignEmail(prisma, campaign, prospect, stepNumber)
+          const success = await sendCampaignEmail(prisma, campaign, prospect, stepNumber)
+          if (success) sentCount++
+          else errorCount++
 
           // Mark row as sent (best-effort)
           await (prisma as any).emailCampaignProspectStep.update({
@@ -208,7 +234,9 @@ async function processScheduledEmails(prisma: PrismaClient) {
 
     for (const prospect of step1Ready) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
-      await sendCampaignEmail(prisma, campaign, prospect, 1)
+      const success = await sendCampaignEmail(prisma, campaign, prospect, 1)
+      if (success) sentCount++
+      else errorCount++
       emailsSentToday++
     }
 
@@ -230,10 +258,14 @@ async function processScheduledEmails(prisma: PrismaClient) {
 
     for (const prospect of step2Ready) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
-      await sendCampaignEmail(prisma, campaign, prospect, 2)
+      const success = await sendCampaignEmail(prisma, campaign, prospect, 2)
+      if (success) sentCount++
+      else errorCount++
       emailsSentToday++
     }
   }
+  
+  return { sent: sentCount, errors: errorCount }
 }
 
 async function isSuppressed(prisma: PrismaClient, customerId: string, email: string) {
@@ -260,7 +292,7 @@ async function sendCampaignEmail(
   campaign: any,
   prospect: any,
   stepNumber: number
-) {
+): Promise<boolean> {
   try {
     const recipientEmail = prospect.contact?.email?.toLowerCase()
     if (recipientEmail) {
@@ -280,14 +312,14 @@ async function sendCampaignEmail(
         } catch {
           // ignore if schema not migrated yet
         }
-        return
+        return false // Suppressed, not sent
       }
     }
 
     const template = campaign.templates.find((t: any) => t.stepNumber === stepNumber)
     if (!template) {
       console.error(`Template for step ${stepNumber} not found for campaign ${campaign.id}`)
-      return
+      return false
     }
 
     // Render template
@@ -360,10 +392,11 @@ async function sendCampaignEmail(
           data: { lastStatus: 'completed' } as any })
       }
 
-      console.log(`✅ Sent step ${stepNumber} email to ${prospect.contact.email}`)
+      console.log(`✅ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Sent step ${stepNumber} to ${prospect.contact.email}`)
+      return true
     } else {
       // Handle failure
-      console.error(`❌ Failed to send email to ${prospect.contact.email}:`, result.error)
+      console.error(`❌ [emailScheduler] ${SCHEDULER_INSTANCE_ID} - Failed to send to ${prospect.contact.email}:`, result.error)
 
       // Check if it's a bounce
       if (result.error?.toLowerCase().includes('bounce') || 
@@ -384,8 +417,10 @@ async function sendCampaignEmail(
             lastStatus: 'bounced'
           } as any })
       }
+      return false
     }
   } catch (error) {
-    console.error(`Error sending email for prospect ${prospect.id}:`, error)
+    console.error(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Error sending email for prospect ${prospect.id}:`, error)
+    return false
   }
 }
