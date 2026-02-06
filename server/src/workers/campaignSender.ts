@@ -1,15 +1,13 @@
-// @ts-nocheck
 /**
  * Campaign Email Sender Worker
- * Ported from OpensDoorsV2 sender.mjs
  * 
  * Processes running campaigns and sends emails based on sequences
- * Enforces daily sending caps and delays between steps
+ * Enforces daily sending caps, send windows, and delays between steps
  */
 
 import { PrismaClient } from '@prisma/client'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
-import { sendEmail } from '../services/smtpMailer.js'
+import { sendEmail as sendEmailViaOutlook } from '../services/outlookEmailService.js'
 
 export interface SenderConfig {
   batchSize?: number
@@ -21,92 +19,60 @@ export interface SenderConfig {
 }
 
 /**
- * Process campaigns and send due emails
+ * Check if current time is within the campaign's send window
  */
-export async function processCampaigns(
-  prisma: PrismaClient,
-  config: SenderConfig = {}
-): Promise<{ sent: number; scanned: number }> {
+function isWithinSendWindow(
+  sendWindowHoursStart: number,
+  sendWindowHoursEnd: number
+): boolean {
   const now = new Date()
-  const {
-    batchSize = 25,
-    lockMinutes = 5,
-    mailboxDailyCap = 50,
-    spreadHours = 10,
-    stepJitterMinutes = 60,
-    retryMinutes = 15,
-  } = config
-
-  const instanceId = `sender-${process.pid}-${Math.random().toString(16).slice(2)}`
-  const lockCutoff = new Date(now.getTime() - lockMinutes * 60 * 1000)
-  const dayStartUtc = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)
-  )
-
-  // Find campaign prospects that are due to be sent
-  const candidates = await prisma.emailCampaignProspect.findMany({
-    where: {
-      lastStatus: 'pending',
-      campaign: { status: 'running' },
-      // Check if any step is due (we'll use step1ScheduledAt as proxy for now)
-      // In a full implementation, check email_campaign_prospect_steps
-    },
-    orderBy: [{ createdAt: 'asc' }],
-    take: batchSize,
-    select: {
-      id: true,
-      campaignId: true,
-      contactId: true,
-      senderIdentityId: true,
-      lastStatus: true,
-      campaign: {
-        select: {
-          id: true,
-          sequenceId: true,
-          customerId: true,
-        },
-      },
-    },
-  })
-
-  if (candidates.length === 0) {
-    console.log(`[campaignSender] ${now.toISOString()} - No due prospects`)
-    return { sent: 0, scanned: 0 }
-  }
-
-  // For now, we'll use a simplified version
-  // Full implementation would check prospect_steps table and sequence
-
-  let sentCount = 0
-  console.log(`[campaignSender] ${now.toISOString()} - Processing ${candidates.length} prospects`)
-
-  // This is a placeholder - full implementation would:
-  // 1. Lock prospects to prevent duplicate sends
-  // 2. Load sequence steps
-  // 3. Check daily caps per email identity
-  // 4. Send emails via SMTP or OAuth
-  // 5. Create emailEvent
-  // 6. Update prospect status and schedule next step
-
-  return {
-    sent: sentCount,
-    scanned: candidates.length,
+  const currentHour = now.getHours()
+  
+  // Handle cases where window crosses midnight (e.g., 22 to 6)
+  if (sendWindowHoursStart <= sendWindowHoursEnd) {
+    return currentHour >= sendWindowHoursStart && currentHour < sendWindowHoursEnd
+  } else {
+    return currentHour >= sendWindowHoursStart || currentHour < sendWindowHoursEnd
   }
 }
 
 /**
- * Simplified campaign sender using new sequences schema
- * This version works with the migrated Lists + Sequences workflow
+ * Check if email is suppressed
+ */
+async function isSuppressed(
+  prisma: PrismaClient,
+  customerId: string,
+  email: string
+): Promise<boolean> {
+  const emailLower = email.toLowerCase()
+  const domain = emailLower.split('@')[1] || ''
+  
+  // Check for exact email or domain suppression
+  const suppression = await prisma.suppressionEntry.findFirst({
+    where: {
+      customerId,
+      OR: [
+        { type: 'email', value: emailLower },
+        { type: 'domain', value: domain }
+      ]
+    }
+  })
+  
+  return !!suppression
+}
+
+/**
+ * Simplified campaign sender using sequences
+ * This version works with the Lists + Sequences workflow
  */
 export async function processSequenceBasedCampaigns(
   prisma: PrismaClient,
   config: SenderConfig = {}
-): Promise<{ sent: number; scanned: number }> {
+): Promise<{ sent: number; scanned: number; skipped: number }> {
   const now = new Date()
   const {
     batchSize = 25,
     mailboxDailyCap = 50,
-    stepJitterMinutes = 60,
   } = config
 
   const dayStartUtc = new Date(
@@ -124,19 +90,30 @@ export async function processSequenceBasedCampaigns(
       customerId: true,
       sequenceId: true,
       senderIdentityId: true,
+      sendWindowHoursStart: true,
+      sendWindowHoursEnd: true,
     },
   })
 
   if (campaigns.length === 0) {
     console.log(`[campaignSender] ${now.toISOString()} - No active sequence campaigns`)
-    return { sent: 0, scanned: 0 }
+    return { sent: 0, scanned: 0, skipped: 0 }
   }
 
   let sentCount = 0
   let scannedCount = 0
+  let skippedCount = 0
 
   for (const campaign of campaigns) {
     if (!campaign.sequenceId) continue
+
+    // Check send window
+    if (!isWithinSendWindow(campaign.sendWindowHoursStart, campaign.sendWindowHoursEnd)) {
+      console.log(
+        `[campaignSender] Campaign ${campaign.id} outside send window (${campaign.sendWindowHoursStart}-${campaign.sendWindowHoursEnd})`
+      )
+      continue
+    }
 
     // Get sequence steps
     const sequence = await prisma.emailSequence.findUnique({
@@ -148,14 +125,23 @@ export async function processSequenceBasedCampaigns(
       },
     })
 
-    if (!sequence || sequence.email_sequence_steps.length === 0) continue
+    if (!sequence || sequence.steps.length === 0) {
+      console.log(`[campaignSender] Campaign ${campaign.id} has no sequence steps`)
+      continue
+    }
 
     // Get email identity
     const identity = await prisma.emailIdentity.findUnique({
       where: { id: campaign.senderIdentityId },
     })
 
-    if (!identity || !identity.isActive) continue
+    if (!identity || !identity.isActive) {
+      console.log(`[campaignSender] Campaign ${campaign.id} has inactive or missing identity`)
+      continue
+    }
+
+    // Use identity's dailySendLimit or config fallback
+    const dailyCap = identity.dailySendLimit || mailboxDailyCap
 
     // Check daily cap for this identity
     const sentToday = await prisma.emailEvent.count({
@@ -168,32 +154,56 @@ export async function processSequenceBasedCampaigns(
       },
     })
 
-    if (sentToday >= mailboxDailyCap) {
+    if (sentToday >= dailyCap) {
       console.log(
-        `[campaignSender] Identity ${identity.emailAddress} hit daily cap (${sentToday}/${mailboxDailyCap})`
+        `[campaignSender] Identity ${identity.emailAddress} hit daily cap (${sentToday}/${dailyCap})`
       )
       continue
     }
 
     // Get prospects for this campaign that are pending
+    // Filter out prospects who have replied, bounced, or unsubscribed
     const prospects = await prisma.emailCampaignProspect.findMany({
       where: {
         campaignId: campaign.id,
         lastStatus: 'pending',
+        replyDetectedAt: null,  // Stop-on-reply
+        bouncedAt: null,        // Stop if bounced
+        unsubscribedAt: null,   // Stop if unsubscribed
       },
       include: {
         contact: true,
       },
-      take: Math.min(batchSize, mailboxDailyCap - sentToday),
+      take: Math.min(batchSize, dailyCap - sentToday),
     })
 
     scannedCount += prospects.length
 
     for (const prospect of prospects) {
-      const contact = prospect.contacts_relation
+      const contact = prospect.contact
+
+      // Check global suppression list
+      const suppressed = await isSuppressed(prisma, campaign.customerId, contact.email)
+      if (suppressed) {
+        console.log(`[campaignSender] Skipping suppressed email: ${contact.email}`)
+        await prisma.emailCampaignProspect.update({
+          where: { id: prospect.id },
+          data: { lastStatus: 'suppressed', updatedAt: now },
+        })
+        skippedCount++
+        continue
+      }
+
+      // Check contact status
+      if (contact.status === 'bounced' || contact.status === 'unsubscribed') {
+        console.log(`[campaignSender] Skipping ${contact.status} contact: ${contact.email}`)
+        skippedCount++
+        continue
+      }
 
       // Determine which step to send (simplified - step 1 for all pending)
-      const step = sequence.email_sequence_steps[0]
+      // TODO: Implement multi-step logic based on campaign prospect steps table
+      const step = sequence.steps[0]
       if (!step) continue
 
       // Apply template placeholders
@@ -203,9 +213,9 @@ export async function processSequenceBasedCampaigns(
         company: contact.companyName,
         companyName: contact.companyName,
         email: contact.email,
-        jobTitle: contact.jobTitle,
-        title: contact.jobTitle,
-        phone: contact.phone,
+        jobTitle: contact.jobTitle || '',
+        title: contact.jobTitle || '',
+        phone: contact.phone || '',
       })
 
       const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
@@ -214,9 +224,9 @@ export async function processSequenceBasedCampaigns(
         company: contact.companyName,
         companyName: contact.companyName,
         email: contact.email,
-        jobTitle: contact.jobTitle,
-        title: contact.jobTitle,
-        phone: contact.phone,
+        jobTitle: contact.jobTitle || '',
+        title: contact.jobTitle || '',
+        phone: contact.phone || '',
       })
 
       const bodyText = step.bodyTemplateText
@@ -226,24 +236,26 @@ export async function processSequenceBasedCampaigns(
             company: contact.companyName,
             companyName: contact.companyName,
             email: contact.email,
-            jobTitle: contact.jobTitle,
-            title: contact.jobTitle,
-            phone: contact.phone,
+            jobTitle: contact.jobTitle || '',
+            title: contact.jobTitle || '',
+            phone: contact.phone || '',
           })
         : undefined
 
-      // Send email
-      const result = await sendEmail({
-        identity,
-        to: contact.email,
+      // Send email via Outlook
+      const result = await sendEmailViaOutlook(prisma, {
+        senderIdentityId: identity.id,
+        toEmail: contact.email,
         subject,
-        html: bodyHtml,
-        text: bodyText,
+        htmlBody: bodyHtml,
+        textBody: bodyText,
+        campaignProspectId: prospect.id,
       })
 
-      if (result.ok) {
+      if (result.success) {
         // Create email event
-        await prisma.emailEvent.create({ data: {
+        await prisma.emailEvent.create({
+          data: {
             id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             campaignId: campaign.id,
             campaignProspectId: prospect.id,
@@ -251,6 +263,7 @@ export async function processSequenceBasedCampaigns(
             metadata: {
               step: step.stepOrder,
               subject,
+              messageId: result.messageId,
             },
           },
         })
@@ -266,9 +279,10 @@ export async function processSequenceBasedCampaigns(
         })
 
         sentCount++
+        console.log(`[campaignSender] Sent to ${contact.email} (step ${step.stepOrder})`)
 
         // Check if we hit daily cap
-        if (sentToday + sentCount >= mailboxDailyCap) {
+        if (sentToday + sentCount >= dailyCap) {
           console.log(
             `[campaignSender] Identity ${identity.emailAddress} reached daily cap`
           )
@@ -276,31 +290,45 @@ export async function processSequenceBasedCampaigns(
         }
       } else {
         console.error(
-          `[campaignSender] Failed to send to ${contact.email}: ${(result as any).error}`
+          `[campaignSender] Failed to send to ${contact.email}: ${result.error}`
         )
 
-        // Create bounced event if needed
-        await prisma.emailEvent.create({ data: {
+        // Create bounced event
+        await prisma.emailEvent.create({
+          data: {
             id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             campaignId: campaign.id,
             campaignProspectId: prospect.id,
             type: 'bounced',
             metadata: {
-              error: (result as any).error,
+              error: result.error,
             },
           },
         })
+
+        // Mark prospect as bounced
+        await prisma.emailCampaignProspect.update({
+          where: { id: prospect.id },
+          data: {
+            lastStatus: 'bounced',
+            bouncedAt: now,
+            updatedAt: now,
+          },
+        })
+
+        skippedCount++
       }
     }
   }
 
   console.log(
-    `[campaignSender] ${now.toISOString()} - Sent: ${sentCount}, Scanned: ${scannedCount}`
+    `[campaignSender] ${now.toISOString()} - Sent: ${sentCount}, Scanned: ${scannedCount}, Skipped: ${skippedCount}`
   )
 
   return {
     sent: sentCount,
     scanned: scannedCount,
+    skipped: skippedCount,
   }
 }
 
