@@ -1,5 +1,5 @@
 -- Allow draft campaigns without sender identity
-ALTER TABLE "email_campaigns" ALTER COLUMN "sender_identity_id" DROP NOT NULL;
+ALTER TABLE "email_campaigns" ALTER COLUMN "senderIdentityId" DROP NOT NULL;
 
 -- Store raw sheet rows per contact and snapshot list
 CREATE TABLE "contact_source_rows" (
