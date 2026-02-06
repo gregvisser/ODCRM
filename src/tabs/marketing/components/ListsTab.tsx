@@ -120,9 +120,9 @@ const ListsTab: React.FC = () => {
     setLoading(true)
     setError(null)
 
-    const [listsRes, prospectsRes] = await Promise.all([
+    const [listsRes, contactsRes] = await Promise.all([
       api.get<ProspectList[]>('/api/lists'),
-      api.get<Prospect[]>('/api/prospects')
+      api.get<Prospect[]>('/api/contacts')  // Get contacts for adding to lists
     ])
 
     if (listsRes.error) {
@@ -131,9 +131,12 @@ const ListsTab: React.FC = () => {
       setLists(listsRes.data || [])
     }
 
-    // Note: /api/prospects doesn't have a backend yet, so we accept empty data here
-    if (!prospectsRes.error) {
-      setProspects(prospectsRes.data || [])
+    // Map contacts to prospect format for UI consistency
+    if (!contactsRes.error) {
+      setProspects((contactsRes.data || []).map(c => ({
+        ...c,
+        status: c.status || 'active'
+      })))
     }
 
     setLoading(false)
@@ -206,49 +209,47 @@ const ListsTab: React.FC = () => {
 
   const handleManageProspects = async (list: ProspectList) => {
     setManagingList(list)
-    try {
-      const prospectsRes = await api.get<Prospect[]>(`/api/lists/${list.id}/prospects`)
-      setAvailableProspects(prospectsRes.data || [])
-    } catch (error) {
-      setAvailableProspects(mockProspects.slice(0, 20))
-    }
+    // Use the current prospects (contacts) already loaded
+    // The list endpoint GET /api/lists/:id returns contacts in the list
+    setAvailableProspects(prospects)
     onManageOpen()
   }
 
-  const handleAddProspectToList = async (prospectId: string) => {
+  const handleAddProspectToList = async (contactId: string) => {
     if (!managingList) return
 
     try {
-      await api.post(`/api/lists/${managingList.id}/prospects`, { prospectId })
+      // Backend expects { contactIds: [] } array
+      await api.post(`/api/lists/${managingList.id}/contacts`, { contactIds: [contactId] })
       await loadData()
       toast({
-        title: 'Prospect added to list',
+        title: 'Contact added to list',
         status: 'success',
         duration: 2000,
       })
     } catch (error) {
       toast({
-        title: 'Failed to add prospect',
+        title: 'Failed to add contact',
         status: 'error',
         duration: 2000,
       })
     }
   }
 
-  const handleRemoveProspectFromList = async (prospectId: string) => {
+  const handleRemoveProspectFromList = async (contactId: string) => {
     if (!managingList) return
 
     try {
-      await api.delete(`/api/lists/${managingList.id}/prospects/${prospectId}`)
+      await api.delete(`/api/lists/${managingList.id}/contacts/${contactId}`)
       await loadData()
       toast({
-        title: 'Prospect removed from list',
+        title: 'Contact removed from list',
         status: 'success',
         duration: 2000,
       })
     } catch (error) {
       toast({
-        title: 'Failed to remove prospect',
+        title: 'Failed to remove contact',
         status: 'error',
         duration: 2000,
       })
