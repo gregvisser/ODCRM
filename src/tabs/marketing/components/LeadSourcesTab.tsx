@@ -15,6 +15,14 @@ import {
   Icon,
   Input,
   InputGroup,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  Select,
   SimpleGrid,
   Spinner,
   Stat,
@@ -40,6 +48,7 @@ import {
   FormLabel,
   FormHelperText,
   Link,
+  useDisclosure,
 } from '@chakra-ui/react'
 import {
   CheckCircleIcon,
@@ -112,6 +121,12 @@ interface SnapshotList {
   lastSyncAt: string
 }
 
+interface CampaignOption {
+  id: string
+  name: string
+  status?: string
+}
+
 interface ContactPreview {
   email: string
   firstName: string | null
@@ -141,6 +156,14 @@ const LeadSourcesTab: React.FC = () => {
   const [syncResults, setSyncResults] = useState<Record<string, SyncResult>>({})
   const [previewResults, setPreviewResults] = useState<Record<string, PreviewResult>>({})
   const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
+  const [campaignOptions, setCampaignOptions] = useState<CampaignOption[]>([])
+  const [campaignsLoading, setCampaignsLoading] = useState(false)
+  const [campaignsError, setCampaignsError] = useState<string | null>(null)
+  const [selectedSnapshot, setSelectedSnapshot] = useState<SnapshotList | null>(null)
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('')
+  const [newCampaignName, setNewCampaignName] = useState('')
+  const [campaignSubmitting, setCampaignSubmitting] = useState(false)
+  const { isOpen: isCampaignModalOpen, onOpen: onCampaignModalOpen, onClose: onCampaignModalClose } = useDisclosure()
   const toast = useToast()
 
   // Load sources on mount
@@ -309,6 +332,117 @@ const LeadSourcesTab: React.FC = () => {
     url.searchParams.set('view', 'lists')
     url.searchParams.set('listId', listId)
     window.location.assign(url.toString())
+  }
+
+  const handleGoToCampaign = (campaignId: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('tab', 'marketing-home')
+    url.searchParams.set('view', 'campaigns')
+    url.searchParams.set('campaignId', campaignId)
+    window.location.assign(url.toString())
+  }
+
+  const loadCampaignOptions = async () => {
+    setCampaignsLoading(true)
+    setCampaignsError(null)
+    const res = await api.get<CampaignOption[]>('/api/campaigns')
+    if (res.error) {
+      setCampaignsError(res.error)
+      setCampaignOptions([])
+    } else {
+      setCampaignOptions(res.data || [])
+    }
+    setCampaignsLoading(false)
+  }
+
+  const openUseInCampaign = async (snapshot: SnapshotList) => {
+    setSelectedSnapshot(snapshot)
+    setSelectedCampaignId('')
+    setNewCampaignName('')
+    onCampaignModalOpen()
+    await loadCampaignOptions()
+  }
+
+  const closeUseInCampaign = () => {
+    onCampaignModalClose()
+    setSelectedSnapshot(null)
+    setSelectedCampaignId('')
+    setNewCampaignName('')
+    setCampaignsError(null)
+  }
+
+  const handleAttachToCampaign = async () => {
+    if (!selectedSnapshot) return
+
+    if (!selectedCampaignId) {
+      toast({
+        title: 'Select a campaign',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
+    if (selectedCampaignId === 'new' && !newCampaignName.trim()) {
+      toast({
+        title: 'Campaign name required',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
+    setCampaignSubmitting(true)
+
+    let campaignId = selectedCampaignId
+    if (selectedCampaignId === 'new') {
+      const createRes = await api.post<{ id: string }>('/api/campaigns', {
+        name: newCampaignName.trim(),
+        status: 'draft',
+      })
+      if (createRes.error || !createRes.data?.id) {
+        setCampaignSubmitting(false)
+        toast({
+          title: 'Failed to create campaign',
+          description: createRes.error || 'Campaign ID not returned',
+          status: 'error',
+          duration: 5000,
+        })
+        return
+      }
+      campaignId = createRes.data.id
+    }
+
+    const attachRes = await api.patch(`/api/campaigns/${campaignId}`, {
+      listId: selectedSnapshot.id,
+    })
+
+    setCampaignSubmitting(false)
+
+    if (attachRes.error) {
+      toast({
+        title: 'Failed to attach snapshot',
+        description: attachRes.error,
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+
+    closeUseInCampaign()
+    toast({
+      title: 'Snapshot attached to campaign',
+      status: 'success',
+      duration: 5000,
+      render: ({ onClose }) => (
+        <Box bg="green.500" color="white" p={4} borderRadius="md">
+          <Text fontWeight="bold" mb={2}>Snapshot attached to campaign</Text>
+          <Button size="sm" variant="outline" onClick={() => { onClose(); handleGoToCampaign(campaignId) }}>
+            Go to Campaign
+          </Button>
+        </Box>
+      ),
+    })
   }
 
   const getStatusBadge = (status: string, error?: string | null) => {
@@ -636,9 +770,14 @@ const LeadSourcesTab: React.FC = () => {
                         {list.memberCount} members · {new Date(list.lastSyncAt).toLocaleString()}
                       </Text>
                     </Box>
-                    <Button size="sm" variant="outline" onClick={() => handleOpenSnapshotList(list.id)}>
-                      Open Snapshot List
-                    </Button>
+                    <HStack spacing={2}>
+                      <Button size="sm" variant="outline" onClick={() => handleOpenSnapshotList(list.id)}>
+                        Open Snapshot List
+                      </Button>
+                      <Button size="sm" colorScheme="blue" onClick={() => openUseInCampaign(list)}>
+                        Use in Campaign
+                      </Button>
+                    </HStack>
                   </Flex>
                 ))}
               </VStack>
@@ -754,6 +893,77 @@ const LeadSourcesTab: React.FC = () => {
           </TabPanel>
         </TabPanels>
       </Tabs>
+
+      <Modal isOpen={isCampaignModalOpen} onClose={closeUseInCampaign} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Use snapshot in campaign</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack align="stretch" spacing={4}>
+              <Box>
+                <Text fontWeight="semibold">{selectedSnapshot?.name || 'Snapshot'}</Text>
+                <Text fontSize="sm" color="gray.500">
+                  {selectedSnapshot?.memberCount ?? 0} members
+                </Text>
+              </Box>
+
+              <FormControl>
+                <FormLabel>Select campaign</FormLabel>
+                <Select
+                  placeholder={campaignsLoading ? 'Loading campaigns...' : 'Choose a campaign'}
+                  value={selectedCampaignId}
+                  onChange={(e) => setSelectedCampaignId(e.target.value)}
+                  isDisabled={campaignsLoading}
+                >
+                  {campaignOptions.map(campaign => (
+                    <option key={campaign.id} value={campaign.id}>
+                      {campaign.name}{campaign.status ? ` (${campaign.status})` : ''}
+                    </option>
+                  ))}
+                  <option value="new">Create new campaign</option>
+                </Select>
+                {campaignsError && (
+                  <Text mt={2} fontSize="sm" color="red.500">
+                    {campaignsError}
+                  </Text>
+                )}
+              </FormControl>
+
+              {selectedCampaignId === 'new' && (
+                <FormControl>
+                  <FormLabel>New campaign name</FormLabel>
+                  <Input
+                    value={newCampaignName}
+                    onChange={(e) => setNewCampaignName(e.target.value)}
+                    placeholder="Enter campaign name"
+                  />
+                </FormControl>
+              )}
+
+              <Alert status="info">
+                <AlertIcon />
+                <AlertDescription>
+                  This does NOT send emails. Campaign remains in Draft.
+                </AlertDescription>
+              </Alert>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={closeUseInCampaign}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={handleAttachToCampaign}
+              isLoading={campaignSubmitting}
+              isDisabled={!selectedSnapshot}
+            >
+              Confirm
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Box>
   )
 }
