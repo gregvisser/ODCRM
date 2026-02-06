@@ -9,19 +9,13 @@ import {
   CardBody,
   CardHeader,
   Flex,
-  Grid,
-  GridItem,
   Heading,
   HStack,
-  Icon,
-  Progress,
   Select,
   SimpleGrid,
   Stat,
   StatLabel,
   StatNumber,
-  StatHelpText,
-  StatArrow,
   Table,
   Tbody,
   Td,
@@ -32,77 +26,102 @@ import {
   VStack,
   Badge,
   Button,
-  Spacer,
-  Divider,
+  Spinner,
   useColorModeValue,
+  Progress,
 } from '@chakra-ui/react'
 import {
-  CalendarIcon,
   EmailIcon,
   CheckCircleIcon,
-  WarningIcon,
-  TriangleUpIcon,
-  TriangleDownIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
-type ReportMetrics = {
-  totalEmails: number
-  deliveredEmails: number
-  openedEmails: number
-  clickedEmails: number
-  repliedEmails: number
-  bouncedEmails: number
-  unsubscribedEmails: number
-  openRate: number
-  clickRate: number
-  replyRate: number
-  bounceRate: number
-  unsubscribeRate: number
+// Backend response shape from /api/reports/emails
+type EmailReportResponse = {
+  range: {
+    start: string
+    end: string
+  }
+  totals: Record<string, number>
+  byCampaign: Array<{
+    campaignId: string
+    campaignName: string
+    senderIdentity: {
+      id: string
+      emailAddress: string
+      displayName?: string
+    } | null
+    counts: Record<string, number>
+  }>
 }
 
-type SequenceReport = {
-  id: string
-  name: string
-  status: 'active' | 'paused' | 'completed'
-  sent: number
-  delivered: number
-  opened: number
-  clicked: number
-  replied: number
-  replyRate: number
-  lastActivity: string
+// Backend response shape from /api/reports/team-performance
+type TeamPerformanceResponse = {
+  range: {
+    start: string
+    end: string
+  }
+  rows: Array<{
+    identityId: string
+    emailAddress: string
+    displayName?: string
+    sent: number
+    replied: number
+    replyRate: number
+  }>
 }
 
 type TimeRange = '7d' | '30d' | '90d' | '1y'
 
 const ReportsTab: React.FC = () => {
   const [timeRange, setTimeRange] = useState<TimeRange>('30d')
-  const [metrics, setMetrics] = useState<ReportMetrics | null>(null)
-  const [sequences, setSequences] = useState<SequenceReport[]>([])
+  const [emailReport, setEmailReport] = useState<EmailReportResponse | null>(null)
+  const [teamReport, setTeamReport] = useState<TeamPerformanceResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
 
+  const calculateDateRange = (range: TimeRange) => {
+    const end = new Date()
+    const start = new Date()
+    switch (range) {
+      case '7d':
+        start.setDate(start.getDate() - 7)
+        break
+      case '30d':
+        start.setDate(start.getDate() - 30)
+        break
+      case '90d':
+        start.setDate(start.getDate() - 90)
+        break
+      case '1y':
+        start.setFullYear(start.getFullYear() - 1)
+        break
+    }
+    return { start: start.toISOString(), end: end.toISOString() }
+  }
+
   const loadReports = async () => {
     setLoading(true)
     setError(null)
 
-    const [metricsRes, sequencesRes] = await Promise.all([
-      api.get<ReportMetrics>(`/api/reports/metrics?range=${timeRange}`),
-      api.get<SequenceReport[]>(`/api/reports/sequences?range=${timeRange}`)
+    const { start, end } = calculateDateRange(timeRange)
+
+    const [emailRes, teamRes] = await Promise.all([
+      api.get<EmailReportResponse>(`/api/reports/emails?start=${start}&end=${end}`),
+      api.get<TeamPerformanceResponse>(`/api/reports/team-performance?start=${start}&end=${end}`)
     ])
 
-    if (metricsRes.error && sequencesRes.error) {
-      setError(metricsRes.error)
+    if (emailRes.error && teamRes.error) {
+      setError(emailRes.error)
     } else {
-      if (!metricsRes.error) {
-        setMetrics(metricsRes.data || null)
+      if (!emailRes.error) {
+        setEmailReport(emailRes.data || null)
       }
-      if (!sequencesRes.error) {
-        setSequences(sequencesRes.data || [])
+      if (!teamRes.error) {
+        setTeamReport(teamRes.data || null)
       }
     }
 
@@ -113,54 +132,44 @@ const ReportsTab: React.FC = () => {
     loadReports()
   }, [timeRange])
 
-  const statCards = useMemo(() => {
-    if (!metrics) return []
-
-    return [
-      {
-        label: 'Total Emails Sent',
-        value: metrics.totalEmails.toLocaleString(),
-        change: '+12.5%',
-        changeType: 'increase' as const,
-        icon: EmailIcon,
-      },
-      {
-        label: 'Open Rate',
-        value: `${metrics.openRate}%`,
-        change: '+2.1%',
-        changeType: 'increase' as const,
-        icon: CalendarIcon,
-      },
-      {
-        label: 'Reply Rate',
-        value: `${metrics.replyRate}%`,
-        change: '+0.3%',
-        changeType: 'increase' as const,
-        icon: CheckCircleIcon,
-      },
-      {
-        label: 'Click Rate',
-        value: `${metrics.clickRate}%`,
-        change: '-0.2%',
-        changeType: 'decrease' as const,
-        icon: TriangleUpIcon,
-      },
-    ]
-  }, [metrics])
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'active': return 'green'
-      case 'paused': return 'yellow'
-      case 'completed': return 'blue'
-      default: return 'gray'
+  const totals = useMemo(() => {
+    if (!emailReport?.totals) {
+      return {
+        sent: 0,
+        delivered: 0,
+        opened: 0,
+        clicked: 0,
+        replied: 0,
+        bounced: 0,
+        unsubscribed: 0,
+      }
     }
-  }
+    return {
+      sent: emailReport.totals.sent || 0,
+      delivered: emailReport.totals.delivered || 0,
+      opened: emailReport.totals.opened || 0,
+      clicked: emailReport.totals.clicked || 0,
+      replied: emailReport.totals.replied || 0,
+      bounced: emailReport.totals.bounced || 0,
+      unsubscribed: emailReport.totals.unsubscribed || 0,
+    }
+  }, [emailReport])
+
+  const rates = useMemo(() => {
+    const sent = totals.sent || 1 // Avoid division by zero
+    return {
+      openRate: ((totals.opened / sent) * 100).toFixed(1),
+      clickRate: ((totals.clicked / sent) * 100).toFixed(1),
+      replyRate: ((totals.replied / sent) * 100).toFixed(1),
+      bounceRate: ((totals.bounced / sent) * 100).toFixed(1),
+    }
+  }, [totals])
 
   if (loading) {
     return (
       <Box textAlign="center" py={10}>
-        <Text>Loading reports...</Text>
+        <Spinner size="lg" />
+        <Text mt={4}>Loading reports...</Text>
       </Box>
     )
   }
@@ -188,6 +197,9 @@ const ReportsTab: React.FC = () => {
             <option value="90d">Last 90 days</option>
             <option value="1y">Last year</option>
           </Select>
+          <Button size="sm" onClick={loadReports}>
+            Refresh
+          </Button>
         </HStack>
       </Flex>
 
@@ -207,161 +219,190 @@ const ReportsTab: React.FC = () => {
 
       {/* Key Metrics */}
       <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4} mb={8}>
-        {statCards.map((stat, index) => (
-          <Card key={index} bg={bgColor} borderColor={borderColor}>
-            <CardBody>
-              <Stat>
-                <StatLabel fontSize="sm" color="gray.600">
-                  <HStack>
-                    <Icon as={stat.icon} boxSize={4} />
-                    <Text>{stat.label}</Text>
-                  </HStack>
-                </StatLabel>
-                <StatNumber fontSize="2xl">{stat.value}</StatNumber>
-                <StatHelpText>
-                  <StatArrow type={stat.changeType} />
-                  {stat.change} from last period
-                </StatHelpText>
-              </Stat>
-            </CardBody>
-          </Card>
-        ))}
+        <Card bg={bgColor} borderColor={borderColor}>
+          <CardBody>
+            <Stat>
+              <StatLabel>
+                <HStack>
+                  <EmailIcon />
+                  <Text>Total Sent</Text>
+                </HStack>
+              </StatLabel>
+              <StatNumber>{totals.sent.toLocaleString()}</StatNumber>
+            </Stat>
+          </CardBody>
+        </Card>
+
+        <Card bg={bgColor} borderColor={borderColor}>
+          <CardBody>
+            <Stat>
+              <StatLabel>Open Rate</StatLabel>
+              <StatNumber>{rates.openRate}%</StatNumber>
+              <Text fontSize="sm" color="gray.500">
+                {totals.opened.toLocaleString()} opened
+              </Text>
+            </Stat>
+          </CardBody>
+        </Card>
+
+        <Card bg={bgColor} borderColor={borderColor}>
+          <CardBody>
+            <Stat>
+              <StatLabel>
+                <HStack>
+                  <CheckCircleIcon color="green.500" />
+                  <Text>Reply Rate</Text>
+                </HStack>
+              </StatLabel>
+              <StatNumber>{rates.replyRate}%</StatNumber>
+              <Text fontSize="sm" color="gray.500">
+                {totals.replied.toLocaleString()} replies
+              </Text>
+            </Stat>
+          </CardBody>
+        </Card>
+
+        <Card bg={bgColor} borderColor={borderColor}>
+          <CardBody>
+            <Stat>
+              <StatLabel>Click Rate</StatLabel>
+              <StatNumber>{rates.clickRate}%</StatNumber>
+              <Text fontSize="sm" color="gray.500">
+                {totals.clicked.toLocaleString()} clicked
+              </Text>
+            </Stat>
+          </CardBody>
+        </Card>
       </SimpleGrid>
 
-      {/* Performance Overview */}
-      <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6} mb={8}>
-        <Card bg={bgColor} borderColor={borderColor}>
-          <CardHeader>
-            <Heading size="md">Email Performance Breakdown</Heading>
-          </CardHeader>
-          <CardBody>
-            <VStack spacing={4} align="stretch">
-              <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm">Delivered</Text>
-                  <Text fontSize="sm" fontWeight="semibold">
-                    {metrics?.deliveredEmails.toLocaleString()} ({((metrics?.deliveredEmails || 0) / (metrics?.totalEmails || 1) * 100).toFixed(1)}%)
-                  </Text>
-                </HStack>
-                <Progress
-                  value={(metrics?.deliveredEmails || 0) / (metrics?.totalEmails || 1) * 100}
-                  colorScheme="green"
-                  size="sm"
-                />
-              </Box>
-
-              <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm">Opened</Text>
-                  <Text fontSize="sm" fontWeight="semibold">
-                    {metrics?.openedEmails.toLocaleString()} ({metrics?.openRate}%)
-                  </Text>
-                </HStack>
-                <Progress value={metrics?.openRate || 0} colorScheme="blue" size="sm" />
-              </Box>
-
-              <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm">Clicked</Text>
-                  <Text fontSize="sm" fontWeight="semibold">
-                    {metrics?.clickedEmails.toLocaleString()} ({metrics?.clickRate}%)
-                  </Text>
-                </HStack>
-                <Progress value={metrics?.clickRate || 0} colorScheme="purple" size="sm" />
-              </Box>
-
-              <Box>
-                <HStack justify="space-between" mb={2}>
-                  <Text fontSize="sm">Replied</Text>
-                  <Text fontSize="sm" fontWeight="semibold">
-                    {metrics?.repliedEmails.toLocaleString()} ({metrics?.replyRate}%)
-                  </Text>
-                </HStack>
-                <Progress value={metrics?.replyRate || 0} colorScheme="orange" size="sm" />
-              </Box>
-            </VStack>
-          </CardBody>
-        </Card>
-
-        <Card bg={bgColor} borderColor={borderColor}>
-          <CardHeader>
-            <Heading size="md">Issues & Alerts</Heading>
-          </CardHeader>
-          <CardBody>
-            <VStack spacing={3} align="stretch">
-              <Box>
-                <HStack>
-                  <Icon as={WarningIcon} color="red.500" boxSize={4} />
-                  <Text fontSize="sm">High bounce rate detected</Text>
-                </HStack>
-                <Text fontSize="xs" color="gray.600" mt={1}>
-                  {metrics?.bounceRate}% bounce rate exceeds 5% threshold
-                </Text>
-              </Box>
-
-              <Divider />
-
-              <Box>
-                <HStack>
-                  <Icon as={CheckCircleIcon} color="green.500" boxSize={4} />
-                  <Text fontSize="sm">Deliverability is healthy</Text>
-                </HStack>
-                <Text fontSize="xs" color="gray.600" mt={1}>
-                  {metrics?.deliveredEmails}/{metrics?.totalEmails} emails delivered
-                </Text>
-              </Box>
-            </VStack>
-          </CardBody>
-        </Card>
-      </Grid>
-
-      {/* Sequence Performance */}
-      <Card bg={bgColor} borderColor={borderColor}>
+      {/* Campaign Performance */}
+      <Card mb={8}>
         <CardHeader>
-          <Flex justify="space-between" align="center">
-            <Heading size="md">Sequence Performance</Heading>
-            <Button size="sm" variant="outline">
-              View All Sequences
-            </Button>
-          </Flex>
+          <Heading size="md">Campaign Performance</Heading>
         </CardHeader>
-        <CardBody>
-          <Box overflowX="auto">
-            <Table size="sm">
+        <CardBody pt={0}>
+          {emailReport?.byCampaign && emailReport.byCampaign.length > 0 ? (
+            <Table variant="simple">
               <Thead>
                 <Tr>
-                  <Th>Sequence Name</Th>
-                  <Th>Status</Th>
+                  <Th>Campaign</Th>
+                  <Th>Sender</Th>
                   <Th isNumeric>Sent</Th>
                   <Th isNumeric>Opened</Th>
+                  <Th isNumeric>Clicked</Th>
                   <Th isNumeric>Replied</Th>
                   <Th isNumeric>Reply Rate</Th>
-                  <Th>Last Activity</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {sequences.map((sequence) => (
-                  <Tr key={sequence.id}>
-                    <Td fontWeight="semibold">{sequence.name}</Td>
+                {emailReport.byCampaign.map((campaign) => {
+                  const sent = campaign.counts.sent || 0
+                  const opened = campaign.counts.opened || 0
+                  const clicked = campaign.counts.clicked || 0
+                  const replied = campaign.counts.replied || 0
+                  const replyRate = sent > 0 ? ((replied / sent) * 100).toFixed(1) : '0.0'
+
+                  return (
+                    <Tr key={campaign.campaignId}>
+                      <Td>
+                        <Text fontWeight="medium">{campaign.campaignName}</Text>
+                      </Td>
+                      <Td>
+                        <Text fontSize="sm" color="gray.600">
+                          {campaign.senderIdentity?.displayName || campaign.senderIdentity?.emailAddress || 'Unknown'}
+                        </Text>
+                      </Td>
+                      <Td isNumeric>{sent.toLocaleString()}</Td>
+                      <Td isNumeric>{opened.toLocaleString()}</Td>
+                      <Td isNumeric>{clicked.toLocaleString()}</Td>
+                      <Td isNumeric>
+                        <Badge colorScheme="green" variant="subtle">
+                          {replied}
+                        </Badge>
+                      </Td>
+                      <Td isNumeric>
+                        <HStack justify="flex-end" spacing={2}>
+                          <Progress
+                            value={parseFloat(replyRate)}
+                            max={10}
+                            size="sm"
+                            colorScheme="green"
+                            w="60px"
+                          />
+                          <Text fontSize="sm">{replyRate}%</Text>
+                        </HStack>
+                      </Td>
+                    </Tr>
+                  )
+                })}
+              </Tbody>
+            </Table>
+          ) : (
+            <Text color="gray.500" textAlign="center" py={8}>
+              No campaign data available for this time range
+            </Text>
+          )}
+        </CardBody>
+      </Card>
+
+      {/* Team Performance */}
+      <Card>
+        <CardHeader>
+          <Heading size="md">Sender Performance</Heading>
+        </CardHeader>
+        <CardBody pt={0}>
+          {teamReport?.rows && teamReport.rows.length > 0 ? (
+            <Table variant="simple">
+              <Thead>
+                <Tr>
+                  <Th>Sender</Th>
+                  <Th isNumeric>Emails Sent</Th>
+                  <Th isNumeric>Replies</Th>
+                  <Th isNumeric>Reply Rate</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {teamReport.rows.map((row) => (
+                  <Tr key={row.identityId}>
                     <Td>
-                      <Badge colorScheme={getStatusColor(sequence.status)} size="sm">
-                        {sequence.status}
+                      <VStack align="start" spacing={0}>
+                        <Text fontWeight="medium">
+                          {row.displayName || row.emailAddress}
+                        </Text>
+                        {row.displayName && (
+                          <Text fontSize="sm" color="gray.500">
+                            {row.emailAddress}
+                          </Text>
+                        )}
+                      </VStack>
+                    </Td>
+                    <Td isNumeric>{row.sent.toLocaleString()}</Td>
+                    <Td isNumeric>
+                      <Badge colorScheme="green" variant="subtle">
+                        {row.replied}
                       </Badge>
                     </Td>
-                    <Td isNumeric>{sequence.sent.toLocaleString()}</Td>
-                    <Td isNumeric>{sequence.opened.toLocaleString()}</Td>
-                    <Td isNumeric>{sequence.replied.toLocaleString()}</Td>
-                    <Td isNumeric>{sequence.replyRate}%</Td>
-                    <Td>
-                      <Text fontSize="xs" color="gray.600">
-                        {new Date(sequence.lastActivity).toLocaleDateString()}
-                      </Text>
+                    <Td isNumeric>
+                      <HStack justify="flex-end" spacing={2}>
+                        <Progress
+                          value={row.replyRate}
+                          max={10}
+                          size="sm"
+                          colorScheme="green"
+                          w="60px"
+                        />
+                        <Text fontSize="sm">{row.replyRate.toFixed(1)}%</Text>
+                      </HStack>
                     </Td>
                   </Tr>
                 ))}
               </Tbody>
             </Table>
-          </Box>
+          ) : (
+            <Text color="gray.500" textAlign="center" py={8}>
+              No sender performance data available for this time range
+            </Text>
+          )}
         </CardBody>
       </Card>
     </Box>
