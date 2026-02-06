@@ -204,39 +204,57 @@ export function findFieldMappings(headers: string[]): Record<string, string | nu
 }
 
 /**
- * Extract contact data from a row using field mappings
+ * Extracted contact data - all fields are nullable.
+ * Defaults (e.g., "Unknown") should NOT be applied here.
+ * Apply defaults only at CREATE time in the route handler.
  */
-export function extractContactFromRow(
-  row: Record<string, string>,
-  mappings: Record<string, string | null>
-): {
+export interface ExtractedContact {
   email: string | null
-  firstName: string
-  lastName: string
-  companyName: string
+  firstName: string | null
+  lastName: string | null
+  companyName: string | null
   jobTitle: string | null
   phone: string | null
   linkedinUrl: string | null
   website: string | null
   location: string | null
-} {
+}
+
+/**
+ * Extract contact data from a row using field mappings.
+ * Returns null for any field that is not mapped or has an empty/blank value.
+ * NO DEFAULTS are applied here - this prevents overwriting existing data during updates.
+ */
+export function extractContactFromRow(
+  row: Record<string, string>,
+  mappings: Record<string, string | null>
+): ExtractedContact {
   const getValue = (field: string): string | null => {
     const header = mappings[field]
     if (!header) return null
-    return row[header]?.trim() || null
+    const value = row[header]?.trim()
+    // Return null for empty/blank values - do NOT use defaults
+    return value && value.length > 0 ? value : null
   }
 
   return {
     email: getValue('email'),
-    firstName: getValue('firstName') || 'Unknown',
-    lastName: getValue('lastName') || '',
-    companyName: getValue('companyName') || 'Unknown',
+    firstName: getValue('firstName'),
+    lastName: getValue('lastName'),
+    companyName: getValue('companyName'),
     jobTitle: getValue('jobTitle'),
     phone: getValue('phone'),
     linkedinUrl: getValue('linkedinUrl'),
     website: getValue('website'),
     location: getValue('location'),
   }
+}
+
+/**
+ * Helper: Check if a value is a non-empty string after trimming
+ */
+export function hasValue(v: unknown): v is string {
+  return typeof v === 'string' && v.trim().length > 0
 }
 
 /**

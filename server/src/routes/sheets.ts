@@ -15,6 +15,7 @@ import {
   findFieldMappings,
   extractContactFromRow,
   validateCredentials,
+  hasValue,
 } from '../services/googleSheetsService.js'
 
 const router = Router()
@@ -264,17 +265,19 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
           })
 
           if (existing) {
-            // Update existing contact
+            // UPDATE existing contact:
+            // Only include fields that have actual non-empty values from the sheet.
+            // This prevents overwriting existing data with defaults or empty values.
+            const updateData: Record<string, string> = { source }
+            if (hasValue(contact.firstName)) updateData.firstName = contact.firstName
+            if (hasValue(contact.lastName)) updateData.lastName = contact.lastName
+            if (hasValue(contact.companyName)) updateData.companyName = contact.companyName
+            if (hasValue(contact.jobTitle)) updateData.jobTitle = contact.jobTitle
+            if (hasValue(contact.phone)) updateData.phone = contact.phone
+
             await prisma.contact.update({
               where: { id: existing.id },
-              data: {
-                firstName: contact.firstName || existing.firstName,
-                lastName: contact.lastName || existing.lastName,
-                companyName: contact.companyName || existing.companyName,
-                jobTitle: contact.jobTitle || existing.jobTitle,
-                phone: contact.phone || existing.phone,
-                source: source,
-              },
+              data: updateData,
             })
             updated++
 
@@ -291,15 +294,16 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
               update: {},
             })
           } else {
-            // Create new contact
+            // CREATE new contact:
+            // Apply defaults for required fields (firstName, companyName) if not in sheet.
             const newContact = await prisma.contact.create({
               data: {
                 id: `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`,
                 customerId,
                 email: contact.email.toLowerCase(),
-                firstName: contact.firstName,
-                lastName: contact.lastName,
-                companyName: contact.companyName,
+                firstName: hasValue(contact.firstName) ? contact.firstName : 'Unknown',
+                lastName: hasValue(contact.lastName) ? contact.lastName : '',
+                companyName: hasValue(contact.companyName) ? contact.companyName : 'Unknown',
                 jobTitle: contact.jobTitle,
                 phone: contact.phone,
                 source: source,
