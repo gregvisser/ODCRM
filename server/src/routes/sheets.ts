@@ -6,6 +6,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from 'express'
+import { randomUUID } from 'crypto'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { SheetSource, SheetSyncStatus } from '@prisma/client'
@@ -44,6 +45,24 @@ const DEFAULT_SHEET_URLS: Record<ValidSource, string> = {
   cognism: 'https://docs.google.com/spreadsheets/d/1dh8aMhjLCuXSvrcUQhi6lPxlacmdHVVMoLDfEHMUeSU/edit?gid=0#gid=0',
   apollo: 'https://docs.google.com/spreadsheets/d/1-qQGHRY5vSx1z2oFemd72AiAw2T9etbLqjsYvCJBtNg/edit?gid=0#gid=0',
   blackbook: 'https://docs.google.com/spreadsheets/d/134ylfcnrhrDVzjr-ATdss6hWgYro5U5Ws7YEif2RyI8/edit?gid=0#gid=0',
+}
+
+const SOURCE_LABELS: Record<ValidSource, string> = {
+  cognism: 'Cognism',
+  apollo: 'Apollo',
+  blackbook: 'Blackbook',
+}
+
+const normalizeEmail = (value: string | null): string | null => {
+  if (!hasValue(value)) return null
+  return value.trim().toLowerCase()
+}
+
+const isValidEmail = (value: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+
+const getSnapshotListName = (source: ValidSource, sheetName: string, date: Date) => {
+  const dateLabel = date.toISOString().slice(0, 10)
+  return `${SOURCE_LABELS[source]} — ${sheetName} — ${dateLabel}`
 }
 
 /**
@@ -221,20 +240,22 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
       let updated = 0
       let skipped = 0
       const errors: string[] = []
-      const preview: any[] = []
+      const contactIdsInSheet = new Set<string>()
 
-      // Ensure system list exists for this source
-      const listName = source.charAt(0).toUpperCase() + source.slice(1) // Capitalize
-      let systemList = await prisma.contactList.findFirst({
-        where: { customerId, name: listName },
+      const sourceKey = source as ValidSource
+      const sheetName = sheetData.sheetTitle || config.sheetName || 'Sheet1'
+      const snapshotName = getSnapshotListName(sourceKey, sheetName, new Date())
+
+      let snapshotList = await prisma.contactList.findFirst({
+        where: { customerId, name: snapshotName },
       })
-      if (!systemList) {
-        systemList = await prisma.contactList.create({
+      if (!snapshotList) {
+        snapshotList = await prisma.contactList.create({
           data: {
-            id: `list_${source}_${customerId}_${Date.now()}`,
+            id: `list_${source}_${customerId}_${randomUUID()}`,
             customerId,
-            name: listName,
-            description: `Auto-created list for ${listName} leads`,
+            name: snapshotName,
+            description: `Snapshot from ${SOURCE_LABELS[sourceKey]} (${sheetName})`,
           },
         })
       }
@@ -242,26 +263,25 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
       for (let i = 0; i < sheetData.rows.length; i++) {
         const row = sheetData.rows[i]
         const contact = extractContactFromRow(row, mappings)
+        const normalizedEmail = normalizeEmail(contact.email)
 
         // Skip rows without email
-        if (!contact.email) {
+        if (!normalizedEmail) {
           skipped++
           errors.push(`Row ${i + 2}: Missing email`)
           continue
         }
 
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-        if (!emailRegex.test(contact.email)) {
+        if (!isValidEmail(normalizedEmail)) {
           skipped++
-          errors.push(`Row ${i + 2}: Invalid email format: ${contact.email}`)
+          errors.push(`Row ${i + 2}: Invalid email format: ${normalizedEmail}`)
           continue
         }
 
         try {
           // Upsert contact
           const existing = await prisma.contact.findFirst({
-            where: { customerId, email: contact.email.toLowerCase() },
+            where: { customerId, email: normalizedEmail },
           })
 
           if (existing) {
@@ -280,27 +300,15 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
               data: updateData,
             })
             updated++
-
-            // Ensure list membership
-            await prisma.contactListMember.upsert({
-              where: {
-                listId_contactId: { listId: systemList.id, contactId: existing.id },
-              },
-              create: {
-                id: `member_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                listId: systemList.id,
-                contactId: existing.id,
-              },
-              update: {},
-            })
+            contactIdsInSheet.add(existing.id)
           } else {
             // CREATE new contact:
             // Apply defaults for required fields (firstName, companyName) if not in sheet.
             const newContact = await prisma.contact.create({
               data: {
-                id: `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                id: `contact_${randomUUID()}`,
                 customerId,
-                email: contact.email.toLowerCase(),
+                email: normalizedEmail,
                 firstName: hasValue(contact.firstName) ? contact.firstName : 'Unknown',
                 lastName: hasValue(contact.lastName) ? contact.lastName : '',
                 companyName: hasValue(contact.companyName) ? contact.companyName : 'Unknown',
@@ -310,20 +318,7 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
               },
             })
             imported++
-
-            // Add to system list
-            await prisma.contactListMember.create({
-              data: {
-                id: `member_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-                listId: systemList.id,
-                contactId: newContact.id,
-              },
-            })
-          }
-
-          // Add to preview (first 20 rows)
-          if (preview.length < 20) {
-            preview.push(contact)
+            contactIdsInSheet.add(newContact.id)
           }
         } catch (err: any) {
           skipped++
@@ -331,34 +326,72 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
         }
       }
 
+      const existingMembers = await prisma.contactListMember.findMany({
+        where: { listId: snapshotList.id },
+        select: { contactId: true },
+      })
+
+      const existingMemberIds = new Set(existingMembers.map(member => member.contactId))
+      const membersToAdd = Array.from(contactIdsInSheet).filter(id => !existingMemberIds.has(id))
+      const membersToRemove = existingMembers.filter(member => !contactIdsInSheet.has(member.contactId))
+
+      if (membersToAdd.length > 0) {
+        await prisma.contactListMember.createMany({
+          data: membersToAdd.map(contactId => ({
+            id: `member_${randomUUID()}`,
+            listId: snapshotList.id,
+            contactId,
+          })),
+          skipDuplicates: true,
+        })
+      }
+
+      if (membersToRemove.length > 0) {
+        await prisma.contactListMember.deleteMany({
+          where: {
+            listId: snapshotList.id,
+            contactId: { in: membersToRemove.map(member => member.contactId) },
+          },
+        })
+      }
+
+      const lastSyncAt = new Date()
+
       // Update config with results
       await prisma.sheetSourceConfig.update({
         where: { id: config.id },
         data: {
-          lastSyncAt: new Date(),
+          lastSyncAt,
           lastSyncStatus: 'success',
           lastError: errors.length > 0 ? errors.slice(0, 10).join('; ') : null,
           rowsImported: imported,
           rowsUpdated: updated,
           rowsSkipped: skipped,
-          sheetName: sheetData.sheetTitle,
+          sheetName,
+          mappings,
         },
+      })
+
+      await prisma.contactList.update({
+        where: { id: snapshotList.id },
+        data: { updatedAt: lastSyncAt },
       })
 
       res.json({
         success: true,
         source,
-        sheetTitle: sheetData.sheetTitle,
+        sheetName,
         totalRows: sheetData.rows.length,
         imported,
         updated,
         skipped,
         errors: errors.slice(0, 10),
-        lastSyncAt: new Date().toISOString(),
-        mappings,
-        preview,
-        listId: systemList.id,
-        listName: systemList.name,
+        list: {
+          id: snapshotList.id,
+          name: snapshotList.name,
+          memberCount: contactIdsInSheet.size,
+        },
+        lastSyncAt: lastSyncAt.toISOString(),
       })
     } catch (err: any) {
       // Update config with error
@@ -376,6 +409,48 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
         source,
       })
     }
+  } catch (err) {
+    next(err)
+  }
+})
+
+/**
+ * GET /api/sheets/sources/:source/lists
+ * Returns recent snapshot lists for a source
+ */
+router.get('/sources/:source/lists', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { source } = req.params
+
+    if (!isValidSource(source)) {
+      return res.status(400).json({ error: `Invalid source. Must be one of: ${validSources.join(', ')}` })
+    }
+
+    const sourceKey = source as ValidSource
+    const prefix = `${SOURCE_LABELS[sourceKey]} — `
+
+    const lists = await prisma.contactList.findMany({
+      where: {
+        customerId,
+        name: { startsWith: prefix },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 10,
+      include: {
+        _count: { select: { contactListMembers: true } },
+      },
+    })
+
+    res.json({
+      source,
+      lists: lists.map(list => ({
+        id: list.id,
+        name: list.name,
+        memberCount: list._count.contactListMembers,
+        lastSyncAt: list.updatedAt.toISOString(),
+      })),
+    })
   } catch (err) {
     next(err)
   }
@@ -401,49 +476,59 @@ router.get('/sources/:source/preview', async (req: Request, res: Response, next:
       },
     })
 
-    if (!config) {
-      return res.json({
-        source,
-        connected: false,
-        preview: [],
-        totalContacts: 0,
+    if (!config || !config.sheetId) {
+      return res.status(400).json({
+        error: 'Sheet not connected. Please connect a sheet URL first.',
       })
     }
 
-    // Get contacts from this source
-    const contacts = await prisma.contact.findMany({
-      where: { customerId, source },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        companyName: true,
-        jobTitle: true,
-        phone: true,
-        createdAt: true,
-      },
-    })
+    const sheetData = await readSheet(config.sheetId, config.gid)
+    const mappings = findFieldMappings(sheetData.headers)
 
-    const totalContacts = await prisma.contact.count({
-      where: { customerId, source },
-    })
+    if (!mappings.email) {
+      return res.status(400).json({ error: 'Sheet must have an email column' })
+    }
+
+    const preview: any[] = []
+    const errors: string[] = []
+
+    for (let i = 0; i < sheetData.rows.length; i++) {
+      const row = sheetData.rows[i]
+      const contact = extractContactFromRow(row, mappings)
+      const normalizedEmail = normalizeEmail(contact.email)
+
+      if (!normalizedEmail) {
+        errors.push(`Row ${i + 2}: Missing email`)
+        continue
+      }
+
+      if (!isValidEmail(normalizedEmail)) {
+        errors.push(`Row ${i + 2}: Invalid email format: ${normalizedEmail}`)
+        continue
+      }
+
+      if (preview.length < 20) {
+        preview.push({
+          ...contact,
+          email: normalizedEmail,
+        })
+      }
+    }
 
     res.json({
       source,
       connected: true,
       sheetUrl: config.sheetUrl,
-      sheetName: config.sheetName,
-      lastSyncAt: config.lastSyncAt?.toISOString(),
+      sheetName: sheetData.sheetTitle,
+      lastSyncAt: config.lastSyncAt?.toISOString() || null,
       lastSyncStatus: config.lastSyncStatus,
       lastError: config.lastError,
       rowsImported: config.rowsImported,
       rowsUpdated: config.rowsUpdated,
       rowsSkipped: config.rowsSkipped,
-      preview: contacts,
-      totalContacts,
+      preview,
+      totalRows: sheetData.rows.length,
+      errors: errors.slice(0, 10),
     })
   } catch (err) {
     next(err)

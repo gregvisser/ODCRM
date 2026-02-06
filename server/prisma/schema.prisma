@@ -696,6 +696,7 @@ model SheetSourceConfig {
   sheetId         String?         // Extracted spreadsheet ID
   gid             String?         // Sheet tab GID (optional)
   sheetName       String?         // Sheet tab name (optional)
+  mappings        Json?           // Field mappings detected from sheet headers
   lastSyncAt      DateTime?
   lastSyncStatus  SheetSyncStatus @default(pending)
   lastError       String?

@@ -10,14 +10,11 @@ import {
   CardBody,
   CardHeader,
   Flex,
-  Grid,
-  GridItem,
   Heading,
   HStack,
   Icon,
   Input,
   InputGroup,
-  InputLeftElement,
   SimpleGrid,
   Spinner,
   Stat,
@@ -49,6 +46,7 @@ import {
   WarningIcon,
   RepeatIcon,
   ExternalLinkIcon,
+  ViewIcon,
   InfoIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
@@ -78,25 +76,44 @@ interface SheetSourcesResponse {
 interface SyncResult {
   success: boolean
   source: string
-  sheetTitle?: string
+  sheetName?: string
   totalRows?: number
   imported?: number
   updated?: number
   skipped?: number
   errors?: string[]
   lastSyncAt?: string
-  mappings?: Record<string, string | null>
-  preview?: ContactPreview[]
-  listId?: string
-  listName?: string
+  list?: {
+    id: string
+    name: string
+    memberCount: number
+  }
   error?: string
+}
+
+interface PreviewResult {
+  source: string
+  sheetName?: string
+  totalRows?: number
+  preview?: ContactPreview[]
+  errors?: string[]
+  lastSyncAt?: string | null
+  lastSyncStatus?: 'pending' | 'syncing' | 'success' | 'error'
+  lastError?: string | null
+}
+
+interface SnapshotList {
+  id: string
+  name: string
+  memberCount: number
+  lastSyncAt: string
 }
 
 interface ContactPreview {
   email: string
-  firstName: string
-  lastName: string
-  companyName: string
+  firstName: string | null
+  lastName: string | null
+  companyName: string | null
   jobTitle: string | null
   phone: string | null
 }
@@ -114,14 +131,28 @@ const LeadSourcesTab: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [syncingSource, setSyncingSource] = useState<string | null>(null)
+  const [previewingSource, setPreviewingSource] = useState<string | null>(null)
   const [sheetUrls, setSheetUrls] = useState<Record<string, string>>({})
   const [syncResults, setSyncResults] = useState<Record<string, SyncResult>>({})
+  const [previewResults, setPreviewResults] = useState<Record<string, PreviewResult>>({})
+  const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
   const toast = useToast()
 
   // Load sources on mount
   useEffect(() => {
     loadSources()
   }, [])
+
+  const loadSnapshotLists = async (source: string) => {
+    const res = await api.get<{ source: string; lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
+    if (res.error) {
+      setSnapshotLists(prev => ({ ...prev, [source]: [] }))
+      return
+    }
+    if (res.data) {
+      setSnapshotLists(prev => ({ ...prev, [source]: res.data?.lists || [] }))
+    }
+  }
 
   const loadSources = async () => {
     setLoading(true)
@@ -145,6 +176,8 @@ const LeadSourcesTab: React.FC = () => {
         urls[s.source] = s.sheetUrl || s.defaultSheetUrl
       })
       setSheetUrls(urls)
+
+      await Promise.all(res.data.sources.map(s => loadSnapshotLists(s.source)))
     }
     
     setLoading(false)
@@ -219,6 +252,7 @@ const LeadSourcesTab: React.FC = () => {
           status: 'success',
           duration: 5000,
         })
+        await loadSnapshotLists(source)
       } else {
         toast({
           title: 'Sync failed',
@@ -230,6 +264,44 @@ const LeadSourcesTab: React.FC = () => {
     }
 
     loadSources()
+  }
+
+  const handlePreview = async (source: string) => {
+    setPreviewingSource(source)
+    const res = await api.get<PreviewResult>(`/api/sheets/sources/${source}/preview`)
+    setPreviewingSource(null)
+
+    if (res.error) {
+      setPreviewResults(prev => ({
+        ...prev,
+        [source]: {
+          source,
+          errors: [res.error],
+        },
+      }))
+      toast({
+        title: 'Preview failed',
+        description: res.error,
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+
+    if (res.data) {
+      setPreviewResults(prev => ({
+        ...prev,
+        [source]: res.data!,
+      }))
+    }
+  }
+
+  const handleOpenSnapshotList = (listId: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('tab', 'marketing-home')
+    url.searchParams.set('view', 'lists')
+    url.searchParams.set('listId', listId)
+    window.location.assign(url.toString())
   }
 
   const getStatusBadge = (status: string, error?: string | null) => {
@@ -248,7 +320,10 @@ const LeadSourcesTab: React.FC = () => {
 
   const renderSourceTab = (source: SheetSourceConfig) => {
     const isSyncing = syncingSource === source.source
+    const isPreviewing = previewingSource === source.source
     const result = syncResults[source.source]
+    const previewResult = previewResults[source.source]
+    const snapshots = snapshotLists[source.source] || []
     const label = SOURCE_LABELS[source.source] || source.source
 
     return (
@@ -262,15 +337,26 @@ const LeadSourcesTab: React.FC = () => {
                 {getStatusBadge(source.lastSyncStatus, source.lastError)}
               </HStack>
               {source.connected && (
-                <Button
-                  leftIcon={isSyncing ? <Spinner size="sm" /> : <RepeatIcon />}
-                  colorScheme="blue"
-                  onClick={() => handleSync(source.source)}
-                  isLoading={isSyncing}
-                  loadingText="Syncing..."
-                >
-                  Sync Now
-                </Button>
+                <HStack spacing={2}>
+                  <Button
+                    leftIcon={isPreviewing ? <Spinner size="sm" /> : <ViewIcon />}
+                    variant="outline"
+                    onClick={() => handlePreview(source.source)}
+                    isLoading={isPreviewing}
+                    loadingText="Previewing..."
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    leftIcon={isSyncing ? <Spinner size="sm" /> : <RepeatIcon />}
+                    colorScheme="blue"
+                    onClick={() => handleSync(source.source)}
+                    isLoading={isSyncing}
+                    loadingText="Syncing..."
+                  >
+                    Sync Now
+                  </Button>
+                </HStack>
               )}
             </Flex>
           </CardHeader>
@@ -307,6 +393,14 @@ const LeadSourcesTab: React.FC = () => {
                     Open default sheet <ExternalLinkIcon mx="2px" />
                   </Link>
                 </FormHelperText>
+                {source.sheetUrl && source.connected && (
+                  <Text fontSize="sm" color="gray.600" mt={2}>
+                    Connected sheet:{" "}
+                    <Link href={source.sheetUrl} isExternal color="blue.500">
+                      {source.sheetUrl}
+                    </Link>
+                  </Text>
+                )}
               </FormControl>
 
               {!source.connected && (
@@ -368,69 +462,111 @@ const LeadSourcesTab: React.FC = () => {
         </Card>
 
         {/* Sync Results */}
-        {result && result.success && (
+        {result && (
           <Card mb={6}>
             <CardHeader>
               <Heading size="sm">Last Sync Results</Heading>
             </CardHeader>
             <CardBody>
-              <VStack align="stretch" spacing={4}>
-                {/* Mapping Info */}
-                {result.mappings && (
-                  <Box>
-                    <Text fontWeight="bold" mb={2}>Column Mappings Detected:</Text>
-                    <SimpleGrid columns={{ base: 2, md: 4 }} spacing={2}>
-                      {Object.entries(result.mappings).map(([field, header]) => (
-                        <HStack key={field}>
-                          <Badge colorScheme={header ? 'green' : 'gray'}>
-                            {field}
-                          </Badge>
-                          <Text fontSize="sm" color={header ? 'green.600' : 'gray.400'}>
-                            {header || 'Not found'}
+              {result.success ? (
+                <VStack align="stretch" spacing={4}>
+                  <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+                    <Stat>
+                      <StatLabel>Total Rows</StatLabel>
+                      <StatNumber>{result.totalRows ?? 0}</StatNumber>
+                    </Stat>
+                    <Stat>
+                      <StatLabel>Imported</StatLabel>
+                      <StatNumber>{result.imported ?? 0}</StatNumber>
+                    </Stat>
+                    <Stat>
+                      <StatLabel>Updated</StatLabel>
+                      <StatNumber>{result.updated ?? 0}</StatNumber>
+                    </Stat>
+                    <Stat>
+                      <StatLabel>Skipped</StatLabel>
+                      <StatNumber>{result.skipped ?? 0}</StatNumber>
+                    </Stat>
+                  </SimpleGrid>
+
+                  {result.list && (
+                    <Alert status="info">
+                      <AlertIcon />
+                      <Box flex="1">
+                        <AlertTitle>Snapshot List</AlertTitle>
+                        <AlertDescription>
+                          {result.list.name} ({result.list.memberCount} members)
+                        </AlertDescription>
+                      </Box>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenSnapshotList(result.list!.id)}
+                      >
+                        Open Snapshot List
+                      </Button>
+                    </Alert>
+                  )}
+
+                  {result.errors && result.errors.length > 0 && (
+                    <Box>
+                      <Text fontWeight="bold" color="red.500" mb={2}>
+                        Sync Errors ({result.errors.length}):
+                      </Text>
+                      <Box maxH="200px" overflowY="auto" bg="red.50" p={2} borderRadius="md">
+                        {result.errors.map((err, idx) => (
+                          <Text key={idx} fontSize="sm" color="red.700">
+                            {err}
                           </Text>
-                        </HStack>
-                      ))}
-                    </SimpleGrid>
-                  </Box>
-                )}
-
-                {/* Added to list info */}
-                {result.listName && (
-                  <Alert status="info">
-                    <AlertIcon />
-                    Contacts added to list: <strong>{result.listName}</strong>
-                  </Alert>
-                )}
-
-                {/* Sync Errors */}
-                {result.errors && result.errors.length > 0 && (
-                  <Box>
-                    <Text fontWeight="bold" color="red.500" mb={2}>
-                      Sync Errors ({result.errors.length}):
-                    </Text>
-                    <Box maxH="200px" overflowY="auto" bg="red.50" p={2} borderRadius="md">
-                      {result.errors.map((err, idx) => (
-                        <Text key={idx} fontSize="sm" color="red.700">
-                          {err}
-                        </Text>
-                      ))}
+                        ))}
+                      </Box>
                     </Box>
+                  )}
+                </VStack>
+              ) : (
+                <Alert status="error">
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>Sync failed</AlertTitle>
+                    <AlertDescription>{result.error || 'Unknown error'}</AlertDescription>
                   </Box>
-                )}
-              </VStack>
+                </Alert>
+              )}
             </CardBody>
           </Card>
         )}
 
+        {/* Preview Errors */}
+        {previewResult && previewResult.errors && previewResult.errors.length > 0 && (!previewResult.preview || previewResult.preview.length === 0) && (
+          <Alert status="error" mb={6}>
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Preview failed</AlertTitle>
+              <AlertDescription>{previewResult.errors.join('; ')}</AlertDescription>
+            </Box>
+          </Alert>
+        )}
+
         {/* Preview Table */}
-        {result && result.preview && result.preview.length > 0 && (
+        {previewResult && previewResult.preview && previewResult.preview.length > 0 && (
           <Card>
             <CardHeader>
               <Heading size="sm">
-                Preview (first {result.preview.length} of {result.totalRows} rows)
+                Preview (first {previewResult.preview.length} of {previewResult.totalRows} rows)
               </Heading>
             </CardHeader>
             <CardBody>
+              {previewResult.errors && previewResult.errors.length > 0 && (
+                <Alert status="warning" mb={4}>
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>Preview warnings</AlertTitle>
+                    <AlertDescription>
+                      {previewResult.errors.slice(0, 3).join('; ')}
+                    </AlertDescription>
+                  </Box>
+                </Alert>
+              )}
               <Box overflowX="auto">
                 <Table size="sm">
                   <Thead>
@@ -444,12 +580,12 @@ const LeadSourcesTab: React.FC = () => {
                     </Tr>
                   </Thead>
                   <Tbody>
-                    {result.preview.map((contact, idx) => (
+                    {previewResult.preview.map((contact, idx) => (
                       <Tr key={idx}>
                         <Td>{contact.email}</Td>
-                        <Td>{contact.firstName}</Td>
-                        <Td>{contact.lastName}</Td>
-                        <Td>{contact.companyName}</Td>
+                        <Td>{contact.firstName || '-'}</Td>
+                        <Td>{contact.lastName || '-'}</Td>
+                        <Td>{contact.companyName || '-'}</Td>
                         <Td>{contact.jobTitle || '-'}</Td>
                         <Td>{contact.phone || '-'}</Td>
                       </Tr>
@@ -457,6 +593,32 @@ const LeadSourcesTab: React.FC = () => {
                   </Tbody>
                 </Table>
               </Box>
+            </CardBody>
+          </Card>
+        )}
+
+        {/* Recent Snapshots */}
+        {snapshots.length > 0 && (
+          <Card mt={6}>
+            <CardHeader>
+              <Heading size="sm">Recent Snapshots</Heading>
+            </CardHeader>
+            <CardBody>
+              <VStack align="stretch" spacing={3}>
+                {snapshots.map((list) => (
+                  <Flex key={list.id} align="center" justify="space-between">
+                    <Box>
+                      <Text fontWeight="medium">{list.name}</Text>
+                      <Text fontSize="sm" color="gray.500">
+                        {list.memberCount} members · {new Date(list.lastSyncAt).toLocaleString()}
+                      </Text>
+                    </Box>
+                    <Button size="sm" variant="outline" onClick={() => handleOpenSnapshotList(list.id)}>
+                      Open Snapshot List
+                    </Button>
+                  </Flex>
+                ))}
+              </VStack>
             </CardBody>
           </Card>
         )}
