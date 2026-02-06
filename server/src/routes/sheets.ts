@@ -16,6 +16,7 @@ import {
   findFieldMappings,
   extractContactFromRow,
   validateCredentials,
+  getCredentialDiagnostics,
   hasValue,
 } from '../services/googleSheetsService.js'
 
@@ -98,7 +99,14 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
       }
     })
 
-    res.json({ sources, credentialsConfigured: validateCredentials().valid })
+    const diagnostics = getCredentialDiagnostics()
+    res.json({
+      sources,
+      credentialsConfigured: diagnostics.credentialsConfigured,
+      authMethodUsed: diagnostics.authMethodUsed,
+      serviceAccountEmail: diagnostics.serviceAccountEmail,
+      lastAuthError: diagnostics.lastAuthError,
+    })
   } catch (err) {
     next(err)
   }

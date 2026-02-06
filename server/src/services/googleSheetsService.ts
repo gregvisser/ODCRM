@@ -13,6 +13,15 @@ interface ServiceAccountCredentials {
   private_key: string
 }
 
+export type GoogleAuthMethod = 'json' | 'split' | 'none'
+
+export interface GoogleCredentialsDiagnostics {
+  credentialsConfigured: boolean
+  authMethodUsed: GoogleAuthMethod
+  serviceAccountEmail: string | null
+  lastAuthError: string | null
+}
+
 /**
  * Get service account credentials from environment variables
  */
@@ -266,5 +275,49 @@ export function validateCredentials(): { valid: boolean; error?: string } {
     return { valid: true }
   } catch (err: any) {
     return { valid: false, error: err.message }
+  }
+}
+
+/**
+ * Diagnostics for credential setup (safe to expose).
+ * Does NOT return or log secrets.
+ */
+export function getCredentialDiagnostics(): GoogleCredentialsDiagnostics {
+  const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY
+
+  let authMethodUsed: GoogleAuthMethod = 'none'
+  let serviceAccountEmail: string | null = null
+  let lastAuthError: string | null = null
+
+  try {
+    if (jsonStr) {
+      authMethodUsed = 'json'
+      const parsed = JSON.parse(jsonStr)
+      serviceAccountEmail = typeof parsed.client_email === 'string' ? parsed.client_email : null
+      if (!parsed.client_email || !parsed.private_key) {
+        throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is missing client_email or private_key')
+      }
+    } else if (clientEmail || privateKey) {
+      authMethodUsed = 'split'
+      if (!clientEmail || !privateKey) {
+        throw new Error('Missing GOOGLE_CLIENT_EMAIL or GOOGLE_PRIVATE_KEY')
+      }
+      serviceAccountEmail = clientEmail
+    } else {
+      authMethodUsed = 'none'
+      lastAuthError =
+        'Missing Google credentials. Set GOOGLE_SERVICE_ACCOUNT_JSON or (GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY)'
+    }
+  } catch (err: any) {
+    lastAuthError = err.message
+  }
+
+  return {
+    credentialsConfigured: !lastAuthError,
+    authMethodUsed,
+    serviceAccountEmail,
+    lastAuthError,
   }
 }

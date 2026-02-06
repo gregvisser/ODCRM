@@ -71,6 +71,9 @@ interface SheetSourceConfig {
 interface SheetSourcesResponse {
   sources: SheetSourceConfig[]
   credentialsConfigured: boolean
+  authMethodUsed: 'json' | 'split' | 'none'
+  serviceAccountEmail: string | null
+  lastAuthError: string | null
 }
 
 interface SyncResult {
@@ -128,6 +131,8 @@ const SOURCE_LABELS: Record<string, string> = {
 const LeadSourcesTab: React.FC = () => {
   const [sources, setSources] = useState<SheetSourceConfig[]>([])
   const [credentialsConfigured, setCredentialsConfigured] = useState(false)
+  const [serviceAccountEmail, setServiceAccountEmail] = useState<string | null>(null)
+  const [lastAuthError, setLastAuthError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [syncingSource, setSyncingSource] = useState<string | null>(null)
@@ -169,6 +174,8 @@ const LeadSourcesTab: React.FC = () => {
     if (res.data) {
       setSources(res.data.sources)
       setCredentialsConfigured(res.data.credentialsConfigured)
+      setServiceAccountEmail(res.data.serviceAccountEmail)
+      setLastAuthError(res.data.lastAuthError)
       
       // Initialize sheet URLs from sources
       const urls: Record<string, string> = {}
@@ -342,6 +349,7 @@ const LeadSourcesTab: React.FC = () => {
                     leftIcon={isPreviewing ? <Spinner size="sm" /> : <ViewIcon />}
                     variant="outline"
                     onClick={() => handlePreview(source.source)}
+                    isDisabled={!credentialsConfigured}
                     isLoading={isPreviewing}
                     loadingText="Previewing..."
                   >
@@ -351,6 +359,7 @@ const LeadSourcesTab: React.FC = () => {
                     leftIcon={isSyncing ? <Spinner size="sm" /> : <RepeatIcon />}
                     colorScheme="blue"
                     onClick={() => handleSync(source.source)}
+                    isDisabled={!credentialsConfigured}
                     isLoading={isSyncing}
                     loadingText="Syncing..."
                   >
@@ -369,7 +378,21 @@ const LeadSourcesTab: React.FC = () => {
                   <Box>
                     <AlertTitle>Google Sheets credentials not configured</AlertTitle>
                     <AlertDescription>
-                      Contact your administrator to set up the GOOGLE_SERVICE_ACCOUNT_JSON environment variable.
+                      <VStack align="start" spacing={1} mt={2}>
+                        <Text>1) Create a Google service account</Text>
+                        <Text>2) Add GOOGLE_SERVICE_ACCOUNT_JSON to Azure App Service</Text>
+                        <Text>3) Share the sheet with the service account email</Text>
+                      </VStack>
+                      {serviceAccountEmail && (
+                        <Text mt={2}>
+                          Service account email: <strong>{serviceAccountEmail}</strong>
+                        </Text>
+                      )}
+                      {lastAuthError && (
+                        <Text mt={2} color="red.600">
+                          {lastAuthError}
+                        </Text>
+                      )}
                     </AlertDescription>
                   </Box>
                 </Alert>
