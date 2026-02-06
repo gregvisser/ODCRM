@@ -62,7 +62,7 @@ import {
   ExternalLinkIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { settingsStore } from '../../../stores/settingsStore'
+import { getCurrentCustomerId } from '../../../platform/stores/settings'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -133,7 +133,7 @@ const EmailAccountsTab: React.FC = () => {
   }, [identities])
 
   const handleConnectOutlook = () => {
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     // Open OAuth flow in same window - backend will redirect back
     const apiBaseUrl = import.meta.env.VITE_API_URL || ''
     window.location.href = `${apiBaseUrl}/api/outlook/auth?customerId=${customerId}`
