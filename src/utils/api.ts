@@ -1,8 +1,17 @@
 import { settingsStore } from '../platform'
 
 // API utility for making requests to backend
-// Use environment variable or empty string for relative URLs (Azure proxy)
+// VITE_API_URL MUST be set. In production, Azure SWA proxy handles /api/* routing.
+// In development, it points to localhost:3001
 const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+
+// Warn if API_BASE_URL is empty - in production this relies on Azure SWA proxy
+if (!API_BASE_URL && typeof window !== 'undefined') {
+  console.warn(
+    '[API] VITE_API_URL is not set. Requests will use relative URLs (/api/*). ' +
+    'This works in production via Azure SWA proxy, but may fail if proxy is misconfigured.'
+  )
+}
 
 export interface ApiResponse<T> {
   data?: T

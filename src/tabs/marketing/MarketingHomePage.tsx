@@ -21,7 +21,7 @@ import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import SequencesTab from './components/SequencesTab'
 import PeopleTab from './components/PeopleTab'
-import ListsTab from './components/ListsTab'
+import LeadSourcesTab from './components/LeadSourcesTab'
 import CampaignsTab from './components/CampaignsTab'
 import EmailAccountsTab from './components/EmailAccountsTab'
 import ReportsTab from './components/ReportsTab'
@@ -122,9 +122,9 @@ export default function MarketingHomePage({
     },
     {
       id: 'lists',
-      label: 'Lists',
+      label: 'Lead Sources',
       icon: ViewIcon,
-      content: <ListsTab />,
+      content: <LeadSourcesTab />,
       sortOrder: 5,
     },
     {
