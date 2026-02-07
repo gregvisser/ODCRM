@@ -1,0 +1,46 @@
+name: Resolve Prisma Migration Lock
+
+on:
+  workflow_dispatch:
+
+jobs:
+  resolve-migration-lock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Prisma migrate status (before)
+        run: npx prisma migrate status
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Resolve failed migration as rolled back
+        run: npx prisma migrate resolve --rolled-back 20260206233000_add_contact_source_rows_and_nullable_sender_identity
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Prisma migrate deploy
+        run: npx prisma migrate deploy
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Prisma migrate status (after)
+        run: npx prisma migrate status
+        working-directory: server
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
