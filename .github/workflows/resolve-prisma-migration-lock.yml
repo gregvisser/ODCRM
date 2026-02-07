@@ -13,13 +13,43 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: server/package-lock.json
 
       - name: Install server dependencies
         run: npm ci
         working-directory: server
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Preflight cleanup for partial migration
+        run: |
+          set -euo pipefail
+          echo "Preflight: checking for contact_source_rows table..."
+          TABLE_EXISTS=$(psql "$DATABASE_URL" -Atqc "SELECT to_regclass('public.contact_source_rows') IS NOT NULL;")
+          if [ "$TABLE_EXISTS" = "t" ]; then
+            echo "Detected contact_source_rows table."
+            echo "Indexes on contact_source_rows:"
+            psql "$DATABASE_URL" -Atqc "SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='contact_source_rows' ORDER BY indexname;"
+            echo "Dropping contact_source_rows table (CASCADE)..."
+            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS public.contact_source_rows CASCADE;"
+            echo "Dropped contact_source_rows table."
+          else
+            echo "contact_source_rows table not found. No drop needed."
+          fi
+
+          echo "Checking senderIdentityId nullability..."
+          COL_NULLABLE=$(psql "$DATABASE_URL" -Atqc "SELECT is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='email_campaigns' AND column_name='senderIdentityId';")
+          if [ -z "$COL_NULLABLE" ]; then
+            echo "Column senderIdentityId not found in email_campaigns."
+          else
+            echo "senderIdentityId is_nullable: $COL_NULLABLE"
+          fi
+          echo "Preflight cleanup complete."
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
       - name: Prisma migrate status (before)
         run: npx prisma migrate status
