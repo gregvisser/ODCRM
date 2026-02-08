@@ -35,7 +35,8 @@ const createCampaignSchema = z.object({
 router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const data = createCampaignSchema.parse(req.body)
+    const { id: _ignoredId, ...safeBody } = (req.body || {}) as Record<string, unknown>
+    const data = createCampaignSchema.parse(safeBody)
     const status = data.status || 'draft'
 
     if (status !== 'draft') {
