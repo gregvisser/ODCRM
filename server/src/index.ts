@@ -134,7 +134,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV || 'development',
     version: '2026-02-05-v2',
-    commit: process.env.WEBSITE_COMMIT_HASH || null
+    commit: process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || null
   })
 })
 
