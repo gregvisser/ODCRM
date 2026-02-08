@@ -14,9 +14,15 @@ export const prisma =
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   })
 
+console.log('[prisma] shared client loaded (lib/prisma.ts)')
+
 prisma.$use(async (params, next) => {
   if (params.model === 'EmailCampaign' && (params.action === 'create' || params.action === 'createMany')) {
     const data = params.args?.data
+    const hasId = Array.isArray(data)
+      ? data.some((item) => item && typeof item === 'object' && 'id' in item)
+      : !!(data && typeof data === 'object' && 'id' in data)
+    console.log('[prisma] middleware hit', { model: params.model, action: params.action, hasId })
     if (Array.isArray(data)) {
       data.forEach((item) => {
         if (item && typeof item === 'object' && 'id' in item) {
