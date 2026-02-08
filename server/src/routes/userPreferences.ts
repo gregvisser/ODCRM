@@ -1,10 +1,10 @@
 import express from 'express'
-import { PrismaClient, Prisma } from '@prisma/client'
+import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
+import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
-const prisma = new PrismaClient()
 
 // Validation schema for preferences
 const preferencesSchema = z.object({
