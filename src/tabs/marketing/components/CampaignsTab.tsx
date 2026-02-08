@@ -1,13 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
   Card,
   CardBody,
-  CardHeader,
   Flex,
-  Grid,
-  GridItem,
   Heading,
   HStack,
   Icon,
@@ -20,7 +17,6 @@ import {
   MenuItem,
   MenuList,
   MenuDivider,
-  Progress,
   Select,
   SimpleGrid,
   Stat,
@@ -36,7 +32,6 @@ import {
   Tr,
   VStack,
   Badge,
-  Avatar,
   useDisclosure,
   Modal,
   ModalOverlay,
@@ -46,17 +41,18 @@ import {
   ModalCloseButton,
   FormControl,
   FormLabel,
-  Textarea,
   Spacer,
-  Divider,
   useToast,
-  Tag,
-  TagLabel,
-  TagCloseButton,
   Alert,
   AlertIcon,
   AlertTitle,
   AlertDescription,
+  AlertDialog,
+  AlertDialogOverlay,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogBody,
+  AlertDialogFooter,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -67,67 +63,111 @@ import {
   EmailIcon,
   CheckCircleIcon,
   SettingsIcon,
-  TriangleUpIcon,
-  TriangleDownIcon,
   TimeIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
+type CampaignMetrics = {
+  totalProspects: number
+  emailsSent: number
+  opened: number
+  bounced: number
+  unsubscribed: number
+  replied: number
+}
+
 type Campaign = {
   id: string
   name: string
-  subject: string
-  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'paused'
-  recipientCount: number
-  sentCount: number
-  openedCount: number
-  clickedCount: number
-  repliedCount: number
-  openRate: number
-  clickRate: number
-  replyRate: number
+  description?: string | null
+  status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'paused' | 'running'
+  listId?: string | null
+  senderIdentityId?: string | null
   scheduledFor?: string
   sentAt?: string
   createdAt: string
-  templateId?: string
-  senderIdentity: {
+  senderIdentity?: {
     id: string
     emailAddress: string
     displayName?: string
-  }
-  tags: string[]
+  } | null
+  metrics?: CampaignMetrics
+  templateId?: string
 }
 
-type CampaignTemplate = {
+type EmailTemplate = {
   id: string
   name: string
-  subject: string
-  previewText?: string
+  subjectTemplate: string
+  bodyTemplateHtml: string
+  bodyTemplateText?: string | null
+  stepNumber?: number
 }
+
+type SnapshotList = {
+  id: string
+  name: string
+  memberCount: number
+  lastSyncAt: string
+}
+
+type SnapshotOption = SnapshotList & {
+  source: 'cognism' | 'apollo' | 'blackbook'
+}
+
+type EmailIdentity = {
+  id: string
+  emailAddress: string
+  displayName?: string | null
+  isActive?: boolean
+}
+
+type StartPreview = {
+  snapshot?: SnapshotOption
+  template?: EmailTemplate
+  sender?: EmailIdentity
+  contactCount?: number
+  missingEmailCount?: number
+  error?: string | null
+  loading?: boolean
+}
+
+const LEAD_SOURCES: SnapshotOption['source'][] = ['cognism', 'apollo', 'blackbook']
 
 const CampaignsTab: React.FC = () => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [templates, setTemplates] = useState<CampaignTemplate[]>([])
+  const [templates, setTemplates] = useState<EmailTemplate[]>([])
+  const [snapshots, setSnapshots] = useState<SnapshotOption[]>([])
+  const [senderIdentities, setSenderIdentities] = useState<EmailIdentity[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [snapshotsError, setSnapshotsError] = useState<string | null>(null)
+  const [templatesError, setTemplatesError] = useState<string | null>(null)
+  const [sendersError, setSendersError] = useState<string | null>(null)
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false)
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [sendersLoading, setSendersLoading] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null)
+  const [startPreviewCampaign, setStartPreviewCampaign] = useState<Campaign | null>(null)
+  const [startPreview, setStartPreview] = useState<StartPreview | null>(null)
+  const { isOpen: isStartOpen, onOpen: onStartOpen, onClose: onStartClose } = useDisclosure()
+  const cancelStartRef = useRef<HTMLButtonElement | null>(null)
   const toast = useToast()
 
   useEffect(() => {
     loadData()
+    loadFormOptions()
+    maybeOpenFromSnapshot()
   }, [])
 
   const loadData = async () => {
     setLoading(true)
     setError(null)
 
-    const [campaignsRes, templatesRes] = await Promise.all([
-      api.get<Campaign[]>('/api/campaigns'),
-      api.get<CampaignTemplate[]>('/api/templates')
-    ])
+    const campaignsRes = await api.get<Campaign[]>('/api/campaigns')
 
     if (campaignsRes.error) {
       setError(campaignsRes.error)
@@ -135,18 +175,93 @@ const CampaignsTab: React.FC = () => {
       setCampaigns(campaignsRes.data || [])
     }
 
-    if (!templatesRes.error) {
+    setLoading(false)
+  }
+
+  const loadFormOptions = async () => {
+    setSnapshotsLoading(true)
+    setTemplatesLoading(true)
+    setSendersLoading(true)
+    setSnapshotsError(null)
+    setTemplatesError(null)
+    setSendersError(null)
+
+    const [snapshotsRes, templatesRes, sendersRes] = await Promise.all([
+      loadSnapshots(),
+      api.get<EmailTemplate[]>('/api/templates'),
+      api.get<EmailIdentity[]>('/api/outlook/identities')
+    ])
+
+    if (templatesRes.error) {
+      setTemplatesError(templatesRes.error)
+    } else {
       setTemplates(templatesRes.data || [])
     }
 
-    setLoading(false)
+    if (sendersRes.error) {
+      setSendersError(sendersRes.error)
+    } else {
+      setSenderIdentities((sendersRes.data || []).filter((sender) => sender.isActive !== false))
+    }
+
+    setSnapshotsLoading(false)
+    setTemplatesLoading(false)
+    setSendersLoading(false)
+  }
+
+  const loadSnapshots = async () => {
+    const results = await Promise.all(
+      LEAD_SOURCES.map((source) =>
+        api.get<{ lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
+      )
+    )
+
+    const errors = results
+      .map((res, idx) => (res.error ? `${LEAD_SOURCES[idx]}: ${res.error}` : null))
+      .filter(Boolean) as string[]
+
+    if (errors.length > 0) {
+      setSnapshotsError(`Failed to load snapshots: ${errors.join(', ')}`)
+    }
+
+    const combined: SnapshotOption[] = results.flatMap((res, idx) => {
+      const lists = res.data?.lists || []
+      return lists.map((list) => ({
+        ...list,
+        source: LEAD_SOURCES[idx],
+      }))
+    })
+
+    combined.sort((a, b) => new Date(b.lastSyncAt).getTime() - new Date(a.lastSyncAt).getTime())
+    setSnapshots(combined)
+    return combined
+  }
+
+  const getRecipientCount = (campaign: Campaign) => {
+    return campaign.metrics?.totalProspects ?? 0
+  }
+
+  const getSentCount = (campaign: Campaign) => {
+    return campaign.metrics?.emailsSent ?? 0
+  }
+
+  const getOpenedCount = (campaign: Campaign) => {
+    return campaign.metrics?.opened ?? 0
+  }
+
+  const getClickedCount = (_campaign: Campaign) => {
+    return 0
+  }
+
+  const getRepliedCount = (campaign: Campaign) => {
+    return campaign.metrics?.replied ?? 0
   }
 
   const filteredCampaigns = useMemo(() => {
     return campaigns.filter(campaign => {
       const matchesSearch = searchQuery === '' ||
         campaign.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        campaign.subject.toLowerCase().includes(searchQuery.toLowerCase())
+        (campaign.description || '').toLowerCase().includes(searchQuery.toLowerCase())
 
       const matchesStatus = statusFilter === 'all' || campaign.status === statusFilter
 
@@ -160,10 +275,10 @@ const CampaignsTab: React.FC = () => {
       sent: campaigns.filter(c => c.status === 'sent').length,
       scheduled: campaigns.filter(c => c.status === 'scheduled').length,
       drafts: campaigns.filter(c => c.status === 'draft').length,
-      totalSent: campaigns.reduce((sum, c) => sum + c.sentCount, 0),
-      totalOpens: campaigns.reduce((sum, c) => sum + c.openedCount, 0),
-      totalClicks: campaigns.reduce((sum, c) => sum + c.clickedCount, 0),
-      totalReplies: campaigns.reduce((sum, c) => sum + c.repliedCount, 0),
+      totalSent: campaigns.reduce((sum, c) => sum + getSentCount(c), 0),
+      totalOpens: campaigns.reduce((sum, c) => sum + getOpenedCount(c), 0),
+      totalClicks: campaigns.reduce((sum, c) => sum + getClickedCount(c), 0),
+      totalReplies: campaigns.reduce((sum, c) => sum + getRepliedCount(c), 0),
     }
   }, [campaigns])
 
@@ -171,77 +286,261 @@ const CampaignsTab: React.FC = () => {
     setEditingCampaign({
       id: '',
       name: '',
-      subject: '',
+      description: '',
       status: 'draft',
-      recipientCount: 0,
-      sentCount: 0,
-      openedCount: 0,
-      clickedCount: 0,
-      repliedCount: 0,
-      openRate: 0,
-      clickRate: 0,
-      replyRate: 0,
       createdAt: new Date().toISOString(),
-      senderIdentity: {
-        id: 'default',
-        emailAddress: 'noreply@company.com',
-        displayName: 'Company Name',
-      },
-      tags: [],
+      listId: '',
+      senderIdentityId: '',
+      templateId: '',
     })
     onOpen()
   }
 
   const handleEditCampaign = (campaign: Campaign) => {
-    setEditingCampaign(campaign)
+    setEditingCampaign({
+      ...campaign,
+      listId: campaign.listId || '',
+      senderIdentityId: campaign.senderIdentity?.id || campaign.senderIdentityId || '',
+      templateId: campaign.templateId || '',
+    })
     onOpen()
+    loadCampaignTemplateSelection(campaign.id)
   }
 
-  const handleSaveCampaign = async () => {
+  const handleSaveDraft = async () => {
     if (!editingCampaign) return
-
-    try {
-      if (editingCampaign.id) {
-        await api.put(`/api/campaigns/${editingCampaign.id}`, editingCampaign)
-      } else {
-        await api.post('/api/campaigns', editingCampaign)
-      }
-      await loadData()
-      onClose()
+    if (!editingCampaign.name.trim()) {
       toast({
-        title: `Campaign ${editingCampaign.id ? 'updated' : 'created'}`,
-        status: 'success',
-        duration: 3000,
-      })
-    } catch (error) {
-      toast({
-        title: `Failed to ${editingCampaign.id ? 'update' : 'create'} campaign`,
+        title: 'Campaign name is required',
         status: 'error',
         duration: 3000,
-      })
-    }
-  }
-
-  const handleStartCampaign = async (campaignId: string) => {
-    const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/start`, {})
-    
-    if (apiError) {
-      toast({
-        title: 'Failed to start campaign',
-        description: apiError,
-        status: 'error',
-        duration: 5000,
       })
       return
     }
 
-    await loadData()
-    toast({
-      title: 'Campaign started',
-      description: 'Emails will be sent according to the schedule.',
-      status: 'success',
-      duration: 3000,
+    try {
+      const payload = {
+        name: editingCampaign.name.trim(),
+        description: editingCampaign.description?.trim() || undefined,
+        status: 'draft',
+        listId: editingCampaign.listId || undefined,
+        senderIdentityId: editingCampaign.senderIdentityId || undefined,
+      }
+      if (editingCampaign.id) {
+        await api.patch(`/api/campaigns/${editingCampaign.id}`, payload)
+        await saveCampaignTemplate(editingCampaign.id)
+      } else {
+        const response = await api.post<Campaign>('/api/campaigns', payload)
+        if (response.error) {
+          throw new Error(response.error)
+        }
+        if (response.data?.id) await saveCampaignTemplate(response.data.id)
+      }
+      await loadData()
+      onClose()
+      toast({
+        title: `Campaign ${editingCampaign.id ? 'updated' : 'created'} (Draft)`,
+        status: 'success',
+        duration: 3000,
+      })
+    } catch (error: any) {
+      toast({
+        title: `Failed to ${editingCampaign.id ? 'update' : 'create'} campaign`,
+        description: error?.message,
+        status: 'error',
+        duration: 3000,
+      })
+    }
+  }
+
+  const loadCampaignTemplateSelection = async (campaignId: string) => {
+    const { data, error: apiError } = await api.get<any>(`/api/campaigns/${campaignId}`)
+    if (apiError || !data) return
+
+    const step1 = Array.isArray(data.email_campaign_templates)
+      ? data.email_campaign_templates.find((t: any) => t.stepNumber === 1)
+      : null
+
+    if (!step1) return
+
+    const matched = templates.find((template) =>
+      template.subjectTemplate === step1.subjectTemplate &&
+      template.bodyTemplateHtml === step1.bodyTemplateHtml
+    )
+
+    if (matched) {
+      setEditingCampaign((prev) =>
+        prev?.id === campaignId ? { ...prev, templateId: matched.id } as Campaign : prev
+      )
+    }
+  }
+
+  const saveCampaignTemplate = async (campaignId: string) => {
+    const templateId = editingCampaign?.templateId
+    if (!templateId) return
+
+    const selectedTemplate = templates.find((template) => template.id === templateId)
+    if (!selectedTemplate) return
+
+    await api.post(`/api/campaigns/${campaignId}/templates`, {
+      steps: [
+        {
+          stepNumber: 1,
+          subjectTemplate: selectedTemplate.subjectTemplate,
+          bodyTemplateHtml: selectedTemplate.bodyTemplateHtml,
+          bodyTemplateText: selectedTemplate.bodyTemplateText || undefined,
+          delayDaysMin: 0,
+          delayDaysMax: 0,
+        }
+      ],
     })
+  }
+
+  const validateStartRequirements = (campaign: Campaign) => {
+    if (!campaign.name.trim()) return 'Campaign name is required.'
+    if (snapshots.length === 0) return 'No snapshots available.'
+    if (!campaign.listId) return 'Select a lead snapshot.'
+    if (templates.length === 0) return 'No templates available.'
+    if (!campaign.templateId) return 'Select a template.'
+    if (senderIdentities.length === 0) return 'No senders available.'
+    if (!campaign.senderIdentityId) return 'Select a sender.'
+    if (snapshotsError || templatesError || sendersError) return 'Fix the data loading errors first.'
+    return null
+  }
+
+  const handleRequestStart = async (campaign: Campaign) => {
+    const validationError = validateStartRequirements(campaign)
+    if (validationError) {
+      toast({
+        title: 'Cannot start campaign',
+        description: validationError,
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+
+    const snapshot = snapshots.find((item) => item.id === campaign.listId)
+    const template = templates.find((item) => item.id === campaign.templateId)
+    const sender = senderIdentities.find((item) => item.id === campaign.senderIdentityId)
+
+    if (!snapshot || !template || !sender) {
+      toast({
+        title: 'Cannot start campaign',
+        description: 'Snapshot, template, or sender selection is invalid.',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+
+    setStartPreviewCampaign(campaign)
+    setStartPreview({
+      snapshot,
+      template,
+      sender,
+      loading: true,
+      error: null,
+    })
+    onStartOpen()
+
+    const listRes = await api.get<{ contacts: Array<{ id: string; email: string | null }> }>(`/api/lists/${snapshot.id}`)
+    if (listRes.error) {
+      setStartPreview((prev) => ({
+        ...prev,
+        loading: false,
+        error: listRes.error,
+      }))
+      return
+    }
+
+    const contacts = listRes.data?.contacts || []
+    const missingEmailCount = contacts.filter((contact) => !contact.email).length
+
+    setStartPreview((prev) => ({
+      ...prev,
+      loading: false,
+      contactCount: contacts.length,
+      missingEmailCount,
+    }))
+  }
+
+  const handleConfirmStart = async () => {
+    if (!startPreviewCampaign) return
+    const campaign = startPreviewCampaign
+    const listId = campaign.listId
+    const senderIdentityId = campaign.senderIdentityId
+    const templateId = campaign.templateId
+
+    if (!listId || !senderIdentityId || !templateId) return
+
+    try {
+      if (!campaign.id) {
+        toast({
+          title: 'Save draft first',
+          description: 'Save the draft before starting to lock the template selection.',
+          status: 'error',
+          duration: 4000,
+        })
+        return
+      }
+
+      let campaignId = campaign.id
+      if (campaignId) {
+        await api.patch(`/api/campaigns/${campaignId}`, {
+          name: campaign.name.trim(),
+          description: campaign.description?.trim() || undefined,
+          listId,
+          senderIdentityId,
+        })
+      }
+
+      const listRes = await api.get<{ contacts: Array<{ id: string }> }>(`/api/lists/${listId}`)
+      if (listRes.error) {
+        throw new Error(listRes.error)
+      }
+
+      const contactIds = (listRes.data?.contacts || []).map((contact) => contact.id)
+      if (contactIds.length > 0) {
+        const attachRes = await api.post(`/api/campaigns/${campaignId}/prospects`, {
+          contactIds,
+        })
+        if (attachRes.error) {
+          throw new Error(attachRes.error)
+        }
+      }
+
+      const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/start`, {})
+      if (apiError) {
+        throw new Error(apiError)
+      }
+
+      await loadData()
+      onStartClose()
+      onClose()
+      toast({
+        title: 'Campaign started',
+        description: 'Emails will be sent according to the schedule.',
+        status: 'success',
+        duration: 4000,
+      })
+    } catch (startError: any) {
+      toast({
+        title: 'Failed to start campaign',
+        description: startError?.message || 'Unknown error',
+        status: 'error',
+        duration: 5000,
+      })
+    }
+  }
+
+  const maybeOpenFromSnapshot = () => {
+    const params = new URLSearchParams(window.location.search)
+    const snapshotId = params.get('snapshotId')
+    const view = params.get('view')
+    if (view !== 'campaigns' || !snapshotId) return
+    handleCreateCampaign()
+    setEditingCampaign((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
   }
 
   const handlePauseCampaign = async (campaignId: string) => {
@@ -324,6 +623,20 @@ const CampaignsTab: React.FC = () => {
             <AlertDescription>{error}</AlertDescription>
           </Box>
           <Button size="sm" onClick={loadData} ml={4}>
+            Retry
+          </Button>
+        </Alert>
+      )}
+      {(snapshotsError || templatesError || sendersError) && (
+        <Alert status="error" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Failed to load campaign options</AlertTitle>
+            <AlertDescription>
+              {snapshotsError || templatesError || sendersError}
+            </AlertDescription>
+          </Box>
+          <Button size="sm" onClick={loadFormOptions} ml={4}>
             Retry
           </Button>
         </Alert>
@@ -476,19 +789,9 @@ const CampaignsTab: React.FC = () => {
                     <Td>
                       <VStack align="start" spacing={1}>
                         <Text fontWeight="semibold">{campaign.name}</Text>
-                        <Text fontSize="sm" color="gray.600">{campaign.subject}</Text>
-                        <HStack spacing={1}>
-                          {campaign.tags.slice(0, 2).map((tag) => (
-                            <Tag key={tag} size="sm" variant="subtle">
-                              <TagLabel>{tag}</TagLabel>
-                            </Tag>
-                          ))}
-                          {campaign.tags.length > 2 && (
-                            <Tag size="sm" variant="subtle">
-                              <TagLabel>+{campaign.tags.length - 2}</TagLabel>
-                            </Tag>
-                          )}
-                        </HStack>
+                        <Text fontSize="sm" color="gray.600">
+                          {campaign.description || 'No description'}
+                        </Text>
                       </VStack>
                     </Td>
                     <Td>
@@ -499,29 +802,29 @@ const CampaignsTab: React.FC = () => {
                         </Badge>
                       </HStack>
                     </Td>
-                    <Td isNumeric>{campaign.recipientCount.toLocaleString()}</Td>
-                    <Td isNumeric>{campaign.sentCount.toLocaleString()}</Td>
+                    <Td isNumeric>{getRecipientCount(campaign).toLocaleString()}</Td>
+                    <Td isNumeric>{getSentCount(campaign).toLocaleString()}</Td>
                     <Td isNumeric>
                       <VStack align="end" spacing={0}>
-                        <Text>{campaign.openedCount.toLocaleString()}</Text>
+                        <Text>{getOpenedCount(campaign).toLocaleString()}</Text>
                         <Text fontSize="xs" color="gray.600">
-                          {campaign.sentCount > 0 ? ((campaign.openedCount / campaign.sentCount) * 100).toFixed(1) : '0.0'}%
+                          {getSentCount(campaign) > 0 ? ((getOpenedCount(campaign) / getSentCount(campaign)) * 100).toFixed(1) : '0.0'}%
                         </Text>
                       </VStack>
                     </Td>
                     <Td isNumeric>
                       <VStack align="end" spacing={0}>
-                        <Text>{campaign.clickedCount.toLocaleString()}</Text>
+                        <Text>{getClickedCount(campaign).toLocaleString()}</Text>
                         <Text fontSize="xs" color="gray.600">
-                          {campaign.sentCount > 0 ? ((campaign.clickedCount / campaign.sentCount) * 100).toFixed(1) : '0.0'}%
+                          {getSentCount(campaign) > 0 ? ((getClickedCount(campaign) / getSentCount(campaign)) * 100).toFixed(1) : '0.0'}%
                         </Text>
                       </VStack>
                     </Td>
                     <Td isNumeric>
                       <VStack align="end" spacing={0}>
-                        <Text>{campaign.repliedCount.toLocaleString()}</Text>
+                        <Text>{getRepliedCount(campaign).toLocaleString()}</Text>
                         <Text fontSize="xs" color="gray.600">
-                          {campaign.sentCount > 0 ? ((campaign.repliedCount / campaign.sentCount) * 100).toFixed(1) : '0.0'}%
+                          {getSentCount(campaign) > 0 ? ((getRepliedCount(campaign) / getSentCount(campaign)) * 100).toFixed(1) : '0.0'}%
                         </Text>
                       </VStack>
                     </Td>
@@ -558,7 +861,7 @@ const CampaignsTab: React.FC = () => {
                             Edit
                           </MenuItem>
                           {(campaign.status === 'draft' || campaign.status === 'paused') && (
-                            <MenuItem icon={<EmailIcon />} onClick={() => handleStartCampaign(campaign.id)}>
+                            <MenuItem icon={<EmailIcon />} onClick={() => handleEditCampaign(campaign)}>
                               Start Campaign
                             </MenuItem>
                           )}
@@ -599,83 +902,168 @@ const CampaignsTab: React.FC = () => {
                     placeholder="Enter campaign name"
                   />
                 </FormControl>
-                <FormControl>
-                  <FormLabel>Email Subject</FormLabel>
-                  <Input
-                    value={editingCampaign.subject}
-                    onChange={(e) => setEditingCampaign({...editingCampaign, subject: e.target.value})}
-                    placeholder="Enter email subject line"
-                  />
-                </FormControl>
-                <FormControl>
-                  <FormLabel>Sender</FormLabel>
+                <FormControl isRequired>
+                  <FormLabel>Leads Snapshot</FormLabel>
                   <Select
-                    value={editingCampaign.senderIdentity.id}
+                    value={editingCampaign.listId || ''}
                     onChange={(e) => setEditingCampaign({
                       ...editingCampaign,
-                      senderIdentity: { ...editingCampaign.senderIdentity, id: e.target.value }
+                      listId: e.target.value || '',
                     })}
+                    placeholder={snapshotsLoading ? 'Loading snapshots...' : 'Select a snapshot'}
                   >
-                    <option value="default">noreply@company.com</option>
-                    <option value="sales">sales@company.com</option>
-                  </Select>
-                </FormControl>
-                <FormControl>
-                  <FormLabel>Status</FormLabel>
-                  <Select
-                    value={editingCampaign.status}
-                    onChange={(e) => setEditingCampaign({...editingCampaign, status: e.target.value as any})}
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="scheduled">Scheduled</option>
-                  </Select>
-                </FormControl>
-                <FormControl gridColumn="span 2">
-                  <FormLabel>Tags</FormLabel>
-                  <HStack spacing={2} wrap="wrap">
-                    {editingCampaign.tags.map((tag) => (
-                      <Tag key={tag} size="md" variant="solid">
-                        <TagLabel>{tag}</TagLabel>
-                        <TagCloseButton
-                          onClick={() => setEditingCampaign({
-                            ...editingCampaign,
-                            tags: editingCampaign.tags.filter(t => t !== tag)
-                          })}
-                        />
-                      </Tag>
+                    {snapshots.map((snapshot) => (
+                      <option key={snapshot.id} value={snapshot.id}>
+                        {snapshot.name} ({snapshot.memberCount} leads)
+                      </option>
                     ))}
-                    <Input
-                      size="sm"
-                      placeholder="Add tag..."
-                      w="120px"
-                      onKeyPress={(e) => {
-                        if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                          const newTag = e.currentTarget.value.trim()
-                          if (!editingCampaign.tags.includes(newTag)) {
-                            setEditingCampaign({
-                              ...editingCampaign,
-                              tags: [...editingCampaign.tags, newTag]
-                            })
-                          }
-                          e.currentTarget.value = ''
-                        }
-                      }}
-                    />
-                  </HStack>
+                  </Select>
+                  {snapshots.length === 0 && !snapshotsLoading && (
+                    <Text fontSize="sm" color="gray.500" mt={2}>
+                      No snapshots yet. Go to Lead Sources and click Sync.
+                    </Text>
+                  )}
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Template</FormLabel>
+                  <Select
+                    value={editingCampaign.templateId || ''}
+                    onChange={(e) => setEditingCampaign({...editingCampaign, templateId: e.target.value || ''})}
+                    placeholder={templatesLoading ? 'Loading templates...' : 'Select a template'}
+                  >
+                    {templates.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name} — {template.subjectTemplate}
+                      </option>
+                    ))}
+                  </Select>
+                  {templates.length === 0 && !templatesLoading && (
+                    <Text fontSize="sm" color="gray.500" mt={2}>
+                      Create a template first.
+                    </Text>
+                  )}
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel>Sender</FormLabel>
+                  <Select
+                    value={editingCampaign.senderIdentityId || ''}
+                    onChange={(e) => setEditingCampaign({
+                      ...editingCampaign,
+                      senderIdentityId: e.target.value || '',
+                    })}
+                    placeholder={sendersLoading ? 'Loading senders...' : 'Select a sender'}
+                  >
+                    {senderIdentities.map((sender) => (
+                      <option key={sender.id} value={sender.id}>
+                        {sender.displayName ? `${sender.displayName} — ${sender.emailAddress}` : sender.emailAddress}
+                      </option>
+                    ))}
+                  </Select>
+                  {senderIdentities.length === 0 && !sendersLoading && (
+                    <Text fontSize="sm" color="gray.500" mt={2}>
+                      Connect an Outlook sender first.
+                    </Text>
+                  )}
                 </FormControl>
               </SimpleGrid>
             )}
           </ModalBody>
+          <Box px={6} pb={2}>
+            {editingCampaign && !editingCampaign.id && (
+              <Alert status="info" variant="left-accent">
+                <AlertIcon />
+                <Box>
+                  <AlertTitle>Save draft to enable Start</AlertTitle>
+                  <AlertDescription>
+                    Starting requires a saved draft. Click Save Draft once, then Start.
+                  </AlertDescription>
+                </Box>
+              </Alert>
+            )}
+          </Box>
           <Flex justify="flex-end" p={6} pt={0}>
             <Button variant="ghost" mr={3} onClick={onClose}>
               Cancel
             </Button>
-            <Button colorScheme="blue" onClick={handleSaveCampaign}>
-              {editingCampaign?.id ? 'Save Changes' : 'Create Campaign'}
+            <Button variant="outline" mr={3} onClick={handleSaveDraft}>
+              Save Draft
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={() => editingCampaign && handleRequestStart(editingCampaign)}
+              isDisabled={!editingCampaign || !editingCampaign.id || !!validateStartRequirements(editingCampaign)}
+            >
+              Start Campaign
             </Button>
           </Flex>
         </ModalContent>
       </Modal>
+
+      <AlertDialog isOpen={isStartOpen} onClose={onStartClose} leastDestructiveRef={cancelStartRef}>
+        <AlertDialogOverlay />
+        <AlertDialogContent>
+          <AlertDialogHeader fontSize="lg" fontWeight="bold">
+            Confirm start
+          </AlertDialogHeader>
+          <AlertDialogBody>
+            {startPreview?.error ? (
+              <Alert status="error" mb={4}>
+                <AlertIcon />
+                <AlertDescription>{startPreview.error}</AlertDescription>
+              </Alert>
+            ) : (
+              <VStack align="start" spacing={3}>
+                <Text>
+                  This will enroll the selected snapshot and start sending immediately.
+                </Text>
+                <Box>
+                  <Text fontWeight="semibold">Sender</Text>
+                  <Text fontSize="sm" color="gray.600">
+                    {startPreview?.sender?.emailAddress || '—'}
+                  </Text>
+                </Box>
+                <Box>
+                  <Text fontWeight="semibold">Leads Snapshot</Text>
+                  <Text fontSize="sm" color="gray.600">
+                    {startPreview?.snapshot?.name || '—'}
+                    {typeof startPreview?.snapshot?.memberCount === 'number'
+                      ? ` (${startPreview.snapshot.memberCount} leads)`
+                      : ''}
+                  </Text>
+                </Box>
+                <Box>
+                  <Text fontWeight="semibold">Template</Text>
+                  <Text fontSize="sm" color="gray.600">
+                    {startPreview?.template?.name || '—'} — {startPreview?.template?.subjectTemplate || '—'}
+                  </Text>
+                </Box>
+                {typeof startPreview?.missingEmailCount === 'number' && startPreview.missingEmailCount > 0 && (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    <AlertDescription>
+                      {startPreview.missingEmailCount} lead(s) are missing email addresses and will be skipped.
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </VStack>
+            )}
+          </AlertDialogBody>
+          <AlertDialogFooter>
+            <Button ref={cancelStartRef} onClick={onStartClose}>
+              Cancel
+            </Button>
+            <Button
+              colorScheme="blue"
+              onClick={handleConfirmStart}
+              ml={3}
+              isLoading={startPreview?.loading}
+              isDisabled={!!startPreview?.error}
+            >
+              Start Campaign
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Box>
   )
 }
