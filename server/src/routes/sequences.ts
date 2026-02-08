@@ -17,6 +17,7 @@ const getCustomerId = (req: any): string => {
 
 // Schema validation
 const createSequenceSchema = z.object({
+  senderIdentityId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
   steps: z.array(
@@ -54,6 +55,13 @@ router.get('/', async (req, res) => {
         _count: {
           select: { steps: true },
         },
+        senderIdentity: {
+          select: {
+            id: true,
+            emailAddress: true,
+            displayName: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -62,6 +70,8 @@ router.get('/', async (req, res) => {
     const sequencesWithCount = sequences.map((seq) => ({
       id: seq.id,
       customerId: seq.customerId,
+      senderIdentityId: seq.senderIdentityId,
+      senderIdentity: seq.senderIdentity,
       name: seq.name,
       description: seq.description,
       stepCount: seq._count.steps,
@@ -81,11 +91,18 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const sequence = await prisma.emailSequence.findUnique({
-      where: { id },
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, customerId: getCustomerId(req) },
       include: {
         steps: {
           orderBy: { stepOrder: 'asc' },
+        },
+        senderIdentity: {
+          select: {
+            id: true,
+            emailAddress: true,
+            displayName: true,
+          },
         },
       },
     })
@@ -97,6 +114,8 @@ router.get('/:id', async (req, res) => {
     return res.json({
       id: sequence.id,
       customerId: sequence.customerId,
+      senderIdentityId: sequence.senderIdentityId,
+      senderIdentity: sequence.senderIdentity,
       name: sequence.name,
       description: sequence.description,
       createdAt: sequence.createdAt.toISOString(),
@@ -124,9 +143,26 @@ router.post('/', async (req, res) => {
     const validated = createSequenceSchema.parse(req.body)
     const customerId = getCustomerId(req)
 
-    const sequence = await prisma.emailSequence.create({ data: {
+    // Verify senderIdentityId belongs to customer
+    const senderIdentity = await prisma.emailIdentity.findFirst({
+      where: {
+        id: validated.senderIdentityId,
+        customerId,
+        isActive: true,
+      },
+    })
+
+    if (!senderIdentity) {
+      return res.status(400).json({
+        error: 'Invalid sender identity - must belong to customer and be active'
+      })
+    }
+
+    const sequence = await prisma.emailSequence.create({
+      data: {
         id: `seq_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         customerId,
+        senderIdentityId: validated.senderIdentityId,
         name: validated.name,
         description: validated.description,
         updatedAt: new Date(),
@@ -148,12 +184,21 @@ router.post('/', async (req, res) => {
         steps: {
           orderBy: { stepOrder: 'asc' },
         },
+        senderIdentity: {
+          select: {
+            id: true,
+            emailAddress: true,
+            displayName: true,
+          },
+        },
       },
     })
 
     return res.status(201).json({
       id: sequence.id,
       customerId: sequence.customerId,
+      senderIdentityId: sequence.senderIdentityId,
+      senderIdentity: sequence.senderIdentity,
       name: sequence.name,
       description: sequence.description,
       stepCount: sequence.steps.length,
@@ -401,11 +446,71 @@ router.post('/:id/enroll', async (req, res) => {
         id: { in: contactIds },
         customerId,
       },
+      select: {
+        id: true,
+        email: true,
+      },
     })
 
     if (contacts.length !== contactIds.length) {
       return res.status(400).json({ error: 'Some contacts not found or do not belong to customer' })
     }
+
+    // Check for suppressed emails
+    const contactEmails = contacts.map(c => c.email).filter(Boolean)
+    const suppressedEmails = await prisma.suppressionEntry.findMany({
+      where: {
+        customerId,
+        OR: [
+          {
+            type: 'email',
+            emailNormalized: { in: contactEmails.map(e => e!.toLowerCase().trim()) },
+          },
+          {
+            type: 'domain',
+            value: {
+              in: contactEmails.map(e => e!.split('@')[1]).filter(Boolean),
+            },
+          },
+        ],
+      },
+      select: {
+        type: true,
+        value: true,
+        reason: true,
+      },
+    })
+
+    const suppressedContacts = new Set<string>()
+    const suppressionDetails: Array<{ contactId: string; email: string; reason: string }> = []
+
+    for (const contact of contacts) {
+      if (!contact.email) continue
+
+      const normalizedEmail = contact.email.toLowerCase().trim()
+      const domain = contact.email.split('@')[1]
+
+      // Check email suppression
+      const emailSuppressed = suppressedEmails.find(
+        s => s.type === 'email' && s.value === normalizedEmail
+      )
+
+      // Check domain suppression
+      const domainSuppressed = suppressedEmails.find(
+        s => s.type === 'domain' && s.value === domain
+      )
+
+      if (emailSuppressed || domainSuppressed) {
+        suppressedContacts.add(contact.id)
+        suppressionDetails.push({
+          contactId: contact.id,
+          email: contact.email,
+          reason: emailSuppressed?.reason || domainSuppressed?.reason || 'Suppressed',
+        })
+      }
+    }
+
+    const validContactIds = contactIds.filter(id => !suppressedContacts.has(id))
 
     // Get first step for scheduling
     const firstStep = sequence.steps[0]
@@ -413,17 +518,17 @@ router.post('/:id/enroll', async (req, res) => {
       ? new Date(Date.now() + (firstStep.delayDaysFromPrevious || 0) * 24 * 60 * 60 * 1000)
       : new Date()
 
-    // Check existing enrollments
+    // Check existing enrollments among valid contacts
     const existing = await prisma.sequenceEnrollment.findMany({
       where: {
         sequenceId: id,
-        contactId: { in: contactIds },
+        contactId: { in: validContactIds },
       },
       select: { contactId: true },
     })
 
     const existingContactIds = new Set(existing.map(e => e.contactId))
-    const newContactIds = contactIds.filter(cid => !existingContactIds.has(cid))
+    const newContactIds = validContactIds.filter(cid => !existingContactIds.has(cid))
 
     // Create enrollments
     if (newContactIds.length > 0) {
@@ -450,7 +555,9 @@ router.post('/:id/enroll', async (req, res) => {
     res.json({
       enrolled: newContactIds.length,
       skipped: existingContactIds.size,
+      suppressed: suppressionDetails.length,
       total: contactIds.length,
+      suppressionDetails: suppressionDetails.length > 0 ? suppressionDetails : undefined,
     })
   } catch (error) {
     console.error('Error enrolling contacts:', error)

@@ -39,6 +39,7 @@ import {
   AddIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { useToast } from '@chakra-ui/react'
 
 // Helper function to format relative time
 function getTimeAgo(date: Date): string {
@@ -84,6 +85,16 @@ interface DashboardStats {
   deliverability: number
 }
 
+interface EmployeeStats {
+  employeeId: string
+  employeeName: string
+  emailAddress: string
+  emailsSentToday: number
+  emailsSentWeek: number
+  repliesToday: number
+  repliesWeek: number
+}
+
 interface RecentActivity {
   type: 'sequence_started' | 'email_sent' | 'reply_received' | 'sequence_completed' | 'campaign_sent'
   message: string
@@ -91,6 +102,7 @@ interface RecentActivity {
 }
 
 const OverviewDashboard: React.FC = () => {
+  const toast = useToast()
   const [stats, setStats] = useState<DashboardStats>({
     totalContacts: 0,
     activeSequences: 0,
@@ -101,6 +113,7 @@ const OverviewDashboard: React.FC = () => {
     pendingTasks: 0,
     deliverability: 0,
   })
+  const [employeeStats, setEmployeeStats] = useState<EmployeeStats[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([])
@@ -114,81 +127,52 @@ const OverviewDashboard: React.FC = () => {
         setLoading(true)
         setError(null)
 
-        // Fetch data from multiple API endpoints
-        const [sequencesRes, campaignsRes, contactsRes, reportsRes, inboxRes] = await Promise.allSettled([
-          api.get('/api/sequences'),
-          api.get('/api/campaigns'),
-          api.get('/api/contacts'),
-          api.get('/api/reports/emails'),
-          api.get('/api/inbox?limit=10'),
-        ])
+        // Fetch overview data from the new overview endpoint
+        const overviewRes = await api.get('/api/overview')
 
-        // Process sequences data
-        let totalContacts = 0
-        let activeSequences = 0
-        let sequencesRunning = 0
+        if (overviewRes.data) {
+          const data = overviewRes.data
 
-        if (sequencesRes.status === 'fulfilled') {
-          const sequences = sequencesRes.value?.data || []
-          activeSequences = sequences.length
-          sequencesRunning = sequences.filter((s: any) => s.status === 'active').length
-        }
+          // Update main stats
+          setStats({
+            totalContacts: data.totalContacts || 0,
+            activeSequences: data.activeSequences || 0,
+            emailsSentToday: data.emailsSentToday || 0,
+            replyRate: 0, // Will calculate from employee stats
+            openRate: 0, // Will calculate from employee stats
+            sequencesRunning: data.activeSequences || 0, // Using active sequences as running
+            pendingTasks: 0, // Not implemented yet
+            deliverability: 0, // Not implemented yet
+          })
 
-        // Process contacts data
-        if (contactsRes.status === 'fulfilled') {
-          const contacts = contactsRes.value?.data || []
-          totalContacts = contacts.length
-        }
+          // Update employee stats
+          setEmployeeStats(data.employeeStats || [])
 
-        // Process email reports for today's stats
-        let emailsSentToday = 0
-        let replyRate = 0
-        let openRate = 0
-        let deliverability = 98.2 // Default deliverability
+          // Calculate aggregate reply rate from employee stats
+          if (data.employeeStats && data.employeeStats.length > 0) {
+            const totalReplies = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
+            const totalSent = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
+            const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0
 
-        if (reportsRes.status === 'fulfilled') {
-          const reportData = reportsRes.value?.data || {}
-          const totals = reportData.totals || {}
-
-          // Calculate today's sent emails
-          emailsSentToday = totals.sent || 0
-
-          // Calculate rates
-          const totalSent = totals.sent || 1 // Avoid division by zero
-          const replies = totals.replied || 0
-          const opens = totals.opened || 0
-
-          replyRate = (replies / totalSent) * 100
-          openRate = (opens / totalSent) * 100
-
-          // Calculate deliverability (sent vs bounced)
-          const bounced = totals.bounced || 0
-          if (totalSent > 0) {
-            deliverability = ((totalSent - bounced) / totalSent) * 100
+            setStats(prev => ({
+              ...prev,
+              replyRate: Math.round(replyRate * 10) / 10,
+            }))
           }
         }
 
-        // Mock pending tasks for now (could be calculated from campaigns/tasks)
-        const pendingTasks = 0
+        // Fetch recent activity (keep existing logic for now)
+        const [campaignsRes, inboxRes] = await Promise.allSettled([
+          api.get('/api/campaigns?limit=3'),
+          api.get('/api/inbox?limit=3'),
+        ])
 
-        setStats({
-          totalContacts,
-          activeSequences,
-          emailsSentToday,
-          replyRate: Math.round(replyRate * 10) / 10, // Round to 1 decimal
-          openRate: Math.round(openRate * 10) / 10,
-          sequencesRunning,
-          pendingTasks,
-          deliverability: Math.round(deliverability * 10) / 10,
-        })
-
-        // Process recent activity from inbox and campaigns
         const activity: RecentActivity[] = []
 
         // Add campaign activity
         if (campaignsRes.status === 'fulfilled') {
           const campaigns = campaignsRes.value?.data || []
-          campaigns.slice(0, 3).forEach((campaign: any) => {
+          campaigns.forEach((campaign: any) => {
             if (campaign.createdAt) {
               const timeAgo = getTimeAgo(new Date(campaign.createdAt))
               activity.push({
@@ -203,27 +187,12 @@ const OverviewDashboard: React.FC = () => {
         // Add inbox/reply activity
         if (inboxRes.status === 'fulfilled') {
           const inboxItems = inboxRes.value?.data || []
-          inboxItems.slice(0, 3).forEach((item: any) => {
+          inboxItems.forEach((item: any) => {
             if (item.receivedAt) {
               const timeAgo = getTimeAgo(new Date(item.receivedAt))
               activity.push({
                 type: 'reply_received',
                 message: `New reply from ${item.from || 'contact'}`,
-                time: timeAgo,
-              })
-            }
-          })
-        }
-
-        // Add sequence activity
-        if (sequencesRes.status === 'fulfilled') {
-          const sequences = sequencesRes.value?.data || []
-          sequences.slice(0, 2).forEach((sequence: any) => {
-            if (sequence.createdAt) {
-              const timeAgo = getTimeAgo(new Date(sequence.createdAt))
-              activity.push({
-                type: 'sequence_started',
-                message: `Sequence "${sequence.name}" was created`,
                 time: timeAgo,
               })
             }
@@ -264,81 +233,52 @@ const OverviewDashboard: React.FC = () => {
       setLoading(true)
       setError(null)
 
-      // Fetch data from multiple API endpoints
-      const [sequencesRes, campaignsRes, contactsRes, reportsRes, inboxRes] = await Promise.allSettled([
-        api.get('/api/sequences'),
-        api.get('/api/campaigns'),
-        api.get('/api/contacts'),
-        api.get('/api/reports/emails'),
-        api.get('/api/inbox?limit=10'),
-      ])
+      // Fetch overview data from the new overview endpoint
+      const overviewRes = await api.get('/api/overview')
 
-      // Process sequences data
-      let totalContacts = 0
-      let activeSequences = 0
-      let sequencesRunning = 0
+      if (overviewRes.data) {
+        const data = overviewRes.data
 
-      if (sequencesRes.status === 'fulfilled') {
-        const sequences = sequencesRes.value?.data || []
-        activeSequences = sequences.length
-        sequencesRunning = sequences.filter((s: any) => s.status === 'active').length
-      }
+        // Update main stats
+        setStats({
+          totalContacts: data.totalContacts || 0,
+          activeSequences: data.activeSequences || 0,
+          emailsSentToday: data.emailsSentToday || 0,
+          replyRate: 0, // Will calculate from employee stats
+          openRate: 0, // Will calculate from employee stats
+          sequencesRunning: data.activeSequences || 0, // Using active sequences as running
+          pendingTasks: 0, // Not implemented yet
+          deliverability: 0, // Not implemented yet
+        })
 
-      // Process contacts data
-      if (contactsRes.status === 'fulfilled') {
-        const contacts = contactsRes.value?.data || []
-        totalContacts = contacts.length
-      }
+        // Update employee stats
+        setEmployeeStats(data.employeeStats || [])
 
-      // Process email reports for today's stats
-      let emailsSentToday = 0
-      let replyRate = 0
-      let openRate = 0
-      let deliverability = 98.2 // Default deliverability
+        // Calculate aggregate reply rate from employee stats
+        if (data.employeeStats && data.employeeStats.length > 0) {
+          const totalReplies = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
+          const totalSent = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
+          const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0
 
-      if (reportsRes.status === 'fulfilled') {
-        const reportData = reportsRes.value?.data || {}
-        const totals = reportData.totals || {}
-
-        // Calculate today's sent emails
-        emailsSentToday = totals.sent || 0
-
-        // Calculate rates
-        const totalSent = totals.sent || 1 // Avoid division by zero
-        const replies = totals.replied || 0
-        const opens = totals.opened || 0
-
-        replyRate = (replies / totalSent) * 100
-        openRate = (opens / totalSent) * 100
-
-        // Calculate deliverability (sent vs bounced)
-        const bounced = totals.bounced || 0
-        if (totalSent > 0) {
-          deliverability = ((totalSent - bounced) / totalSent) * 100
+          setStats(prev => ({
+            ...prev,
+            replyRate: Math.round(replyRate * 10) / 10,
+          }))
         }
       }
 
-      // Mock pending tasks for now (could be calculated from campaigns/tasks)
-      const pendingTasks = 0
+      // Fetch recent activity
+      const [campaignsRes, inboxRes] = await Promise.allSettled([
+        api.get('/api/campaigns?limit=3'),
+        api.get('/api/inbox?limit=3'),
+      ])
 
-      setStats({
-        totalContacts,
-        activeSequences,
-        emailsSentToday,
-        replyRate: Math.round(replyRate * 10) / 10, // Round to 1 decimal
-        openRate: Math.round(openRate * 10) / 10,
-        sequencesRunning,
-        pendingTasks,
-        deliverability: Math.round(deliverability * 10) / 10,
-      })
-
-      // Process recent activity from inbox and campaigns
       const activity: RecentActivity[] = []
 
       // Add campaign activity
       if (campaignsRes.status === 'fulfilled') {
         const campaigns = campaignsRes.value?.data || []
-        campaigns.slice(0, 3).forEach((campaign: any) => {
+        campaigns.forEach((campaign: any) => {
           if (campaign.createdAt) {
             const timeAgo = getTimeAgo(new Date(campaign.createdAt))
             activity.push({
@@ -353,27 +293,12 @@ const OverviewDashboard: React.FC = () => {
       // Add inbox/reply activity
       if (inboxRes.status === 'fulfilled') {
         const inboxItems = inboxRes.value?.data || []
-        inboxItems.slice(0, 3).forEach((item: any) => {
+        inboxItems.forEach((item: any) => {
           if (item.receivedAt) {
             const timeAgo = getTimeAgo(new Date(item.receivedAt))
             activity.push({
               type: 'reply_received',
               message: `New reply from ${item.from || 'contact'}`,
-              time: timeAgo,
-            })
-          }
-        })
-      }
-
-      // Add sequence activity
-      if (sequencesRes.status === 'fulfilled') {
-        const sequences = sequencesRes.value?.data || []
-        sequences.slice(0, 2).forEach((sequence: any) => {
-          if (sequence.createdAt) {
-            const timeAgo = getTimeAgo(new Date(sequence.createdAt))
-            activity.push({
-              type: 'sequence_started',
-              message: `Sequence "${sequence.name}" was created`,
               time: timeAgo,
             })
           }
@@ -584,6 +509,63 @@ const OverviewDashboard: React.FC = () => {
             </Card>
           </GridItem>
         </Grid>
+
+        {/* Employee Performance */}
+        {employeeStats.length > 0 && (
+          <Card>
+            <CardHeader>
+              <Heading size="md">Employee Performance</Heading>
+              <Text fontSize="sm" color="gray.600">Today's email activity by team member</Text>
+            </CardHeader>
+            <CardBody>
+              <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
+                {employeeStats.map((employee) => (
+                  <Card key={employee.employeeId} variant="outline">
+                    <CardBody>
+                      <VStack spacing={2} align="stretch">
+                        <Flex justify="space-between" align="center">
+                          <Text fontWeight="semibold" fontSize="sm">{employee.employeeName}</Text>
+                          <Badge colorScheme="blue" fontSize="xs">{employee.emailAddress.split('@')[0]}</Badge>
+                        </Flex>
+
+                        <SimpleGrid columns={2} spacing={2} fontSize="xs">
+                          <Box>
+                            <Text color="gray.600">Sent Today</Text>
+                            <Text fontWeight="bold" color="blue.600">{employee.emailsSentToday}</Text>
+                          </Box>
+                          <Box>
+                            <Text color="gray.600">Sent Week</Text>
+                            <Text fontWeight="bold" color="blue.600">{employee.emailsSentWeek}</Text>
+                          </Box>
+                          <Box>
+                            <Text color="gray.600">Replies Today</Text>
+                            <Text fontWeight="bold" color="green.600">{employee.repliesToday}</Text>
+                          </Box>
+                          <Box>
+                            <Text color="gray.600">Replies Week</Text>
+                            <Text fontWeight="bold" color="green.600">{employee.repliesWeek}</Text>
+                          </Box>
+                        </SimpleGrid>
+
+                        {employee.emailsSentToday > 0 && (
+                          <Box>
+                            <Text fontSize="xs" color="gray.600" mb={1}>Reply Rate Today</Text>
+                            <Progress
+                              value={(employee.repliesToday / employee.emailsSentToday) * 100}
+                              colorScheme="green"
+                              size="sm"
+                              borderRadius="md"
+                            />
+                          </Box>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+                ))}
+              </SimpleGrid>
+            </CardBody>
+          </Card>
+        )}
 
         {/* Status Overview & Recent Activity */}
         <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={6}>

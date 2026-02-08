@@ -481,7 +481,7 @@ const PeopleTab: React.FC = () => {
                     onChange={(e) => setFormState((prev) => ({ ...prev, jobTitle: e.target.value }))}
                   />
                 </FormControl>
-                <FormControl>
+                <FormControl isRequired>
                   <FormLabel>Company</FormLabel>
                   <Input
                     placeholder="TechCorp Inc"
@@ -491,25 +491,14 @@ const PeopleTab: React.FC = () => {
                 </FormControl>
               </SimpleGrid>
 
-              <SimpleGrid columns={2} spacing={4}>
-                <FormControl>
-                  <FormLabel>Phone</FormLabel>
-                  <Input
-                    placeholder="+1 (555) 123-4567"
-                    value={formState.phone}
-                    onChange={(e) => setFormState((prev) => ({ ...prev, phone: e.target.value }))}
-                  />
-                </FormControl>
-                <FormControl>
-                  <FormLabel>Industry</FormLabel>
-                  <Select placeholder="Select industry">
-                    <option value="technology">Technology</option>
-                    <option value="healthcare">Healthcare</option>
-                    <option value="finance">Finance</option>
-                    <option value="education">Education</option>
-                  </Select>
-                </FormControl>
-              </SimpleGrid>
+              <FormControl>
+                <FormLabel>Phone</FormLabel>
+                <Input
+                  placeholder="+1 (555) 123-4567"
+                  value={formState.phone}
+                  onChange={(e) => setFormState((prev) => ({ ...prev, phone: e.target.value }))}
+                />
+              </FormControl>
 
               <Flex justify="flex-end" pt={4}>
                 <Button variant="ghost" mr={3} onClick={onClose}>

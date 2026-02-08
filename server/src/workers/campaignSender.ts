@@ -341,8 +341,11 @@ export async function processSequenceBasedCampaigns(
           await prisma.emailEvent.create({
             data: {
               id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+              customerId: campaign.customerId,
               campaignId: campaign.id,
               campaignProspectId: prospect.id,
+              senderIdentityId: campaign.senderIdentityId,
+              recipientEmail: contact.email,
               type: 'sent',
               metadata: {
                 step: step.stepOrder,
@@ -376,8 +379,11 @@ export async function processSequenceBasedCampaigns(
           await prisma.emailEvent.create({
             data: {
               id: `evt_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+              customerId: campaign.customerId,
               campaignId: campaign.id,
               campaignProspectId: prospect.id,
+              senderIdentityId: campaign.senderIdentityId,
+              recipientEmail: contact.email,
               type: 'bounced',
               metadata: {
                 error: result.error,

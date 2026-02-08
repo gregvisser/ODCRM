@@ -1,7 +1,7 @@
 /**
  * Google Sheets Lead Sources API
  * 
- * Endpoints for managing Cognism, Apollo, and Blackbook sheet integrations.
+ * Endpoints for managing Cognism, Apollo, and Social sheet integrations.
  * Uses service account authentication (no user OAuth required).
  */
 
@@ -51,7 +51,7 @@ const DEFAULT_SHEET_URLS: Record<ValidSource, string> = {
 const SOURCE_LABELS: Record<ValidSource, string> = {
   cognism: 'Cognism',
   apollo: 'Apollo',
-  blackbook: 'Blackbook',
+  blackbook: 'Social',
 }
 
 const normalizeEmail = (value: string | null): string | null => {

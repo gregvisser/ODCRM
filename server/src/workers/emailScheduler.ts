@@ -85,30 +85,50 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
   }
 
   for (const campaign of runningCampaigns) {
-    // Check if we're within send window (using campaign's sendWindowHoursStart/End)
-    const currentHour = now.getHours()
-    if (currentHour < campaign.sendWindowHoursStart || currentHour >= campaign.sendWindowHoursEnd) {
+    const senderIdentity = campaign.senderIdentity
+    if (!senderIdentity) {
+      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Campaign ${campaign.id} has no sender identity`)
+      continue
+    }
+
+    // Check if we're within send window using sender identity's configuration
+    const timeZone = senderIdentity.sendWindowTimeZone || 'UTC'
+    const senderTime = new Date(now.toLocaleString('en-US', { timeZone }))
+    const currentHour = senderTime.getHours()
+
+    const windowStart = senderIdentity.sendWindowHoursStart ?? 9
+    const windowEnd = senderIdentity.sendWindowHoursEnd ?? 17
+
+    // Handle wrap-around windows (e.g., 22 to 6)
+    const inWindow = windowStart <= windowEnd
+      ? (currentHour >= windowStart && currentHour < windowEnd)
+      : (currentHour >= windowStart || currentHour < windowEnd)
+
+    if (!inWindow) {
+      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Outside send window for ${senderIdentity.emailAddress} (${currentHour} not in ${windowStart}-${windowEnd})`)
       continue
     }
 
     // Check daily send limit for this identity
-    const todayStart = new Date(now)
+    const todayStart = new Date(senderTime)
     todayStart.setHours(0, 0, 0, 0)
+    const todayEnd = new Date(senderTime)
+    todayEnd.setHours(23, 59, 59, 999)
 
-    let emailsSentToday = await prisma.emailEvent.count({
+    const emailsSentToday = await prisma.emailEvent.count({
       where: {
-        campaign: {
-          senderIdentityId: campaign.senderIdentityId
-        },
+        senderIdentityId: senderIdentity.id,
         type: 'sent',
         occurredAt: {
-          gte: todayStart
-        }
-      }
+          gte: todayStart,
+          lte: todayEnd,
+        },
+      },
     })
 
-    if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) {
-      console.log(`⚠️ Daily send limit reached for identity ${campaign.senderIdentityId}`)
+    const dailyLimit = senderIdentity.dailySendLimit || 150
+    if (emailsSentToday >= dailyLimit) {
+      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Daily limit reached for ${senderIdentity.emailAddress}: ${emailsSentToday}/${dailyLimit}`)
       continue
     }
 
@@ -401,6 +421,68 @@ async function sendCampaignEmail(
     
     const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
     const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
+
+    // Check for suppression before sending
+    const normalizedEmail = prospect.contact.email.toLowerCase().trim()
+    const domain = prospect.contact.email.split('@')[1]
+
+    const suppressionCheck = await prisma.suppressionEntry.findFirst({
+      where: {
+        customerId: campaign.customerId,
+        OR: [
+          {
+            type: 'email',
+            emailNormalized: normalizedEmail,
+          },
+          {
+            type: 'domain',
+            value: domain,
+          },
+        ],
+      },
+      select: {
+        type: true,
+        value: true,
+        reason: true,
+      },
+    })
+
+    if (suppressionCheck) {
+      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - SUPPRESSED: ${prospect.contact.email} (${suppressionCheck.type}: ${suppressionCheck.value}) - ${suppressionCheck.reason || 'No reason'}`)
+
+      // Record suppressed event instead of sent
+      await prisma.emailEvent.create({
+        data: {
+          customerId: campaign.customerId,
+          campaignId: campaign.id,
+          campaignProspectId: prospect.id,
+          senderIdentityId: campaign.senderIdentityId,
+          recipientEmail: prospect.contact.email,
+          type: 'failed',
+          metadata: {
+            step: stepNumber,
+            suppressed: true,
+            suppressionType: suppressionCheck.type,
+            suppressionValue: suppressionCheck.value,
+            suppressionReason: suppressionCheck.reason,
+            instanceId: SCHEDULER_INSTANCE_ID
+          },
+          occurredAt: new Date()
+        }
+      })
+
+      // Mark prospect as failed/suppressed
+      await prisma.emailCampaignProspect.update({
+        where: { id: prospect.id },
+        data: {
+          lastStatus: 'suppressed',
+          [`step${stepNumber}SentAt`]: new Date(),
+        }
+      })
+
+      errorCount++
+      continue
+    }
 
     // Inject tracking - MUST be set in production
     const trackingDomain = process.env.EMAIL_TRACKING_DOMAIN

@@ -1,0 +1,153 @@
+import express from 'express'
+import { prisma } from '../lib/prisma.js'
+import { z } from 'zod'
+
+const router = express.Router()
+
+const getCustomerId = (req: express.Request): string => {
+  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+  if (!customerId) {
+    const err = new Error('Customer ID required') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+  return customerId
+}
+
+// GET /api/overview - Get overview stats for a customer
+router.get('/', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+
+    // Get total contacts (active only, deduped by email)
+    const totalContacts = await prisma.contact.count({
+      where: {
+        customerId,
+        status: 'active',
+      },
+    })
+
+    // Get active sequences (sequences with at least one active enrollment)
+    const activeSequencesResult = await prisma.$queryRaw<{ count: number }[]>`
+      SELECT COUNT(DISTINCT es.id) as count
+      FROM email_sequences es
+      INNER JOIN sequence_enrollments se ON es.id = se.sequenceId
+      WHERE es.customerId = ${customerId}
+        AND se.status = 'active'
+    `
+    const activeSequences = Number(activeSequencesResult[0]?.count || 0)
+
+    // Get emails sent today
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(tomorrow.getDate() + 1)
+
+    const emailsSentToday = await prisma.emailEvent.count({
+      where: {
+        type: 'sent',
+        occurredAt: {
+          gte: today,
+          lt: tomorrow,
+        },
+        campaign: {
+          customerId,
+        },
+      },
+    })
+
+    // Get per-employee stats for today and this week
+    const weekStart = new Date(today)
+    weekStart.setDate(weekStart.getDate() - 7)
+
+    // Get employee stats by sender identity
+    const employeeStatsResult = await prisma.$queryRaw<
+      Array<{
+        senderIdentityId: string
+        emailAddress: string
+        displayName: string | null
+        emailsSentToday: number
+        emailsSentWeek: number
+        repliesToday: number
+        repliesWeek: number
+      }>
+    >`
+      SELECT
+        ei.id as senderIdentityId,
+        ei.emailAddress,
+        ei.displayName,
+        COALESCE(sent_today.count, 0) as emailsSentToday,
+        COALESCE(sent_week.count, 0) as emailsSentWeek,
+        COALESCE(replies_today.count, 0) as repliesToday,
+        COALESCE(replies_week.count, 0) as repliesWeek
+      FROM email_identities ei
+      LEFT JOIN (
+        SELECT ee.campaignId, COUNT(*) as count
+        FROM email_events ee
+        WHERE ee.type = 'sent'
+          AND ee.occurredAt >= ${today}
+          AND ee.occurredAt < ${tomorrow}
+        GROUP BY ee.campaignId
+      ) sent_today ON sent_today.campaignId IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+      )
+      LEFT JOIN (
+        SELECT ee.campaignId, COUNT(*) as count
+        FROM email_events ee
+        WHERE ee.type = 'sent'
+          AND ee.occurredAt >= ${weekStart}
+        GROUP BY ee.campaignId
+      ) sent_week ON sent_week.campaignId IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+      )
+      LEFT JOIN (
+        SELECT ee.campaignId, COUNT(*) as count
+        FROM email_events ee
+        WHERE ee.type = 'replied'
+          AND ee.occurredAt >= ${today}
+          AND ee.occurredAt < ${tomorrow}
+        GROUP BY ee.campaignId
+      ) replies_today ON replies_today.campaignId IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+      )
+      LEFT JOIN (
+        SELECT ee.campaignId, COUNT(*) as count
+        FROM email_events ee
+        WHERE ee.type = 'replied'
+          AND ee.occurredAt >= ${weekStart}
+        GROUP BY ee.campaignId
+      ) replies_week ON replies_week.campaignId IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+      )
+      WHERE ei.customerId = ${customerId}
+        AND ei.isActive = true
+      ORDER BY emailsSentToday DESC
+    `
+
+    // Transform to employee stats (map EmailIdentity to employees)
+    // For now, use emailAddress/displayName as employee identifier
+    // TODO: Add proper userId field to EmailIdentity for better employee mapping
+    const employeeStats = employeeStatsResult.map(stat => ({
+      employeeId: stat.senderIdentityId, // Use identity ID as proxy for employee ID
+      employeeName: stat.displayName || stat.emailAddress.split('@')[0], // Fallback to email username
+      emailAddress: stat.emailAddress,
+      emailsSentToday: Number(stat.emailsSentToday),
+      emailsSentWeek: Number(stat.emailsSentWeek),
+      repliesToday: Number(stat.repliesToday),
+      repliesWeek: Number(stat.repliesWeek),
+    }))
+
+    res.json({
+      customerId,
+      totalContacts,
+      activeSequences,
+      emailsSentToday,
+      employeeStats,
+      generatedAt: new Date().toISOString(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+export default router

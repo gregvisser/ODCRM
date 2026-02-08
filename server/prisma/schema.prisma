@@ -36,11 +36,15 @@ enum CampaignStatus {
 
 enum EventType {
   sent
-  bounced
   delivered
   opened
-  unsubscribed
+  clicked
   replied
+  bounced
+  opted_out
+  spam_complaint
+  failed
+  not_reached
 }
 
 enum MessageDirection {
@@ -127,6 +131,7 @@ model Customer {
   contactLists          ContactList[]
   emailSequences        EmailSequence[]
   emailTemplates        EmailTemplate[]
+  emailEvents           EmailEvent[]
   leadRecords           LeadRecord[]
   leadSyncState         LeadSyncState?
   suppressionEntries    SuppressionEntry[]
@@ -191,6 +196,9 @@ model EmailIdentity {
   smtpSecure               Boolean?                   @default(true)
   
   dailySendLimit           Int                        @default(150)
+  sendWindowHoursStart     Int                        @default(9)  // 9 AM
+  sendWindowHoursEnd       Int                        @default(17) // 5 PM
+  sendWindowTimeZone       String                     @default("UTC")
   isActive                 Boolean                    @default(true)
   lastCheckedAt            DateTime?
   createdAt                DateTime                   @default(now())
@@ -201,6 +209,8 @@ model EmailIdentity {
   emailCampaignProspects   EmailCampaignProspect[]
   emailCampaigns           EmailCampaign[]
   emailMessageMetadata     EmailMessageMetadata[]
+  sentEmailEvents          EmailEvent[]               @relation("EmailIdentitySentEvents")
+  sentSequences            EmailSequence[]
 
   @@unique([customerId, emailAddress])
   @@index([customerId])
@@ -275,7 +285,7 @@ model EmailCampaignTemplate {
 
 model EmailTemplate {
   id               String   @id
-  customerId       String?
+  customerId       String
   name             String
   subjectTemplate  String
   bodyTemplateHtml String
@@ -284,7 +294,7 @@ model EmailTemplate {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  customer         Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
   @@index([stepNumber])
@@ -355,39 +365,52 @@ model EmailCampaignProspectStep {
 
 model EmailEvent {
   id                       String                   @id
+  customerId               String
   campaignId               String
-  campaignProspectId       String
+  campaignProspectId       String?
+  senderIdentityId         String?
+  recipientEmail           String?
   type                     EventType
   metadata                 Json?
   occurredAt               DateTime                 @default(now())
   createdAt                DateTime                 @default(now())
-  
-  // Relations
-  campaign                 EmailCampaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  campaignProspect         EmailCampaignProspect    @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
 
+  // Relations
+  customer                 Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  campaign                 EmailCampaign            @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignProspect         EmailCampaignProspect?   @relation(fields: [campaignProspectId], references: [id], onDelete: Cascade)
+  senderIdentity           EmailIdentity?           @relation("EmailIdentitySentEvents", fields: [senderIdentityId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([customerId, occurredAt])
+  @@index([customerId, type])
+  @@index([customerId, type, occurredAt])
   @@index([campaignId])
   @@index([campaignId, type])
   @@index([campaignProspectId])
+  @@index([senderIdentityId])
   @@index([occurredAt])
   @@index([type])
   @@map("email_events")
 }
 
 model SuppressionEntry {
-  id         String   @id
-  customerId String
-  type       String   // "domain" | "email"
-  value      String
-  reason     String?
-  source     String?  // "manual" | "import" | "bounce" | "unsubscribe"
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                String   @id
+  customerId        String
+  type              String   // "domain" | "email"
+  value             String   // normalized email or domain
+  emailNormalized   String?  // normalized email (lowercase, trimmed) for email type entries
+  reason            String?
+  source            String?  // "manual" | "import" | "bounce" | "unsubscribe"
+  sourceFileName    String?  // filename when imported from CSV
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, type, value])
   @@index([customerId])
+  @@index([customerId, emailNormalized])
   @@index([type])
   @@index([value])
   @@map("suppression_entries")
@@ -498,20 +521,23 @@ model ContactListMember {
 
 // Email Sequences (reusable multi-step workflows)
 model EmailSequence {
-  id          String                   @id
-  customerId  String
-  name        String
-  description String?
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
-  
+  id               String                   @id
+  customerId       String
+  senderIdentityId String
+  name             String
+  description      String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
   // Relations
-  customer    Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  steps       EmailSequenceStep[]
-  campaigns   EmailCampaign[]          @relation("CampaignToSequence")
-  enrollments SequenceEnrollment[]
+  customer         Customer                 @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  senderIdentity   EmailIdentity            @relation(fields: [senderIdentityId], references: [id], onDelete: Cascade)
+  steps            EmailSequenceStep[]
+  campaigns        EmailCampaign[]          @relation("CampaignToSequence")
+  enrollments      SequenceEnrollment[]
 
   @@index([customerId])
+  @@index([customerId, senderIdentityId])
   @@index([customerId, name])
   @@map("email_sequences")
 }
@@ -558,6 +584,7 @@ model SequenceEnrollment {
   @@unique([sequenceId, contactId])
   @@index([sequenceId])
   @@index([contactId])
+  @@index([status])
   @@index([nextStepScheduledAt])
   @@map("sequence_enrollments")
 }

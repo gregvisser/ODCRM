@@ -31,10 +31,6 @@ function App() {
     return {
       accounts: { tab: 'customers-home' as const, view: 'accounts' satisfies CustomersViewId },
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
-      'marketing-leads': { tab: 'marketing-home' as const, view: 'leads' satisfies OpenDoorsViewId },
-      'email-campaigns': { tab: 'marketing-home' as const, view: 'campaigns' satisfies OpenDoorsViewId },
-      'email-templates': { tab: 'marketing-home' as const, view: 'templates' satisfies OpenDoorsViewId },
-      'cognism-prospects': { tab: 'marketing-home' as const, view: 'cognism-prospects' satisfies OpenDoorsViewId },
       inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
       'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies OpenDoorsViewId },

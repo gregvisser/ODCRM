@@ -134,7 +134,7 @@ interface ContactPreview {
 const SOURCE_LABELS: Record<string, string> = {
   cognism: 'Cognism',
   apollo: 'Apollo',
-  blackbook: 'Blackbook',
+  blackbook: 'Social',
 }
 
 const LeadSourcesTab: React.FC = () => {
@@ -898,7 +898,7 @@ const LeadSourcesTab: React.FC = () => {
         <Box>
           <Heading size="lg">Lead Sources</Heading>
           <Text color="gray.500">
-            Connect Google Sheets to import contacts from Cognism, Apollo, and Blackbook
+            Connect Google Sheets to import contacts from Cognism, Apollo, and Social
           </Text>
           {currentCustomerId && (
             <Text mt={2} fontSize="sm" color="gray.600">
@@ -970,7 +970,7 @@ const LeadSourcesTab: React.FC = () => {
             {apollo?.connected && <Badge ml={2} colorScheme="green" fontSize="xs">Connected</Badge>}
           </Tab>
           <Tab>
-            Blackbook
+            Social
             {blackbook?.connected && <Badge ml={2} colorScheme="green" fontSize="xs">Connected</Badge>}
           </Tab>
         </TabList>

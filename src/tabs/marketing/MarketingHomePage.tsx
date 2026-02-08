@@ -22,48 +22,36 @@ import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext
 import SequencesTab from './components/SequencesTab'
 import PeopleTab from './components/PeopleTab'
 import LeadSourcesTab from './components/LeadSourcesTab'
-import CampaignsTab from './components/CampaignsTab'
 import EmailAccountsTab from './components/EmailAccountsTab'
 import ReportsTab from './components/ReportsTab'
-import TemplatesTab from './components/TemplatesTab'
 import InboxTab from './components/InboxTab'
 import OverviewDashboard from './components/OverviewDashboard'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
-import CognismProspectsTab from './components/CognismProspectsTab'
-import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 
 export type OpenDoorsViewId =
   | 'overview'
-  | 'leads'
   | 'sequences'
   | 'people'
   | 'lists'
-  | 'campaigns'
   | 'email-accounts'
   | 'compliance'
   | 'reports'
-  | 'templates'
   | 'inbox'
-  | 'cognism-prospects'
   | 'schedules'
 
 export type MarketingViewId = OpenDoorsViewId
 
 function coerceViewId(view?: string): OpenDoorsViewId {
   if (
-    view === 'leads' ||
     view === 'sequences' ||
     view === 'people' ||
     view === 'lists' ||
-    view === 'campaigns' ||
     view === 'email-accounts' ||
     view === 'compliance' ||
     view === 'schedules' ||
     view === 'reports' ||
-    view === 'templates' ||
-    view === 'inbox' ||
-    view === 'cognism-prospects'
+    view === 'inbox'
   )
     return view
   return 'overview'
@@ -93,88 +81,60 @@ export default function MarketingHomePage({
       sortOrder: 0,
     },
     {
-      id: 'leads',
-      label: 'Marketing Leads',
-      icon: EmailIcon,
-      content: <MarketingLeadsTab focusAccountName={focusAccountName} />,
+      id: 'reports',
+      label: 'Reports',
+      icon: SearchIcon,
+      content: <ReportsTab />,
       sortOrder: 1,
-    },
-    {
-      id: 'sequences',
-      label: 'Sequences',
-      icon: RepeatIcon,
-      content: <SequencesTab />,
-      sortOrder: 2,
     },
     {
       id: 'people',
       label: 'People',
       icon: AtSignIcon,
       content: <PeopleTab />,
-      sortOrder: 3,
-    },
-    {
-      id: 'cognism-prospects',
-      label: 'Prospects',
-      icon: SearchIcon,
-      content: <CognismProspectsTab />,
-      sortOrder: 4,
+      sortOrder: 2,
     },
     {
       id: 'lists',
       label: 'Lead Sources',
       icon: ViewIcon,
       content: <LeadSourcesTab />,
-      sortOrder: 5,
+      sortOrder: 3,
     },
     {
-      id: 'campaigns',
-      label: 'Campaigns',
-      icon: EmailIcon,
-      content: <CampaignsTab />,
-      sortOrder: 6,
+      id: 'compliance',
+      label: 'Compliance List',
+      icon: WarningIcon,
+      content: <ComplianceTab />,
+      sortOrder: 4,
     },
     {
       id: 'email-accounts',
       label: 'Email Accounts',
       icon: SettingsIcon,
       content: <EmailAccountsTab />,
-      sortOrder: 7,
+      sortOrder: 5,
     },
     {
-      id: 'compliance',
-      label: 'Compliance',
-      icon: WarningIcon,
-      content: <ComplianceTab />,
-      sortOrder: 8,
+      id: 'sequences',
+      label: 'Sequences',
+      icon: RepeatIcon,
+      content: <SequencesTab />,
+      sortOrder: 6,
     },
     {
       id: 'schedules',
       label: 'Schedules',
       icon: CalendarIcon,
       content: <SchedulesTab />,
-      sortOrder: 9,
-    },
-    {
-      id: 'reports',
-      label: 'Reports',
-      icon: SearchIcon,
-      content: <ReportsTab />,
-      sortOrder: 10,
-    },
-    {
-      id: 'templates',
-      label: 'Templates',
-      icon: CopyIcon,
-      content: <TemplatesTab />,
-      sortOrder: 11,
+      sortOrder: 7,
     },
     {
       id: 'inbox',
       label: 'Inbox',
       icon: ChatIcon,
       content: <InboxTab />,
-      sortOrder: 12,
+      sortOrder: 8,
     },
   ]
 

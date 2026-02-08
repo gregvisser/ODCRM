@@ -66,6 +66,7 @@ import {
   TimeIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { settingsStore } from '../../../platform'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -145,8 +146,15 @@ type SequenceDetail = {
 
 const LEAD_SOURCES: SnapshotOption['source'][] = ['cognism', 'apollo', 'blackbook']
 
+type Customer = {
+  id: string
+  name: string
+}
+
 const SequencesTab: React.FC = () => {
   const [sequences, setSequences] = useState<SequenceCampaign[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [snapshots, setSnapshots] = useState<SnapshotOption[]>([])
   const [senderIdentities, setSenderIdentities] = useState<EmailIdentity[]>([])
@@ -331,9 +339,10 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  const ensureSequenceFromTemplate = async (template: EmailTemplate, name: string, sequenceId?: string | null) => {
+  const ensureSequenceFromTemplate = async (template: EmailTemplate, name: string, senderIdentityId: string, sequenceId?: string | null) => {
     if (!sequenceId) {
       const createRes = await api.post<{ id: string }>('/api/sequences', {
+        senderIdentityId,
         name,
         description: '',
         steps: [
@@ -549,7 +558,7 @@ const SequencesTab: React.FC = () => {
         throw new Error('Template not found')
       }
 
-      const sequenceId = await ensureSequenceFromTemplate(template, sequence.name.trim(), sequence.sequenceId)
+      const sequenceId = await ensureSequenceFromTemplate(template, sequence.name.trim(), senderIdentityId, sequence.sequenceId)
 
       let campaignId = sequence.id
       if (campaignId) {
@@ -713,8 +722,34 @@ const SequencesTab: React.FC = () => {
           <Text color="gray.600">
             Create and manage multi-step outreach sequences from lead snapshots
           </Text>
+          <HStack spacing={4} mt={2}>
+            <FormControl w="300px">
+              <FormLabel fontSize="sm">Customer</FormLabel>
+              <Select
+                value={selectedCustomerId}
+                onChange={(e) => {
+                  const newCustomerId = e.target.value
+                  setSelectedCustomerId(newCustomerId)
+                  // Update the global settings store so API calls use the correct customer
+                  settingsStore.setCurrentCustomerId(newCustomerId)
+                }}
+                placeholder="Select customer"
+              >
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+          </HStack>
         </VStack>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSequence}>
+        <Button
+          leftIcon={<AddIcon />}
+          colorScheme="blue"
+          onClick={handleCreateSequence}
+          isDisabled={!selectedCustomerId}
+        >
           New Sequence
         </Button>
       </Flex>

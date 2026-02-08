@@ -72,6 +72,9 @@ type EmailIdentity = {
   provider: string
   isActive: boolean
   dailySendLimit: number
+  sendWindowHoursStart: number
+  sendWindowHoursEnd: number
+  sendWindowTimeZone: string
   createdAt: string
   smtpHost?: string | null
   smtpPort?: number | null
@@ -79,8 +82,15 @@ type EmailIdentity = {
   smtpSecure?: boolean | null
 }
 
+type Customer = {
+  id: string
+  name: string
+}
+
 const EmailAccountsTab: React.FC = () => {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
@@ -90,22 +100,52 @@ const EmailAccountsTab: React.FC = () => {
   const toast = useToast()
 
   useEffect(() => {
-    loadData()
+    loadCustomers()
   }, [])
 
-  const loadData = async () => {
+  useEffect(() => {
+    if (selectedCustomerId) {
+      loadIdentities()
+    }
+  }, [selectedCustomerId])
+
+  const loadCustomers = async () => {
+    const { data, error: apiError } = await api.get<Customer[]>('/api/customers')
+
+    if (apiError) {
+      console.error('Failed to load customers:', apiError)
+      // Use default customer if we can't load the list
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+    } else {
+      const customerList = data || []
+      setCustomers(customerList)
+
+      // Auto-select the first customer or the current one
+      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
+      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      if (currentCustomer) {
+        setSelectedCustomerId(currentCustomerId)
+      } else if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id)
+      }
+    }
+  }
+
+  const loadIdentities = async () => {
     setLoading(true)
     setError(null)
 
     const { data, error: apiError } = await api.get<EmailIdentity[]>('/api/outlook/identities')
-    
+
     if (apiError) {
       setError(apiError)
       // Keep previous data if we had any (don't wipe UI on transient errors)
     } else {
       setIdentities(data || [])
     }
-    
+
     setLoading(false)
   }
 
@@ -133,10 +173,19 @@ const EmailAccountsTab: React.FC = () => {
   }, [identities])
 
   const handleConnectOutlook = () => {
-    const customerId = getCurrentCustomerId('prod-customer-1')
+    if (!selectedCustomerId) {
+      toast({
+        title: 'No customer selected',
+        description: 'Please select a customer first',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
     // Open OAuth flow in same window - backend will redirect back
     const apiBaseUrl = import.meta.env.VITE_API_URL || ''
-    window.location.href = `${apiBaseUrl}/api/outlook/auth?customerId=${customerId}`
+    window.location.href = `${apiBaseUrl}/api/outlook/auth?customerId=${selectedCustomerId}`
   }
 
   const handleEditIdentity = (identity: EmailIdentity) => {
@@ -150,6 +199,9 @@ const EmailAccountsTab: React.FC = () => {
     const { error: apiError } = await api.patch(`/api/outlook/identities/${editingIdentity.id}`, {
       displayName: editingIdentity.displayName,
       dailySendLimit: editingIdentity.dailySendLimit,
+      sendWindowHoursStart: editingIdentity.sendWindowHoursStart,
+      sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
+      sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
       isActive: editingIdentity.isActive,
     })
 
@@ -163,7 +215,7 @@ const EmailAccountsTab: React.FC = () => {
       return
     }
 
-    await loadData()
+    await loadIdentities()
     onClose()
     toast({
       title: 'Account updated',
@@ -219,7 +271,7 @@ const EmailAccountsTab: React.FC = () => {
       return
     }
 
-    await loadData()
+    await loadIdentities()
     toast({
       title: identity.isActive ? 'Account deactivated' : 'Account activated',
       status: 'success',
@@ -244,7 +296,7 @@ const EmailAccountsTab: React.FC = () => {
       return
     }
 
-    await loadData()
+    await loadIdentities()
     toast({
       title: 'Account disconnected',
       status: 'success',
@@ -271,7 +323,7 @@ const EmailAccountsTab: React.FC = () => {
             <AlertTitle>Failed to load email accounts</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
-          <Button size="sm" onClick={loadData} ml={4}>
+          <Button size="sm" onClick={loadIdentities} ml={4}>
             Retry
           </Button>
         </Alert>
@@ -284,6 +336,22 @@ const EmailAccountsTab: React.FC = () => {
           <Text color="gray.600">
             Connect Outlook accounts to send campaigns (max 5 per customer)
           </Text>
+          <HStack spacing={4} mt={2}>
+            <FormControl w="300px">
+              <FormLabel fontSize="sm">Customer</FormLabel>
+              <Select
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                placeholder="Select customer"
+              >
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+          </HStack>
         </VStack>
         <Button
           leftIcon={<ExternalLinkIcon />}
@@ -516,6 +584,37 @@ const EmailAccountsTab: React.FC = () => {
                   </NumberInput>
                   <Text fontSize="xs" color="gray.500" mt={1}>
                     Recommended: 50-150 for new accounts, up to 500 for warmed accounts
+                  </Text>
+                </FormControl>
+
+                <FormControl>
+                  <FormLabel>Send Window</FormLabel>
+                  <HStack spacing={2}>
+                    <NumberInput
+                      value={editingIdentity.sendWindowHoursStart}
+                      onChange={(_, val) => setEditingIdentity({...editingIdentity, sendWindowHoursStart: val || 9})}
+                      min={0}
+                      max={23}
+                      maxW="100px"
+                    >
+                      <NumberInputField />
+                    </NumberInput>
+                    <Text fontSize="sm" color="gray.500">to</Text>
+                    <NumberInput
+                      value={editingIdentity.sendWindowHoursEnd}
+                      onChange={(_, val) => setEditingIdentity({...editingIdentity, sendWindowHoursEnd: val || 17})}
+                      min={0}
+                      max={23}
+                      maxW="100px"
+                    >
+                      <NumberInputField />
+                    </NumberInput>
+                    <Text fontSize="sm" color="gray.500">
+                      {editingIdentity.sendWindowTimeZone || 'UTC'}
+                    </Text>
+                  </HStack>
+                  <Text fontSize="xs" color="gray.500" mt={1}>
+                    Hours when emails can be sent (0-23, local time)
                   </Text>
                 </FormControl>
                 <Flex w="100%" justify="flex-end" gap={2} mt={4}>

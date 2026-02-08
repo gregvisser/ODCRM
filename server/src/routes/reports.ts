@@ -14,161 +14,183 @@ const getCustomerId = (req: express.Request): string => {
   return customerId
 }
 
-const dateRangeSchema = z.object({
-  start: z.string().optional(),
-  end: z.string().optional(),
-})
-
-function parseRange(input: z.infer<typeof dateRangeSchema>) {
-  const now = new Date()
-  const end = input.end ? new Date(input.end) : now
-  const start = input.start ? new Date(input.start) : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000)
-  return { start, end }
-}
-
-// Email events summary (Reply.io-style “Reports → Emails”)
-router.get('/emails', async (req, res, next) => {
+// GET /api/reports/customer?customerId=X&dateRange=today|week|month
+router.get('/customer', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const { start, end } = parseRange(dateRangeSchema.parse(req.query))
+    const dateRange = (req.query.dateRange as string) || 'today'
 
-    // Totals by type in range
-    const byType = await prisma.emailEvent.groupBy({
+    // Calculate date range (UTC)
+    const now = new Date()
+    let startDate: Date
+    let endDate: Date = new Date(now)
+
+    switch (dateRange) {
+      case 'today':
+        startDate = new Date(now)
+        startDate.setUTCHours(0, 0, 0, 0)
+        endDate.setUTCHours(23, 59, 59, 999)
+        break
+      case 'week':
+        startDate = new Date(now)
+        startDate.setUTCDate(startDate.getUTCDate() - 7)
+        startDate.setUTCHours(0, 0, 0, 0)
+        endDate.setUTCHours(23, 59, 59, 999)
+        break
+      case 'month':
+        startDate = new Date(now)
+        startDate.setUTCMonth(startDate.getUTCMonth() - 1)
+        startDate.setUTCHours(0, 0, 0, 0)
+        endDate.setUTCHours(23, 59, 59, 999)
+        break
+      default:
+        startDate = new Date(now)
+        startDate.setUTCHours(0, 0, 0, 0)
+        endDate.setUTCHours(23, 59, 59, 999)
+    }
+
+    // Get all event counts for the customer and date range
+    const eventCounts = await prisma.emailEvent.groupBy({
       by: ['type'],
       where: {
-        occurredAt: { gte: start, lte: end },
-        campaign: { customerId },
+        customerId,
+        occurredAt: {
+          gte: startDate,
+          lte: endDate,
+        },
       },
-      _count: { _all: true },
+      _count: {
+        id: true,
+      },
     })
 
-    const totals = byType.reduce<Record<string, number>>((acc, row) => {
-      acc[row.type] = row._count._all
-      return acc
-    }, {})
+    // Convert to a map for easy access
+    const counts: Record<string, number> = {}
+    eventCounts.forEach(event => {
+      counts[event.type] = event._count.id
+    })
 
-    // By campaign + type
-    const byCampaignType = await prisma.emailEvent.groupBy({
-      by: ['campaignId', 'type'],
+    // Calculate metrics
+    const sent = counts.sent || 0
+    const delivered = counts.delivered || 0
+    const opened = counts.opened || 0
+    const clicked = counts.clicked || 0
+    const replied = counts.replied || 0
+    const bounced = counts.bounced || 0
+    const optedOut = counts.opted_out || 0
+    const spamComplaints = counts.spam_complaint || 0
+    const failed = counts.failed || 0
+    const notReached = counts.not_reached || 0
+
+    // Rate calculations (all as percentages, rounded to 1 decimal)
+    const deliveryRate = sent > 0 ? (delivered / sent) * 100 : 0
+    const openRate = delivered > 0 ? (opened / delivered) * 100 : 0
+    const clickRate = delivered > 0 ? (clicked / delivered) * 100 : 0
+    const replyRate = delivered > 0 ? (replied / delivered) * 100 : 0
+    const bounceRate = sent > 0 ? (bounced / sent) * 100 : 0
+    const optOutRate = delivered > 0 ? (optedOut / delivered) * 100 : 0
+    const notReachedRate = sent > 0 ? ((failed + notReached) / sent) * 100 : 0
+
+    // Get total sequences completed (sequences with enrollments that have status 'completed')
+    const sequencesCompleted = await prisma.sequenceEnrollment.count({
       where: {
-        occurredAt: { gte: start, lte: end },
-        campaign: { customerId },
+        sequence: {
+          customerId,
+        },
+        status: 'completed',
       },
-      _count: { _all: true },
     })
 
-    const campaignIds = Array.from(new Set(byCampaignType.map((r) => r.campaignId as string)))
-    const campaigns = campaignIds.length
-      ? await prisma.emailCampaign.findMany({
-          where: { id: { in: campaignIds }, customerId },
+    // Get unique senders for this period
+    const uniqueSenders = await prisma.emailEvent.findMany({
+      where: {
+        customerId,
+        type: 'sent',
+        occurredAt: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      select: {
+        senderIdentityId: true,
+        senderIdentity: {
           select: {
-            id: true,
-            name: true,
-            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
+            emailAddress: true,
+            displayName: true,
           },
-        })
-      : []
-
-    const campaignMap = new Map(campaigns.map((c) => [c.id, c]))
-
-    const byCampaign = campaignIds
-      .map((id) => {
-        const rows = byCampaignType.filter((r) => r.campaignId === id)
-        const counts = rows.reduce<Record<string, number>>((acc, r) => {
-          acc[r.type] = r._count._all
-          return acc
-        }, {})
-        const c = campaignMap.get(id)
-        return {
-          campaignId: id as string,
-          campaignName: c?.name || '(unknown)',
-          senderIdentity: c?.senderIdentity || null,
-          counts,
-        }
-      })
-      .sort((a, b) => (b.counts.sent || 0) - (a.counts.sent || 0))
+        },
+      },
+      distinct: ['senderIdentityId'],
+    })
 
     res.json({
-      range: { start: start.toISOString(), end: end.toISOString() },
-      totals,
-      byCampaign,
+      customerId,
+      dateRange,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      timezone: 'UTC',
+
+      // Raw counts
+      sent,
+      delivered,
+      opened,
+      clicked,
+      replied,
+      bounced,
+      optedOut,
+      spamComplaints,
+      failed,
+      notReached,
+
+      // Calculated metrics
+      sequencesCompleted,
+      deliveryRate: Math.round(deliveryRate * 10) / 10,
+      openRate: Math.round(openRate * 10) / 10,
+      clickRate: Math.round(clickRate * 10) / 10,
+      replyRate: Math.round(replyRate * 10) / 10,
+      bounceRate: Math.round(bounceRate * 10) / 10,
+      optOutRate: Math.round(optOutRate * 10) / 10,
+      notReachedRate: Math.round(notReachedRate * 10) / 10,
+
+      // Employee breakdown
+      uniqueSenders: uniqueSenders.length,
+      senders: uniqueSenders.map(s => ({
+        identityId: s.senderIdentityId,
+        email: s.senderIdentity?.emailAddress,
+        name: s.senderIdentity?.displayName,
+      })),
+
+      generatedAt: new Date().toISOString(),
     })
   } catch (error) {
     next(error)
   }
 })
 
-// Team performance (Reply.io-style “Reports → Team Performance”)
-router.get('/team-performance', async (req, res, next) => {
+// GET /api/reports/customers - List all customers for dropdown
+router.get('/customers', async (req, res, next) => {
   try {
-    const customerId = getCustomerId(req)
-    const { start, end } = parseRange(dateRangeSchema.parse(req.query))
-
-    // Count sent/replied grouped by sender identity via campaigns.
-    const sentByCampaign = await prisma.emailEvent.groupBy({
-      by: ['campaignId'],
-      where: {
-        occurredAt: { gte: start, lte: end },
-        type: 'sent',
-        campaign: { customerId },
-      },
-      _count: { _all: true },
-    })
-
-    const repliedByCampaign = await prisma.emailEvent.groupBy({
-      by: ['campaignId'],
-      where: {
-        occurredAt: { gte: start, lte: end },
-        type: 'replied',
-        campaign: { customerId },
-      },
-      _count: { _all: true },
-    })
-
-    const campaignIds = Array.from(new Set([...sentByCampaign.map((r) => r.campaignId), ...repliedByCampaign.map((r) => r.campaignId)]))
-    const campaigns = campaignIds.length
-      ? await prisma.emailCampaign.findMany({
-          where: { id: { in: campaignIds }, customerId },
+    const customers = await prisma.customer.findMany({
+      select: {
+        id: true,
+        name: true,
+        _count: {
           select: {
-            id: true,
-            senderIdentity: { select: { id: true, emailAddress: true, displayName: true } },
+            emailEvents: true,
           },
-        })
-      : []
-
-    const sentMap = new Map(sentByCampaign.map((r) => [r.campaignId as string, r._count._all as number]))
-    const replyMap = new Map(repliedByCampaign.map((r) => [r.campaignId as string, r._count._all as number]))
-
-    const byIdentity = new Map<
-      string,
-      { identityId: string; emailAddress: string; displayName?: string; sent: number; replied: number }
-    >()
-
-    for (const c of campaigns) {
-      const identity = c.senderIdentity
-      const key = identity.id
-      const prev = byIdentity.get(key) || {
-        identityId: identity.id,
-        emailAddress: identity.emailAddress,
-        displayName: identity.displayName || undefined,
-        sent: 0,
-        replied: 0,
-      }
-      prev.sent += (sentMap.get(c.id) || 0) as number
-      prev.replied += (replyMap.get(c.id) || 0) as number
-      byIdentity.set(key, prev)
-    }
-
-    const rows = Array.from(byIdentity.values())
-      .map((r) => ({
-        ...r,
-        replyRate: r.sent > 0 ? (r.replied / r.sent) * 100 : 0,
-      }))
-      .sort((a, b) => b.sent - a.sent)
+        },
+      },
+      orderBy: {
+        name: 'asc',
+      },
+    })
 
     res.json({
-      range: { start: start.toISOString(), end: end.toISOString() },
-      rows,
+      customers: customers.map(c => ({
+        id: c.id,
+        name: c.name,
+        totalEvents: c._count.emailEvents,
+      })),
     })
   } catch (error) {
     next(error)
@@ -176,4 +198,3 @@ router.get('/team-performance', async (req, res, next) => {
 })
 
 export default router
-

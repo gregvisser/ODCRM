@@ -36,6 +36,53 @@ import {
   EmailIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { settingsStore } from '../../../platform'
+
+// Customer type
+type Customer = {
+  id: string
+  name: string
+}
+
+// Thread types
+type EmailThread = {
+  threadId: string
+  subject: string
+  participantEmail: string
+  participantName?: string | null
+  mailboxEmail: string
+  mailboxName?: string | null
+  campaignId?: string
+  campaignName?: string
+  latestMessageAt: string
+  messageCount: number
+  hasReplies: boolean
+}
+
+type EmailMessage = {
+  id: string
+  direction: 'inbound' | 'outbound'
+  fromAddress: string
+  toAddress: string
+  subject: string
+  rawHeaders?: any
+  createdAt: string
+  senderIdentity?: {
+    id: string
+    emailAddress: string
+    displayName?: string | null
+  }
+  campaignProspect?: {
+    id: string
+    contact: {
+      id: string
+      firstName: string
+      lastName: string
+      companyName?: string
+      email: string
+    }
+  }
+}
 
 // Backend reply item shape from /api/inbox/replies
 type ReplyItem = {
@@ -65,15 +112,33 @@ type RepliesResponse = {
 }
 
 const InboxTab: React.FC = () => {
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [replies, setReplies] = useState<ReplyItem[]>([])
+  const [threads, setThreads] = useState<EmailThread[]>([])
+  const [selectedThread, setSelectedThread] = useState<EmailMessage[] | null>(null)
+  const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
+  const [threadsLoading, setThreadsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
+  const [view, setView] = useState<'replies' | 'threads'>('threads')
+  const [replyContent, setReplyContent] = useState('')
 
   useEffect(() => {
-    loadReplies()
-  }, [dateRange])
+    loadCustomers()
+  }, [])
+
+  useEffect(() => {
+    if (selectedCustomerId) {
+      if (view === 'replies') {
+        loadReplies()
+      } else {
+        loadThreads()
+      }
+    }
+  }, [selectedCustomerId, view, dateRange])
 
   const loadReplies = async () => {
     setLoading(true)
@@ -105,6 +170,100 @@ const InboxTab: React.FC = () => {
     }
     
     setLoading(false)
+  }
+
+  const loadCustomers = async () => {
+    const { data, error: apiError } = await api.get<Customer[]>('/api/customers')
+
+    if (apiError) {
+      console.error('Failed to load customers:', apiError)
+      // Use default customer if we can't load the list
+      const defaultCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+    } else {
+      const customerList = data || []
+      setCustomers(customerList)
+
+      // Auto-select the first customer or the current one
+      const currentCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      if (currentCustomer) {
+        setSelectedCustomerId(currentCustomerId)
+      } else if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id)
+      }
+    }
+  }
+
+  const loadThreads = async () => {
+    setThreadsLoading(true)
+    setError(null)
+
+    const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>('/api/inbox/threads', {
+      limit: 50,
+      offset: 0
+    })
+
+    if (apiError) {
+      setError(apiError)
+    } else {
+      setThreads(data?.threads || [])
+    }
+
+    setThreadsLoading(false)
+  }
+
+  const loadThreadMessages = async (threadId: string) => {
+    const { data, error: apiError } = await api.get<{ threadId: string; messages: EmailMessage[] }>(`/api/inbox/threads/${threadId}/messages`)
+
+    if (apiError) {
+      toast({
+        title: 'Failed to load thread',
+        description: apiError,
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
+    setSelectedThread(data?.messages || [])
+    setSelectedThreadId(threadId)
+  }
+
+  const sendReply = async () => {
+    if (!selectedThreadId || !replyContent.trim()) return
+
+    const lastMessage = selectedThread?.[selectedThread.length - 1]
+    if (!lastMessage) return
+
+    const toAddress = lastMessage.direction === 'inbound' ? lastMessage.fromAddress : lastMessage.toAddress
+
+    const { error: apiError } = await api.post(`/api/inbox/threads/${selectedThreadId}/reply`, {
+      content: replyContent,
+      toAddress,
+    })
+
+    if (apiError) {
+      toast({
+        title: 'Failed to send reply',
+        description: apiError,
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
+    toast({
+      title: 'Reply sent',
+      description: 'Your reply has been sent successfully',
+      status: 'success',
+      duration: 3000,
+    })
+
+    setReplyContent('')
+    // Reload the thread to show the new message
+    loadThreadMessages(selectedThreadId)
   }
 
   const filteredReplies = useMemo(() => {
@@ -164,10 +323,32 @@ const InboxTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Inbox</Heading>
           <Text color="gray.600">
-            View replies from your outreach campaigns
+            View email threads from your connected mailboxes
           </Text>
         </VStack>
         <HStack>
+          <Select
+            size="sm"
+            value={selectedCustomerId}
+            onChange={(e) => {
+              setSelectedCustomerId(e.target.value)
+              settingsStore.setCurrentCustomerId(e.target.value)
+            }}
+            w="200px"
+          >
+            {customers.map(customer => (
+              <option key={customer.id} value={customer.id}>{customer.name}</option>
+            ))}
+          </Select>
+          <Select
+            size="sm"
+            value={view}
+            onChange={(e) => setView(e.target.value as 'replies' | 'threads')}
+            w="120px"
+          >
+            <option value="threads">Threads</option>
+            <option value="replies">Replies</option>
+          </Select>
           <Select
             size="sm"
             value={dateRange}
@@ -178,7 +359,10 @@ const InboxTab: React.FC = () => {
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </Select>
-          <Button size="sm" onClick={loadReplies}>
+          <Button size="sm" onClick={() => {
+            if (view === 'replies') loadReplies()
+            else loadThreads()
+          }}>
             Refresh
           </Button>
         </HStack>
@@ -192,54 +376,186 @@ const InboxTab: React.FC = () => {
             <AlertTitle>Failed to load inbox</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
-          <Button size="sm" onClick={loadReplies} ml={4}>
+          <Button size="sm" onClick={() => {
+            if (view === 'replies') loadReplies()
+            else loadThreads()
+          }} ml={4}>
             Retry
           </Button>
         </Alert>
       )}
 
-      {/* Stats */}
-      <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} mb={6}>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Total Replies</StatLabel>
-              <StatNumber>{stats.total}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Today</StatLabel>
-              <StatNumber>{stats.today}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>This Week</StatLabel>
-              <StatNumber>{stats.thisWeek}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-      </SimpleGrid>
+      {view === 'threads' ? (
+        <Grid templateColumns={{ base: '1fr', lg: '300px 1fr' }} gap={6}>
+          {/* Thread List */}
+          <Card>
+            <CardHeader>
+              <Heading size="md">Email Threads</Heading>
+            </CardHeader>
+            <CardBody p={0}>
+              {threadsLoading ? (
+                <VStack py={8}>
+                  <Spinner />
+                  <Text>Loading threads...</Text>
+                </VStack>
+              ) : threads.length === 0 ? (
+                <VStack py={8}>
+                  <Text color="gray.500">No email threads found</Text>
+                </VStack>
+              ) : (
+                <VStack spacing={0} align="stretch">
+                  {threads.map(thread => (
+                    <Box
+                      key={thread.threadId}
+                      p={4}
+                      borderBottom="1px"
+                      borderColor="gray.100"
+                      cursor="pointer"
+                      bg={selectedThreadId === thread.threadId ? "blue.50" : "white"}
+                      _hover={{ bg: "gray.50" }}
+                      onClick={() => loadThreadMessages(thread.threadId)}
+                    >
+                      <HStack spacing={3} align="start">
+                        <Avatar size="sm" name={thread.participantName || thread.participantEmail} />
+                        <VStack align="start" spacing={1} flex={1}>
+                          <HStack justify="space-between" w="full">
+                            <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
+                              {thread.participantName || thread.participantEmail}
+                            </Text>
+                            <Text fontSize="xs" color="gray.500">
+                              {new Date(thread.latestMessageAt).toLocaleDateString()}
+                            </Text>
+                          </HStack>
+                          <Text fontSize="sm" color="gray.600" noOfLines={1}>
+                            {thread.subject}
+                          </Text>
+                          <HStack spacing={2}>
+                            <Badge size="sm" colorScheme="blue">
+                              {thread.mailboxName || thread.mailboxEmail}
+                            </Badge>
+                            {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
+                          </HStack>
+                        </VStack>
+                      </HStack>
+                    </Box>
+                  ))}
+                </VStack>
+              )}
+            </CardBody>
+          </Card>
 
-      {/* Search */}
-      <InputGroup mb={6}>
-        <InputLeftElement pointerEvents="none">
-          <SearchIcon color="gray.300" />
-        </InputLeftElement>
-        <Input
-          placeholder="Search by name, email, company, or campaign..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </InputGroup>
+          {/* Thread Messages */}
+          <Card>
+            <CardHeader>
+              <Heading size="md">
+                {selectedThread ? 'Thread Messages' : 'Select a thread'}
+              </Heading>
+            </CardHeader>
+            <CardBody>
+              {selectedThread ? (
+                <VStack spacing={4} align="stretch">
+                  {selectedThread.map(message => (
+                    <Box
+                      key={message.id}
+                      p={4}
+                      bg={message.direction === 'inbound' ? 'blue.50' : 'gray.50'}
+                      borderRadius="md"
+                    >
+                      <HStack justify="space-between" mb={2}>
+                        <HStack>
+                          <Text fontWeight="medium">
+                            {message.direction === 'inbound' ? 'From:' : 'To:'}
+                            {message.direction === 'inbound' ? message.fromAddress : message.toAddress}
+                          </Text>
+                          {message.senderIdentity && (
+                            <Badge size="sm" colorScheme="blue">
+                              {message.senderIdentity.displayName || message.senderIdentity.emailAddress}
+                            </Badge>
+                          )}
+                        </HStack>
+                        <Text fontSize="sm" color="gray.500">
+                          {new Date(message.createdAt).toLocaleString()}
+                        </Text>
+                      </HStack>
+                      <Text fontSize="sm" whiteSpace="pre-wrap">
+                        {message.rawHeaders?.body || 'No message content'}
+                      </Text>
+                    </Box>
+                  ))}
 
-      {/* Replies List */}
-      {filteredReplies.length === 0 ? (
+                  {/* Reply Form */}
+                  <Box borderTop="1px" borderColor="gray.200" pt={4}>
+                    <Heading size="sm" mb={3}>Reply</Heading>
+                    <Textarea
+                      placeholder="Type your reply..."
+                      value={replyContent}
+                      onChange={(e) => setReplyContent(e.target.value)}
+                      rows={4}
+                      mb={3}
+                    />
+                    <Button
+                      colorScheme="blue"
+                      onClick={sendReply}
+                      isDisabled={!replyContent.trim()}
+                    >
+                      Send Reply
+                    </Button>
+                  </Box>
+                </VStack>
+              ) : (
+                <Text color="gray.500">Select a thread from the list to view messages</Text>
+              )}
+            </CardBody>
+          </Card>
+        </Grid>
+      ) : (
+        <>
+          {/* Stats */}
+          <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} mb={6}>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Total Replies</StatLabel>
+                  <StatNumber>{stats.total}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Today</StatLabel>
+                  <StatNumber>{stats.today}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>This Week</StatLabel>
+                  <StatNumber>{stats.thisWeek}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          {/* Search */}
+          <InputGroup mb={6}>
+            <InputLeftElement pointerEvents="none">
+              <SearchIcon color="gray.300" />
+            </InputLeftElement>
+            <Input
+              placeholder="Search by name, email, company, or campaign..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </InputGroup>
+        </>
+      )}
+
+      {/* Replies List - Only show when view is replies */}
+      {view === 'replies' && (
+        <>
+          {filteredReplies.length === 0 ? (
         <Card>
           <CardBody textAlign="center" py={10}>
             <EmailIcon boxSize={12} color="gray.300" mb={4} />
@@ -315,6 +631,8 @@ const InboxTab: React.FC = () => {
             </Table>
           </CardBody>
         </Card>
+      )}
+        </>
       )}
     </Box>
   )

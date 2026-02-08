@@ -66,25 +66,23 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 
-type DeliverySchedule = {
+type CampaignSchedule = {
   id: string
+  customerId: string
   name: string
-  description?: string
-  isActive: boolean
-  timezone: string
-  daysOfWeek: number[] // 0-6, Sunday = 0
-  timeWindows: TimeWindow[]
-  maxEmailsPerDay: number
-  maxEmailsPerHour: number
-  respectRecipientTimezone: boolean
+  status: 'draft' | 'scheduled' | 'running' | 'paused' | 'sent'
+  senderIdentity: {
+    id: string
+    emailAddress: string
+    displayName?: string | null
+    dailySendLimit: number
+    sendWindowHoursStart: number
+    sendWindowHoursEnd: number
+    sendWindowTimeZone: string
+  } | null
+  totalProspects: number
   createdAt: string
   updatedAt: string
-}
-
-type TimeWindow = {
-  startTime: string // HH:MM format
-  endTime: string // HH:MM format
-  maxEmails: number
 }
 
 type ScheduledEmail = {
@@ -94,16 +92,37 @@ type ScheduledEmail = {
   prospectEmail: string
   prospectName: string
   scheduledFor: string
-  status: 'pending' | 'sent' | 'failed'
-  scheduleId: string
+  status: 'scheduled' | 'sent' | 'failed'
+  senderIdentity?: {
+    id: string
+    emailAddress: string
+    displayName?: string | null
+  } | null
+  stepNumber: number
+}
+
+type ScheduleStats = {
+  campaignId: string
+  status: string
+  totalProspects: number
+  upcomingSends: number
+  sentSends: number
+  todaySent: number
+  dailyLimit: number
+  senderIdentity: {
+    id: string
+    emailAddress: string
+    dailySendLimit: number
+  } | null
 }
 
 const SchedulesTab: React.FC = () => {
-  const [schedules, setSchedules] = useState<DeliverySchedule[]>([])
+  const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [loading, setLoading] = useState(true)
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const [editingSchedule, setEditingSchedule] = useState<DeliverySchedule | null>(null)
+  const [editingSchedule, setEditingSchedule] = useState<CampaignSchedule | null>(null)
+  const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null)
   const toast = useToast()
 
   const daysOfWeek = [
@@ -124,18 +143,102 @@ const SchedulesTab: React.FC = () => {
     try {
       setLoading(true)
       const [schedulesRes, emailsRes] = await Promise.all([
-        api.get<DeliverySchedule[]>('/api/schedules'),
+        api.get<CampaignSchedule[]>('/api/schedules'),
         api.get<ScheduledEmail[]>('/api/schedules/emails')
       ])
 
-      setSchedules(schedulesRes.data || mockSchedules)
-      setScheduledEmails(emailsRes.data || mockScheduledEmails)
+      if (schedulesRes.error) {
+        console.error('Failed to load schedules:', schedulesRes.error)
+        setSchedules([])
+      } else {
+        setSchedules(schedulesRes.data || [])
+      }
+
+      if (emailsRes.error) {
+        console.error('Failed to load scheduled emails:', emailsRes.error)
+        setScheduledEmails([])
+      } else {
+        setScheduledEmails(emailsRes.data || [])
+      }
     } catch (error) {
-      console.error('Failed to load schedules:', error)
-      setSchedules(mockSchedules)
-      setScheduledEmails(mockScheduledEmails)
+      console.error('Error loading schedules:', error)
+      setSchedules([])
+      setScheduledEmails([])
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadScheduleStats = async (scheduleId: string) => {
+    try {
+      const statsRes = await api.get<ScheduleStats>(`/api/schedules/${scheduleId}/stats`)
+      if (statsRes.error) {
+        console.error('Failed to load schedule stats:', statsRes.error)
+      } else {
+        setScheduleStats(statsRes.data || null)
+      }
+    } catch (error) {
+      console.error('Error loading schedule stats:', error)
+    }
+  }
+
+  const handlePauseSchedule = async (scheduleId: string) => {
+    try {
+      const res = await api.post(`/api/schedules/${scheduleId}/pause`, {})
+      if (res.error) {
+        toast({
+          title: 'Failed to pause schedule',
+          description: res.error,
+          status: 'error',
+          duration: 3000,
+        })
+      } else {
+        toast({
+          title: 'Schedule paused',
+          description: 'The campaign has been paused',
+          status: 'success',
+          duration: 3000,
+        })
+        loadData() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error pausing schedule:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to pause schedule',
+        status: 'error',
+        duration: 3000,
+      })
+    }
+  }
+
+  const handleResumeSchedule = async (scheduleId: string) => {
+    try {
+      const res = await api.post(`/api/schedules/${scheduleId}/resume`, {})
+      if (res.error) {
+        toast({
+          title: 'Failed to resume schedule',
+          description: res.error,
+          status: 'error',
+          duration: 3000,
+        })
+      } else {
+        toast({
+          title: 'Schedule resumed',
+          description: 'The campaign has been resumed',
+          status: 'success',
+          duration: 3000,
+        })
+        loadData() // Refresh the list
+      }
+    } catch (error) {
+      console.error('Error resuming schedule:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to resume schedule',
+        status: 'error',
+        duration: 3000,
+      })
     }
   }
 
@@ -290,47 +393,44 @@ const SchedulesTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Delivery Schedules</Heading>
+          <Heading size="lg">Schedules</Heading>
           <Text color="gray.600">
-            Configure optimal sending times and manage email delivery windows
+            View and manage active campaign schedules with upcoming sends
           </Text>
         </VStack>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSchedule}>
-          New Schedule
-        </Button>
       </Flex>
 
       {/* Stats */}
-      <SimpleGrid columns={{ base: 2, md: 5 }} spacing={4} mb={6}>
+      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Total Schedules</StatLabel>
-              <StatNumber>{stats.totalSchedules}</StatNumber>
+              <StatLabel>Active Campaigns</StatLabel>
+              <StatNumber>{schedules.filter(s => s.status === 'running').length}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Active</StatLabel>
-              <StatNumber>{stats.activeSchedules}</StatNumber>
+              <StatLabel>Paused Campaigns</StatLabel>
+              <StatNumber>{schedules.filter(s => s.status === 'paused').length}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Scheduled Today</StatLabel>
-              <StatNumber>{stats.todayScheduled}</StatNumber>
+              <StatLabel>Upcoming Sends</StatLabel>
+              <StatNumber>{scheduledEmails.length}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Pending Emails</StatLabel>
-              <StatNumber>{stats.pendingEmails}</StatNumber>
+              <StatLabel>Total Prospects</StatLabel>
+              <StatNumber>{schedules.reduce((sum, s) => sum + s.totalProspects, 0)}</StatNumber>
             </Stat>
           </CardBody>
         </Card>

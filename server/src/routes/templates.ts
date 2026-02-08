@@ -28,7 +28,6 @@ const createTemplateSchema = z.object({
   bodyTemplateHtml: z.string().min(1),
   bodyTemplateText: z.string().optional(),
   stepNumber: z.number().int().min(1).max(10).default(1),
-  isGlobal: z.boolean().optional(),
 })
 
 const updateTemplateSchema = z.object({
@@ -44,12 +43,9 @@ const updateTemplateSchema = z.object({
 router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const includeGlobal = req.query.includeGlobal !== 'false'
 
     const templates = await prisma.emailTemplate.findMany({
-      where: includeGlobal
-        ? { OR: [{ customerId }, { customerId: null }] }
-        : { customerId },
+      where: { customerId },
       orderBy: [{ updatedAt: 'desc' }],
     })
 
@@ -67,7 +63,7 @@ router.post('/', async (req, res, next) => {
     const created = await prisma.emailTemplate.create({
       data: {
         id: randomUUID(),
-        customerId: data.isGlobal ? null : customerId,
+        customerId: customerId,
         name: data.name,
         subjectTemplate: data.subjectTemplate,
         bodyTemplateHtml: data.bodyTemplateHtml,

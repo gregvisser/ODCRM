@@ -24,6 +24,8 @@ const createCampaignSchema = z.object({
   description: z.string().optional(),
   status: z.string().optional(),
   senderIdentityId: z.string().optional(),
+  listId: z.string().optional(),
+  sequenceId: z.string().optional(),
   // sendScheduleId: z.string().optional(),
   sendWindowHoursStart: z.number().int().min(0).max(23).optional(),
   sendWindowHoursEnd: z.number().int().min(0).max(23).optional(),
@@ -71,10 +73,11 @@ router.post('/', async (req, res, next) => {
       }
     }
 
+    // Build strict whitelist object - NO spreading, NO untrusted objects
     const dataForCreate = {
       name: parsed.name,
       description: parsed.description,
-      status,
+      status: status as any, // CampaignStatus enum
       senderIdentityId: parsed.senderIdentityId,
       sendWindowHoursStart: parsed.sendWindowHoursStart,
       sendWindowHoursEnd: parsed.sendWindowHoursEnd,
@@ -82,16 +85,21 @@ router.post('/', async (req, res, next) => {
       followUpDelayDaysMin: parsed.followUpDelayDaysMin,
       followUpDelayDaysMax: parsed.followUpDelayDaysMax,
       customerId,
-    } as any
+      // Optional fields - only add if explicitly provided and not null/undefined
+      ...(parsed.listId ? { listId: parsed.listId } : {}),
+      ...(parsed.sequenceId ? { sequenceId: parsed.sequenceId } : {}),
+    }
 
+    // Runtime assertion - ensure no id field exists
     if ('id' in dataForCreate) {
-      delete dataForCreate.id
+      console.error('[campaigns:create] CRITICAL: id field found in dataForCreate:', dataForCreate.id)
+      throw new Error('Security violation: id field should never be in create payload')
     }
 
     const campaign = await prisma.emailCampaign.create({
       data: dataForCreate,
       include: {
-        email_identities: true
+        senderIdentity: true  // Fixed: was 'email_identities'
       }
     })
 

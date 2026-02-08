@@ -225,4 +225,80 @@ router.post('/migrate-websites', async (req, res) => {
   }
 });
 
+// Backfill customerId for EmailIdentity records that don't have it
+router.post('/backfill-email-identities', validateAdminSecret, async (req, res) => {
+  try {
+    const { defaultCustomerId } = req.body;
+
+    if (!defaultCustomerId) {
+      return res.status(400).json({
+        success: false,
+        error: 'defaultCustomerId is required in request body',
+      });
+    }
+
+    // Check if the customer exists
+    const customer = await prisma.customer.findUnique({
+      where: { id: defaultCustomerId },
+    });
+
+    if (!customer) {
+      return res.status(400).json({
+        success: false,
+        error: `Customer with id ${defaultCustomerId} not found`,
+      });
+    }
+
+    // Find EmailIdentity records without customerId
+    // Note: Since customerId is required in the schema, this should return empty
+    // But this endpoint provides a safety net if any records exist
+    const identitiesWithoutCustomer = await prisma.emailIdentity.findMany({
+      where: {
+        customerId: null,
+      },
+      select: {
+        id: true,
+        emailAddress: true,
+      },
+    });
+
+    if (identitiesWithoutCustomer.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No EmailIdentity records found without customerId - backfill not needed',
+        backfilled: 0,
+      });
+    }
+
+    // Backfill the records
+    const backfillResult = await prisma.emailIdentity.updateMany({
+      where: {
+        customerId: null,
+      },
+      data: {
+        customerId: defaultCustomerId,
+      },
+    });
+
+    // Log the backfilled records
+    console.log(`✅ Backfilled ${backfillResult.count} EmailIdentity records with customerId: ${defaultCustomerId}`);
+    for (const identity of identitiesWithoutCustomer) {
+      console.log(`  - ${identity.emailAddress} (${identity.id})`);
+    }
+
+    res.json({
+      success: true,
+      message: `Backfilled ${backfillResult.count} EmailIdentity records`,
+      backfilled: backfillResult.count,
+      records: identitiesWithoutCustomer,
+    });
+  } catch (error) {
+    console.error('❌ Backfill failed:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export default router;
