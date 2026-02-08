@@ -3,6 +3,7 @@ import path from 'node:path'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { prisma } from './lib/prisma.js'
+import './lib/prisma.js'
 import campaignRoutes from './routes/campaigns.js'
 import contactsRoutes from './routes/contacts.js'
 import outlookRoutes from './routes/outlook.js'
@@ -134,7 +135,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV || 'development',
     version: '2026-02-05-v2',
-    commit: process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || null
+    commit: process.env.WEBSITE_COMMIT_HASH || null
   })
 })
 
