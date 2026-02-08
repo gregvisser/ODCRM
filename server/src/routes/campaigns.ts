@@ -35,31 +35,33 @@ const createCampaignSchema = z.object({
 router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const { id: _ignoredId, ...safeBody } = (req.body || {}) as Record<string, unknown>
+    const incomingBody = (req.body || {}) as Record<string, unknown>
+    if ('id' in incomingBody) {
+      console.warn('[campaigns:create] incoming contained id - ignored')
+    }
+    const { id: _ignoredId, ...safeBody } = incomingBody
     const parsed = createCampaignSchema.parse(safeBody)
-    const { id: _ignoredParsedId, ...safeParsed } = parsed as any
-    const data = safeParsed
-    const status = data.status || 'draft'
+    const status = parsed.status || 'draft'
 
     if (status !== 'draft') {
-      if (!data.senderIdentityId) {
+      if (!parsed.senderIdentityId) {
         return res.status(400).json({ error: 'senderIdentityId is required when status is not draft' })
       }
-      if (data.sendWindowHoursStart === undefined || data.sendWindowHoursEnd === undefined) {
+      if (parsed.sendWindowHoursStart === undefined || parsed.sendWindowHoursEnd === undefined) {
         return res.status(400).json({ error: 'sendWindowHoursStart and sendWindowHoursEnd are required when status is not draft' })
       }
-      if (data.randomizeWithinHours === undefined) {
+      if (parsed.randomizeWithinHours === undefined) {
         return res.status(400).json({ error: 'randomizeWithinHours is required when status is not draft' })
       }
-      if (data.followUpDelayDaysMin === undefined || data.followUpDelayDaysMax === undefined) {
+      if (parsed.followUpDelayDaysMin === undefined || parsed.followUpDelayDaysMax === undefined) {
         return res.status(400).json({ error: 'followUpDelayDaysMin and followUpDelayDaysMax are required when status is not draft' })
       }
     }
 
-    if (data.senderIdentityId) {
+    if (parsed.senderIdentityId) {
       const identity = await prisma.emailIdentity.findFirst({
         where: {
-          id: data.senderIdentityId,
+          id: parsed.senderIdentityId,
           customerId
         }
       })
@@ -70,15 +72,15 @@ router.post('/', async (req, res, next) => {
     }
 
     const dataForCreate = {
-      name: data.name,
-      description: data.description,
+      name: parsed.name,
+      description: parsed.description,
       status,
-      senderIdentityId: data.senderIdentityId,
-      sendWindowHoursStart: data.sendWindowHoursStart,
-      sendWindowHoursEnd: data.sendWindowHoursEnd,
-      randomizeWithinHours: data.randomizeWithinHours,
-      followUpDelayDaysMin: data.followUpDelayDaysMin,
-      followUpDelayDaysMax: data.followUpDelayDaysMax,
+      senderIdentityId: parsed.senderIdentityId,
+      sendWindowHoursStart: parsed.sendWindowHoursStart,
+      sendWindowHoursEnd: parsed.sendWindowHoursEnd,
+      randomizeWithinHours: parsed.randomizeWithinHours,
+      followUpDelayDaysMin: parsed.followUpDelayDaysMin,
+      followUpDelayDaysMax: parsed.followUpDelayDaysMax,
       customerId,
     } as any
 

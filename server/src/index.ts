@@ -42,12 +42,18 @@ const startupDiagnostics = () => {
   
   // Extract and mask DATABASE_URL host
   let maskedDbHost = 'NOT_SET'
+  let hasConnectionLimit = 'UNKNOWN'
+  let hasPoolTimeout = 'UNKNOWN'
   if (process.env.DATABASE_URL) {
     try {
       const url = new URL(process.env.DATABASE_URL)
       maskedDbHost = url.hostname
+      hasConnectionLimit = url.searchParams.has('connection_limit') ? 'YES' : 'NO'
+      hasPoolTimeout = url.searchParams.has('pool_timeout') ? 'YES' : 'NO'
     } catch {
       maskedDbHost = 'INVALID_URL'
+      hasConnectionLimit = 'INVALID_URL'
+      hasPoolTimeout = 'INVALID_URL'
     }
   }
   
@@ -57,6 +63,8 @@ const startupDiagnostics = () => {
   console.log(`  Timestamp:    ${timestamp}`)
   console.log(`  NODE_ENV:     ${nodeEnv}`)
   console.log(`  DB Host:      ${maskedDbHost}`)
+  console.log(`  DB conn limit param: ${hasConnectionLimit}`)
+  console.log(`  DB pool timeout param: ${hasPoolTimeout}`)
   console.log(`  ADMIN_SECRET: ${process.env.ADMIN_SECRET ? 'SET' : 'NOT_SET'}`)
   console.log('========================================')
 }

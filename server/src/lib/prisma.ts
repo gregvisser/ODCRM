@@ -17,21 +17,34 @@ export const prisma =
 console.log('[prisma] shared client loaded (lib/prisma.ts)')
 
 prisma.$use(async (params, next) => {
-  if (params.model === 'EmailCampaign' && (params.action === 'create' || params.action === 'createMany')) {
-    const data = params.args?.data
-    const hasId = Array.isArray(data)
-      ? data.some((item) => item && typeof item === 'object' && 'id' in item)
-      : !!(data && typeof data === 'object' && 'id' in data)
-    console.log('[prisma] middleware hit', { model: params.model, action: params.action, hasId })
-    if (Array.isArray(data)) {
-      data.forEach((item) => {
-        if (item && typeof item === 'object' && 'id' in item) {
-          delete item.id
-        }
-      })
-    } else if (data && typeof data === 'object' && 'id' in data) {
-      delete data.id
+  const isEmailCampaign = params.model === 'EmailCampaign'
+  const isWriteAction = params.action === 'create' || params.action === 'createMany' || params.action === 'upsert'
+
+  if (isEmailCampaign && isWriteAction) {
+    let hasIdBefore = false
+    let removedId = false
+
+    const stripId = (value: unknown) => {
+      if (value && typeof value === 'object' && 'id' in value) {
+        hasIdBefore = true
+        delete (value as { id?: unknown }).id
+        removedId = true
+      }
     }
+
+    if (params.action === 'create' || params.action === 'createMany') {
+      const data = params.args?.data
+      if (Array.isArray(data)) {
+        data.forEach(stripId)
+      } else {
+        stripId(data)
+      }
+    } else if (params.action === 'upsert') {
+      stripId(params.args?.create)
+      stripId(params.args?.update)
+    }
+
+    console.log('[prisma] EmailCampaign write', { action: params.action, hasIdBefore, removedId })
   }
 
   return next(params)
