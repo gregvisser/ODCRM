@@ -226,33 +226,40 @@ app.listen(PORT, () => {
   // These workers run automated tasks in production
   // Control via environment variables (see env.example)
   
-  // Email scheduler and reply detection
-  const emailWorkersDisabled = process.env.EMAIL_WORKERS_DISABLED === 'true'
-  if (!emailWorkersDisabled) {
+  // Email scheduler
+  const emailSchedulerEnabled = process.env.ENABLE_EMAIL_SCHEDULER === 'true'
+  if (emailSchedulerEnabled) {
     console.log('📧 Starting email scheduler...')
     startEmailScheduler(prisma)
+  } else {
+    console.log('⏸️ Email scheduler disabled (set ENABLE_EMAIL_SCHEDULER=true to enable)')
+  }
+
+  // Reply detection worker
+  const replyDetectorEnabled = process.env.ENABLE_REPLY_DETECTOR === 'true'
+  if (replyDetectorEnabled) {
     console.log('📬 Starting reply detection worker...')
     startReplyDetectionWorker(prisma)
   } else {
-    console.log('⚠️  Email workers disabled via EMAIL_WORKERS_DISABLED=true')
+    console.log('⏸️ Reply detection disabled (set ENABLE_REPLY_DETECTOR=true to enable)')
   }
 
   // Leads sync worker - syncs marketing leads from Google Sheets
-  const leadsSyncDisabled = process.env.LEADS_SYNC_DISABLED === 'true'
-  if (!leadsSyncDisabled) {
+  const leadsSyncEnabled = process.env.ENABLE_LEADS_SYNC === 'true'
+  if (leadsSyncEnabled) {
     console.log('📊 Starting leads sync worker...')
     startLeadsSyncWorker(prisma)
   } else {
-    console.log('⚠️  Leads sync worker disabled via LEADS_SYNC_DISABLED=true')
+    console.log('⏸️ Leads sync disabled (set ENABLE_LEADS_SYNC=true to enable)')
   }
 
   // About/Company enrichment worker - refreshes company data quarterly
-  const aboutEnrichmentDisabled = process.env.ABOUT_ENRICHMENT_DISABLED === 'true'
-  if (!aboutEnrichmentDisabled) {
+  const aboutEnrichmentEnabled = process.env.ENABLE_ABOUT_ENRICHMENT === 'true'
+  if (aboutEnrichmentEnabled) {
     console.log('🤖 Starting About enrichment worker...')
     startAboutEnrichmentWorker(prisma)
   } else {
-    console.log('⚠️  About enrichment worker disabled via ABOUT_ENRICHMENT_DISABLED=true')
+    console.log('⏸️ About enrichment disabled (set ENABLE_ABOUT_ENRICHMENT=true to enable)')
   }
 })
 
