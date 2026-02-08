@@ -258,6 +258,11 @@ router.post('/threads/:threadId/reply', async (req, res, next) => {
       },
       include: {
         senderIdentity: true,
+        campaignProspect: {
+          include: {
+            campaign: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })

@@ -264,14 +264,6 @@ router.get('/:id/stats', async (req, res, next) => {
     next(error)
   }
 })
-      where: { id },
-      data,
-    })
-    res.json(updated)
-  } catch (error) {
-    next(error)
-  }
-})
 
 // Delete schedule
 router.delete('/:id', async (req, res, next) => {
