@@ -64,6 +64,6 @@ jobs:
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v3
       with:
-        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+        app-name: odcrm-api-hkbsfbdzdvezedg8
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         package: ./server
