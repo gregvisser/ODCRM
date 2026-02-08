@@ -75,13 +75,16 @@ startupDiagnostics()
 const app = express()
 
 const parseAllowedOrigins = () => {
-  // Parse FRONTEND_URLS (comma-separated) and FRONTEND_URL (single URL)
+  // Parse FRONTEND_URLS (comma-separated), FRONTEND_URL (single URL), and FRONTDOOR_URL
   const envUrls = []
   if (process.env.FRONTEND_URLS) {
     envUrls.push(...process.env.FRONTEND_URLS.split(',').map(s => s.trim()).filter(Boolean))
   }
   if (process.env.FRONTEND_URL) {
     envUrls.push(process.env.FRONTEND_URL.trim())
+  }
+  if (process.env.FRONTDOOR_URL) {
+    envUrls.push(process.env.FRONTDOOR_URL.trim())
   }
 
   // In development, allow localhost by default
@@ -98,6 +101,7 @@ const parseAllowedOrigins = () => {
   console.log('   Environment:', process.env.NODE_ENV || 'development')
   console.log('   FRONTEND_URLS:', process.env.FRONTEND_URLS || 'NOT_SET')
   console.log('   FRONTEND_URL:', process.env.FRONTEND_URL || 'NOT_SET')
+  console.log('   FRONTDOOR_URL:', process.env.FRONTDOOR_URL || 'NOT_SET')
   console.log('   Parsed from env:', envUrls.length > 0 ? envUrls.join(', ') : 'NONE')
   console.log('   Dev defaults:', devDefaults.length > 0 ? devDefaults.join(', ') : 'NONE')
   console.log('   Production fallback:', productionFallback.join(', '))
@@ -108,55 +112,55 @@ const parseAllowedOrigins = () => {
 
 const allowedOrigins = parseAllowedOrigins()
 
-// Middleware
-app.use(
-  cors({
-    origin(origin, callback) {
-      // Allow requests with no origin (e.g., mobile apps, Postman, curl)
-      if (!origin) {
-        console.log('✅ CORS: Allowed (no origin)')
-        return callback(null, true)
-      }
+// Define CORS options for reuse
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow requests with no origin (e.g., mobile apps, Postman, curl)
+    if (!origin) {
+      console.log('✅ CORS: Allowed (no origin)')
+      return callback(null, true)
+    }
 
-      // Normalize origin (remove trailing slash for comparison)
-      const normalizedOrigin = origin.replace(/\/$/, '')
+    // Normalize origin (remove trailing slash for comparison)
+    const normalizedOrigin = origin.replace(/\/$/, '')
 
-      // Check if origin is in allowed list (also check normalized versions)
-      const isAllowed = allowedOrigins.some(allowed => {
-        const normalizedAllowed = allowed.replace(/\/$/, '')
-        return normalizedOrigin === normalizedAllowed
-      })
+    // Check if origin is in allowed list (also check normalized versions)
+    const isAllowed = allowedOrigins.some(allowed => {
+      const normalizedAllowed = allowed.replace(/\/$/, '')
+      return normalizedOrigin === normalizedAllowed
+    })
 
-      if (isAllowed) {
-        console.log('✅ CORS: Allowed origin:', origin)
-        return callback(null, true)
-      }
+    if (isAllowed) {
+      console.log('✅ CORS: Allowed origin:', origin)
+      return callback(null, true)
+    }
 
-      // Allow Vercel preview deployments
-      if (origin.endsWith('.vercel.app')) {
-        console.log('✅ CORS: Allowed Vercel preview:', origin)
-        return callback(null, true)
-      }
+    // Allow Vercel preview deployments
+    if (origin.endsWith('.vercel.app')) {
+      console.log('✅ CORS: Allowed Vercel preview:', origin)
+      return callback(null, true)
+    }
 
-      // Block and log rejected origins
-      console.error('❌ CORS: Blocked origin:', origin)
-      console.error('   Normalized origin:', normalizedOrigin)
-      console.error('   Allowed origins:', allowedOrigins)
-      return callback(new Error(`CORS: Origin ${origin} not allowed`))
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret', 'X-Admin-Diag-Key'],
-  }),
-)
-
-// Handle OPTIONS preflight requests explicitly
-app.options('*', cors({
-  origin: allowedOrigins,
+    // Block and log rejected origins
+    console.error('❌ CORS: Blocked origin:', origin)
+    console.error('   Normalized origin:', normalizedOrigin)
+    console.error('   Allowed origins:', allowedOrigins)
+    return callback(new Error(`CORS: Origin ${origin} not allowed`))
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret', 'X-Admin-Diag-Key'],
-}))
+}
+
+// Log CORS configuration
+console.log('🔒 CORS Methods:', corsOptions.methods.join(', '))
+console.log('🔒 CORS Allowed Headers:', corsOptions.allowedHeaders.join(', '))
+
+// Middleware
+app.use(cors(corsOptions))
+
+// Handle OPTIONS preflight requests explicitly
+app.options('*', cors(corsOptions))
 
 app.use(express.json())
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
