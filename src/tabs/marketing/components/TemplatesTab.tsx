@@ -79,6 +79,20 @@ type EmailTemplate = {
   }
 }
 
+const escapeHtml = (value: string) => {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const toHtmlBody = (text: string) => {
+  const escaped = escapeHtml(text)
+  return `<p>${escaped.replace(/\n/g, '<br/>')}</p>`
+}
+
 const TemplatesTab: React.FC = () => {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -99,12 +113,31 @@ const TemplatesTab: React.FC = () => {
     setLoading(true)
     setError(null)
 
-    const { data, error: apiError } = await api.get<EmailTemplate[]>('/api/templates')
+    const { data, error: apiError } = await api.get<any[]>('/api/templates')
     
     if (apiError) {
       setError(apiError)
     } else {
-      setTemplates(data || [])
+      const mapped = (data || []).map((template) => ({
+        id: template.id,
+        name: template.name || '',
+        subject: template.subjectTemplate || template.subject || '',
+        content: template.bodyTemplateText || template.bodyTemplateHtml || '',
+        previewText: template.previewText || '',
+        category: template.category || 'General',
+        tags: Array.isArray(template.tags) ? template.tags : [],
+        isFavorite: !!template.isFavorite,
+        usageCount: template.usageCount || 0,
+        lastUsed: template.lastUsed,
+        createdAt: template.createdAt || new Date().toISOString(),
+        updatedAt: template.updatedAt || new Date().toISOString(),
+        createdBy: template.createdBy || {
+          id: 'current-user',
+          name: 'Current User',
+          email: 'user@company.com',
+        },
+      }))
+      setTemplates(mapped)
     }
     
     setLoading(false)
@@ -166,12 +199,34 @@ const TemplatesTab: React.FC = () => {
 
   const handleSaveTemplate = async () => {
     if (!editingTemplate) return
+    if (!editingTemplate.name.trim() || !editingTemplate.subject.trim() || !editingTemplate.content.trim()) {
+      toast({
+        title: 'Missing required fields',
+        description: 'Name, subject, and content are required.',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
 
     try {
+      const payload = {
+        name: editingTemplate.name.trim(),
+        subjectTemplate: editingTemplate.subject.trim(),
+        bodyTemplateHtml: toHtmlBody(editingTemplate.content),
+        bodyTemplateText: editingTemplate.content.trim(),
+        stepNumber: 1,
+      }
       if (editingTemplate.id) {
-        await api.put(`/api/templates/${editingTemplate.id}`, editingTemplate)
+        const res = await api.patch(`/api/templates/${editingTemplate.id}`, payload)
+        if (res.error) {
+          throw new Error(res.error)
+        }
       } else {
-        const res = await api.post('/api/templates', editingTemplate)
+        const res = await api.post('/api/templates', payload)
+        if (res.error) {
+          throw new Error(res.error)
+        }
         setEditingTemplate({ ...editingTemplate, id: (res.data as any).id })
       }
       await loadData()
@@ -181,9 +236,10 @@ const TemplatesTab: React.FC = () => {
         status: 'success',
         duration: 3000,
       })
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: `Failed to ${editingTemplate.id ? 'update' : 'create'} template`,
+        description: error?.message,
         status: 'error',
         duration: 3000,
       })
@@ -193,23 +249,26 @@ const TemplatesTab: React.FC = () => {
   const handleDuplicateTemplate = async (template: EmailTemplate) => {
     try {
       const duplicatedTemplate = {
-        ...template,
-        id: '',
         name: `${template.name} (Copy)`,
-        usageCount: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        subjectTemplate: template.subject.trim(),
+        bodyTemplateHtml: toHtmlBody(template.content),
+        bodyTemplateText: template.content.trim(),
+        stepNumber: 1,
       }
-      await api.post('/api/templates', duplicatedTemplate)
+      const res = await api.post('/api/templates', duplicatedTemplate)
+      if (res.error) {
+        throw new Error(res.error)
+      }
       await loadData()
       toast({
         title: 'Template duplicated',
         status: 'success',
         duration: 3000,
       })
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: 'Failed to duplicate template',
+        description: error?.message,
         status: 'error',
         duration: 3000,
       })
