@@ -146,9 +146,18 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret', 'X-Admin-Diag-Key'],
   }),
 )
+
+// Handle OPTIONS preflight requests explicitly
+app.options('*', cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret', 'X-Admin-Diag-Key'],
+}))
+
 app.use(express.json())
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
 
