@@ -75,29 +75,34 @@ startupDiagnostics()
 const app = express()
 
 const parseAllowedOrigins = () => {
-  const raw = [process.env.FRONTEND_URLS, process.env.FRONTEND_URL]
-    .filter(Boolean)
-    .join(',')
-  const fromEnv = raw
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean)
+  // Parse FRONTEND_URLS (comma-separated) and FRONTEND_URL (single URL)
+  const envUrls = []
+  if (process.env.FRONTEND_URLS) {
+    envUrls.push(...process.env.FRONTEND_URLS.split(',').map(s => s.trim()).filter(Boolean))
+  }
+  if (process.env.FRONTEND_URL) {
+    envUrls.push(process.env.FRONTEND_URL.trim())
+  }
 
   // In development, allow localhost by default
   const isDevelopment = process.env.NODE_ENV !== 'production'
-  const devDefaults = isDevelopment ? ['http://localhost:5173'] : []
+  const devDefaults = isDevelopment ? ['http://localhost:5173', 'http://localhost:3000'] : []
 
   // CRITICAL: Always include production frontend URL as fallback
   // This prevents CORS issues even if environment variables aren't set in Azure
   const productionFallback = ['https://odcrm.bidlow.co.uk']
 
-  const allOrigins = Array.from(new Set([...fromEnv, ...devDefaults, ...productionFallback]))
-  
+  const allOrigins = Array.from(new Set([...envUrls, ...devDefaults, ...productionFallback]))
+
   console.log('🔒 CORS Configuration:')
-  console.log('   Environment: ', process.env.NODE_ENV || 'development')
-  console.log('   From env vars: ', fromEnv.length > 0 ? fromEnv : 'NONE')
-  console.log('   Allowed origins: ', allOrigins)
-  
+  console.log('   Environment:', process.env.NODE_ENV || 'development')
+  console.log('   FRONTEND_URLS:', process.env.FRONTEND_URLS || 'NOT_SET')
+  console.log('   FRONTEND_URL:', process.env.FRONTEND_URL || 'NOT_SET')
+  console.log('   Parsed from env:', envUrls.length > 0 ? envUrls.join(', ') : 'NONE')
+  console.log('   Dev defaults:', devDefaults.length > 0 ? devDefaults.join(', ') : 'NONE')
+  console.log('   Production fallback:', productionFallback.join(', '))
+  console.log('   FINAL allowed origins:', allOrigins.join(', '))
+
   return allOrigins
 }
 
@@ -107,27 +112,41 @@ const allowedOrigins = parseAllowedOrigins()
 app.use(
   cors({
     origin(origin, callback) {
-      // Allow requests with no origin (e.g., mobile apps, Postman)
-      if (!origin) return callback(null, true)
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin)) {
+      // Allow requests with no origin (e.g., mobile apps, Postman, curl)
+      if (!origin) {
+        console.log('✅ CORS: Allowed (no origin)')
+        return callback(null, true)
+      }
+
+      // Normalize origin (remove trailing slash for comparison)
+      const normalizedOrigin = origin.replace(/\/$/, '')
+
+      // Check if origin is in allowed list (also check normalized versions)
+      const isAllowed = allowedOrigins.some(allowed => {
+        const normalizedAllowed = allowed.replace(/\/$/, '')
+        return normalizedOrigin === normalizedAllowed
+      })
+
+      if (isAllowed) {
         console.log('✅ CORS: Allowed origin:', origin)
         return callback(null, true)
       }
-      
+
       // Allow Vercel preview deployments
       if (origin.endsWith('.vercel.app')) {
         console.log('✅ CORS: Allowed Vercel preview:', origin)
         return callback(null, true)
       }
-      
+
       // Block and log rejected origins
       console.error('❌ CORS: Blocked origin:', origin)
+      console.error('   Normalized origin:', normalizedOrigin)
       console.error('   Allowed origins:', allowedOrigins)
       return callback(new Error(`CORS: Origin ${origin} not allowed`))
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret'],
   }),
 )
 app.use(express.json())
