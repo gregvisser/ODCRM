@@ -36,7 +36,9 @@ router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id: _ignoredId, ...safeBody } = (req.body || {}) as Record<string, unknown>
-    const data = createCampaignSchema.parse(safeBody)
+    const parsed = createCampaignSchema.parse(safeBody)
+    const { id: _ignoredParsedId, ...safeParsed } = parsed as any
+    const data = safeParsed
     const status = data.status || 'draft'
 
     if (status !== 'draft') {
@@ -67,19 +69,25 @@ router.post('/', async (req, res, next) => {
       }
     }
 
+    const dataForCreate = {
+      name: data.name,
+      description: data.description,
+      status,
+      senderIdentityId: data.senderIdentityId,
+      sendWindowHoursStart: data.sendWindowHoursStart,
+      sendWindowHoursEnd: data.sendWindowHoursEnd,
+      randomizeWithinHours: data.randomizeWithinHours,
+      followUpDelayDaysMin: data.followUpDelayDaysMin,
+      followUpDelayDaysMax: data.followUpDelayDaysMax,
+      customerId,
+    } as any
+
+    if ('id' in dataForCreate) {
+      delete dataForCreate.id
+    }
+
     const campaign = await prisma.emailCampaign.create({
-      data: {
-        name: data.name,
-        description: data.description,
-        status,
-        senderIdentityId: data.senderIdentityId,
-        sendWindowHoursStart: data.sendWindowHoursStart,
-        sendWindowHoursEnd: data.sendWindowHoursEnd,
-        randomizeWithinHours: data.randomizeWithinHours,
-        followUpDelayDaysMin: data.followUpDelayDaysMin,
-        followUpDelayDaysMax: data.followUpDelayDaysMax,
-        customerId,
-      } as any,
+      data: dataForCreate,
       include: {
         email_identities: true
       }
