@@ -13,6 +13,7 @@ import CreateCustomerStep from './components/CreateCustomerStep'
 import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
+import { onboardingDebug } from './utils/debug'
 
 export type OnboardingViewId = 'create-customer' | 'overview' | 'customer-onboarding' | 'progress-tracker'
 
@@ -36,11 +37,11 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
   // Sync with settingsStore on mount and when settings change globally
   useEffect(() => {
-    console.log('🔄 OnboardingHomePage: Initial customerId from settingsStore:', selectedCustomerId)
+    onboardingDebug('🔄 OnboardingHomePage: Initial customerId from settingsStore:', selectedCustomerId)
     
     const unsubscribe = onSettingsUpdated((detail: any) => {
       if (detail && typeof detail.currentCustomerId === 'string') {
-        console.log('🔄 OnboardingHomePage: Customer changed via settingsStore:', detail.currentCustomerId)
+        onboardingDebug('🔄 OnboardingHomePage: Customer changed via settingsStore:', detail.currentCustomerId)
         setSelectedCustomerId(detail.currentCustomerId)
       }
     })
@@ -49,7 +50,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
   // Handler when customer is created - sets canonical customer ID and navigates
   const handleCustomerCreated = useCallback((customerId: string) => {
-    console.log('🎉 OnboardingHomePage: Customer created, setting canonical ID:', customerId)
+    onboardingDebug('🎉 OnboardingHomePage: Customer created, setting canonical ID:', customerId)
     setCurrentCustomerId(customerId) // Update canonical store
     setSelectedCustomerId(customerId) // Update local state
     onNavigate?.('customer-onboarding')
@@ -57,7 +58,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   
   // Handler when customer changes via selector - update canonical store
   const handleCustomerChange = useCallback((customerId: string) => {
-    console.log('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
+    onboardingDebug('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
     setCurrentCustomerId(customerId) // Update canonical store
     setSelectedCustomerId(customerId) // Update local state
   }, [])

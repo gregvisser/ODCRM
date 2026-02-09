@@ -23,6 +23,7 @@ import {
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
 import { setCurrentCustomerId } from '../../../platform/stores/settings'
 import { emit } from '../../../platform/events'
+import { onboardingDebug, onboardingError } from '../utils/debug'
 
 interface CreateCustomerStepProps {
   onCustomerCreated: (customerId: string) => void
@@ -50,7 +51,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
     }
 
     setIsSubmitting(true)
-    console.log('🚀 CreateCustomerStep: Creating customer:', { name: formData.name, domain: formData.domain })
+    onboardingDebug('🚀 CreateCustomerStep: Creating customer:', { name: formData.name, domain: formData.domain })
 
     const { id, error } = await createCustomer({
       name: formData.name.trim(),
@@ -67,7 +68,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
 
     if (error || !id) {
       const errorMsg = error || 'Failed to create customer'
-      console.error('❌ CreateCustomerStep: Customer creation failed:', errorMsg)
+      onboardingError('❌ CreateCustomerStep: Customer creation failed:', errorMsg)
       setFormError(errorMsg)
       toast({
         title: 'Failed to create customer',
@@ -79,11 +80,11 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
       return
     }
 
-    console.log('✅ CreateCustomerStep: Customer created successfully:', id)
+    onboardingDebug('✅ CreateCustomerStep: Customer created successfully:', id)
     
     // Update canonical customer store FIRST
     setCurrentCustomerId(id)
-    console.log('✅ CreateCustomerStep: Set canonical currentCustomerId:', id)
+    onboardingDebug('✅ CreateCustomerStep: Set canonical currentCustomerId:', id)
     
     // Emit customerCreated event for CustomerSelector to refresh
     emit('customerCreated', { id, name: formData.name })

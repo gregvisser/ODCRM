@@ -15,6 +15,8 @@ import {
   Divider,
 } from '@chakra-ui/react'
 import { api } from '../../utils/api'
+import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
+import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 
 // Stable keys for checklist items (NEVER change these - they're persisted in DB)
 const SALES_TEAM_ITEMS = [
@@ -92,10 +94,10 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
   // Load checklist state from database
   const loadChecklistState = useCallback(async () => {
     if (!customerId) {
-      console.log('⚠️ ProgressTrackerTab: No customerId, skipping load')
+      onboardingWarn('⚠️ ProgressTrackerTab: No customerId, skipping load')
       return
     }
-    console.log('📥 ProgressTrackerTab: Loading progress for customerId:', customerId)
+    onboardingDebug('📥 ProgressTrackerTab: Loading progress for customerId:', customerId)
     setIsLoading(true)
     const { data, error } = await api.get<{ accountData?: { progressTracker?: any } }>(
       `/api/customers/${customerId}`,
@@ -113,7 +115,7 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
 
     const progressTracker = data?.accountData?.progressTracker
     if (progressTracker) {
-      console.log('✅ ProgressTrackerTab: Loaded progress from DB:', {
+      onboardingDebug('✅ ProgressTrackerTab: Loaded progress from DB:', {
         customerId,
         salesItems: Object.keys(progressTracker.sales || {}).length,
         opsItems: Object.keys(progressTracker.ops || {}).length,
@@ -123,7 +125,7 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
       setOpsChecklist(progressTracker.ops || {})
       setAmChecklist(progressTracker.am || {})
     } else {
-      console.log('ℹ️ ProgressTrackerTab: No existing progress for customerId:', customerId)
+      onboardingDebug('ℹ️ ProgressTrackerTab: No existing progress for customerId:', customerId)
       setSalesChecklist({})
       setOpsChecklist({})
       setAmChecklist({})
@@ -139,11 +141,11 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
   const saveChecklistState = useCallback(
     async (group: 'sales' | 'ops' | 'am', itemKey: string, checked: boolean) => {
       if (!customerId) {
-        console.log('⚠️ ProgressTrackerTab: No customerId, skipping save')
+        onboardingWarn('⚠️ ProgressTrackerTab: No customerId, skipping save')
         return
       }
       
-      console.log('💾 ProgressTrackerTab: Saving progress:', { customerId, group, itemKey, checked })
+      onboardingDebug('💾 ProgressTrackerTab: Saving progress:', { customerId, group, itemKey, checked })
 
       // Optimistically update UI
       const updateState = (prev: ChecklistState) => ({ ...prev, [itemKey]: checked })
@@ -177,10 +179,11 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         },
       }
 
-      const updatedAccountData = {
-        ...currentAccountData,
+      // SAFE MERGE: Use safeAccountDataMerge to preserve other accountData fields
+      // This ensures updating progressTracker doesn't wipe clientProfile, accountDetails, etc.
+      const updatedAccountData = safeAccountDataMerge(currentAccountData, {
         progressTracker: updatedProgressTracker,
-      }
+      })
 
       // Save to database with complete customer payload (required by validation schema)
       const { error } = await api.put(`/api/customers/${customerId}`, {
@@ -211,7 +214,7 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
       })
 
       if (error) {
-        console.error('❌ Progress Tracker save failed:', {
+        onboardingError('❌ Progress Tracker save failed:', {
           customerId,
           group,
           itemKey,
@@ -227,7 +230,7 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         })
         void loadChecklistState() // Revert to server state
       } else {
-        console.log('✅ Progress Tracker saved:', { customerId, group, itemKey, checked })
+        onboardingDebug('✅ Progress Tracker saved:', { customerId, group, itemKey, checked })
       }
     },
     [customerId, toast, loadChecklistState],

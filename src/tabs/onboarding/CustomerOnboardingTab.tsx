@@ -28,6 +28,8 @@ import { emit } from '../../platform/events'
 import { getJson, setJson } from '../../platform/storage'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
+import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
+import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import type {
   Account,
   Accreditation,
@@ -227,11 +229,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   // Fetch customer data by ID
   const fetchCustomer = useCallback(async () => {
     if (!customerId) {
-      console.log('⚠️ CustomerOnboardingTab: No customerId, skipping fetch')
+      onboardingWarn('⚠️ CustomerOnboardingTab: No customerId, skipping fetch')
       setIsLoading(false)
       return
     }
-    console.log('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId)
+    onboardingDebug('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId)
     setIsLoading(true)
     setLoadError(null)
     const { data, error } = await api.get<CustomerApi>(`/api/customers/${customerId}`)
@@ -241,7 +243,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     if (data) {
-      console.log('✅ CustomerOnboardingTab: Loaded customer from DB:', {
+      onboardingDebug('✅ CustomerOnboardingTab: Loaded customer from DB:', {
         customerId,
         name: data.name,
         hasAccountData: !!data.accountData,
@@ -565,10 +567,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const handleSave = async () => {
     if (!customer) {
-      console.log('⚠️ CustomerOnboardingTab: No customer, skipping save')
+      onboardingWarn('⚠️ CustomerOnboardingTab: No customer, skipping save')
       return
     }
-    console.log('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
+    onboardingDebug('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
     setIsSaving(true)
     
     const currentAccountData =
@@ -588,10 +590,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       },
     }
     
-    const nextAccountData = {
-      ...currentAccountData,
+    // SAFE MERGE: Preserve other accountData fields (e.g., progressTracker)
+    // Only update clientProfile and accountDetails sections
+    const nextAccountData = safeAccountDataMerge(currentAccountData, {
       clientProfile,
       accountDetails: nextAccountDetails,
+      // Also update top-level convenience fields for backward compatibility
       contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
       contactEmail: accountDetails.primaryContact.email,
       contactNumber: accountDetails.primaryContact.phone,
@@ -608,7 +612,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       emailAccounts: accountDetails.emailAccounts,
       emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
       days: accountDetails.daysPerWeek,
-    }
+    })
     
     // Call API and wait for response before updating UI
     const { error } = await api.put(`/api/customers/${customerId}`, {
@@ -618,7 +622,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     
     if (error) {
       // Show error toast with detailed information
-      console.error('❌ Customer Onboarding save failed:', {
+      onboardingError('❌ Customer Onboarding save failed:', {
         customerId,
         error,
         payload: { name: customer.name, accountData: nextAccountData }
@@ -634,7 +638,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     
-    console.log('✅ Customer Onboarding saved successfully:', customerId)
+    onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
     
     // SUCCESS: API returned 2xx - NOW update local state
     // Update customer state with fresh data from API response

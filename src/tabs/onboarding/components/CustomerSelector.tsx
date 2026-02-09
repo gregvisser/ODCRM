@@ -15,6 +15,7 @@ import { RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { settingsStore } from '../../../platform'
 import { on } from '../../../platform/events'
+import { onboardingDebug } from '../utils/debug'
 
 type CustomerApi = {
   id: string
@@ -61,7 +62,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
   // Listen for customerCreated event to refresh dropdown
   useEffect(() => {
     const unsubscribe = on<{ id: string; name: string }>('customerCreated', () => {
-      console.log('🔄 Customer created event received, refreshing customers list...')
+      onboardingDebug('🔄 Customer created event received, refreshing customers list...')
       void fetchCustomers()
     })
     return () => unsubscribe()
