@@ -27,6 +27,27 @@ router.get('/', async (req, res, next) => {
       },
     })
 
+    // Get contacts breakdown by source (Cognism + Apollo + Social/Blackbook)
+    const contactsBySourceResult = await prisma.contact.groupBy({
+      by: ['source'],
+      where: {
+        customerId,
+        status: 'active',
+      },
+      _count: {
+        id: true,
+      },
+    })
+
+    // Map source names (blackbook → social for display)
+    const contactsBySource = contactsBySourceResult.reduce((acc, item) => {
+      const sourceName = item.source === 'blackbook' ? 'social' : item.source
+      acc[sourceName] = item._count.id
+      return acc
+    }, {} as Record<string, number>)
+
+    console.log(`[Overview] Customer ${customerId}: Total contacts = ${totalContacts}, By source:`, contactsBySource)
+
     // Get active sequences (sequences with at least one active enrollment)
     const activeSequencesResult = await prisma.$queryRaw<{ count: number }[]>`
       SELECT COUNT(DISTINCT es.id) as count
@@ -140,6 +161,7 @@ router.get('/', async (req, res, next) => {
     res.json({
       customerId,
       totalContacts,
+      contactsBySource, // Breakdown by source (cognism, apollo, social)
       activeSequences,
       emailsSentToday,
       employeeStats,

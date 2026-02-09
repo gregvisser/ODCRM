@@ -113,6 +113,7 @@ const OverviewDashboard: React.FC = () => {
     pendingTasks: 0,
     deliverability: 0,
   })
+  const [contactsBySource, setContactsBySource] = useState<Record<string, number>>({})
   const [employeeStats, setEmployeeStats] = useState<EmployeeStats[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -144,6 +145,9 @@ const OverviewDashboard: React.FC = () => {
             pendingTasks: 0, // Not implemented yet
             deliverability: 0, // Not implemented yet
           })
+
+          // Update contacts by source breakdown
+          setContactsBySource(data.contactsBySource || {})
 
           // Update employee stats
           setEmployeeStats(data.employeeStats || [])
@@ -396,9 +400,13 @@ const OverviewDashboard: React.FC = () => {
                 <StatNumber fontSize="3xl" color="blue.600">
                   {stats.totalContacts.toLocaleString()}
                 </StatNumber>
-                <StatHelpText>
-                  <StatArrow type="increase" />
-                  +12% this month
+                <StatHelpText fontSize="xs" color="gray.500">
+                  {contactsBySource.cognism ? `Cognism: ${contactsBySource.cognism.toLocaleString()}` : ''}
+                  {contactsBySource.cognism && (contactsBySource.apollo || contactsBySource.social) ? ' | ' : ''}
+                  {contactsBySource.apollo ? `Apollo: ${contactsBySource.apollo.toLocaleString()}` : ''}
+                  {contactsBySource.apollo && contactsBySource.social ? ' | ' : ''}
+                  {contactsBySource.social ? `Social: ${contactsBySource.social.toLocaleString()}` : ''}
+                  {!contactsBySource.cognism && !contactsBySource.apollo && !contactsBySource.social ? 'No sources configured' : ''}
                 </StatHelpText>
               </Stat>
             </CardBody>
