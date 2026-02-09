@@ -58,6 +58,11 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+    - name: Regenerate Prisma client after migrations
+      run: cd server && npm run prisma:generate
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     - name: Build application
       run: cd server && npm run build
 
