@@ -36,7 +36,6 @@ const updateTemplateSchema = z.object({
   bodyTemplateHtml: z.string().min(1).optional(),
   bodyTemplateText: z.string().optional(),
   stepNumber: z.number().int().min(1).max(10).optional(),
-  isGlobal: z.boolean().optional(),
 })
 
 // GET /api/templates - Get all templates for customer
@@ -49,6 +48,7 @@ router.get('/', async (req, res, next) => {
       orderBy: [{ updatedAt: 'desc' }],
     })
 
+    console.log(`[templates] GET / - Customer ${customerId}: ${templates.length} templates`)
     return res.json(templates)
   } catch (error) {
     next(error)
@@ -60,6 +60,9 @@ router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = createTemplateSchema.parse(req.body)
+    
+    console.log(`[templates] POST / - Creating template for customer ${customerId}: ${data.name}`)
+    
     const created = await prisma.emailTemplate.create({
       data: {
         id: randomUUID(),
@@ -71,6 +74,8 @@ router.post('/', async (req, res, next) => {
         stepNumber: data.stepNumber,
       },
     })
+    
+    console.log(`[templates] Created template ${created.id} for customer ${customerId}`)
     res.status(201).json(created)
   } catch (error) {
     next(error)
@@ -86,15 +91,17 @@ router.patch('/:id', async (req, res, next) => {
 
     const existing = await prisma.emailTemplate.findUnique({ where: { id } })
     if (!existing) return res.status(404).json({ error: 'Template not found' })
-    if (existing.customerId && existing.customerId !== customerId) {
-      return res.status(403).json({ error: 'Template not accessible' })
+    
+    // Strict customer scoping: return 404 if template belongs to different customer
+    if (existing.customerId !== customerId) {
+      return res.status(404).json({ error: 'Template not found' })
     }
 
     const updated = await prisma.emailTemplate.update({
       where: { id },
       data: {
         ...data,
-        customerId: data.isGlobal ? null : existing.customerId ?? customerId,
+        // customerId is immutable - never change it after creation
       },
     })
     res.json(updated)
@@ -111,8 +118,10 @@ router.delete('/:id', async (req, res, next) => {
 
     const existing = await prisma.emailTemplate.findUnique({ where: { id } })
     if (!existing) return res.status(404).json({ error: 'Template not found' })
-    if (existing.customerId && existing.customerId !== customerId) {
-      return res.status(403).json({ error: 'Template not accessible' })
+    
+    // Strict customer scoping: return 404 if template belongs to different customer
+    if (existing.customerId !== customerId) {
+      return res.status(404).json({ error: 'Template not found' })
     }
 
     await prisma.emailTemplate.delete({ where: { id } })

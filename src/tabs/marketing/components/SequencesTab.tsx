@@ -78,6 +78,15 @@ type CampaignMetrics = {
   replied: number
 }
 
+type SequenceStep = {
+  stepOrder: number
+  delayDaysFromPrevious: number
+  templateId?: string
+  subjectTemplate: string
+  bodyTemplateHtml: string
+  bodyTemplateText?: string
+}
+
 type SequenceCampaign = {
   id: string
   name: string
@@ -94,7 +103,7 @@ type SequenceCampaign = {
     displayName?: string
   } | null
   metrics?: CampaignMetrics
-  templateId?: string
+  steps?: SequenceStep[]
 }
 
 type EmailTemplate = {
@@ -345,7 +354,15 @@ const SequencesTab: React.FC = () => {
       createdAt: new Date().toISOString(),
       listId: '',
       senderIdentityId: '',
-      templateId: '',
+      steps: [
+        {
+          stepOrder: 1,
+          delayDaysFromPrevious: 0,
+          subjectTemplate: '',
+          bodyTemplateHtml: '',
+          bodyTemplateText: '',
+        }
+      ],
     })
     onOpen()
   }

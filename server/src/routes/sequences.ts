@@ -16,19 +16,21 @@ const getCustomerId = (req: any): string => {
 }
 
 // Schema validation
+const MAX_SEQUENCE_STEPS = 8
+
 const createSequenceSchema = z.object({
   senderIdentityId: z.string().min(1),
   name: z.string().min(1),
   description: z.string().optional(),
   steps: z.array(
     z.object({
-      stepOrder: z.number().int().min(1),
+      stepOrder: z.number().int().min(1).max(MAX_SEQUENCE_STEPS),
       delayDaysFromPrevious: z.number().int().min(0).default(0),
       subjectTemplate: z.string().min(1),
       bodyTemplateHtml: z.string().min(1),
       bodyTemplateText: z.string().optional(),
     })
-  ).optional(),
+  ).max(MAX_SEQUENCE_STEPS, `Maximum ${MAX_SEQUENCE_STEPS} steps allowed per sequence`).optional(),
 })
 
 const updateSequenceSchema = z.object({
@@ -37,7 +39,7 @@ const updateSequenceSchema = z.object({
 })
 
 const createStepSchema = z.object({
-  stepOrder: z.number().int().min(1),
+  stepOrder: z.number().int().min(1).max(MAX_SEQUENCE_STEPS),
   delayDaysFromPrevious: z.number().int().min(0).default(0),
   subjectTemplate: z.string().min(1),
   bodyTemplateHtml: z.string().min(1),
@@ -336,10 +338,27 @@ router.post('/:id/steps', async (req, res) => {
     const { id } = req.params
     const validated = createStepSchema.parse(req.body)
 
-    // Verify sequence exists
-    const sequence = await prisma.emailSequence.findUnique({ where: { id } })
+    // Verify sequence exists and check step count
+    const sequence = await prisma.emailSequence.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { steps: true },
+        },
+      },
+    })
+    
     if (!sequence) {
       return res.status(404).json({ error: 'Sequence not found' })
+    }
+
+    // Enforce max 8 steps per sequence
+    if (sequence._count.steps >= MAX_SEQUENCE_STEPS) {
+      return res.status(400).json({
+        error: `Maximum ${MAX_SEQUENCE_STEPS} steps allowed per sequence`,
+        currentSteps: sequence._count.steps,
+        maxSteps: MAX_SEQUENCE_STEPS,
+      })
     }
 
     // Check if stepOrder already exists
