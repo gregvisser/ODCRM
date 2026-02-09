@@ -130,6 +130,23 @@ router.get('/customer', async (req, res, next) => {
       endDate: endDate.toISOString(),
       timezone: 'UTC',
 
+      // Data source metadata (for transparency)
+      _metadata: {
+        dataSource: 'email_events table',
+        eventTypes: ['sent', 'delivered', 'opened', 'clicked', 'replied', 'bounced', 'opted_out', 'failed', 'not_reached'],
+        calculationMethod: 'Event-based aggregation',
+        accuracy: 'Depends on email provider webhooks and tracking pixels',
+        notes: [
+          'Delivery rate = delivered / sent * 100',
+          'Open rate = opened / delivered * 100 (tracking pixel required)',
+          'Click rate = clicked / delivered * 100 (link tracking required)',
+          'Reply rate = replied / delivered * 100',
+          'Bounce rate = bounced / sent * 100',
+          'Opt-out rate = opted_out / delivered * 100',
+          'Not reached rate = (failed + not_reached) / sent * 100',
+        ],
+      },
+
       // Raw counts
       sent,
       delivered,
