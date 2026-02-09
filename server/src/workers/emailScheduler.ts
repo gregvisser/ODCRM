@@ -480,7 +480,6 @@ async function sendCampaignEmail(
         }
       })
 
-      errorCount++
       return false
     }
 
