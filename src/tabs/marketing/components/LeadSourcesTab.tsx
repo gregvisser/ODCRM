@@ -161,7 +161,7 @@ const LeadSourcesTab: React.FC = () => {
   const toast = useToast()
 
   const loadCustomers = async () => {
-    const res = await api.get<CustomerOption[]>('/api/customers')
+    const res = await api.get<{ customers: CustomerOption[] } | CustomerOption[]>('/api/customers')
     if (res.error) {
       toast({
         title: 'Failed to load customers',
@@ -172,7 +172,18 @@ const LeadSourcesTab: React.FC = () => {
       return
     }
 
-    const list = (res.data || []).map((customer) => ({
+    // Normalize response: handle both array and { customers: array } shapes
+    let customersData: CustomerOption[]
+    if (Array.isArray(res.data)) {
+      customersData = res.data
+    } else if (res.data && typeof res.data === 'object' && 'customers' in res.data && Array.isArray(res.data.customers)) {
+      customersData = res.data.customers
+    } else {
+      console.error('❌ Unexpected API response shape in LeadSourcesTab:', res.data)
+      customersData = []
+    }
+
+    const list = customersData.map((customer) => ({
       id: customer.id,
       name: customer.name,
     }))

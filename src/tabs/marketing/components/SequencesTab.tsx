@@ -200,7 +200,7 @@ const SequencesTab: React.FC = () => {
   }, [selectedCustomerId])
 
   const loadCustomers = async () => {
-    const { data, error: apiError } = await api.get<Customer[]>('/api/customers')
+    const { data, error: apiError } = await api.get<{ customers: Customer[] } | Customer[]>('/api/customers')
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
@@ -208,7 +208,17 @@ const SequencesTab: React.FC = () => {
       setSelectedCustomerId(defaultCustomerId)
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
     } else {
-      const customerList = data || []
+      // Normalize response: handle both array and { customers: array } shapes
+      let customerList: Customer[]
+      if (Array.isArray(data)) {
+        customerList = data
+      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
+        customerList = data.customers
+      } else {
+        console.error('❌ Unexpected API response shape in SequencesTab:', data)
+        customerList = []
+      }
+      
       setCustomers(customerList)
 
       const currentCustomerId = getCurrentCustomerId('prod-customer-1')

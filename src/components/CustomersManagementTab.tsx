@@ -159,7 +159,7 @@ export default function CustomersManagementTab() {
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await api.get<Customer[]>('/api/customers')
+    const { data, error } = await api.get<{ customers: Customer[] } | Customer[]>('/api/customers')
     if (error) {
       toast({
         title: 'Error',
@@ -168,7 +168,30 @@ export default function CustomersManagementTab() {
         duration: 3000,
       })
     } else if (data) {
-      setCustomers(data)
+      // Normalize response: handle both array and { customers: array } shapes
+      let customersArray: Customer[]
+      
+      if (Array.isArray(data)) {
+        // Direct array response (legacy format)
+        customersArray = data
+      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
+        // Wrapped response: { customers: [...] } (current production format)
+        customersArray = data.customers
+      } else {
+        // Unexpected response shape - fail safely
+        console.error('❌ Unexpected API response shape:', data)
+        toast({
+          title: 'Error',
+          description: 'Unexpected API response format. Please refresh.',
+          status: 'error',
+          duration: 5000,
+        })
+        setCustomers([])
+        setLoading(false)
+        return
+      }
+      
+      setCustomers(customersArray)
     }
     setLoading(false)
   }, [toast])
@@ -296,10 +319,14 @@ export default function CustomersManagementTab() {
             </Tr>
           </Thead>
           <Tbody>
-            {customers.length === 0 ? (
+            {!Array.isArray(customers) || customers.length === 0 ? (
               <Tr>
                 <Td colSpan={8} textAlign="center" py={8}>
-                  <Text color="gray.500">No customers yet. Create your first customer to get started.</Text>
+                  <Text color="gray.500">
+                    {!Array.isArray(customers) 
+                      ? 'Error loading customers. Please refresh the page.'
+                      : 'No customers yet. Create your first customer to get started.'}
+                  </Text>
                 </Td>
               </Tr>
             ) : (
@@ -427,7 +454,7 @@ export default function CustomersManagementTab() {
                             </Box>
                           </Grid>
 
-                          {customer.customerContacts.length > 0 && (
+                          {Array.isArray(customer.customerContacts) && customer.customerContacts.length > 0 && (
                             <>
                               <Divider my={2} />
                               <Text fontWeight="bold" fontSize="sm">

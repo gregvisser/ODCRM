@@ -37,13 +37,26 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
-    const { data, error } = await api.get<CustomerApi[]>('/api/customers')
+    const { data, error } = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
     if (error) {
       setLoadError(error)
       setIsLoading(false)
       return
     }
-    const apiCustomers = Array.isArray(data) ? data : []
+    
+    // Normalize response: handle both array and { customers: array } shapes
+    let apiCustomers: CustomerApi[]
+    if (Array.isArray(data)) {
+      apiCustomers = data
+    } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
+      apiCustomers = data.customers
+    } else {
+      apiCustomers = []
+      if (data) {
+        console.error('❌ Unexpected API response shape in CustomerSelector:', data)
+        setLoadError('Unexpected API response format')
+      }
+    }
     setCustomers(apiCustomers)
     if (!selectedCustomerId || !apiCustomers.some((item) => item.id === selectedCustomerId)) {
       const firstCustomer = apiCustomers[0]?.id || ''
