@@ -17,6 +17,7 @@ import {
 import { api } from '../../utils/api'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
+import { sanitizeCustomerPayload, validateCustomerPayload } from './utils/sanitizeCustomerPayload'
 
 // Stable keys for checklist items (NEVER change these - they're persisted in DB)
 const SALES_TEAM_ITEMS = [
@@ -185,33 +186,55 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         progressTracker: updatedProgressTracker,
       })
 
-      // Save to database with complete customer payload (required by validation schema)
-      const { error } = await api.put(`/api/customers/${customerId}`, {
+      // Build payload with all customer fields
+      const payload = {
         name: customerData.name, // Required by backend validation
-        domain: customerData.domain || null,
+        domain: customerData.domain,
         accountData: updatedAccountData,
-        website: customerData.website || null,
-        whatTheyDo: customerData.whatTheyDo || null,
-        accreditations: customerData.accreditations || null,
-        keyLeaders: customerData.keyLeaders || null,
-        companyProfile: customerData.companyProfile || null,
-        recentNews: customerData.recentNews || null,
-        companySize: customerData.companySize || null,
-        headquarters: customerData.headquarters || null,
-        foundingYear: customerData.foundingYear || null,
-        socialPresence: customerData.socialPresence || null,
-        leadsReportingUrl: customerData.leadsReportingUrl || null,
-        sector: customerData.sector || null,
+        website: customerData.website,
+        whatTheyDo: customerData.whatTheyDo,
+        accreditations: customerData.accreditations,
+        keyLeaders: customerData.keyLeaders,
+        companyProfile: customerData.companyProfile,
+        recentNews: customerData.recentNews,
+        companySize: customerData.companySize,
+        headquarters: customerData.headquarters,
+        foundingYear: customerData.foundingYear,
+        socialPresence: customerData.socialPresence,
+        leadsReportingUrl: customerData.leadsReportingUrl,
+        sector: customerData.sector,
         clientStatus: customerData.clientStatus || 'active',
-        targetJobTitle: customerData.targetJobTitle || null,
-        prospectingLocation: customerData.prospectingLocation || null,
-        monthlyIntakeGBP: customerData.monthlyIntakeGBP ? parseFloat(customerData.monthlyIntakeGBP) : null,
-        defcon: customerData.defcon || null,
-        weeklyLeadTarget: customerData.weeklyLeadTarget || null,
-        weeklyLeadActual: customerData.weeklyLeadActual || null,
-        monthlyLeadTarget: customerData.monthlyLeadTarget || null,
-        monthlyLeadActual: customerData.monthlyLeadActual || null,
-      })
+        targetJobTitle: customerData.targetJobTitle,
+        prospectingLocation: customerData.prospectingLocation,
+        monthlyIntakeGBP: customerData.monthlyIntakeGBP ? parseFloat(customerData.monthlyIntakeGBP) : undefined,
+        defcon: customerData.defcon,
+        weeklyLeadTarget: customerData.weeklyLeadTarget,
+        weeklyLeadActual: customerData.weeklyLeadActual,
+        monthlyLeadTarget: customerData.monthlyLeadTarget,
+        monthlyLeadActual: customerData.monthlyLeadActual,
+      }
+
+      // SANITIZE: Remove null/undefined fields to prevent validation errors
+      // Backend expects z.string().optional() which accepts string | undefined, NOT null
+      const sanitizedPayload = sanitizeCustomerPayload(payload)
+      
+      // Validate required fields are present
+      try {
+        validateCustomerPayload(sanitizedPayload)
+      } catch (validationError) {
+        onboardingError('❌ Invalid payload before save:', validationError)
+        toast({
+          title: 'Save failed',
+          description: 'Internal error: Invalid customer data',
+          status: 'error',
+          duration: 4000,
+        })
+        void loadChecklistState() // Revert to server state
+        return
+      }
+
+      // Save to database with sanitized payload
+      const { error } = await api.put(`/api/customers/${customerId}`, sanitizedPayload)
 
       if (error) {
         onboardingError('❌ Progress Tracker save failed:', {
