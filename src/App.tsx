@@ -18,6 +18,7 @@ import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/Onb
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
+import { DiagnosticBanner } from './components/DiagnosticBanner'
 import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
 
 function App() {
@@ -299,6 +300,7 @@ function App() {
           Build {__BUILD_STAMP__}
         </Text>
       </Box>
+      <DiagnosticBanner />
     </Flex>
   )
 }

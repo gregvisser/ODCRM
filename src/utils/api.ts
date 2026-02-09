@@ -24,8 +24,11 @@ async function apiRequest<T>(
 ): Promise<ApiResponse<T>> {
   try {
     const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const fullUrl = `${API_BASE_URL}${endpoint}`
     
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    console.log(`[API] ${options.method || 'GET'} ${fullUrl}`)
+    
+    const response = await fetch(fullUrl, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
@@ -34,14 +37,19 @@ async function apiRequest<T>(
       }
     })
 
+    console.log(`[API] ${options.method || 'GET'} ${fullUrl} -> ${response.status}`)
+
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }))
+      console.error(`[API ERROR] ${fullUrl}:`, error)
       return { error: error.error || `HTTP ${response.status}` }
     }
 
     const data = await response.json()
+    console.log(`[API SUCCESS] ${fullUrl}:`, data)
     return { data }
   } catch (error: any) {
+    console.error(`[API EXCEPTION] ${endpoint}:`, error)
     return { error: error.message || 'Network error' }
   }
 }
