@@ -169,7 +169,21 @@ router.get('/:id/email-identities', async (req, res) => {
 // POST /api/customers - Create a new customer
 router.post('/', async (req, res) => {
   try {
-    const validated = upsertCustomerSchema.parse(req.body)
+    // Validate with detailed error reporting
+    const validationResult = upsertCustomerSchema.safeParse(req.body)
+    if (!validationResult.success) {
+      const firstError = validationResult.error.errors[0]
+      const errorMessage = firstError 
+        ? `${firstError.path.join('.')}: ${firstError.message}`
+        : 'Invalid input'
+      console.error('Validation failed for POST /api/customers:', validationResult.error.errors)
+      return res.status(400).json({ 
+        error: errorMessage,
+        details: validationResult.error.errors
+      })
+    }
+    
+    const validated = validationResult.data
 
     const customer = await prisma.customer.create({ data: {
         id: `cust_${Date.now()}_${Math.random().toString(36).substring(7)}`,
@@ -218,7 +232,22 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params
-    const validated = upsertCustomerSchema.parse(req.body)
+    
+    // Validate with detailed error reporting
+    const validationResult = upsertCustomerSchema.safeParse(req.body)
+    if (!validationResult.success) {
+      const firstError = validationResult.error.errors[0]
+      const errorMessage = firstError 
+        ? `${firstError.path.join('.')}: ${firstError.message}`
+        : 'Invalid input'
+      console.error('Validation failed for PUT /api/customers/:id:', validationResult.error.errors)
+      return res.status(400).json({ 
+        error: errorMessage,
+        details: validationResult.error.errors
+      })
+    }
+    
+    const validated = validationResult.data
     const shouldClearLeads = validated.leadsReportingUrl === null
     const updateData = {
       name: validated.name,

@@ -191,13 +191,23 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
       })
 
       if (error) {
+        console.error('❌ Progress Tracker save failed:', {
+          customerId,
+          group,
+          itemKey,
+          checked,
+          error,
+        })
         toast({
           title: 'Save failed',
           description: error,
           status: 'error',
-          duration: 4000,
+          duration: 5000,
+          isClosable: true,
         })
         void loadChecklistState() // Revert to server state
+      } else {
+        console.log('✅ Progress Tracker saved:', { customerId, group, itemKey, checked })
       }
     },
     [customerId, toast, loadChecklistState],
