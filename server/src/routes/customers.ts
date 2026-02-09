@@ -66,12 +66,24 @@ const upsertCustomerContactSchema = z.object({
 router.get('/diagnostic', async (req, res) => {
   try {
     console.log('[DIAGNOSTIC] Testing database connection...')
+    console.log('[DIAGNOSTIC] Prisma client type:', typeof prisma)
+    console.log('[DIAGNOSTIC] Prisma customer model:', typeof prisma.customer)
+    
     const count = await prisma.customer.count()
     console.log(`[DIAGNOSTIC] Customer count: ${count}`)
-    return res.json({ success: true, customerCount: count, timestamp: new Date().toISOString() })
+    return res.json({ 
+      success: true, 
+      customerCount: count, 
+      timestamp: new Date().toISOString() 
+    })
   } catch (error: any) {
-    console.error('[DIAGNOSTIC] Error:', error.message)
-    return res.status(500).json({ error: error.message })
+    console.error('[DIAGNOSTIC] Full error:', error)
+    return res.status(500).json({ 
+      error: error.message,
+      code: error.code,
+      stack: error.stack?.substring(0, 500),
+      prismaError: error.meta
+    })
   }
 })
 
