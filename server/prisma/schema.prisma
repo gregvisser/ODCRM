@@ -722,6 +722,29 @@ model UserPreferences {
 }
 
 // ============================================================================
+// AUDIT TRAIL
+// ============================================================================
+
+// Customer audit events for tracking workflow transitions and critical actions
+model CustomerAuditEvent {
+  id              String       @id @default(cuid())
+  customerId      String
+  action          String       // "complete_onboarding", "status_change", etc.
+  actorUserId     String?      // User ID who performed the action
+  actorEmail      String?      // Email of actor (fallback if userId not available)
+  fromStatus      ClientStatus?
+  toStatus        ClientStatus?
+  metadata        Json?        // Additional context (reason, notes, etc.)
+  createdAt       DateTime     @default(now())
+
+  @@index([customerId])
+  @@index([customerId, action])
+  @@index([customerId, createdAt])
+  @@index([action])
+  @@map("customer_audit_events")
+}
+
+// ============================================================================
 // LEAD SOURCES (Google Sheets Integration)
 // ============================================================================
 

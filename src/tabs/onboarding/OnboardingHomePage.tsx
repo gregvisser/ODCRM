@@ -14,6 +14,7 @@ import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
 import { onboardingDebug } from './utils/debug'
+import { api } from '../../utils/api'
 
 export type OnboardingViewId = 'create-customer' | 'overview' | 'customer-onboarding' | 'progress-tracker'
 
@@ -34,6 +35,9 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   
   // Use canonical settingsStore for customer selection (SINGLE SOURCE OF TRUTH)
   const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId(''))
+  
+  // Customer data for Complete Onboarding button
+  const [customerData, setCustomerData] = useState<{ name: string; clientStatus: string } | null>(null)
 
   // Sync with settingsStore on mount and when settings change globally
   useEffect(() => {
@@ -63,6 +67,39 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     setSelectedCustomerId(customerId) // Update local state
   }, [])
 
+  // Fetch customer data for Complete Onboarding button
+  const fetchCustomerData = useCallback(async () => {
+    if (!selectedCustomerId) {
+      setCustomerData(null)
+      return
+    }
+
+    try {
+      const { data, error } = await api.get<any>(`/api/customers/${selectedCustomerId}`)
+      if (error || !data) {
+        console.error('Failed to fetch customer data:', error)
+        return
+      }
+
+      setCustomerData({
+        name: data.name,
+        clientStatus: data.clientStatus || 'unknown',
+      })
+    } catch (err) {
+      console.error('Error fetching customer data:', err)
+    }
+  }, [selectedCustomerId])
+
+  // Load customer data when selection changes
+  useEffect(() => {
+    void fetchCustomerData()
+  }, [fetchCustomerData])
+
+  // Handler for when status is updated (refresh customer data)
+  const handleStatusUpdated = useCallback(() => {
+    void fetchCustomerData()
+  }, [fetchCustomerData])
+
   // Create navigation items with customer context
   const navItems: SubNavItem[] = useMemo(() => {
     // If no customer selected, show Create Customer as the primary action
@@ -91,7 +128,14 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         id: 'overview',
         label: 'Overview',
         icon: InfoIcon,
-        content: <OnboardingOverview />,
+        content: (
+          <OnboardingOverview
+            customerId={selectedCustomerId}
+            customerName={customerData?.name}
+            currentStatus={customerData?.clientStatus}
+            onStatusUpdated={handleStatusUpdated}
+          />
+        ),
         sortOrder: 0,
       },
       {

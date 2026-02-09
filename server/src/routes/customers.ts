@@ -548,4 +548,157 @@ router.post('/sync-leads-urls', async (req, res) => {
   }
 })
 
+// POST /api/customers/:id/complete-onboarding - Complete onboarding workflow (IRREVERSIBLE)
+router.post('/:id/complete-onboarding', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { actorEmail, actorUserId } = req.body
+
+    // Validate actor info provided
+    if (!actorEmail && !actorUserId) {
+      return res.status(400).json({ 
+        error: 'Actor information required',
+        details: 'Either actorEmail or actorUserId must be provided'
+      })
+    }
+
+    // Fetch current customer state
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true, clientStatus: true }
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    // Check if already completed (idempotency)
+    if (customer.clientStatus === 'active') {
+      // Already active - log attempt but don't fail
+      await prisma.customerAuditEvent.create({
+        data: {
+          customerId: id,
+          action: 'complete_onboarding_attempt_already_active',
+          actorUserId,
+          actorEmail,
+          fromStatus: customer.clientStatus,
+          toStatus: customer.clientStatus,
+          metadata: {
+            note: 'Attempt to complete onboarding for already-active customer',
+            customerName: customer.name
+          }
+        }
+      })
+
+      return res.status(409).json({ 
+        error: 'Customer already active',
+        message: 'Onboarding was already completed for this customer',
+        currentStatus: customer.clientStatus
+      })
+    }
+
+    // IRREVERSIBLE TRANSITION: onboarding -> active
+    const previousStatus = customer.clientStatus
+    
+    // Update customer status
+    const updatedCustomer = await prisma.customer.update({
+      where: { id },
+      data: { clientStatus: 'active' }
+    })
+
+    // Create audit event
+    const auditEvent = await prisma.customerAuditEvent.create({
+      data: {
+        customerId: id,
+        action: 'complete_onboarding',
+        actorUserId,
+        actorEmail,
+        fromStatus: previousStatus,
+        toStatus: 'active',
+        metadata: {
+          customerName: customer.name,
+          completedAt: new Date().toISOString()
+        }
+      }
+    })
+
+    console.log(`✅ Onboarding completed for customer ${customer.name} (${id}) by ${actorEmail || actorUserId}`)
+
+    res.json({
+      success: true,
+      customer: {
+        id: updatedCustomer.id,
+        name: updatedCustomer.name,
+        clientStatus: updatedCustomer.clientStatus,
+        previousStatus
+      },
+      auditEvent: {
+        id: auditEvent.id,
+        action: auditEvent.action,
+        actorEmail: auditEvent.actorEmail,
+        actorUserId: auditEvent.actorUserId,
+        fromStatus: auditEvent.fromStatus,
+        toStatus: auditEvent.toStatus,
+        createdAt: auditEvent.createdAt.toISOString()
+      }
+    })
+  } catch (error) {
+    console.error('Error completing onboarding:', error)
+    res.status(500).json({ 
+      error: 'Failed to complete onboarding',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
+// GET /api/customers/:id/audit - Get audit trail for customer
+router.get('/:id/audit', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { action } = req.query
+
+    // Verify customer exists
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true }
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    // Build query filters
+    const where: any = { customerId: id }
+    if (action && typeof action === 'string') {
+      where.action = action
+    }
+
+    // Fetch audit events
+    const auditEvents = await prisma.customerAuditEvent.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 100 // Limit to last 100 events
+    })
+
+    // Serialize dates
+    const serialized = auditEvents.map(event => ({
+      ...event,
+      createdAt: event.createdAt.toISOString()
+    }))
+
+    res.json({
+      customerId: id,
+      customerName: customer.name,
+      events: serialized,
+      total: serialized.length
+    })
+  } catch (error) {
+    console.error('Error fetching audit trail:', error)
+    res.status(500).json({ 
+      error: 'Failed to fetch audit trail',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
 export default router

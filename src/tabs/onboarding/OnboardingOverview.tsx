@@ -1,6 +1,19 @@
-import { Box, Heading, Text, VStack, Stack } from '@chakra-ui/react'
+import { Box, Heading, Text, VStack, Stack, Divider } from '@chakra-ui/react'
+import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
 
-export default function OnboardingOverview() {
+interface OnboardingOverviewProps {
+  customerId?: string
+  customerName?: string
+  currentStatus?: string
+  onStatusUpdated?: () => void
+}
+
+export default function OnboardingOverview({
+  customerId,
+  customerName,
+  currentStatus,
+  onStatusUpdated,
+}: OnboardingOverviewProps = {}) {
   return (
     <Box display="flex" justifyContent="center" py={8} px={4}>
       <Box
@@ -67,6 +80,24 @@ export default function OnboardingOverview() {
               .
             </Text>
           </Stack>
+
+          {/* Complete Onboarding Section */}
+          {customerId && customerName && (
+            <>
+              <Divider my={4} />
+              <Stack spacing={4}>
+                <Heading as="h2" size="md" color="gray.700">
+                  Completion:
+                </Heading>
+                <CompleteOnboardingButton
+                  customerId={customerId}
+                  customerName={customerName}
+                  currentStatus={currentStatus || 'unknown'}
+                  onStatusUpdated={onStatusUpdated}
+                />
+              </Stack>
+            </>
+          )}
         </VStack>
       </Box>
     </Box>
