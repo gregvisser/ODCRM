@@ -30,6 +30,7 @@ import { OdcrmStorageKeys } from '../../platform/keys'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
+import { CustomerContactsSection } from './components/CustomerContactsSection'
 import type {
   Account,
   Accreditation,
@@ -894,6 +895,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             </Stack>
           </FormControl>
         </Stack>
+      </Box>
+
+      {/* Customer Contacts Section */}
+      <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+        <CustomerContactsSection customerId={customerId} />
       </Box>
 
       {/* Email Accounts Section */}
