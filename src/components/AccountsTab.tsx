@@ -6295,7 +6295,45 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
                         <option value={5}>5 days</option>
                       </Select>
                     </FieldRow>
-                    <FieldRow label="Agreements">
+                    
+                    {/* Phase 2 Item 4: DB-backed Agreement Display */}
+                    <FieldRow label="Agreement">
+                      {(() => {
+                        const customer = customers.find((c) => c.id === selectedAccount._databaseId)
+                        const agreementFileName = (customer as any)?.agreementFileName
+                        const agreementFileUrl = (customer as any)?.agreementFileUrl
+                        const agreementUploadedAt = (customer as any)?.agreementUploadedAt
+                        
+                        if (agreementFileUrl && agreementFileName) {
+                          return (
+                            <HStack spacing={2}>
+                              <Link
+                                href={agreementFileUrl}
+                                isExternal
+                                color="teal.600"
+                                fontSize="md"
+                                fontWeight="medium"
+                              >
+                                {agreementFileName}
+                              </Link>
+                              {agreementUploadedAt && (
+                                <Text fontSize="xs" color="gray.500">
+                                  ({new Date(agreementUploadedAt).toLocaleDateString()})
+                                </Text>
+                              )}
+                            </HStack>
+                          )
+                        }
+                        
+                        return (
+                          <Text fontSize="sm" color="gray.500">
+                            No agreement uploaded yet. Upload in Customer Onboarding tab.
+                          </Text>
+                        )
+                      })()}
+                    </FieldRow>
+                    
+                    <FieldRow label="Agreements (Legacy)">
                       <Stack spacing={3}>
                         <Input
                           type="file"

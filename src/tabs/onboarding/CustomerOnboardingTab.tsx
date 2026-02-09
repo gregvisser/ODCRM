@@ -213,6 +213,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [headOfficeLoading, setHeadOfficeLoading] = useState(false)
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
+  const [uploadingAgreement, setUploadingAgreement] = useState(false)
+  const [agreementData, setAgreementData] = useState<{ fileName?: string; fileUrl?: string; uploadedAt?: string } | null>(null)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -253,6 +255,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         hasAccountData: !!data.accountData,
       })
       setCustomer(data)
+      
+      // Load agreement data if present (Phase 2 Item 4)
+      if ((data as any).agreementFileName && (data as any).agreementFileUrl) {
+        setAgreementData({
+          fileName: (data as any).agreementFileName,
+          fileUrl: (data as any).agreementFileUrl,
+          uploadedAt: (data as any).agreementUploadedAt,
+        })
+      } else {
+        setAgreementData(null)
+      }
     }
     setIsLoading(false)
   }, [customerId])
@@ -478,6 +491,67 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       caseStudiesFileName: undefined,
       caseStudiesFileUrl: undefined,
     })
+  }
+
+  // Phase 2 Item 4: Agreement upload handler
+  const handleAgreementFileChange = (file: File | null) => {
+    if (!file || !customer) return
+
+    // Validate file type
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Only PDF, DOC, and DOCX files are allowed',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
+      if (!dataUrl) return
+
+      setUploadingAgreement(true)
+      
+      const { data, error } = await api.post<{
+        success: boolean
+        agreement: { fileName: string; fileUrl: string; uploadedAt: string }
+        progressUpdated: boolean
+      }>(
+        `/api/customers/${customer.id}/agreement`,
+        { fileName: file.name, dataUrl },
+      )
+
+      if (error || !data?.success) {
+        toast({
+          title: 'Upload failed',
+          description: error || 'Unable to upload agreement',
+          status: 'error',
+          duration: 4000,
+        })
+      } else {
+        setAgreementData({
+          fileName: data.agreement.fileName,
+          fileUrl: data.agreement.fileUrl,
+          uploadedAt: data.agreement.uploadedAt,
+        })
+        toast({
+          title: 'Agreement uploaded',
+          description: 'Contract signed & filed checkbox has been automatically ticked',
+          status: 'success',
+          duration: 4000,
+        })
+        
+        // Refresh customer data to get updated progress tracker
+        emit('customer-updated', { customerId: customer.id })
+      }
+      
+      setUploadingAgreement(false)
+    }
+    reader.readAsDataURL(file)
   }
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
@@ -1343,6 +1417,57 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   ) : (
                     <Text fontSize="sm" color="gray.500">
                       No file attached
+                    </Text>
+                  )}
+                </HStack>
+              </Stack>
+            </Stack>
+          </FormControl>
+
+          <Divider />
+
+          {/* Phase 2 Item 4: Agreement Upload */}
+          <FormControl>
+            <FormLabel>Customer Agreement (PDF/Word)</FormLabel>
+            <Stack spacing={3}>
+              <Text fontSize="sm" color="gray.600">
+                Upload the signed customer agreement. This will automatically tick the "Contract Signed & Filed" checkbox in the Progress Tracker.
+              </Text>
+              <Stack spacing={2}>
+                <Input
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  display="none"
+                  id="agreement-upload"
+                  onChange={(e) => handleAgreementFileChange(e.target.files?.[0] || null)}
+                />
+                <HStack spacing={3}>
+                  <Button
+                    as="label"
+                    htmlFor="agreement-upload"
+                    leftIcon={<AttachmentIcon />}
+                    variant="outline"
+                    size="sm"
+                    colorScheme="teal"
+                    isLoading={uploadingAgreement}
+                    isDisabled={uploadingAgreement}
+                  >
+                    {agreementData?.fileUrl ? 'Replace Agreement' : 'Upload Agreement'}
+                  </Button>
+                  {agreementData?.fileUrl ? (
+                    <HStack spacing={2}>
+                      <Link href={agreementData.fileUrl} isExternal fontSize="sm" color="teal.600" fontWeight="medium">
+                        {agreementData.fileName || 'View agreement'}
+                      </Link>
+                      {agreementData.uploadedAt && (
+                        <Text fontSize="xs" color="gray.500">
+                          (Uploaded {new Date(agreementData.uploadedAt).toLocaleDateString()})
+                        </Text>
+                      )}
+                    </HStack>
+                  ) : (
+                    <Text fontSize="sm" color="gray.500">
+                      No agreement uploaded
                     </Text>
                   )}
                 </HStack>

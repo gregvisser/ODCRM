@@ -82,6 +82,7 @@ router.get('/', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
+      agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
       customerContacts: customer.customerContacts.map((contact) => ({
         ...contact,
         createdAt: contact.createdAt.toISOString(),
@@ -122,6 +123,7 @@ router.get('/:id', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
+      agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
       customerContacts: customer.customerContacts.map((contact) => ({
         ...contact,
         createdAt: contact.createdAt.toISOString(),
@@ -713,6 +715,150 @@ router.get('/:id/audit', async (req, res) => {
     console.error('Error fetching audit trail:', error)
     res.status(500).json({ 
       error: 'Failed to fetch audit trail',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
+// POST /api/customers/:id/agreement - Upload customer agreement
+// Phase 2 Item 4: Agreement upload with auto-tick progress tracker
+router.post('/:id/agreement', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { fileName, dataUrl } = req.body
+
+    // Validate customer exists
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true, accountData: true }
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    // Validate input
+    if (!fileName || !dataUrl) {
+      return res.status(400).json({ error: 'Missing fileName or dataUrl' })
+    }
+
+    // Extract and validate mime type from dataUrl
+    const mimeMatch = dataUrl.match(/^data:([^;]+);base64,/)
+    if (!mimeMatch) {
+      return res.status(400).json({ error: 'Invalid dataUrl format' })
+    }
+
+    const mimeType = mimeMatch[1]
+    const allowedMimeTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ]
+
+    if (!allowedMimeTypes.includes(mimeType)) {
+      return res.status(400).json({ 
+        error: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.',
+        receivedMimeType: mimeType 
+      })
+    }
+
+    // Upload file using existing infrastructure
+    // Reuse the upload logic from uploads.ts
+    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+    if (!match) {
+      return res.status(400).json({ error: 'Invalid dataUrl format' })
+    }
+
+    const base64Data = match[2]
+    const buffer = Buffer.from(base64Data, 'base64')
+
+    // Save file to uploads directory
+    const fs = await import('node:fs/promises')
+    const path = await import('node:path')
+    
+    const uploadsDir = path.resolve(process.cwd(), 'uploads')
+    await fs.mkdir(uploadsDir, { recursive: true })
+
+    const sanitizeFileName = (name: string): string => {
+      const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      return safe || 'agreement'
+    }
+
+    const safeName = sanitizeFileName(fileName)
+    const uniqueName = `agreement_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`
+    const filePath = path.join(uploadsDir, uniqueName)
+
+    await fs.writeFile(filePath, buffer)
+
+    // Construct file URL
+    const baseUrl = process.env.API_PUBLIC_BASE_URL || 'http://localhost:3001'
+    const fileUrl = `${baseUrl}/uploads/${uniqueName}`
+
+    // Get actor email from auth context (server-derived only)
+    const actorIdentity = getActorIdentity(req)
+    const actorEmail = actorIdentity?.email || null
+
+    // Update customer record with agreement metadata
+    // CRITICAL: Safely merge accountData.progressTracker.sales.sales_contract_signed = true
+    const currentAccountData = customer.accountData as Record<string, any> || {}
+    const currentProgressTracker = currentAccountData.progressTracker || { sales: {}, ops: {}, am: {} }
+    const currentSales = currentProgressTracker.sales || {}
+
+    const updatedAccountData = {
+      ...currentAccountData,
+      progressTracker: {
+        ...currentProgressTracker,
+        sales: {
+          ...currentSales,
+          sales_contract_signed: true  // Auto-tick "Contract Signed & Filed"
+        }
+      }
+    }
+
+    const updatedCustomer = await prisma.customer.update({
+      where: { id },
+      data: {
+        agreementFileUrl: fileUrl,
+        agreementFileName: fileName,
+        agreementFileMimeType: mimeType,
+        agreementUploadedAt: new Date(),
+        agreementUploadedByEmail: actorEmail,
+        accountData: updatedAccountData,
+        updatedAt: new Date()
+      },
+      select: {
+        id: true,
+        name: true,
+        agreementFileUrl: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementUploadedAt: true,
+        agreementUploadedByEmail: true,
+        accountData: true
+      }
+    })
+
+    console.log(`✅ Agreement uploaded for customer ${customer.name} (${id})`)
+    console.log(`   File: ${fileName}`)
+    console.log(`   URL: ${fileUrl}`)
+    console.log(`   Progress tracker updated: sales_contract_signed = true`)
+
+    return res.status(201).json({
+      success: true,
+      agreement: {
+        fileName: updatedCustomer.agreementFileName,
+        fileUrl: updatedCustomer.agreementFileUrl,
+        mimeType: updatedCustomer.agreementFileMimeType,
+        uploadedAt: updatedCustomer.agreementUploadedAt?.toISOString(),
+        uploadedByEmail: updatedCustomer.agreementUploadedByEmail
+      },
+      progressUpdated: true,
+      progressTracker: (updatedCustomer.accountData as any)?.progressTracker?.sales
+    })
+  } catch (error) {
+    console.error('Error uploading agreement:', error)
+    return res.status(500).json({ 
+      error: 'Failed to upload agreement',
       details: error instanceof Error ? error.message : 'Unknown error'
     })
   }

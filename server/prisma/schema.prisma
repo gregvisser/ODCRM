@@ -122,6 +122,13 @@ model Customer {
   monthlyLeadTarget     Int?
   monthlyLeadActual     Int?
   
+  // Agreement upload (Phase 2 Item 4)
+  agreementFileUrl      String?
+  agreementFileName     String?
+  agreementFileMimeType String?
+  agreementUploadedAt   DateTime?
+  agreementUploadedByEmail String?          // Server-derived only from auth context
+  
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
   
