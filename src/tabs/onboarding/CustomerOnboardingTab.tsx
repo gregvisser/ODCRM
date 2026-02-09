@@ -214,6 +214,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
+  const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -311,6 +312,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
     setAccountDetails(mergedDetails)
     setHeadOfficeQuery(mergedDetails.headOfficeAddress || '')
+    
+    // Initialize monthly revenue from customer field
+    const revenue = customer.monthlyRevenueFromCustomer
+    setMonthlyRevenueFromCustomer(revenue ? parseFloat(revenue).toString() : '')
   }, [customer])
 
   // Geographic area search
@@ -615,10 +620,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       days: accountDetails.daysPerWeek,
     })
     
+    // Prepare top-level customer fields (including monthly revenue)
+    const revenueNumber = monthlyRevenueFromCustomer.trim() 
+      ? parseFloat(monthlyRevenueFromCustomer)
+      : undefined
+    
     // Call API and wait for response before updating UI
     const { error } = await api.put(`/api/customers/${customerId}`, {
       name: customer.name,
       accountData: nextAccountData,
+      monthlyRevenueFromCustomer: revenueNumber,
     })
     
     if (error) {
@@ -834,6 +845,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 <option value={4}>4 days</option>
                 <option value={5}>5 days</option>
               </Select>
+            </FormControl>
+            <FormControl>
+              <FormLabel>Monthly Revenue from Customer (£)</FormLabel>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={monthlyRevenueFromCustomer}
+                onChange={(e) => setMonthlyRevenueFromCustomer(e.target.value)}
+                placeholder="e.g. 5000.00"
+              />
             </FormControl>
             <FormControl>
               <FormLabel>Weekly Lead Target</FormLabel>

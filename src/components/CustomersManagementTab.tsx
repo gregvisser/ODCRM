@@ -73,6 +73,7 @@ type Customer = {
   targetJobTitle?: string | null
   prospectingLocation?: string | null
   monthlyIntakeGBP?: string | null
+  monthlyRevenueFromCustomer?: string | null
   defcon?: number | null
   weeklyLeadTarget?: number | null
   weeklyLeadActual?: number | null
@@ -386,6 +387,14 @@ export default function CustomersManagementTab() {
                               </Text>
                               <Text fontSize="sm">
                                 {customer.monthlyIntakeGBP ? `£${customer.monthlyIntakeGBP}` : 'Not set'}
+                              </Text>
+                            </Box>
+                            <Box>
+                              <Text fontSize="xs" color="gray.600">
+                                Monthly Revenue
+                              </Text>
+                              <Text fontSize="sm" fontWeight="medium" color="green.600">
+                                {customer.monthlyRevenueFromCustomer ? `£${parseFloat(customer.monthlyRevenueFromCustomer).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Not set'}
                               </Text>
                             </Box>
                             <Box>

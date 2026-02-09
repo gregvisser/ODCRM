@@ -17,6 +17,7 @@ export type DatabaseCustomer = {
   targetJobTitle?: string | null
   prospectingLocation?: string | null
   monthlyIntakeGBP?: string | null
+  monthlyRevenueFromCustomer?: string | null
   defcon?: number | null
   weeklyLeadTarget?: number | null
   weeklyLeadActual?: number | null

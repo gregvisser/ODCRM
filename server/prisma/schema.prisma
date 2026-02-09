@@ -111,8 +111,9 @@ model Customer {
   lastEnrichedAt        DateTime?
   
   // Financial & performance tracking
-  monthlyIntakeGBP      Decimal?             @db.Decimal(10, 2)
-  defcon                Int?                 // Priority level 1-6
+  monthlyIntakeGBP            Decimal?       @db.Decimal(10, 2)  // Customer's monthly intake
+  monthlyRevenueFromCustomer  Decimal?       @db.Decimal(10, 2)  // ODCRM revenue from this customer
+  defcon                      Int?           // Priority level 1-6
   
   // Lead targets & actuals
   weeklyLeadTarget      Int?

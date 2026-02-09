@@ -87,6 +87,7 @@ export function sanitizeCustomerPayload(payload: Record<string, any>): Record<st
     'targetJobTitle',
     'prospectingLocation',
     'monthlyIntakeGBP',
+    'monthlyRevenueFromCustomer',
     'defcon',
     'weeklyLeadTarget',
     'weeklyLeadActual',

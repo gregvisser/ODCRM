@@ -40,6 +40,7 @@ const upsertCustomerSchema = z.object({
   
   // Financial & performance
   monthlyIntakeGBP: z.number().optional().nullable(),
+  monthlyRevenueFromCustomer: z.number().optional().nullable(),
   defcon: z.number().int().min(1).max(6).optional().nullable(),
   
   // Lead targets & actuals
@@ -74,6 +75,9 @@ router.get('/', async (req, res) => {
       ...customer,
       monthlyIntakeGBP: customer.monthlyIntakeGBP
         ? customer.monthlyIntakeGBP.toString()
+        : null,
+      monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer
+        ? customer.monthlyRevenueFromCustomer.toString()
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
@@ -111,6 +115,9 @@ router.get('/:id', async (req, res) => {
       ...customer,
       monthlyIntakeGBP: customer.monthlyIntakeGBP
         ? customer.monthlyIntakeGBP.toString()
+        : null,
+      monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer
+        ? customer.monthlyRevenueFromCustomer.toString()
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
@@ -207,6 +214,7 @@ router.post('/', async (req, res) => {
         targetJobTitle: validated.targetJobTitle,
         prospectingLocation: validated.prospectingLocation,
         monthlyIntakeGBP: validated.monthlyIntakeGBP,
+        monthlyRevenueFromCustomer: validated.monthlyRevenueFromCustomer,
         defcon: validated.defcon,
         weeklyLeadTarget: validated.weeklyLeadTarget,
         weeklyLeadActual: validated.weeklyLeadActual,
@@ -270,6 +278,7 @@ router.put('/:id', async (req, res) => {
       targetJobTitle: validated.targetJobTitle,
       prospectingLocation: validated.prospectingLocation,
       monthlyIntakeGBP: validated.monthlyIntakeGBP,
+      monthlyRevenueFromCustomer: validated.monthlyRevenueFromCustomer,
       defcon: validated.defcon,
       weeklyLeadTarget: validated.weeklyLeadTarget,
       weeklyLeadActual: validated.weeklyLeadActual,
