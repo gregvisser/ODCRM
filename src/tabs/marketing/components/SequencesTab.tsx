@@ -367,55 +367,157 @@ const SequencesTab: React.FC = () => {
     onOpen()
   }
 
-  const handleEditSequence = (sequence: SequenceCampaign) => {
+  const handleAddStep = () => {
+    if (!editingSequence || !editingSequence.steps) return
+    
+    const maxSteps = 8
+    if (editingSequence.steps.length >= maxSteps) {
+      toast({
+        title: `Maximum ${maxSteps} steps allowed`,
+        description: 'Sequences support up to 8 email steps.',
+        status: 'warning',
+        duration: 4000,
+      })
+      return
+    }
+
+    const newStep: SequenceStep = {
+      stepOrder: editingSequence.steps.length + 1,
+      delayDaysFromPrevious: 2, // Default 2 days delay
+      subjectTemplate: '',
+      bodyTemplateHtml: '',
+      bodyTemplateText: '',
+    }
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: [...editingSequence.steps, newStep],
+    })
+  }
+
+  const handleRemoveStep = (stepOrder: number) => {
+    if (!editingSequence || !editingSequence.steps) return
+    
+    if (editingSequence.steps.length === 1) {
+      toast({
+        title: 'Cannot remove last step',
+        description: 'Sequences must have at least one step.',
+        status: 'warning',
+        duration: 3000,
+      })
+      return
+    }
+
+    const updatedSteps = editingSequence.steps
+      .filter(s => s.stepOrder !== stepOrder)
+      .map((s, index) => ({ ...s, stepOrder: index + 1 })) // Renumber steps
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: updatedSteps,
+    })
+  }
+
+  const handleStepTemplateChange = (stepOrder: number, templateId: string) => {
+    if (!editingSequence || !editingSequence.steps) return
+    
+    const template = templates.find(t => t.id === templateId)
+    if (!template) return
+
+    const updatedSteps = editingSequence.steps.map(step => {
+      if (step.stepOrder === stepOrder) {
+        return {
+          ...step,
+          templateId,
+          subjectTemplate: template.subjectTemplate,
+          bodyTemplateHtml: template.bodyTemplateHtml,
+          bodyTemplateText: template.bodyTemplateText || '',
+        }
+      }
+      return step
+    })
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: updatedSteps,
+    })
+  }
+
+  const handleStepDelayChange = (stepOrder: number, delay: number) => {
+    if (!editingSequence || !editingSequence.steps) return
+
+    const updatedSteps = editingSequence.steps.map(step => {
+      if (step.stepOrder === stepOrder) {
+        return { ...step, delayDaysFromPrevious: Math.max(0, delay) }
+      }
+      return step
+    })
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: updatedSteps,
+    })
+  }
+
+  const handleEditSequence = async (sequence: SequenceCampaign) => {
     setEditingSequence({
       ...sequence,
       listId: sequence.listId || '',
       senderIdentityId: sequence.senderIdentity?.id || sequence.senderIdentityId || '',
-      templateId: sequence.templateId || '',
+      steps: sequence.steps || [
+        {
+          stepOrder: 1,
+          delayDaysFromPrevious: 0,
+          subjectTemplate: '',
+          bodyTemplateHtml: '',
+          bodyTemplateText: '',
+        }
+      ],
     })
     onOpen()
+    
+    // Load steps from backend if sequenceId exists
     if (sequence.sequenceId) {
-      loadSequenceTemplateSelection(sequence.sequenceId)
+      const { data, error: apiError } = await api.get<SequenceDetail>(`/api/sequences/${sequence.sequenceId}`)
+      if (apiError || !data) {
+        console.error('Failed to load sequence steps:', apiError)
+        return
+      }
+
+      // Convert loaded steps to editing format
+      const loadedSteps: SequenceStep[] = data.steps.map(step => ({
+        stepOrder: step.stepOrder,
+        delayDaysFromPrevious: step.delayDaysFromPrevious || 0,
+        subjectTemplate: step.subjectTemplate,
+        bodyTemplateHtml: step.bodyTemplateHtml,
+        bodyTemplateText: step.bodyTemplateText || '',
+      }))
+
+      setEditingSequence(prev => prev ? { ...prev, steps: loadedSteps } : prev)
     }
   }
 
-  const loadSequenceTemplateSelection = async (sequenceId: string) => {
-    const { data, error: apiError } = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`)
-    if (apiError || !data) return
-
-    const step1 = data.steps?.find((step) => step.stepOrder === 1)
-    if (!step1) return
-
-    const matched = templates.find((template) =>
-      template.subjectTemplate === step1.subjectTemplate &&
-      template.bodyTemplateHtml === step1.bodyTemplateHtml
-    )
-
-    if (matched) {
-      setEditingSequence((prev) =>
-        prev ? { ...prev, templateId: matched.id } : prev
-      )
-    }
-  }
-
-  const ensureSequenceFromTemplate = async (template: EmailTemplate, name: string, senderIdentityId: string, sequenceId?: string | null) => {
+  const saveSequenceWithSteps = async (
+    name: string,
+    senderIdentityId: string,
+    steps: SequenceStep[],
+    sequenceId?: string | null
+  ) => {
     if (!sequenceId) {
-      // Log request payload for debugging
+      // Create new sequence with all steps
       const payload = {
         senderIdentityId,
         name,
         description: '',
-        steps: [
-          {
-            stepOrder: 1,
-            delayDaysFromPrevious: 0,
-            subjectTemplate: template.subjectTemplate,
-            bodyTemplateHtml: template.bodyTemplateHtml,
-            bodyTemplateText: template.bodyTemplateText || undefined,
-          }
-        ],
+        steps: steps.map(step => ({
+          stepOrder: step.stepOrder,
+          delayDaysFromPrevious: step.delayDaysFromPrevious,
+          subjectTemplate: step.subjectTemplate,
+          bodyTemplateHtml: step.bodyTemplateHtml,
+          bodyTemplateText: step.bodyTemplateText || undefined,
+        })),
       }
+      
       console.log('[SequencesTab] Creating sequence with payload:', payload)
       console.log('[SequencesTab] Using customer ID:', selectedCustomerId)
 
@@ -427,59 +529,69 @@ const SequencesTab: React.FC = () => {
         console.error('[SequencesTab] Create sequence failed:', createRes.error)
         throw new Error(createRes.error || 'Failed to create sequence')
       }
+      
       return createRes.data.id
     }
 
+    // Update existing sequence - need to sync steps
     const detailRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`)
     if (detailRes.error || !detailRes.data) {
       throw new Error(detailRes.error || 'Failed to load sequence')
     }
 
-    const step1 = detailRes.data.steps.find((step) => step.stepOrder === 1)
-    if (step1) {
-      const updateRes = await api.put(`/api/sequences/${sequenceId}/steps/${step1.id}`, {
-        stepOrder: 1,
-        delayDaysFromPrevious: 0,
-        subjectTemplate: template.subjectTemplate,
-        bodyTemplateHtml: template.bodyTemplateHtml,
-        bodyTemplateText: template.bodyTemplateText || undefined,
-      })
-      if (updateRes.error) {
-        throw new Error(updateRes.error)
+    const existingSteps = detailRes.data.steps || []
+
+    // Update or create each step
+    for (const step of steps) {
+      const existingStep = existingSteps.find(s => s.stepOrder === step.stepOrder)
+      
+      if (existingStep) {
+        // Update existing step
+        const updateRes = await api.put(`/api/sequences/${sequenceId}/steps/${existingStep.id}`, {
+          stepOrder: step.stepOrder,
+          delayDaysFromPrevious: step.delayDaysFromPrevious,
+          subjectTemplate: step.subjectTemplate,
+          bodyTemplateHtml: step.bodyTemplateHtml,
+          bodyTemplateText: step.bodyTemplateText || undefined,
+        })
+        if (updateRes.error) {
+          throw new Error(`Failed to update step ${step.stepOrder}: ${updateRes.error}`)
+        }
+      } else {
+        // Create new step
+        const addRes = await api.post(`/api/sequences/${sequenceId}/steps`, {
+          stepOrder: step.stepOrder,
+          delayDaysFromPrevious: step.delayDaysFromPrevious,
+          subjectTemplate: step.subjectTemplate,
+          bodyTemplateHtml: step.bodyTemplateHtml,
+          bodyTemplateText: step.bodyTemplateText || undefined,
+        })
+        if (addRes.error) {
+          throw new Error(`Failed to add step ${step.stepOrder}: ${addRes.error}`)
+        }
       }
-    } else {
-      const addRes = await api.post(`/api/sequences/${sequenceId}/steps`, {
-        stepOrder: 1,
-        delayDaysFromPrevious: 0,
-        subjectTemplate: template.subjectTemplate,
-        bodyTemplateHtml: template.bodyTemplateHtml,
-        bodyTemplateText: template.bodyTemplateText || undefined,
-      })
-      if (addRes.error) {
-        throw new Error(addRes.error)
+    }
+
+    // Delete steps that were removed
+    const stepsToDelete = existingSteps.filter(
+      existing => !steps.some(s => s.stepOrder === existing.stepOrder)
+    )
+    
+    for (const step of stepsToDelete) {
+      const deleteRes = await api.delete(`/api/sequences/${sequenceId}/steps/${step.id}`)
+      if (deleteRes.error) {
+        console.error(`Failed to delete step ${step.stepOrder}:`, deleteRes.error)
       }
     }
 
     return sequenceId
   }
 
-  const saveCampaignTemplate = async (campaignId: string, template: EmailTemplate) => {
-    await api.post(`/api/campaigns/${campaignId}/templates`, {
-      steps: [
-        {
-          stepNumber: 1,
-          subjectTemplate: template.subjectTemplate,
-          bodyTemplateHtml: template.bodyTemplateHtml,
-          bodyTemplateText: template.bodyTemplateText || undefined,
-          delayDaysMin: 0,
-          delayDaysMax: 0,
-        }
-      ],
-    })
-  }
 
   const handleSaveDraft = async () => {
     if (!editingSequence) return
+    
+    // Validate name
     if (!editingSequence.name.trim()) {
       toast({
         title: 'Sequence name is required',
@@ -489,21 +601,51 @@ const SequencesTab: React.FC = () => {
       return
     }
 
-    try {
-      let sequenceId = editingSequence.sequenceId
-      const template = templates.find((item) => item.id === editingSequence.templateId)
-      if (template) {
-        if (!editingSequence.senderIdentityId) {
-          toast({
-            title: 'Sender identity is required',
-            status: 'error',
-            duration: 3000,
-          })
-          return
-        }
-        sequenceId = await ensureSequenceFromTemplate(template, editingSequence.name.trim(), editingSequence.senderIdentityId, sequenceId)
-      }
+    // Validate sender identity
+    if (!editingSequence.senderIdentityId) {
+      toast({
+        title: 'Sender identity is required',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
 
+    // Validate steps
+    if (!editingSequence.steps || editingSequence.steps.length === 0) {
+      toast({
+        title: 'At least one step is required',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+
+    // Validate each step has content
+    const emptySteps = editingSequence.steps.filter(
+      step => !step.subjectTemplate.trim() || !step.bodyTemplateHtml.trim()
+    )
+    
+    if (emptySteps.length > 0) {
+      toast({
+        title: 'All steps must have subject and body',
+        description: `Step${emptySteps.length > 1 ? 's' : ''} ${emptySteps.map(s => s.stepOrder).join(', ')} ${emptySteps.length > 1 ? 'are' : 'is'} incomplete.`,
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+
+    try {
+      // Save sequence with all steps
+      const sequenceId = await saveSequenceWithSteps(
+        editingSequence.name.trim(),
+        editingSequence.senderIdentityId,
+        editingSequence.steps,
+        editingSequence.sequenceId
+      )
+
+      // Update campaign with sequence reference
       const payload = {
         name: editingSequence.name.trim(),
         description: editingSequence.description?.trim() || undefined,
@@ -515,19 +657,18 @@ const SequencesTab: React.FC = () => {
 
       if (editingSequence.id) {
         await api.patch(`/api/campaigns/${editingSequence.id}`, payload)
-        if (template) await saveCampaignTemplate(editingSequence.id, template)
       } else {
         const response = await api.post<SequenceCampaign>('/api/campaigns', payload)
         if (response.error) {
           throw new Error(response.error)
         }
-        if (response.data?.id && template) await saveCampaignTemplate(response.data.id, template)
       }
 
       await loadData()
       onClose()
       toast({
         title: `Sequence ${editingSequence.id ? 'updated' : 'created'} (Draft)`,
+        description: `${editingSequence.steps.length} step${editingSequence.steps.length > 1 ? 's' : ''} saved`,
         status: 'success',
         duration: 3000,
       })
@@ -536,7 +677,7 @@ const SequencesTab: React.FC = () => {
         title: `Failed to ${editingSequence.id ? 'update' : 'create'} sequence`,
         description: error?.message,
         status: 'error',
-        duration: 3000,
+        duration: 4000,
       })
     }
   }
@@ -566,13 +707,12 @@ const SequencesTab: React.FC = () => {
     }
 
     const snapshot = snapshots.find((item) => item.id === sequence.listId)
-    const template = templates.find((item) => item.id === sequence.templateId)
     const sender = senderIdentities.find((item) => item.id === sequence.senderIdentityId)
 
-    if (!snapshot || !template || !sender) {
+    if (!snapshot || !sender || !sequence.steps || sequence.steps.length === 0) {
       toast({
         title: 'Cannot start sequence',
-        description: 'Snapshot, template, or sender selection is invalid.',
+        description: 'Snapshot, steps, or sender selection is invalid.',
         status: 'error',
         duration: 4000,
       })
@@ -582,7 +722,6 @@ const SequencesTab: React.FC = () => {
     setStartPreviewCampaign(sequence)
     setStartPreview({
       snapshot,
-      template,
       sender,
       loading: true,
       error: null,
@@ -637,27 +776,34 @@ const SequencesTab: React.FC = () => {
     const sequence = startPreviewCampaign
     const listId = sequence.listId
     const senderIdentityId = sequence.senderIdentityId
-    const templateId = sequence.templateId
+    const sequenceId = sequence.sequenceId
 
-    if (!listId || !senderIdentityId || !templateId) return
+    if (!listId || !senderIdentityId || !sequenceId) {
+      toast({
+        title: 'Sequence not fully configured',
+        description: 'Save the draft first to create the sequence.',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
 
     try {
       if (!sequence.id) {
         toast({
           title: 'Save draft first',
-          description: 'Save the draft before starting to lock the template selection.',
+          description: 'Save the draft before starting.',
           status: 'error',
           duration: 4000,
         })
         return
       }
 
-      const template = templates.find((item) => item.id === templateId)
-      if (!template) {
-        throw new Error('Template not found')
+      // Sequence already has steps from save, just verify it exists
+      const verifyRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`)
+      if (verifyRes.error || !verifyRes.data || !verifyRes.data.steps || verifyRes.data.steps.length === 0) {
+        throw new Error('Sequence has no steps. Save draft again.')
       }
-
-      const sequenceId = await ensureSequenceFromTemplate(template, sequence.name.trim(), senderIdentityId, sequence.sequenceId)
 
       let campaignId = sequence.id
       if (campaignId) {
@@ -1100,25 +1246,89 @@ const SequencesTab: React.FC = () => {
                     </Text>
                   )}
                 </FormControl>
-                <FormControl isRequired>
-                  <FormLabel>Template</FormLabel>
-                  <Select
-                    value={editingSequence.templateId || ''}
-                    onChange={(e) => setEditingSequence({ ...editingSequence, templateId: e.target.value || '' })}
-                    placeholder={templatesLoading ? 'Loading templates...' : 'Select a template'}
-                  >
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name} — {template.subjectTemplate}
-                      </option>
-                    ))}
-                  </Select>
+                
+                {/* Multi-Step Editor */}
+                <Box>
+                  <Flex justify="space-between" align="center" mb={3}>
+                    <FormLabel m={0}>Sequence Steps ({editingSequence.steps?.length || 0}/8)</FormLabel>
+                    <Button 
+                      size="sm" 
+                      leftIcon={<AddIcon />}
+                      onClick={handleAddStep}
+                      isDisabled={!editingSequence.steps || editingSequence.steps.length >= 8}
+                    >
+                      Add Step
+                    </Button>
+                  </Flex>
+                  
                   {templates.length === 0 && !templatesLoading && (
-                    <Text fontSize="sm" color="gray.500" mt={2}>
-                      Create a template first.
-                    </Text>
+                    <Alert status="warning" mb={3}>
+                      <AlertIcon />
+                      <AlertDescription>
+                        Create templates first to build sequence steps.
+                      </AlertDescription>
+                    </Alert>
                   )}
-                </FormControl>
+
+                  {editingSequence.steps?.map((step, index) => (
+                    <Box key={step.stepOrder} borderWidth="1px" borderRadius="md" p={4} mb={3} bg="gray.50">
+                      <Flex justify="space-between" align="center" mb={3}>
+                        <Text fontWeight="bold" fontSize="md">Step {step.stepOrder}</Text>
+                        {editingSequence.steps && editingSequence.steps.length > 1 && (
+                          <IconButton 
+                            aria-label="Remove step"
+                            icon={<DeleteIcon />}
+                            size="sm"
+                            variant="ghost"
+                            colorScheme="red"
+                            onClick={() => handleRemoveStep(step.stepOrder)}
+                          />
+                        )}
+                      </Flex>
+                      
+                      {step.stepOrder > 1 && (
+                        <FormControl mb={3}>
+                          <FormLabel fontSize="sm">Delay After Previous Step (days)</FormLabel>
+                          <Input 
+                            type="number" 
+                            min={0}
+                            value={step.delayDaysFromPrevious}
+                            onChange={(e) => handleStepDelayChange(step.stepOrder, parseInt(e.target.value) || 0)}
+                            size="sm"
+                          />
+                          <Text fontSize="xs" color="gray.600" mt={1}>
+                            This email will be sent {step.delayDaysFromPrevious} day{step.delayDaysFromPrevious !== 1 ? 's' : ''} after the previous step.
+                          </Text>
+                        </FormControl>
+                      )}
+                      
+                      <FormControl isRequired>
+                        <FormLabel fontSize="sm">Template</FormLabel>
+                        <Select 
+                          value={step.templateId || ''}
+                          onChange={(e) => handleStepTemplateChange(step.stepOrder, e.target.value)}
+                          placeholder={templatesLoading ? 'Loading...' : 'Select a template'}
+                          size="sm"
+                        >
+                          {templates.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.name} — {t.subjectTemplate.substring(0, 50)}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormControl>
+                      
+                      {step.subjectTemplate && (
+                        <Box mt={2} p={2} bg="white" borderRadius="md" fontSize="xs">
+                          <Text fontWeight="semibold" color="gray.600">Preview:</Text>
+                          <Text mt={1}><strong>Subject:</strong> {step.subjectTemplate}</Text>
+                          <Text mt={1} noOfLines={2}><strong>Body:</strong> {step.bodyTemplateHtml.replace(/<[^>]*>/g, '').substring(0, 100)}...</Text>
+                        </Box>
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+                
                 <FormControl isRequired>
                   <FormLabel>Sender</FormLabel>
                   <Select
@@ -1208,10 +1418,19 @@ const SequencesTab: React.FC = () => {
                   </Text>
                 </Box>
                 <Box>
-                  <Text fontWeight="semibold">Template</Text>
-                  <Text fontSize="sm" color="gray.600">
-                    {startPreview?.template?.name || '—'} — {startPreview?.template?.subjectTemplate || '—'}
-                  </Text>
+                  <Text fontWeight="semibold">Sequence Steps</Text>
+                  {startPreviewCampaign?.steps && startPreviewCampaign.steps.length > 0 ? (
+                    <VStack align="stretch" spacing={1} mt={1}>
+                      {startPreviewCampaign.steps.map(step => (
+                        <Text key={step.stepOrder} fontSize="sm" color="gray.600">
+                          Step {step.stepOrder}: {step.subjectTemplate}
+                          {step.stepOrder > 1 && ` (${step.delayDaysFromPrevious}d delay)`}
+                        </Text>
+                      ))}
+                    </VStack>
+                  ) : (
+                    <Text fontSize="sm" color="gray.600">No steps configured</Text>
+                  )}
                 </Box>
                 {typeof startPreview?.missingEmailCount === 'number' && startPreview.missingEmailCount > 0 && (
                   <Alert status="warning">
