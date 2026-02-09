@@ -67,6 +67,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { settingsStore } from '../../../platform'
+import { getCurrentCustomerId } from '../../../platform/stores/settings'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -177,10 +178,38 @@ const SequencesTab: React.FC = () => {
   const toast = useToast()
 
   useEffect(() => {
+    loadCustomers()
     loadData()
-    loadFormOptions()
     maybeOpenFromSnapshot()
   }, [])
+
+  useEffect(() => {
+    if (selectedCustomerId) {
+      loadFormOptions()
+    }
+  }, [selectedCustomerId])
+
+  const loadCustomers = async () => {
+    const { data, error: apiError } = await api.get<Customer[]>('/api/customers')
+
+    if (apiError) {
+      console.error('Failed to load customers:', apiError)
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+    } else {
+      const customerList = data || []
+      setCustomers(customerList)
+
+      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
+      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      if (currentCustomer) {
+        setSelectedCustomerId(currentCustomerId)
+      } else if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id)
+      }
+    }
+  }
 
   const loadData = async () => {
     setLoading(true)
@@ -203,10 +232,11 @@ const SequencesTab: React.FC = () => {
     setTemplatesError(null)
     setSendersError(null)
 
+    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : {}
     const [snapshotsRes, templatesRes, sendersRes] = await Promise.all([
       loadSnapshots(),
-      api.get<EmailTemplate[]>('/api/templates'),
-      api.get<EmailIdentity[]>('/api/outlook/identities')
+      api.get<EmailTemplate[]>('/api/templates', { headers }),
+      api.get<EmailIdentity[]>('/api/outlook/identities', { headers })
     ])
 
     if (templatesRes.error) {
@@ -294,6 +324,18 @@ const SequencesTab: React.FC = () => {
   }, [sequences])
 
   const handleCreateSequence = () => {
+    // Check if templates exist
+    if (templates.length === 0) {
+      toast({
+        title: 'No templates available',
+        description: 'You need at least one template to create a sequence. Please create a template first.',
+        status: 'warning',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+
     setEditingSequence({
       id: '',
       name: '',
@@ -712,6 +754,30 @@ const SequencesTab: React.FC = () => {
           </Box>
           <Button size="sm" onClick={loadFormOptions} ml={4}>
             Retry
+          </Button>
+        </Alert>
+      )}
+
+      {!templatesLoading && !templatesError && templates.length === 0 && selectedCustomerId && (
+        <Alert status="warning" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>No email templates found</AlertTitle>
+            <AlertDescription>
+              You need at least one email template to create a sequence. Please create a template first in the Templates tab.
+            </AlertDescription>
+          </Box>
+          <Button 
+            size="sm" 
+            colorScheme="blue" 
+            ml={4}
+            onClick={() => {
+              // Navigate to templates tab
+              const event = new CustomEvent('navigate-to-view', { detail: { view: 'templates' } })
+              window.dispatchEvent(event)
+            }}
+          >
+            Go to Templates
           </Button>
         </Alert>
       )}

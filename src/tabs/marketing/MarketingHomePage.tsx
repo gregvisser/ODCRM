@@ -23,6 +23,7 @@ import SequencesTab from './components/SequencesTab'
 import PeopleTab from './components/PeopleTab'
 import LeadSourcesTab from './components/LeadSourcesTab'
 import EmailAccountsTab from './components/EmailAccountsTab'
+import TemplatesTab from './components/TemplatesTab'
 import ReportsTab from './components/ReportsTab'
 import InboxTab from './components/InboxTab'
 import OverviewDashboard from './components/OverviewDashboard'
@@ -35,6 +36,7 @@ export type OpenDoorsViewId =
   | 'people'
   | 'lists'
   | 'email-accounts'
+  | 'templates'
   | 'compliance'
   | 'reports'
   | 'inbox'
@@ -48,6 +50,7 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'people' ||
     view === 'lists' ||
     view === 'email-accounts' ||
+    view === 'templates' ||
     view === 'compliance' ||
     view === 'schedules' ||
     view === 'reports' ||
@@ -116,25 +119,32 @@ export default function MarketingHomePage({
       sortOrder: 5,
     },
     {
+      id: 'templates',
+      label: 'Templates',
+      icon: CopyIcon,
+      content: <TemplatesTab />,
+      sortOrder: 6,
+    },
+    {
       id: 'sequences',
       label: 'Sequences',
       icon: RepeatIcon,
       content: <SequencesTab />,
-      sortOrder: 6,
+      sortOrder: 7,
     },
     {
       id: 'schedules',
       label: 'Schedules',
       icon: CalendarIcon,
       content: <SchedulesTab />,
-      sortOrder: 7,
+      sortOrder: 8,
     },
     {
       id: 'inbox',
       label: 'Inbox',
       icon: ChatIcon,
       content: <InboxTab />,
-      sortOrder: 8,
+      sortOrder: 9,
     },
   ]
 

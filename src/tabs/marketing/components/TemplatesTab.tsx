@@ -58,6 +58,7 @@ import {
   ViewIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { getCurrentCustomerId } from '../../../platform/stores/settings'
 
 type EmailTemplate = {
   id: string
@@ -79,6 +80,11 @@ type EmailTemplate = {
   }
 }
 
+type Customer = {
+  id: string
+  name: string
+}
+
 const escapeHtml = (value: string) => {
   return value
     .replace(/&/g, '&amp;')
@@ -95,6 +101,8 @@ const toHtmlBody = (text: string) => {
 
 const TemplatesTab: React.FC = () => {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
@@ -106,14 +114,50 @@ const TemplatesTab: React.FC = () => {
   const toast = useToast()
 
   useEffect(() => {
-    loadData()
+    loadCustomers()
   }, [])
 
+  useEffect(() => {
+    if (selectedCustomerId) {
+      loadData()
+    }
+  }, [selectedCustomerId])
+
+  const loadCustomers = async () => {
+    const { data, error: apiError } = await api.get<Customer[]>('/api/customers')
+
+    if (apiError) {
+      console.error('Failed to load customers:', apiError)
+      // Use default customer if we can't load the list
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+    } else {
+      const customerList = data || []
+      setCustomers(customerList)
+
+      // Auto-select the first customer or the current one
+      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
+      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      if (currentCustomer) {
+        setSelectedCustomerId(currentCustomerId)
+      } else if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id)
+      }
+    }
+  }
+
   const loadData = async () => {
+    if (!selectedCustomerId) {
+      return
+    }
+
     setLoading(true)
     setError(null)
 
-    const { data, error: apiError } = await api.get<any[]>('/api/templates')
+    const { data, error: apiError } = await api.get<any[]>('/api/templates', {
+      headers: { 'X-Customer-Id': selectedCustomerId }
+    })
     
     if (apiError) {
       setError(apiError)
@@ -217,13 +261,15 @@ const TemplatesTab: React.FC = () => {
         bodyTemplateText: editingTemplate.content.trim(),
         stepNumber: 1,
       }
+      const headers = { 'X-Customer-Id': selectedCustomerId }
+      
       if (editingTemplate.id) {
-        const res = await api.patch(`/api/templates/${editingTemplate.id}`, payload)
+        const res = await api.patch(`/api/templates/${editingTemplate.id}`, payload, { headers })
         if (res.error) {
           throw new Error(res.error)
         }
       } else {
-        const res = await api.post('/api/templates', payload)
+        const res = await api.post('/api/templates', payload, { headers })
         if (res.error) {
           throw new Error(res.error)
         }
@@ -255,7 +301,8 @@ const TemplatesTab: React.FC = () => {
         bodyTemplateText: template.content.trim(),
         stepNumber: 1,
       }
-      const res = await api.post('/api/templates', duplicatedTemplate)
+      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const res = await api.post('/api/templates', duplicatedTemplate, { headers })
       if (res.error) {
         throw new Error(res.error)
       }
@@ -277,9 +324,10 @@ const TemplatesTab: React.FC = () => {
 
   const handleToggleFavorite = async (template: EmailTemplate) => {
     try {
+      const headers = { 'X-Customer-Id': selectedCustomerId }
       await api.patch(`/api/templates/${template.id}`, {
         isFavorite: !template.isFavorite
-      })
+      }, { headers })
       await loadData()
     } catch (error) {
       toast({
@@ -292,7 +340,8 @@ const TemplatesTab: React.FC = () => {
 
   const handleDeleteTemplate = async (templateId: string) => {
     try {
-      await api.delete(`/api/templates/${templateId}`)
+      const headers = { 'X-Customer-Id': selectedCustomerId }
+      await api.delete(`/api/templates/${templateId}`, { headers })
       await loadData()
       toast({
         title: 'Template deleted',
@@ -306,6 +355,14 @@ const TemplatesTab: React.FC = () => {
         duration: 3000,
       })
     }
+  }
+
+  if (!selectedCustomerId) {
+    return (
+      <Box textAlign="center" py={10}>
+        <Text>Please select a customer to view templates.</Text>
+      </Box>
+    )
   }
 
   if (loading) {
@@ -326,9 +383,29 @@ const TemplatesTab: React.FC = () => {
             Create and manage reusable email content for your outreach campaigns
           </Text>
         </VStack>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateTemplate}>
-          New Template
-        </Button>
+        <HStack spacing={3}>
+          <FormControl w="250px">
+            <Select
+              value={selectedCustomerId}
+              onChange={(e) => setSelectedCustomerId(e.target.value)}
+              placeholder="Select Customer"
+            >
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
+          <Button 
+            leftIcon={<AddIcon />} 
+            colorScheme="blue" 
+            onClick={handleCreateTemplate}
+            isDisabled={!selectedCustomerId}
+          >
+            New Template
+          </Button>
+        </HStack>
       </Flex>
 
       {/* Error Display */}
@@ -401,6 +478,22 @@ const TemplatesTab: React.FC = () => {
 
         <Spacer />
       </Flex>
+
+      {/* Empty State */}
+      {filteredTemplates.length === 0 && !loading && (
+        <Box textAlign="center" py={10}>
+          <Text fontSize="lg" color="gray.600" mb={4}>
+            {templates.length === 0 
+              ? 'No templates yet. Create your first template to get started!'
+              : 'No templates match your search criteria.'}
+          </Text>
+          {templates.length === 0 && (
+            <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateTemplate}>
+              Create First Template
+            </Button>
+          )}
+        </Box>
+      )}
 
       {/* Templates Grid */}
       <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
