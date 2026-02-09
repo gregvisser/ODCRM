@@ -3,10 +3,11 @@
  * Follows Marketing section pattern with customer selector in left panel
  */
 
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { Box, Flex, Text, VStack } from '@chakra-ui/react'
 import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
+import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
 import CustomerSelector from './components/CustomerSelector'
 import CreateCustomerStep from './components/CreateCustomerStep'
 import OnboardingOverview from './OnboardingOverview'
@@ -29,14 +30,37 @@ interface OnboardingHomePageProps {
 
 export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
   const activeView = coerceViewId(view)
-  const [selectedCustomerId, setSelectedCustomerId] = useState('')
+  
+  // Use canonical settingsStore for customer selection (SINGLE SOURCE OF TRUTH)
+  const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId(''))
 
-  // Handler when customer is created - sets customer ID and navigates to Customer Onboarding
+  // Sync with settingsStore on mount and when settings change globally
+  useEffect(() => {
+    console.log('🔄 OnboardingHomePage: Initial customerId from settingsStore:', selectedCustomerId)
+    
+    const unsubscribe = onSettingsUpdated((detail: any) => {
+      if (detail && typeof detail.currentCustomerId === 'string') {
+        console.log('🔄 OnboardingHomePage: Customer changed via settingsStore:', detail.currentCustomerId)
+        setSelectedCustomerId(detail.currentCustomerId)
+      }
+    })
+    return unsubscribe
+  }, [])
+
+  // Handler when customer is created - sets canonical customer ID and navigates
   const handleCustomerCreated = useCallback((customerId: string) => {
-    console.log('🎉 OnboardingHomePage: Customer created, setting ID and navigating:', customerId)
-    setSelectedCustomerId(customerId)
+    console.log('🎉 OnboardingHomePage: Customer created, setting canonical ID:', customerId)
+    setCurrentCustomerId(customerId) // Update canonical store
+    setSelectedCustomerId(customerId) // Update local state
     onNavigate?.('customer-onboarding')
   }, [onNavigate])
+  
+  // Handler when customer changes via selector - update canonical store
+  const handleCustomerChange = useCallback((customerId: string) => {
+    console.log('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
+    setCurrentCustomerId(customerId) // Update canonical store
+    setSelectedCustomerId(customerId) // Update local state
+  }, [])
 
   // Create navigation items with customer context
   const navItems: SubNavItem[] = useMemo(() => {
@@ -93,7 +117,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         <Box mb={4}>
           <CustomerSelector 
             selectedCustomerId={selectedCustomerId} 
-            onCustomerChange={setSelectedCustomerId} 
+            onCustomerChange={handleCustomerChange} 
           />
         </Box>
       )}
@@ -119,7 +143,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           <CustomerSelector 
             selectedCustomerId={selectedCustomerId} 
             onCustomerChange={(id) => {
-              setSelectedCustomerId(id)
+              handleCustomerChange(id)
               onNavigate?.('customer-onboarding')
             }} 
           />

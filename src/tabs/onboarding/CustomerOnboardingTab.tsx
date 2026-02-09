@@ -227,9 +227,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   // Fetch customer data by ID
   const fetchCustomer = useCallback(async () => {
     if (!customerId) {
+      console.log('⚠️ CustomerOnboardingTab: No customerId, skipping fetch')
       setIsLoading(false)
       return
     }
+    console.log('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId)
     setIsLoading(true)
     setLoadError(null)
     const { data, error } = await api.get<CustomerApi>(`/api/customers/${customerId}`)
@@ -239,6 +241,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     if (data) {
+      console.log('✅ CustomerOnboardingTab: Loaded customer from DB:', {
+        customerId,
+        name: data.name,
+        hasAccountData: !!data.accountData,
+      })
       setCustomer(data)
     }
     setIsLoading(false)
@@ -557,7 +564,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   const handleSave = async () => {
-    if (!customer) return
+    if (!customer) {
+      console.log('⚠️ CustomerOnboardingTab: No customer, skipping save')
+      return
+    }
+    console.log('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
     setIsSaving(true)
     
     const currentAccountData =

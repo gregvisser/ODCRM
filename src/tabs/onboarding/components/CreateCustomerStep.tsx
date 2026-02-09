@@ -21,6 +21,8 @@ import {
   AlertDescription,
 } from '@chakra-ui/react'
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
+import { setCurrentCustomerId } from '../../../platform/stores/settings'
+import { emit } from '../../../platform/events'
 
 interface CreateCustomerStepProps {
   onCustomerCreated: (customerId: string) => void
@@ -78,6 +80,14 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
     }
 
     console.log('✅ CreateCustomerStep: Customer created successfully:', id)
+    
+    // Update canonical customer store FIRST
+    setCurrentCustomerId(id)
+    console.log('✅ CreateCustomerStep: Set canonical currentCustomerId:', id)
+    
+    // Emit customerCreated event for CustomerSelector to refresh
+    emit('customerCreated', { id, name: formData.name })
+    
     toast({
       title: 'Customer created',
       description: `${formData.name} has been added. Continue with onboarding details.`,

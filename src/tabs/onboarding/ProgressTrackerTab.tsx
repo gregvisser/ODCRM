@@ -91,7 +91,11 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
 
   // Load checklist state from database
   const loadChecklistState = useCallback(async () => {
-    if (!customerId) return
+    if (!customerId) {
+      console.log('⚠️ ProgressTrackerTab: No customerId, skipping load')
+      return
+    }
+    console.log('📥 ProgressTrackerTab: Loading progress for customerId:', customerId)
     setIsLoading(true)
     const { data, error } = await api.get<{ accountData?: { progressTracker?: any } }>(
       `/api/customers/${customerId}`,
@@ -109,9 +113,20 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
 
     const progressTracker = data?.accountData?.progressTracker
     if (progressTracker) {
+      console.log('✅ ProgressTrackerTab: Loaded progress from DB:', {
+        customerId,
+        salesItems: Object.keys(progressTracker.sales || {}).length,
+        opsItems: Object.keys(progressTracker.ops || {}).length,
+        amItems: Object.keys(progressTracker.am || {}).length,
+      })
       setSalesChecklist(progressTracker.sales || {})
       setOpsChecklist(progressTracker.ops || {})
       setAmChecklist(progressTracker.am || {})
+    } else {
+      console.log('ℹ️ ProgressTrackerTab: No existing progress for customerId:', customerId)
+      setSalesChecklist({})
+      setOpsChecklist({})
+      setAmChecklist({})
     }
     setIsLoading(false)
   }, [customerId, toast])
@@ -123,7 +138,12 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
   // Save checklist state to database
   const saveChecklistState = useCallback(
     async (group: 'sales' | 'ops' | 'am', itemKey: string, checked: boolean) => {
-      if (!customerId) return
+      if (!customerId) {
+        console.log('⚠️ ProgressTrackerTab: No customerId, skipping save')
+        return
+      }
+      
+      console.log('💾 ProgressTrackerTab: Saving progress:', { customerId, group, itemKey, checked })
 
       // Optimistically update UI
       const updateState = (prev: ChecklistState) => ({ ...prev, [itemKey]: checked })
