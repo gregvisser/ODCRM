@@ -99,8 +99,17 @@ router.get('/', async (req, res) => {
     })
     console.log(`[GET /] Fetched ${customers.length} customers`)
 
+    if (customers.length === 0) {
+      console.log('[GET /] No customers, returning empty array')
+      return res.json([])
+    }
+
+    console.log('[GET /] Starting serialization...')
     // Explicitly construct serialized objects to avoid Date serialization issues
-    const serialized = customers.map((customer) => ({
+    const serialized = customers.map((customer, index) => {
+      try {
+        console.log(`[GET /] Serializing customer ${index + 1}/${customers.length}: ${customer.name}`)
+        return {
       id: customer.id,
       name: customer.name,
       domain: customer.domain,
@@ -148,12 +157,22 @@ router.get('/', async (req, res) => {
         createdAt: contact.createdAt.toISOString(),
         updatedAt: contact.updatedAt.toISOString(),
       })),
-    }))
+    }
+      } catch (serError: any) {
+        console.error(`[GET /] Error serializing customer ${index + 1}: ${customer.name}`, serError.message)
+        throw serError
+      }
+    })
 
+    console.log('[GET /] Serialization complete, sending response...')
     return res.json(serialized)
-  } catch (error) {
-    console.error('Error fetching customers:', error)
-    return res.status(500).json({ error: 'Failed to fetch customers' })
+  } catch (error: any) {
+    console.error('[GET /] Error in GET /:', error.message, error.stack?.substring(0, 200))
+    return res.status(500).json({ 
+      error: 'Failed to fetch customers',
+      detail: error.message,
+      at: 'GET /'
+    })
   }
 })
 
