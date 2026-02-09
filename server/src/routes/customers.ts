@@ -82,6 +82,7 @@ router.get('/', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
+      lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
       agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
       customerContacts: customer.customerContacts.map((contact) => ({
         ...contact,
@@ -123,6 +124,7 @@ router.get('/:id', async (req, res) => {
         : null,
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
+      lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
       agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
       customerContacts: customer.customerContacts.map((contact) => ({
         ...contact,
