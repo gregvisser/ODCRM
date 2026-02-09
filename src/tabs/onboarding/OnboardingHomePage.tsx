@@ -18,6 +18,11 @@ import {
   Tag,
   TagCloseButton,
   TagLabel,
+  Tab,
+  TabList,
+  TabPanel,
+  TabPanels,
+  Tabs,
   Text,
   Textarea,
   useToast,
@@ -30,6 +35,7 @@ import { settingsStore } from '../../platform'
 import { getJson } from '../../platform/storage'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
+import ProgressTrackerTab from './ProgressTrackerTab'
 import type {
   Account,
   Accreditation,
@@ -654,16 +660,29 @@ export default function OnboardingHomePage() {
     setIsSaving(false)
   }
 
+  const [activeChildTab, setActiveChildTab] = useState(0)
+
   return (
     <Stack spacing={6}>
       <Box>
         <Heading size="lg">Onboarding</Heading>
         <Text color="gray.600" fontSize="sm">
-          Capture client onboarding details and persist them to the Opensdoors account record.
+          Manage client onboarding process including profile details and progress tracking.
         </Text>
       </Box>
 
-      <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+      {/* Child Tabs: Customer Onboarding and Progress Tracker */}
+      <Tabs index={activeChildTab} onChange={setActiveChildTab} variant="enclosed" colorScheme="teal">
+        <TabList>
+          <Tab fontWeight="semibold">Customer Onboarding</Tab>
+          <Tab fontWeight="semibold">Progress Tracker</Tab>
+        </TabList>
+
+        <TabPanels>
+          {/* Customer Onboarding Tab (existing content) */}
+          <TabPanel px={0} py={6}>
+            <Stack spacing={6}>
+              <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={4}>
           <FormControl>
             <FormLabel>Opensdoors Account</FormLabel>
@@ -1318,6 +1337,23 @@ export default function OnboardingHomePage() {
           </Text>
         </Box>
       )}
+            </Stack>
+          </TabPanel>
+
+          {/* Progress Tracker Tab (new) */}
+          <TabPanel px={0} py={6}>
+            {selectedCustomer ? (
+              <ProgressTrackerTab customerId={selectedCustomer.id} />
+            ) : (
+              <Box border="1px dashed" borderColor="gray.300" borderRadius="xl" p={6}>
+                <Text color="gray.600" fontSize="sm">
+                  Select an Opensdoors account to track onboarding progress.
+                </Text>
+              </Box>
+            )}
+          </TabPanel>
+        </TabPanels>
+      </Tabs>
     </Stack>
   )
 }
