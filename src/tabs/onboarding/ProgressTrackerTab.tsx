@@ -186,7 +186,9 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         progressTracker: updatedProgressTracker,
       })
 
-      // Build payload with all customer fields
+      // ⚠️ CRITICAL: Do NOT modify workflow fields (clientStatus) in ProgressTracker
+      // ProgressTracker updates ONLY accountData.progressTracker, nothing else
+      // Build minimal payload - omit workflow/business logic fields
       const payload = {
         name: customerData.name, // Required by backend validation
         domain: customerData.domain,
@@ -203,7 +205,7 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         socialPresence: customerData.socialPresence,
         leadsReportingUrl: customerData.leadsReportingUrl,
         sector: customerData.sector,
-        clientStatus: customerData.clientStatus || 'active',
+        // clientStatus: INTENTIONALLY OMITTED - Progress Tracker must NOT modify workflow state
         targetJobTitle: customerData.targetJobTitle,
         prospectingLocation: customerData.prospectingLocation,
         monthlyIntakeGBP: customerData.monthlyIntakeGBP ? parseFloat(customerData.monthlyIntakeGBP) : undefined,
