@@ -49,6 +49,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, EditIcon, DeleteIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
+import { GoogleSheetLink } from './links/GoogleSheetLink'
 
 type CustomerContact = {
   id: string
@@ -68,6 +69,7 @@ type Customer = {
   name: string
   domain?: string | null
   leadsReportingUrl?: string | null
+  leadsGoogleSheetLabel?: string | null
   sector?: string | null
   clientStatus: string
   targetJobTitle?: string | null
@@ -89,6 +91,7 @@ type FormState = {
   name: string
   domain: string
   leadsReportingUrl: string
+  leadsGoogleSheetLabel: string
   sector: string
   clientStatus: string
   targetJobTitle: string
@@ -106,6 +109,7 @@ function emptyForm(): FormState {
     name: '',
     domain: '',
     leadsReportingUrl: '',
+    leadsGoogleSheetLabel: '',
     sector: '',
     clientStatus: 'active',
     targetJobTitle: '',
@@ -125,6 +129,7 @@ function toForm(c: Customer): FormState {
     name: c.name,
     domain: c.domain || '',
     leadsReportingUrl: c.leadsReportingUrl || '',
+    leadsGoogleSheetLabel: c.leadsGoogleSheetLabel || '',
     sector: c.sector || '',
     clientStatus: c.clientStatus || 'active',
     targetJobTitle: c.targetJobTitle || '',
@@ -187,6 +192,7 @@ export default function CustomersManagementTab() {
       name: form.name,
       domain: form.domain || null,
       leadsReportingUrl: form.leadsReportingUrl || null,
+      leadsGoogleSheetLabel: form.leadsGoogleSheetLabel || null,
       sector: form.sector || null,
       clientStatus: form.clientStatus,
       targetJobTitle: form.targetJobTitle || null,
@@ -411,11 +417,13 @@ export default function CustomersManagementTab() {
                             </Box>
                             <Box>
                               <Text fontSize="xs" color="gray.600">
-                                Leads Reporting URL
+                                Leads Google Sheet
                               </Text>
-                              <Text fontSize="sm" noOfLines={1}>
-                                {customer.leadsReportingUrl || 'Not set'}
-                              </Text>
+                              <GoogleSheetLink
+                                url={customer.leadsReportingUrl}
+                                label={customer.leadsGoogleSheetLabel}
+                                fallbackLabel="Customer Lead Sheet"
+                              />
                             </Box>
                           </Grid>
 
@@ -590,11 +598,19 @@ export default function CustomersManagementTab() {
               </Grid>
 
               <FormControl mt={2}>
-                <FormLabel fontSize="sm">Leads Reporting URL (Google Sheet)</FormLabel>
+                <FormLabel fontSize="sm">Leads Google Sheet URL</FormLabel>
                 <Input
                   value={form.leadsReportingUrl}
                   onChange={(e) => setForm({ ...form, leadsReportingUrl: e.target.value })}
                   placeholder="https://docs.google.com/spreadsheets/..."
+                />
+              </FormControl>
+              <FormControl mt={2}>
+                <FormLabel fontSize="sm">Leads Google Sheet Label</FormLabel>
+                <Input
+                  value={form.leadsGoogleSheetLabel}
+                  onChange={(e) => setForm({ ...form, leadsGoogleSheetLabel: e.target.value })}
+                  placeholder="e.g. Customer Lead Sheet"
                 />
               </FormControl>
             </VStack>

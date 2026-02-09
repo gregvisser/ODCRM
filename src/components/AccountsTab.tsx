@@ -67,6 +67,7 @@ import { api } from '../utils/api'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import MigrateAccountsPanel from './MigrateAccountsPanel'
+import { GoogleSheetLink } from './links/GoogleSheetLink'
 
 type Contact = {
   name: string
@@ -196,6 +197,7 @@ type CustomerApi = {
   website?: string | null
   accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
+  leadsGoogleSheetLabel?: string | null
   sector?: string | null
   clientStatus?: string | null
   targetJobTitle?: string | null
@@ -1023,6 +1025,7 @@ type CustomerPayload = {
   website?: string
   accountData?: Record<string, unknown> | null
   leadsReportingUrl?: string | null
+  leadsGoogleSheetLabel?: string | null
   sector?: string | null
   clientStatus?: string | null
   targetJobTitle?: string | null
@@ -6225,28 +6228,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
                         label=""
                         type="url"
                         placeholder="https://docs.google.com/spreadsheets/d/..."
-                        renderDisplay={(value) => (
-                          value ? (
-                            <Link
-                              href={String(value)}
-                              isExternal
-                              color="text.muted"
+                        renderDisplay={(value) => {
+                          // Get customer data to access label
+                          const customer = customers.find((c) => c.id === selectedAccount._databaseId)
+                          return (
+                            <GoogleSheetLink
+                              url={String(value || '')}
+                              label={customer?.leadsGoogleSheetLabel}
+                              fallbackLabel="Open Google Sheets"
                               fontSize="md"
-                              fontWeight="medium"
-                              display="inline-flex"
-                              alignItems="center"
-                              gap={2}
-                              onClick={(e) => {
-                                e.preventDefault()
-                                window.open(String(value), '_blank')
-                                emit('navigateToLeads', { accountName: selectedAccount.name })
-                              }}
-                            >
-                              Open Google Sheets
-                              <ExternalLinkIcon />
-                            </Link>
-                          ) : <Text fontSize="md" color="gray.400">No Google Sheets link set</Text>
-                        )}
+                            />
+                          )
+                        }}
                       />
                     </FieldRow>
                   </SimpleGrid>

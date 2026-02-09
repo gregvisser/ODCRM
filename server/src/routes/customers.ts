@@ -33,6 +33,7 @@ const upsertCustomerSchema = z.object({
   
   // Business details
   leadsReportingUrl: z.string().url().optional().nullable(),
+  leadsGoogleSheetLabel: z.string().optional().nullable(),
   sector: z.string().optional().nullable(),
   clientStatus: z.enum(['active', 'inactive', 'onboarding', 'win_back']).optional(),
   targetJobTitle: z.string().optional().nullable(),
@@ -209,6 +210,7 @@ router.post('/', async (req, res) => {
         foundingYear: validated.foundingYear,
         socialPresence: validated.socialPresence ?? null,
         leadsReportingUrl: validated.leadsReportingUrl,
+        leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
         sector: validated.sector,
         clientStatus: validated.clientStatus || 'active',
         targetJobTitle: validated.targetJobTitle,
@@ -273,6 +275,7 @@ router.put('/:id', async (req, res) => {
       foundingYear: validated.foundingYear,
       socialPresence: validated.socialPresence ?? undefined,
       leadsReportingUrl: validated.leadsReportingUrl,
+      leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
       sector: validated.sector,
       clientStatus: validated.clientStatus,
       targetJobTitle: validated.targetJobTitle,

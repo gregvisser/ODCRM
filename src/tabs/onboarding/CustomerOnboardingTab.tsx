@@ -215,6 +215,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
+  const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
+  const [leadsGoogleSheetLabel, setLeadsGoogleSheetLabel] = useState<string>('')
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -316,6 +318,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     // Initialize monthly revenue from customer field
     const revenue = customer.monthlyRevenueFromCustomer
     setMonthlyRevenueFromCustomer(revenue ? parseFloat(revenue).toString() : '')
+    
+    // Initialize Google Sheet fields
+    setLeadsGoogleSheetUrl(customer.leadsReportingUrl || '')
+    setLeadsGoogleSheetLabel(customer.leadsGoogleSheetLabel || '')
   }, [customer])
 
   // Geographic area search
@@ -620,16 +626,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       days: accountDetails.daysPerWeek,
     })
     
-    // Prepare top-level customer fields (including monthly revenue)
+    // Prepare top-level customer fields (including monthly revenue and Google Sheet)
     const revenueNumber = monthlyRevenueFromCustomer.trim() 
       ? parseFloat(monthlyRevenueFromCustomer)
       : undefined
+    
+    // Google Sheet URL and label (validate URL format lightly)
+    const sheetUrl = leadsGoogleSheetUrl.trim() || undefined
+    const sheetLabel = leadsGoogleSheetLabel.trim() || undefined
     
     // Call API and wait for response before updating UI
     const { error } = await api.put(`/api/customers/${customerId}`, {
       name: customer.name,
       accountData: nextAccountData,
       monthlyRevenueFromCustomer: revenueNumber,
+      leadsReportingUrl: sheetUrl,
+      leadsGoogleSheetLabel: sheetLabel,
     })
     
     if (error) {
@@ -867,6 +879,28 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 }
                 isReadOnly
                 placeholder="Pulled from linked Google Sheet"
+              />
+            </FormControl>
+          </SimpleGrid>
+
+          <Divider my={4} />
+
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+            <FormControl>
+              <FormLabel>Leads Google Sheet URL</FormLabel>
+              <Input
+                type="url"
+                value={leadsGoogleSheetUrl}
+                onChange={(e) => setLeadsGoogleSheetUrl(e.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+              />
+            </FormControl>
+            <FormControl>
+              <FormLabel>Leads Google Sheet Label</FormLabel>
+              <Input
+                value={leadsGoogleSheetLabel}
+                onChange={(e) => setLeadsGoogleSheetLabel(e.target.value)}
+                placeholder="e.g. Customer Lead Sheet"
               />
             </FormControl>
           </SimpleGrid>

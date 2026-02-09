@@ -92,6 +92,7 @@ model Customer {
   
   // Business details (from OpensDoorsV2 ClientAccount)
   leadsReportingUrl     String?
+  leadsGoogleSheetLabel String?              // Custom display name for leads Google Sheet
   sector                String?
   clientStatus          ClientStatus         @default(active)
   targetJobTitle        String?

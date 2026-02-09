@@ -12,6 +12,7 @@ export type DatabaseCustomer = {
   name: string
   domain?: string | null
   leadsReportingUrl?: string | null
+  leadsGoogleSheetLabel?: string | null
   sector?: string | null
   clientStatus: string
   targetJobTitle?: string | null

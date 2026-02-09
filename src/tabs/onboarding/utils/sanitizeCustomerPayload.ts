@@ -82,6 +82,7 @@ export function sanitizeCustomerPayload(payload: Record<string, any>): Record<st
     'foundingYear',
     'socialPresence',
     'leadsReportingUrl',
+    'leadsGoogleSheetLabel',
     'sector',
     'clientStatus',
     'targetJobTitle',
