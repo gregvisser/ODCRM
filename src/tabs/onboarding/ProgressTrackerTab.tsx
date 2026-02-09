@@ -131,8 +131,8 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
       if (group === 'ops') setOpsChecklist(updateState)
       if (group === 'am') setAmChecklist(updateState)
 
-      // Get current customer data first
-      const { data: customerData, error: fetchError } = await api.get<{ accountData?: any }>(
+      // Get current customer data first (need full customer for validation)
+      const { data: customerData, error: fetchError } = await api.get<any>(
         `/api/customers/${customerId}`,
       )
       if (fetchError) {
@@ -157,12 +157,37 @@ export default function ProgressTrackerTab({ customerId }: ProgressTrackerTabPro
         },
       }
 
-      // Save to database
+      const updatedAccountData = {
+        ...currentAccountData,
+        progressTracker: updatedProgressTracker,
+      }
+
+      // Save to database with complete customer payload (required by validation schema)
       const { error } = await api.put(`/api/customers/${customerId}`, {
-        accountData: {
-          ...currentAccountData,
-          progressTracker: updatedProgressTracker,
-        },
+        name: customerData.name, // Required by backend validation
+        domain: customerData.domain || null,
+        accountData: updatedAccountData,
+        website: customerData.website || null,
+        whatTheyDo: customerData.whatTheyDo || null,
+        accreditations: customerData.accreditations || null,
+        keyLeaders: customerData.keyLeaders || null,
+        companyProfile: customerData.companyProfile || null,
+        recentNews: customerData.recentNews || null,
+        companySize: customerData.companySize || null,
+        headquarters: customerData.headquarters || null,
+        foundingYear: customerData.foundingYear || null,
+        socialPresence: customerData.socialPresence || null,
+        leadsReportingUrl: customerData.leadsReportingUrl || null,
+        sector: customerData.sector || null,
+        clientStatus: customerData.clientStatus || 'active',
+        targetJobTitle: customerData.targetJobTitle || null,
+        prospectingLocation: customerData.prospectingLocation || null,
+        monthlyIntakeGBP: customerData.monthlyIntakeGBP ? parseFloat(customerData.monthlyIntakeGBP) : null,
+        defcon: customerData.defcon || null,
+        weeklyLeadTarget: customerData.weeklyLeadTarget || null,
+        weeklyLeadActual: customerData.weeklyLeadActual || null,
+        monthlyLeadTarget: customerData.monthlyLeadTarget || null,
+        monthlyLeadActual: customerData.monthlyLeadActual || null,
       })
 
       if (error) {
