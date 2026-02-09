@@ -62,15 +62,30 @@ const upsertCustomerContactSchema = z.object({
   notes: z.string().optional().nullable(),
 })
 
+// GET /api/customers/diagnostic - Test database connection
+router.get('/diagnostic', async (req, res) => {
+  try {
+    console.log('[DIAGNOSTIC] Testing database connection...')
+    const count = await prisma.customer.count()
+    console.log(`[DIAGNOSTIC] Customer count: ${count}`)
+    return res.json({ success: true, customerCount: count, timestamp: new Date().toISOString() })
+  } catch (error: any) {
+    console.error('[DIAGNOSTIC] Error:', error.message)
+    return res.status(500).json({ error: error.message })
+  }
+})
+
 // GET /api/customers - List all customers with their contacts
 router.get('/', async (req, res) => {
   try {
+    console.log('[GET /] Starting customers fetch...')
     const customers = await prisma.customer.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
         customerContacts: true,
       },
     })
+    console.log(`[GET /] Fetched ${customers.length} customers`)
 
     // Explicitly construct serialized objects to avoid Date serialization issues
     const serialized = customers.map((customer) => ({
