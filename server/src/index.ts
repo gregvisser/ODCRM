@@ -28,10 +28,6 @@ import userPreferencesRoutes from './routes/userPreferences.js'
 import sheetsRoutes from './routes/sheets.js'
 import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
-import { startEmailScheduler } from './workers/emailScheduler.js'
-import { startReplyDetectionWorker } from './workers/replyDetection.js'
-import { startLeadsSyncWorker } from './workers/leadsSync.js'
-import { startAboutEnrichmentWorker } from './workers/aboutEnrichment.js'
 
 dotenv.config()
 
@@ -262,7 +258,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 const PORT = process.env.PORT || 3001
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 Server running on port ${PORT}`)
   
   // ============================================================================
@@ -275,6 +271,7 @@ app.listen(PORT, () => {
   const emailSchedulerEnabled = process.env.ENABLE_EMAIL_SCHEDULER === 'true'
   if (emailSchedulerEnabled) {
     console.log('📧 Starting email scheduler...')
+    const { startEmailScheduler } = await import('./workers/emailScheduler.js')
     startEmailScheduler(prisma)
   } else {
     console.log('⏸️ Email scheduler disabled (set ENABLE_EMAIL_SCHEDULER=true to enable)')
@@ -284,6 +281,7 @@ app.listen(PORT, () => {
   const replyDetectorEnabled = process.env.ENABLE_REPLY_DETECTOR === 'true'
   if (replyDetectorEnabled) {
     console.log('📬 Starting reply detection worker...')
+    const { startReplyDetectionWorker } = await import('./workers/replyDetection.js')
     startReplyDetectionWorker(prisma)
   } else {
     console.log('⏸️ Reply detection disabled (set ENABLE_REPLY_DETECTOR=true to enable)')
@@ -293,6 +291,7 @@ app.listen(PORT, () => {
   const leadsSyncEnabled = process.env.ENABLE_LEADS_SYNC === 'true'
   if (leadsSyncEnabled) {
     console.log('📊 Starting leads sync worker...')
+    const { startLeadsSyncWorker } = await import('./workers/leadsSync.js')
     startLeadsSyncWorker(prisma)
   } else {
     console.log('⏸️ Leads sync disabled (set ENABLE_LEADS_SYNC=true to enable)')
@@ -302,6 +301,7 @@ app.listen(PORT, () => {
   const aboutEnrichmentEnabled = process.env.ENABLE_ABOUT_ENRICHMENT === 'true'
   if (aboutEnrichmentEnabled) {
     console.log('🤖 Starting About enrichment worker...')
+    const { startAboutEnrichmentWorker } = await import('./workers/aboutEnrichment.js')
     startAboutEnrichmentWorker(prisma)
   } else {
     console.log('⏸️ About enrichment disabled (set ENABLE_ABOUT_ENRICHMENT=true to enable)')

@@ -481,7 +481,7 @@ async function sendCampaignEmail(
       })
 
       errorCount++
-      continue
+      return false
     }
 
     // Inject tracking - MUST be set in production
