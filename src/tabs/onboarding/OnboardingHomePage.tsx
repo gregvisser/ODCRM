@@ -36,6 +36,7 @@ import { getJson } from '../../platform/storage'
 import { OdcrmStorageKeys } from '../../platform/keys'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import ProgressTrackerTab from './ProgressTrackerTab'
+import OnboardingOverview from './OnboardingOverview'
 import type {
   Account,
   Accreditation,
@@ -671,14 +672,20 @@ export default function OnboardingHomePage() {
         </Text>
       </Box>
 
-      {/* Child Tabs: Customer Onboarding and Progress Tracker */}
+      {/* Child Tabs: Overview, Customer Onboarding, and Progress Tracker */}
       <Tabs index={activeChildTab} onChange={setActiveChildTab} variant="enclosed" colorScheme="teal">
         <TabList>
+          <Tab fontWeight="semibold">Overview</Tab>
           <Tab fontWeight="semibold">Customer Onboarding</Tab>
           <Tab fontWeight="semibold">Progress Tracker</Tab>
         </TabList>
 
         <TabPanels>
+          {/* Overview Tab (static reference document) */}
+          <TabPanel px={0} py={0}>
+            <OnboardingOverview />
+          </TabPanel>
+
           {/* Customer Onboarding Tab (existing content) */}
           <TabPanel px={0} py={6}>
             <Stack spacing={6}>
