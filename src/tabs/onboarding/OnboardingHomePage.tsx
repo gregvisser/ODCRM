@@ -78,6 +78,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       {/* SubNavigation with customer-aware content */}
       <Box flex="1">
         <SubNavigation
+          key={`onboarding-${selectedCustomerId || 'no-customer'}`}
           items={navItems}
           activeId={activeView}
           onChange={(id) => onNavigate?.(id as OnboardingViewId)}
