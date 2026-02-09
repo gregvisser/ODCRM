@@ -92,11 +92,18 @@ function App() {
       if (accountName) setFocusAccountName(accountName)
     }
 
+    const handleNavigateToOnboarding = () => {
+      setActiveTab('onboarding-home')
+      setActiveView('create-customer')
+    }
+
     window.addEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
     window.addEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
+    window.addEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
     return () => {
       window.removeEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
       window.removeEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
+      window.removeEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
     }
   }, [])
 

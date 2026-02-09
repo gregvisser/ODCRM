@@ -5259,12 +5259,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         </Box>
         <HStack>
           <Button
-            colorScheme="gray"
-            leftIcon={<CheckIcon />}
-            onClick={onCreateModalOpen}
+            colorScheme="teal"
+            variant="outline"
             size="sm"
+            onClick={() => {
+              // Navigate to Onboarding tab
+              const event = new CustomEvent('navigateToOnboarding')
+              window.dispatchEvent(event)
+            }}
           >
-            Create New Account
+            Create New Customer (via Onboarding)
           </Button>
         </HStack>
       </HStack>
@@ -5782,151 +5786,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         </Table>
       </TableContainer>
 
-      {/* Create Account Modal */}
-      <Modal isOpen={isCreateModalOpen} onClose={onCreateModalClose} size="xl">
-        <ModalOverlay />
-        <ModalContent maxH="90vh">
-          <ModalHeader>Create New Account</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody overflowY="auto" maxH="calc(90vh - 120px)">
-            <Stack spacing={4}>
-              <FormControl isRequired>
-                <FormLabel>Account Name</FormLabel>
-                <Input
-                  placeholder="Enter account name"
-                  value={newAccountForm.name || ''}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, name: e.target.value })}
-                />
-              </FormControl>
-
-              <FormControl>
-                <FormLabel>Website</FormLabel>
-                <Input
-                  type="url"
-                  placeholder="https://example.com"
-                  value={newAccountForm.website || ''}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, website: e.target.value })}
-                />
-              </FormControl>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Status</FormLabel>
-                  <Select
-                    value={newAccountForm.status || 'Active'}
-                    onChange={(e) => setNewAccountForm({ ...newAccountForm, status: e.target.value as Account['status'] })}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                    <option value="On Hold">On Hold</option>
-                  </Select>
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Sector</FormLabel>
-                  <Input
-                    placeholder="Enter sector"
-                    value={newAccountForm.sector || ''}
-                    onChange={(e) => setNewAccountForm({ ...newAccountForm, sector: e.target.value })}
-                  />
-                </FormControl>
-              </SimpleGrid>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Monthly Revenue (GBP)</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.monthlySpendGBP || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, monthlySpendGBP: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Defcon</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.defcon || 3}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, defcon: value || 3 })}
-                    min={1}
-                    max={5}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-              </SimpleGrid>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Days (per week)</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.days || 1}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, days: value || 1 })}
-                    min={1}
-                    max={7}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Contacts</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.contacts || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, contacts: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-              </SimpleGrid>
-
-              <SimpleGrid columns={2} gap={4}>
-                <FormControl>
-                  <FormLabel>Weekly Target</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.weeklyTarget || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, weeklyTarget: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Monthly Target</FormLabel>
-                  <NumberInput
-                    value={newAccountForm.monthlyTarget || 0}
-                    onChange={(_, value) => setNewAccountForm({ ...newAccountForm, monthlyTarget: value || 0 })}
-                    min={0}
-                  >
-                    <NumberInputField />
-                  </NumberInput>
-                </FormControl>
-              </SimpleGrid>
-
-              <FormControl>
-                <FormLabel>Client Leads Sheet URL</FormLabel>
-                <Input
-                  type="url"
-                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                  value={newAccountForm.clientLeadsSheetUrl || ''}
-                  onChange={(e) => setNewAccountForm({ ...newAccountForm, clientLeadsSheetUrl: e.target.value })}
-                />
-              </FormControl>
-            </Stack>
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="ghost" mr={3} onClick={onCreateModalClose}>
-              Cancel
-            </Button>
-            <Button colorScheme="gray" onClick={handleCreateAccount}>
-              Create Account
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      {/* Create Account Modal - DISABLED: Customer creation now happens via Onboarding tab only */}
+      {/* Modal commented out - customer creation moved to Onboarding wizard (CreateCustomerStep) */}
 
       {isDrawerOpen && selectedAccount && (
         <Drawer

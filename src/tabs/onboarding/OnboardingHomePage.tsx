@@ -3,19 +3,20 @@
  * Follows Marketing section pattern with customer selector in left panel
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Box, Flex, Text, VStack } from '@chakra-ui/react'
 import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import CustomerSelector from './components/CustomerSelector'
+import CreateCustomerStep from './components/CreateCustomerStep'
 import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
 
-export type OnboardingViewId = 'overview' | 'customer-onboarding' | 'progress-tracker'
+export type OnboardingViewId = 'create-customer' | 'overview' | 'customer-onboarding' | 'progress-tracker'
 
 function coerceViewId(view?: string): OnboardingViewId {
-  if (view === 'customer-onboarding' || view === 'progress-tracker') {
+  if (view === 'create-customer' || view === 'customer-onboarding' || view === 'progress-tracker') {
     return view
   }
   return 'overview'
@@ -30,8 +31,36 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   const activeView = coerceViewId(view)
   const [selectedCustomerId, setSelectedCustomerId] = useState('')
 
+  // Handler when customer is created - sets customer ID and navigates to Customer Onboarding
+  const handleCustomerCreated = useCallback((customerId: string) => {
+    console.log('🎉 OnboardingHomePage: Customer created, setting ID and navigating:', customerId)
+    setSelectedCustomerId(customerId)
+    onNavigate?.('customer-onboarding')
+  }, [onNavigate])
+
   // Create navigation items with customer context
   const navItems: SubNavItem[] = useMemo(() => {
+    // If no customer selected, show Create Customer as the primary action
+    if (!selectedCustomerId) {
+      return [
+        {
+          id: 'create-customer',
+          label: 'Create Customer',
+          icon: EditIcon,
+          content: <CreateCustomerStep onCustomerCreated={handleCustomerCreated} />,
+          sortOrder: 0,
+        },
+        {
+          id: 'overview',
+          label: 'Overview',
+          icon: InfoIcon,
+          content: <OnboardingOverview />,
+          sortOrder: 1,
+        },
+      ]
+    }
+
+    // Customer selected - show full onboarding tabs
     return [
       {
         id: 'overview',
@@ -44,36 +73,30 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         id: 'customer-onboarding',
         label: 'Customer Onboarding',
         icon: EditIcon,
-        content: selectedCustomerId ? (
-          <CustomerOnboardingTab customerId={selectedCustomerId} />
-        ) : (
-          <EmptyState message="Select a customer to view onboarding details" />
-        ),
+        content: <CustomerOnboardingTab customerId={selectedCustomerId} />,
         sortOrder: 1,
       },
       {
         id: 'progress-tracker',
         label: 'Progress Tracker',
         icon: CheckCircleIcon,
-        content: selectedCustomerId ? (
-          <ProgressTrackerTab customerId={selectedCustomerId} />
-        ) : (
-          <EmptyState message="Select a customer to track onboarding progress" />
-        ),
+        content: <ProgressTrackerTab customerId={selectedCustomerId} />,
         sortOrder: 2,
       },
     ]
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, handleCustomerCreated])
 
   return (
     <Flex direction="column" h="100%">
-      {/* Customer Selector above SubNavigation */}
-      <Box mb={4}>
-        <CustomerSelector 
-          selectedCustomerId={selectedCustomerId} 
-          onCustomerChange={setSelectedCustomerId} 
-        />
-      </Box>
+      {/* Customer Selector - shown when customer exists or after creation */}
+      {selectedCustomerId && (
+        <Box mb={4}>
+          <CustomerSelector 
+            selectedCustomerId={selectedCustomerId} 
+            onCustomerChange={setSelectedCustomerId} 
+          />
+        </Box>
+      )}
 
       {/* SubNavigation with customer-aware content */}
       <Box flex="1">
@@ -86,29 +109,22 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           enableDragDrop={false}
         />
       </Box>
-    </Flex>
-  )
-}
 
-// Empty state component for when no customer is selected
-function EmptyState({ message }: { message: string }) {
-  return (
-    <Box
-      border="1px dashed"
-      borderColor="gray.300"
-      borderRadius="xl"
-      p={12}
-      textAlign="center"
-      bg="gray.50"
-    >
-      <VStack spacing={3}>
-        <Text color="gray.500" fontSize="md" fontWeight="medium">
-          {message}
-        </Text>
-        <Text color="gray.400" fontSize="sm">
-          Use the customer selector above to choose a customer.
-        </Text>
-      </VStack>
-    </Box>
+      {/* Optional: Show customer selector at bottom when no customer selected */}
+      {!selectedCustomerId && (
+        <Box mt={4} p={4} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
+          <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+            Already have a customer account?
+          </Text>
+          <CustomerSelector 
+            selectedCustomerId={selectedCustomerId} 
+            onCustomerChange={(id) => {
+              setSelectedCustomerId(id)
+              onNavigate?.('customer-onboarding')
+            }} 
+          />
+        </Box>
+      )}
+    </Flex>
   )
 }
