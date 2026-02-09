@@ -106,7 +106,7 @@ export default function MarketingHomePage({
     },
     {
       id: 'compliance',
-      label: 'Compliance List',
+      label: 'Suppression List',
       icon: WarningIcon,
       content: <ComplianceTab />,
       sortOrder: 4,

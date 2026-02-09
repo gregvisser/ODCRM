@@ -215,9 +215,9 @@ export default function ComplianceTab() {
     <Box>
       <VStack align="stretch" spacing={6}>
         <Box>
-          <Heading size="lg" mb={2}>Compliance List</Heading>
+          <Heading size="lg" mb={2}>Suppression List</Heading>
           <Text fontSize="sm" color="gray.600">
-            Manage suppression lists to prevent emails from being sent to unsubscribed or problematic recipients.
+            Manage your Do Not Contact (DNC) list to prevent emails from being sent to unsubscribed or problematic recipients.
           </Text>
         </Box>
 
