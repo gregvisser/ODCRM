@@ -87,97 +87,245 @@ router.get('/diagnostic', async (req, res) => {
   }
 })
 
+// JSON-safe normalizer - handles Prisma types and nested objects
+function normalizeToJsonSafe(value: any, depth = 0): any {
+  // Prevent infinite recursion
+  if (depth > 10) return '[MAX_DEPTH]'
+  
+  // Handle null/undefined
+  if (value === null || value === undefined) return value
+  
+  // Handle primitives
+  const type = typeof value
+  if (type === 'string' || type === 'number' || type === 'boolean') return value
+  
+  // Handle BigInt
+  if (type === 'bigint') return value.toString()
+  
+  // Handle functions/symbols - omit
+  if (type === 'function' || type === 'symbol') return undefined
+  
+  // Handle Date
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  
+  // Handle Buffer - omit for security
+  if (Buffer.isBuffer(value)) return undefined
+  
+  // Handle Prisma Decimal - detect by presence of toNumber/toString methods
+  if (value && typeof value === 'object' && 
+      (value.constructor?.name === 'Decimal' || 
+       (typeof value.toNumber === 'function' && typeof value.toString === 'function' && value.d !== undefined))) {
+    return value.toString()
+  }
+  
+  // Handle Arrays
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeToJsonSafe(item, depth + 1))
+  }
+  
+  // Handle plain objects - recursively normalize
+  if (value && typeof value === 'object') {
+    const normalized: Record<string, any> = {}
+    for (const [key, val] of Object.entries(value)) {
+      const normalizedVal = normalizeToJsonSafe(val, depth + 1)
+      if (normalizedVal !== undefined) {
+        normalized[key] = normalizedVal
+      }
+    }
+    return normalized
+  }
+  
+  // Fallback: convert to string
+  return String(value)
+}
+
+// Detect which field causes JSON serialization failure
+function detectFailingField(obj: Record<string, any>): { fieldName: string; error: string } | null {
+  for (const [key, value] of Object.entries(obj)) {
+    try {
+      // Try to stringify with a safe replacer
+      JSON.stringify(value, (k, v) => {
+        if (typeof v === 'bigint') return v.toString()
+        if (v instanceof Date) return v.toISOString()
+        return v
+      })
+    } catch (err: any) {
+      return { fieldName: key, error: err.message }
+    }
+  }
+  return null
+}
+
 // GET /api/customers - List all customers with their contacts
 router.get('/', async (req, res) => {
+  const correlationId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  
   try {
-    console.log('[GET /] Starting customers fetch...')
+    console.log(`[${correlationId}] Starting customers fetch...`)
     const customers = await prisma.customer.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
         customerContacts: true,
       },
     })
-    console.log(`[GET /] Fetched ${customers.length} customers`)
+    console.log(`[${correlationId}] Fetched ${customers.length} customers`)
 
     if (customers.length === 0) {
-      console.log('[GET /] No customers, returning empty array')
+      console.log(`[${correlationId}] No customers, returning empty array`)
       return res.json([])
     }
 
-    console.log('[GET /] Starting serialization...')
-    // Explicitly construct serialized objects to avoid Date serialization issues
-    const serialized = customers.map((customer, index) => {
+    console.log(`[${correlationId}] Starting serialization with per-customer sandboxing...`)
+    
+    const successfulCustomers: any[] = []
+    const warnings: any[] = []
+    
+    // Process each customer in isolation
+    for (let index = 0; index < customers.length; index++) {
+      const customer = customers[index]
+      
       try {
-        console.log(`[GET /] Serializing customer ${index + 1}/${customers.length}: ${customer.name}`)
-        return {
-      id: customer.id,
-      name: customer.name,
-      domain: customer.domain,
-      leadsReportingUrl: customer.leadsReportingUrl,
-      leadsGoogleSheetLabel: customer.leadsGoogleSheetLabel,
-      sector: customer.sector,
-      clientStatus: customer.clientStatus,
-      targetJobTitle: customer.targetJobTitle,
-      prospectingLocation: customer.prospectingLocation,
-      monthlyIntakeGBP: customer.monthlyIntakeGBP ? customer.monthlyIntakeGBP.toString() : null,
-      monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer ? customer.monthlyRevenueFromCustomer.toString() : null,
-      defcon: customer.defcon,
-      weeklyLeadTarget: customer.weeklyLeadTarget,
-      weeklyLeadActual: customer.weeklyLeadActual,
-      monthlyLeadTarget: customer.monthlyLeadTarget,
-      monthlyLeadActual: customer.monthlyLeadActual,
-      website: customer.website,
-      whatTheyDo: customer.whatTheyDo,
-      accreditations: customer.accreditations,
-      keyLeaders: customer.keyLeaders,
-      companyProfile: customer.companyProfile,
-      recentNews: customer.recentNews,
-      companySize: customer.companySize,
-      headquarters: customer.headquarters,
-      foundingYear: customer.foundingYear,
-      socialPresence: customer.socialPresence,
-      lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
-      agreementFileUrl: customer.agreementFileUrl,
-      agreementFileName: customer.agreementFileName,
-      agreementFileMimeType: customer.agreementFileMimeType,
-      agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
-      agreementUploadedByEmail: customer.agreementUploadedByEmail,
-      accountData: customer.accountData,
-      createdAt: customer.createdAt.toISOString(),
-      updatedAt: customer.updatedAt.toISOString(),
-      customerContacts: customer.customerContacts.map((contact) => ({
-        id: contact.id,
-        customerId: contact.customerId,
-        name: contact.name,
-        email: contact.email,
-        phone: contact.phone,
-        title: contact.title,
-        isPrimary: contact.isPrimary,
-        notes: contact.notes,
-        createdAt: contact.createdAt.toISOString(),
-        updatedAt: contact.updatedAt.toISOString(),
-      })),
-    }
+        console.log(`[${correlationId}] Serializing customer ${index + 1}/${customers.length}: ${customer.name} (${customer.id})`)
+        
+        // Normalize to JSON-safe primitives first
+        const normalized = {
+          id: customer.id,
+          name: customer.name,
+          domain: customer.domain,
+          leadsReportingUrl: customer.leadsReportingUrl,
+          leadsGoogleSheetLabel: customer.leadsGoogleSheetLabel,
+          sector: customer.sector,
+          clientStatus: customer.clientStatus,
+          targetJobTitle: customer.targetJobTitle,
+          prospectingLocation: customer.prospectingLocation,
+          monthlyIntakeGBP: customer.monthlyIntakeGBP ? customer.monthlyIntakeGBP.toString() : null,
+          monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer ? customer.monthlyRevenueFromCustomer.toString() : null,
+          defcon: customer.defcon,
+          weeklyLeadTarget: customer.weeklyLeadTarget,
+          weeklyLeadActual: customer.weeklyLeadActual,
+          monthlyLeadTarget: customer.monthlyLeadTarget,
+          monthlyLeadActual: customer.monthlyLeadActual,
+          website: customer.website,
+          whatTheyDo: customer.whatTheyDo,
+          accreditations: customer.accreditations,
+          keyLeaders: customer.keyLeaders,
+          companyProfile: customer.companyProfile,
+          recentNews: customer.recentNews,
+          companySize: customer.companySize,
+          headquarters: customer.headquarters,
+          foundingYear: customer.foundingYear,
+          socialPresence: normalizeToJsonSafe(customer.socialPresence), // Could have nested objects
+          lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
+          agreementFileUrl: customer.agreementFileUrl,
+          agreementFileName: customer.agreementFileName,
+          agreementFileMimeType: customer.agreementFileMimeType,
+          agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
+          agreementUploadedByEmail: customer.agreementUploadedByEmail,
+          accountData: normalizeToJsonSafe(customer.accountData), // CRITICAL: normalize nested JSONB
+          createdAt: customer.createdAt.toISOString(),
+          updatedAt: customer.updatedAt.toISOString(),
+          customerContacts: customer.customerContacts.map((contact) => ({
+            id: contact.id,
+            customerId: contact.customerId,
+            name: contact.name,
+            email: contact.email,
+            phone: contact.phone,
+            title: contact.title,
+            isPrimary: contact.isPrimary,
+            notes: contact.notes,
+            createdAt: contact.createdAt.toISOString(),
+            updatedAt: contact.updatedAt.toISOString(),
+          })),
+        }
+        
+        // Test if it can be stringified
+        JSON.stringify(normalized)
+        
+        // Success - add to results
+        successfulCustomers.push(normalized)
+        
       } catch (serError: any) {
-        console.error(`[GET /] Error serializing customer ${index + 1}: ${customer.name}`, serError.message)
-        throw serError
+        // ISOLATION: Don't let one bad customer crash the entire response
+        console.error(`[${correlationId}] ❌ SERIALIZATION FAILED for customer ${customer.id} (${customer.name})`)
+        console.error(`[${correlationId}]    Error: ${serError.message}`)
+        console.error(`[${correlationId}]    Stack: ${serError.stack?.substring(0, 300)}`)
+        
+        // Try to detect the exact failing field
+        let fieldHint: string | undefined
+        try {
+          const failingField = detectFailingField({
+            id: customer.id,
+            name: customer.name,
+            accountData: customer.accountData,
+            socialPresence: customer.socialPresence,
+            monthlyIntakeGBP: customer.monthlyIntakeGBP,
+            monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer,
+          })
+          
+          if (failingField) {
+            fieldHint = failingField.fieldName
+            console.error(`[${correlationId}]    Likely failing field: ${fieldHint}`)
+          }
+        } catch (detectErr) {
+          console.error(`[${correlationId}]    Could not detect failing field`)
+        }
+        
+        // Add warning but continue processing
+        warnings.push({
+          customerId: customer.id,
+          customerName: customer.name, // Include name for debugging (not sensitive)
+          reason: 'serialization_failed',
+          message: serError.message,
+          fieldHint: fieldHint || 'unknown',
+          correlationId
+        })
       }
-    })
+    }
 
-    console.log('[GET /] Serialization complete, sending response...')
-    return res.json(serialized)
+    console.log(`[${correlationId}] Serialization complete: ${successfulCustomers.length} successful, ${warnings.length} failed`)
+    
+    // Return response
+    const response: any = {
+      customers: successfulCustomers
+    }
+    
+    if (warnings.length > 0) {
+      response.warnings = warnings
+      console.error(`[${correlationId}] ⚠️ WARNINGS: ${warnings.length} customers failed serialization`)
+    }
+    
+    // Return 200 if at least one customer succeeded, 500 only if ALL failed
+    if (successfulCustomers.length === 0 && warnings.length > 0) {
+      console.error(`[${correlationId}] ❌ ALL CUSTOMERS FAILED SERIALIZATION`)
+      return res.status(500).json({
+        error: 'customers_list_failed',
+        correlationId,
+        message: 'All customers failed serialization',
+        warnings
+      })
+    }
+    
+    return res.json(response)
+    
   } catch (error: any) {
-    console.error('[GET /] Error in GET /:', error.message, error.stack?.substring(0, 200))
+    // Top-level error (database, network, etc.)
+    console.error(`[${correlationId}] ❌ CRITICAL ERROR in GET /api/customers:`, error.message)
+    console.error(`[${correlationId}]    Stack:`, error.stack)
     return res.status(500).json({ 
-      error: 'Failed to fetch customers',
-      detail: error.message,
-      at: 'GET /'
+      error: 'customers_list_failed',
+      correlationId,
+      message: error.message,
+      stack: error.stack?.substring(0, 500)
     })
   }
 })
 
 // GET /api/customers/:id - Get a single customer with contacts
 router.get('/:id', async (req, res) => {
+  const correlationId = `cust_single_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  
   try {
     const { id } = req.params
 
@@ -192,7 +340,9 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' })
     }
 
-    // Explicitly construct serialized object to avoid Date serialization issues
+    console.log(`[${correlationId}] Serializing customer: ${customer.name} (${customer.id})`)
+
+    // Use same normalization as list endpoint
     const serialized = {
       id: customer.id,
       name: customer.name,
@@ -219,14 +369,14 @@ router.get('/:id', async (req, res) => {
       companySize: customer.companySize,
       headquarters: customer.headquarters,
       foundingYear: customer.foundingYear,
-      socialPresence: customer.socialPresence,
+      socialPresence: normalizeToJsonSafe(customer.socialPresence),
       lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
       agreementFileUrl: customer.agreementFileUrl,
       agreementFileName: customer.agreementFileName,
       agreementFileMimeType: customer.agreementFileMimeType,
       agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
       agreementUploadedByEmail: customer.agreementUploadedByEmail,
-      accountData: customer.accountData,
+      accountData: normalizeToJsonSafe(customer.accountData),
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
       customerContacts: customer.customerContacts.map((contact) => ({
@@ -243,10 +393,18 @@ router.get('/:id', async (req, res) => {
       })),
     }
 
+    // Test serialization
+    JSON.stringify(serialized)
+
     return res.json(serialized)
-  } catch (error) {
-    console.error('Error fetching customer:', error)
-    return res.status(500).json({ error: 'Failed to fetch customer' })
+  } catch (error: any) {
+    console.error(`[${correlationId}] Error fetching customer:`, error.message)
+    console.error(`[${correlationId}] Stack:`, error.stack)
+    return res.status(500).json({ 
+      error: 'customer_fetch_failed',
+      correlationId,
+      message: error.message
+    })
   }
 })
 
