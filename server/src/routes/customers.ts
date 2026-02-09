@@ -164,12 +164,67 @@ router.get('/', async (req, res) => {
   
   try {
     console.log(`[${correlationId}] Starting customers fetch...`)
-    const customers = await prisma.customer.findMany({
-      orderBy: { createdAt: 'desc' },
-      include: {
-        customerContacts: true,
-      },
-    })
+    
+    // HOTFIX: leadsGoogleSheetLabel column may not exist in production due to schema drift
+    // Try with the field first, fall back to without it if it fails
+    let customers;
+    try {
+      customers = await prisma.customer.findMany({
+        orderBy: { createdAt: 'desc' },
+        include: {
+          customerContacts: true,
+        },
+      })
+    } catch (dbError: any) {
+      if (dbError.message && dbError.message.includes('leadsGoogleSheetLabel')) {
+        console.warn(`[${correlationId}] ⚠️ Column leadsGoogleSheetLabel missing, fetching without it`)
+        // Fetch without problematic fields - use explicit select
+        customers = await prisma.customer.findMany({
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            leadsReportingUrl: true,
+            // leadsGoogleSheetLabel: true, // SKIP - doesn't exist in prod
+            sector: true,
+            clientStatus: true,
+            targetJobTitle: true,
+            prospectingLocation: true,
+            monthlyIntakeGBP: true,
+            monthlyRevenueFromCustomer: true,
+            defcon: true,
+            weeklyLeadTarget: true,
+            weeklyLeadActual: true,
+            monthlyLeadTarget: true,
+            monthlyLeadActual: true,
+            website: true,
+            whatTheyDo: true,
+            accreditations: true,
+            keyLeaders: true,
+            companyProfile: true,
+            recentNews: true,
+            companySize: true,
+            headquarters: true,
+            foundingYear: true,
+            socialPresence: true,
+            lastEnrichedAt: true,
+            agreementFileUrl: true,
+            agreementFileName: true,
+            agreementFileMimeType: true,
+            agreementUploadedAt: true,
+            agreementUploadedByEmail: true,
+            accountData: true,
+            createdAt: true,
+            updatedAt: true,
+            customerContacts: true,
+          },
+        }) as any[]
+      } else {
+        throw dbError
+      }
+    }
+    
     console.log(`[${correlationId}] Fetched ${customers.length} customers`)
 
     if (customers.length === 0) {
@@ -195,7 +250,7 @@ router.get('/', async (req, res) => {
           name: customer.name,
           domain: customer.domain,
           leadsReportingUrl: customer.leadsReportingUrl,
-          leadsGoogleSheetLabel: customer.leadsGoogleSheetLabel,
+          leadsGoogleSheetLabel: (customer as any).leadsGoogleSheetLabel || null, // May not exist in prod
           sector: customer.sector,
           clientStatus: customer.clientStatus,
           targetJobTitle: customer.targetJobTitle,
@@ -329,12 +384,63 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    const customer = await prisma.customer.findUnique({
-      where: { id },
-      include: {
-        customerContacts: true,
-      },
-    })
+    // HOTFIX: Try with all fields, fall back to explicit select if schema drift
+    let customer;
+    try {
+      customer = await prisma.customer.findUnique({
+        where: { id },
+        include: {
+          customerContacts: true,
+        },
+      })
+    } catch (dbError: any) {
+      if (dbError.message && dbError.message.includes('leadsGoogleSheetLabel')) {
+        console.warn(`[${correlationId}] ⚠️ Column leadsGoogleSheetLabel missing for single customer fetch`)
+        customer = await prisma.customer.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            name: true,
+            domain: true,
+            leadsReportingUrl: true,
+            // leadsGoogleSheetLabel: true, // SKIP
+            sector: true,
+            clientStatus: true,
+            targetJobTitle: true,
+            prospectingLocation: true,
+            monthlyIntakeGBP: true,
+            monthlyRevenueFromCustomer: true,
+            defcon: true,
+            weeklyLeadTarget: true,
+            weeklyLeadActual: true,
+            monthlyLeadTarget: true,
+            monthlyLeadActual: true,
+            website: true,
+            whatTheyDo: true,
+            accreditations: true,
+            keyLeaders: true,
+            companyProfile: true,
+            recentNews: true,
+            companySize: true,
+            headquarters: true,
+            foundingYear: true,
+            socialPresence: true,
+            lastEnrichedAt: true,
+            agreementFileUrl: true,
+            agreementFileName: true,
+            agreementFileMimeType: true,
+            agreementUploadedAt: true,
+            agreementUploadedByEmail: true,
+            accountData: true,
+            createdAt: true,
+            updatedAt: true,
+            customerContacts: true,
+          },
+        }) as any
+      } else {
+        throw dbError
+      }
+    }
 
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
@@ -348,7 +454,7 @@ router.get('/:id', async (req, res) => {
       name: customer.name,
       domain: customer.domain,
       leadsReportingUrl: customer.leadsReportingUrl,
-      leadsGoogleSheetLabel: customer.leadsGoogleSheetLabel,
+      leadsGoogleSheetLabel: (customer as any).leadsGoogleSheetLabel || null, // May not exist in prod
       sector: customer.sector,
       clientStatus: customer.clientStatus,
       targetJobTitle: customer.targetJobTitle,
