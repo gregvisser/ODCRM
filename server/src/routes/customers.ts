@@ -165,52 +165,36 @@ router.get('/', async (req, res) => {
   try {
     console.log(`[${correlationId}] Starting customers fetch...`)
     
-    // HOTFIX: leadsGoogleSheetLabel column may not exist in production due to schema drift
-    // Try with the field first, fall back to without it if it fails
-    let customers;
-    try {
-      customers = await prisma.customer.findMany({
-        orderBy: { createdAt: 'desc' },
-        include: {
-          customerContacts: true,
-        },
-      })
-    } catch (dbError: any) {
-      // Schema drift: ANY missing column error should trigger fallback
-      if (dbError.message && dbError.message.includes('does not exist in the current database')) {
-        console.error(`[${correlationId}] ⚠️ Schema drift detected: ${dbError.message}`)
-        console.warn(`[${correlationId}] Falling back to minimal safe field selection`)
-        // Use MINIMAL safe fields - only from initial migration
-        customers = await prisma.customer.findMany({
-          orderBy: { createdAt: 'desc' },
+    // PRODUCTION HOTFIX: ALWAYS use minimal safe select - schema drift prevents using include
+    // Many columns missing in production: monthlyRevenueFromCustomer, leadsGoogleSheetLabel, etc.
+    console.warn(`[${correlationId}] Using minimal safe fields only (production schema drift)`)
+    
+    const customers = await prisma.customer.findMany({
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        domain: true,
+        website: true,
+        accountData: true,
+        createdAt: true,
+        updatedAt: true,
+        customerContacts: {
           select: {
             id: true,
+            customerId: true,
             name: true,
-            domain: true,
-            website: true,
-            accountData: true,
+            email: true,
+            phone: true,
+            title: true,
+            isPrimary: true,
+            notes: true,
             createdAt: true,
             updatedAt: true,
-            customerContacts: {
-              select: {
-                id: true,
-                customerId: true,
-                name: true,
-                email: true,
-                phone: true,
-                title: true,
-                isPrimary: true,
-                notes: true,
-                createdAt: true,
-                updatedAt: true,
-              }
-            },
-          },
-        }) as any[]
-      } else {
-        throw dbError
-      }
-    }
+          }
+        },
+      },
+    }) as any[]
     
     console.log(`[${correlationId}] Fetched ${customers.length} customers`)
 
@@ -372,50 +356,35 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    // HOTFIX: Try with all fields, fall back to explicit select if schema drift
-    let customer;
-    try {
-      customer = await prisma.customer.findUnique({
-        where: { id },
-        include: {
-          customerContacts: true,
-        },
-      })
-    } catch (dbError: any) {
-      // Schema drift: ANY missing column error should trigger fallback
-      if (dbError.message && dbError.message.includes('does not exist in the current database')) {
-        console.error(`[${correlationId}] ⚠️ Schema drift for single customer: ${dbError.message}`)
-        console.warn(`[${correlationId}] Falling back to minimal safe field selection`)
-        customer = await prisma.customer.findUnique({
-          where: { id },
+    // PRODUCTION HOTFIX: ALWAYS use minimal safe select - schema drift prevents using include
+    console.warn(`[${correlationId}] Using minimal safe fields only (production schema drift)`)
+    
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        domain: true,
+        website: true,
+        accountData: true,
+        createdAt: true,
+        updatedAt: true,
+        customerContacts: {
           select: {
             id: true,
+            customerId: true,
             name: true,
-            domain: true,
-            website: true,
-            accountData: true,
+            email: true,
+            phone: true,
+            title: true,
+            isPrimary: true,
+            notes: true,
             createdAt: true,
             updatedAt: true,
-            customerContacts: {
-              select: {
-                id: true,
-                customerId: true,
-                name: true,
-                email: true,
-                phone: true,
-                title: true,
-                isPrimary: true,
-                notes: true,
-                createdAt: true,
-                updatedAt: true,
-              }
-            },
-          },
-        }) as any
-      } else {
-        throw dbError
-      }
-    }
+          }
+        },
+      },
+    }) as any
 
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
