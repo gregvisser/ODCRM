@@ -14,7 +14,7 @@ import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
-import OnboardingHomePage from './tabs/onboarding/OnboardingHomePage'
+import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
@@ -133,7 +133,14 @@ function App() {
           />
         )
       case 'onboarding-home':
-        return <OnboardingHomePage />
+        return (
+          <OnboardingHomePage
+            view={activeView}
+            onNavigate={(v) => {
+              setActiveView(v)
+            }}
+          />
+        )
       case 'settings-home':
         return (
           <SettingsHomePage
