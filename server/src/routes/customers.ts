@@ -448,19 +448,20 @@ router.get('/:id', async (req, res) => {
 
     console.log(`[${correlationId}] Serializing customer: ${customer.name} (${customer.id})`)
 
-    // Use same normalization as list endpoint
+    // Use same normalization as list endpoint - handle schema drift
+    const custAny = customer as any
     const serialized = {
       id: customer.id,
       name: customer.name,
       domain: customer.domain,
       leadsReportingUrl: customer.leadsReportingUrl,
-      leadsGoogleSheetLabel: (customer as any).leadsGoogleSheetLabel || null, // May not exist in prod
+      leadsGoogleSheetLabel: custAny.leadsGoogleSheetLabel || null,
       sector: customer.sector,
       clientStatus: customer.clientStatus,
       targetJobTitle: customer.targetJobTitle,
       prospectingLocation: customer.prospectingLocation,
       monthlyIntakeGBP: customer.monthlyIntakeGBP ? customer.monthlyIntakeGBP.toString() : null,
-      monthlyRevenueFromCustomer: customer.monthlyRevenueFromCustomer ? customer.monthlyRevenueFromCustomer.toString() : null,
+      monthlyRevenueFromCustomer: custAny.monthlyRevenueFromCustomer ? custAny.monthlyRevenueFromCustomer.toString() : null,
       defcon: customer.defcon,
       weeklyLeadTarget: customer.weeklyLeadTarget,
       weeklyLeadActual: customer.weeklyLeadActual,
@@ -477,15 +478,15 @@ router.get('/:id', async (req, res) => {
       foundingYear: customer.foundingYear,
       socialPresence: normalizeToJsonSafe(customer.socialPresence),
       lastEnrichedAt: customer.lastEnrichedAt?.toISOString() || null,
-      agreementFileUrl: customer.agreementFileUrl,
-      agreementFileName: customer.agreementFileName,
-      agreementFileMimeType: customer.agreementFileMimeType,
-      agreementUploadedAt: customer.agreementUploadedAt?.toISOString() || null,
-      agreementUploadedByEmail: customer.agreementUploadedByEmail,
+      agreementFileUrl: custAny.agreementFileUrl || null,
+      agreementFileName: custAny.agreementFileName || null,
+      agreementFileMimeType: custAny.agreementFileMimeType || null,
+      agreementUploadedAt: custAny.agreementUploadedAt?.toISOString() || null,
+      agreementUploadedByEmail: custAny.agreementUploadedByEmail || null,
       accountData: normalizeToJsonSafe(customer.accountData),
       createdAt: customer.createdAt.toISOString(),
       updatedAt: customer.updatedAt.toISOString(),
-      customerContacts: customer.customerContacts.map((contact) => ({
+      customerContacts: customer.customerContacts.map((contact: any) => ({
         id: contact.id,
         customerId: contact.customerId,
         name: contact.name,
