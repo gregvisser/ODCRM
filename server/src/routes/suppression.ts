@@ -40,6 +40,61 @@ const isValidDomain = (value: string) => {
   return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(trimmed)
 }
 
+// POST /api/suppression/check - Check how many emails from a list are suppressed
+router.post('/check', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { emails } = z.object({
+      emails: z.array(z.string().email())
+    }).parse(req.body)
+
+    if (emails.length === 0) {
+      return res.json({ suppressedCount: 0, suppressedEmails: [] })
+    }
+
+    // Normalize emails
+    const normalizedEmails = emails.map(e => e.trim().toLowerCase())
+    const domains = normalizedEmails.map(e => e.split('@')[1]).filter(Boolean)
+
+    // Find all suppression entries that match
+    const suppressionEntries = await prisma.suppressionEntry.findMany({
+      where: {
+        customerId,
+        OR: [
+          { type: 'email', value: { in: normalizedEmails } },
+          { type: 'domain', value: { in: domains } },
+        ],
+      },
+      select: {
+        type: true,
+        value: true,
+      },
+    })
+
+    // Build lookup sets
+    const suppressedEmailsSet = new Set(
+      suppressionEntries.filter(e => e.type === 'email').map(e => e.value)
+    )
+    const suppressedDomainsSet = new Set(
+      suppressionEntries.filter(e => e.type === 'domain').map(e => e.value)
+    )
+
+    // Find which emails are suppressed
+    const suppressedEmails = normalizedEmails.filter(email => {
+      const domain = email.split('@')[1]
+      return suppressedEmailsSet.has(email) || suppressedDomainsSet.has(domain)
+    })
+
+    res.json({
+      suppressedCount: suppressedEmails.length,
+      suppressedEmails: suppressedEmails.slice(0, 100), // Limit to first 100 for response size
+      totalChecked: emails.length,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)

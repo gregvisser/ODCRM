@@ -130,6 +130,7 @@ type StartPreview = {
   sender?: EmailIdentity
   contactCount?: number
   missingEmailCount?: number
+  suppressedCount?: number
   error?: string | null
   loading?: boolean
 }
@@ -567,11 +568,33 @@ const SequencesTab: React.FC = () => {
     const contacts = listRes.data?.contacts || []
     const missingEmailCount = contacts.filter((contact) => !contact.email).length
 
+    // Check suppression
+    const validEmails = contacts.filter((c) => c.email).map((c) => c.email!)
+    let suppressedCount = 0
+
+    if (validEmails.length > 0 && selectedCustomerId) {
+      try {
+        const suppressionRes = await api.post('/api/suppression/check', {
+          emails: validEmails
+        }, {
+          headers: { 'X-Customer-Id': selectedCustomerId }
+        })
+
+        if (suppressionRes.data) {
+          suppressedCount = suppressionRes.data.suppressedCount || 0
+        }
+      } catch (err) {
+        console.error('Failed to check suppression:', err)
+        // Don't block on suppression check failure
+      }
+    }
+
     setStartPreview((prev) => ({
       ...prev,
       loading: false,
       contactCount: contacts.length,
       missingEmailCount,
+      suppressedCount,
     }))
   }
 
@@ -1161,6 +1184,14 @@ const SequencesTab: React.FC = () => {
                     <AlertIcon />
                     <AlertDescription>
                       {startPreview.missingEmailCount} lead(s) are missing email addresses and will be skipped.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {typeof startPreview?.suppressedCount === 'number' && startPreview.suppressedCount > 0 && (
+                  <Alert status="info">
+                    <AlertIcon />
+                    <AlertDescription>
+                      {startPreview.suppressedCount} contact(s) are on the suppression list and will be excluded.
                     </AlertDescription>
                   </Alert>
                 )}
