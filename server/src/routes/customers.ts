@@ -7,6 +7,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
+import { getActorIdentity } from '../utils/auth.js'
 
 const router = Router()
 
@@ -552,14 +553,16 @@ router.post('/sync-leads-urls', async (req, res) => {
 router.post('/:id/complete-onboarding', async (req, res) => {
   try {
     const { id } = req.params
-    const { actorEmail, actorUserId } = req.body
 
-    // Validate actor info provided
-    if (!actorEmail && !actorUserId) {
-      return res.status(400).json({ 
-        error: 'Actor information required',
-        details: 'Either actorEmail or actorUserId must be provided'
-      })
+    // SECURITY: Derive actor identity from server-side auth context ONLY
+    // NEVER trust client-supplied identity fields
+    const actor = getActorIdentity(req)
+    
+    // Log authentication status (for debugging)
+    if (actor.source === 'none') {
+      console.log(`[complete-onboarding] No authenticated user - proceeding with null actor for customer ${id}`)
+    } else {
+      console.log(`[complete-onboarding] Authenticated via ${actor.source}: ${actor.email || actor.userId}`)
     }
 
     // Fetch current customer state
@@ -579,13 +582,14 @@ router.post('/:id/complete-onboarding', async (req, res) => {
         data: {
           customerId: id,
           action: 'complete_onboarding_attempt_already_active',
-          actorUserId,
-          actorEmail,
+          actorUserId: actor.userId,
+          actorEmail: actor.email,
           fromStatus: customer.clientStatus,
           toStatus: customer.clientStatus,
           metadata: {
             note: 'Attempt to complete onboarding for already-active customer',
-            customerName: customer.name
+            customerName: customer.name,
+            authSource: actor.source
           }
         }
       })
@@ -606,23 +610,24 @@ router.post('/:id/complete-onboarding', async (req, res) => {
       data: { clientStatus: 'active' }
     })
 
-    // Create audit event
+    // Create audit event with server-derived actor identity
     const auditEvent = await prisma.customerAuditEvent.create({
       data: {
         customerId: id,
         action: 'complete_onboarding',
-        actorUserId,
-        actorEmail,
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
         fromStatus: previousStatus,
         toStatus: 'active',
         metadata: {
           customerName: customer.name,
-          completedAt: new Date().toISOString()
+          completedAt: new Date().toISOString(),
+          authSource: actor.source
         }
       }
     })
 
-    console.log(`✅ Onboarding completed for customer ${customer.name} (${id}) by ${actorEmail || actorUserId}`)
+    console.log(`✅ Onboarding completed for customer ${customer.name} (${id}) by ${actor.email || actor.userId || 'anonymous'}`)
 
     res.json({
       success: true,

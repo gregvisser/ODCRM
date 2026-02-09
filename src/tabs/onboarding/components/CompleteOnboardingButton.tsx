@@ -87,14 +87,11 @@ export function CompleteOnboardingButton({
 
   const handleComplete = async () => {
     try {
-      // Get user email from localStorage (or use a default)
-      const userEmail = localStorage.getItem('userEmail') || 'system@odcrm.local'
-
+      // SECURITY: Actor identity is derived server-side from auth context
+      // Do NOT send client-supplied identity - it would be spoofable
       const { data, error } = await api.post<any>(
         `/api/customers/${customerId}/complete-onboarding`,
-        {
-          actorEmail: userEmail,
-        }
+        {} // Empty body - server derives actor from auth headers
       )
 
       if (error) {
