@@ -384,7 +384,8 @@ const SequencesTab: React.FC = () => {
 
   const ensureSequenceFromTemplate = async (template: EmailTemplate, name: string, senderIdentityId: string, sequenceId?: string | null) => {
     if (!sequenceId) {
-      const createRes = await api.post<{ id: string }>('/api/sequences', {
+      // Log request payload for debugging
+      const payload = {
         senderIdentityId,
         name,
         description: '',
@@ -397,8 +398,16 @@ const SequencesTab: React.FC = () => {
             bodyTemplateText: template.bodyTemplateText || undefined,
           }
         ],
+      }
+      console.log('[SequencesTab] Creating sequence with payload:', payload)
+      console.log('[SequencesTab] Using customer ID:', selectedCustomerId)
+
+      const createRes = await api.post<{ id: string }>('/api/sequences', payload, {
+        headers: { 'X-Customer-Id': selectedCustomerId }
       })
+      
       if (createRes.error || !createRes.data?.id) {
+        console.error('[SequencesTab] Create sequence failed:', createRes.error)
         throw new Error(createRes.error || 'Failed to create sequence')
       }
       return createRes.data.id
@@ -467,7 +476,15 @@ const SequencesTab: React.FC = () => {
       let sequenceId = editingSequence.sequenceId
       const template = templates.find((item) => item.id === editingSequence.templateId)
       if (template) {
-        sequenceId = await ensureSequenceFromTemplate(template, editingSequence.name.trim(), sequenceId)
+        if (!editingSequence.senderIdentityId) {
+          toast({
+            title: 'Sender identity is required',
+            status: 'error',
+            duration: 3000,
+          })
+          return
+        }
+        sequenceId = await ensureSequenceFromTemplate(template, editingSequence.name.trim(), editingSequence.senderIdentityId, sequenceId)
       }
 
       const payload = {

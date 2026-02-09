@@ -140,8 +140,23 @@ router.get('/:id', async (req, res) => {
 // POST /api/sequences - Create a new sequence (with optional steps)
 router.post('/', async (req, res) => {
   try {
+    console.log('[sequences] POST / - Create sequence request:', {
+      customerId: req.headers['x-customer-id'],
+      bodyKeys: Object.keys(req.body),
+      senderIdentityId: req.body.senderIdentityId,
+      name: req.body.name,
+      stepsCount: req.body.steps?.length,
+    })
+
     const validated = createSequenceSchema.parse(req.body)
     const customerId = getCustomerId(req)
+
+    console.log('[sequences] Validated payload:', {
+      customerId,
+      senderIdentityId: validated.senderIdentityId,
+      name: validated.name,
+      stepsCount: validated.steps?.length || 0,
+    })
 
     // Verify senderIdentityId belongs to customer
     const senderIdentity = await prisma.emailIdentity.findFirst({
@@ -153,8 +168,14 @@ router.post('/', async (req, res) => {
     })
 
     if (!senderIdentity) {
+      console.error('[sequences] Invalid sender identity:', {
+        senderIdentityId: validated.senderIdentityId,
+        customerId,
+      })
       return res.status(400).json({
-        error: 'Invalid sender identity - must belong to customer and be active'
+        error: 'Invalid sender identity - must belong to customer and be active',
+        field: 'senderIdentityId',
+        value: validated.senderIdentityId,
       })
     }
 
@@ -217,9 +238,30 @@ router.post('/', async (req, res) => {
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid input', details: error.errors })
+      console.error('[sequences] Zod validation error:', error.errors)
+      
+      // Format Zod errors into user-friendly messages
+      const fieldErrors = error.errors.map(err => {
+        const field = err.path.join('.')
+        return `${field}: ${err.message}`
+      }).join(', ')
+      
+      return res.status(400).json({ 
+        error: `Invalid input: ${fieldErrors}`,
+        validationErrors: error.errors,
+        receivedFields: Object.keys(req.body),
+      })
     }
-    console.error('Error creating sequence:', error)
+    
+    // Handle missing customer ID
+    if (error instanceof Error && error.message === 'customerId is required') {
+      return res.status(400).json({
+        error: 'Customer ID is required (X-Customer-Id header)',
+        details: 'Ensure X-Customer-Id header is sent with the request',
+      })
+    }
+    
+    console.error('[sequences] Error creating sequence:', error)
     return res.status(500).json({ error: 'Failed to create sequence' })
   }
 })
