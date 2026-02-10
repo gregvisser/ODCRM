@@ -2,6 +2,21 @@
 
 Backend API server for the OpensDoors CRM Email Campaigns module.
 
+## ⚠️ IMPORTANT: Always Run Prisma Commands from `/server`
+
+**Single source of truth:** All Prisma files are in `server/prisma/`
+
+```bash
+# ❌ WRONG (from repo root) - will fail or show "0 migrations found"
+npx prisma migrate status
+
+# ✅ CORRECT (from server directory)
+cd server
+npx prisma migrate status
+```
+
+**Why:** The repo root has `prisma/schema.prisma` (legacy/unused), but the canonical location is `server/prisma/`. Running from root will use the wrong path.
+
 ## Quick Start
 
 1. Install dependencies:
@@ -88,17 +103,43 @@ The server automatically starts two background workers:
 
 ## Database
 
-Uses Prisma ORM with PostgreSQL. Run migrations with:
+Uses Prisma ORM with PostgreSQL.
+
+### Run migrations (from `/server` directory):
 
 ```bash
+cd server
+
+# Development (creates migration + applies)
 npx prisma migrate dev
+
+# Production (applies existing migrations only)
+npx prisma migrate deploy
+
+# Check migration status
+npx prisma migrate status
 ```
 
-View database in Prisma Studio:
+### View database in Prisma Studio:
 
 ```bash
+cd server
 npx prisma studio
 ```
+
+### Check which database you're connected to:
+
+```bash
+cd server
+
+# Linux/macOS/Git Bash:
+bash scripts/show-db-host.sh
+
+# Windows PowerShell:
+.\scripts\show-db-host.ps1
+```
+
+This will print only the hostname (never the password) to verify you're connected to the correct database.
 
 ## Development
 

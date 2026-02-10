@@ -32,6 +32,39 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+    - name: Validate Prisma setup
+      run: |
+        cd server
+        # Fail build if critical paths are wrong
+        if [ ! -f "prisma/schema.prisma" ]; then
+          echo "❌ ERROR: prisma/schema.prisma not found in /server"
+          exit 1
+        fi
+        if [ ! -d "prisma/migrations" ]; then
+          echo "❌ ERROR: prisma/migrations folder not found in /server"
+          exit 1
+        fi
+        MIGRATION_COUNT=$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+        if [ "$MIGRATION_COUNT" -eq 0 ]; then
+          echo "❌ ERROR: No migrations found in prisma/migrations"
+          exit 1
+        fi
+        echo "✅ Validation passed:"
+        echo "   - Schema: prisma/schema.prisma exists"
+        echo "   - Migrations: $MIGRATION_COUNT migrations found"
+
+    - name: Log DB connection info (sanitized)
+      run: |
+        cd server
+        # Extract and log only the hostname (never password)
+        DB_HOST=$(echo "$DATABASE_URL" | grep -oP '(?<=@)[^:/]+' || echo "PARSE_FAILED")
+        echo "✅ DB Host: $DB_HOST"
+        if [ "$DB_HOST" = "PARSE_FAILED" ]; then
+          echo "⚠️  WARNING: Could not parse DB hostname from DATABASE_URL"
+        fi
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
     - name: Baseline existing migrations (if needed)
       run: |
         cd server
