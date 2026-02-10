@@ -1126,10 +1126,11 @@ router.post('/:id/agreement', async (req, res) => {
       blobName
     })
 
-    const fileUrl = uploadResult.url
+    // Store blob reference (not direct URL - use SAS for access)
+    const containerName = process.env.AZURE_STORAGE_CONTAINER_AGREEMENTS || 'customer-agreements'
 
     // Log agreement upload details for verification
-    console.log(`[agreement] customerId=${id} blobName=${blobName} url=${fileUrl} size=${buffer.length}`)
+    console.log(`[agreement] customerId=${id} container=${containerName} blobName=${blobName} size=${buffer.length}`)
 
     // Get actor email from auth context (server-derived only)
     const actorIdentity = getActorIdentity(req)
@@ -1155,18 +1156,25 @@ router.post('/:id/agreement', async (req, res) => {
     const updatedCustomer = await prisma.customer.update({
       where: { id },
       data: {
-        agreementFileUrl: fileUrl,
+        // Store blob reference for SAS generation (NEW - REQUIRED)
+        agreementBlobName: blobName,
+        agreementContainerName: containerName,
+        // Legacy URL kept for backward compatibility (not used for access)
+        agreementFileUrl: null,
+        // Metadata
         agreementFileName: fileName,
         agreementFileMimeType: mimeType,
         agreementUploadedAt: new Date(),
         agreementUploadedByEmail: actorEmail,
+        // Progress tracker
         accountData: updatedAccountData,
         updatedAt: new Date()
       },
       select: {
         id: true,
         name: true,
-        agreementFileUrl: true,
+        agreementBlobName: true,
+        agreementContainerName: true,
         agreementFileName: true,
         agreementFileMimeType: true,
         agreementUploadedAt: true,
@@ -1177,14 +1185,15 @@ router.post('/:id/agreement', async (req, res) => {
 
     console.log(`✅ Agreement uploaded for customer ${customer.name} (${id})`)
     console.log(`   File: ${fileName}`)
-    console.log(`   URL: ${fileUrl}`)
+    console.log(`   Blob: ${containerName}/${blobName}`)
     console.log(`   Progress tracker updated: sales_contract_signed = true`)
 
     return res.status(201).json({
       success: true,
       agreement: {
         fileName: updatedCustomer.agreementFileName,
-        fileUrl: updatedCustomer.agreementFileUrl,
+        blobName: updatedCustomer.agreementBlobName,
+        containerName: updatedCustomer.agreementContainerName,
         mimeType: updatedCustomer.agreementFileMimeType,
         uploadedAt: updatedCustomer.agreementUploadedAt?.toISOString(),
         uploadedByEmail: updatedCustomer.agreementUploadedByEmail
@@ -1196,6 +1205,109 @@ router.post('/:id/agreement', async (req, res) => {
     console.error('Error uploading agreement:', error)
     return res.status(500).json({ 
       error: 'Failed to upload agreement',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
+// GET /api/customers/:id/agreement-download - Generate SAS URL for agreement download
+// Returns a short-lived (15 min) SAS URL for accessing the agreement blob
+router.get('/:id/agreement-download', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    // Validate customer exists and has agreement
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        agreementBlobName: true,
+        agreementContainerName: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementFileUrl: true, // Legacy field for backward compatibility
+      }
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    // Check for blob-based agreement (new format)
+    if (customer.agreementBlobName && customer.agreementContainerName) {
+      // Generate SAS URL for blob access
+      const { generateAgreementSasUrl } = await import('../utils/blobSas.js')
+      
+      const sasResult = await generateAgreementSasUrl({
+        containerName: customer.agreementContainerName,
+        blobName: customer.agreementBlobName,
+        ttlMinutes: 15
+      })
+
+      console.log(`[agreement-download] Generated SAS for customer ${id}: ${customer.agreementFileName}`)
+
+      return res.status(200).json({
+        url: sasResult.url,
+        fileName: customer.agreementFileName || 'agreement.pdf',
+        mimeType: customer.agreementFileMimeType || 'application/pdf',
+        expiresAt: sasResult.expiresAt.toISOString()
+      })
+    }
+
+    // Legacy: Try to parse blobName from agreementFileUrl if available
+    if (customer.agreementFileUrl) {
+      const urlMatch = customer.agreementFileUrl.match(/\/([^\/]+)\/([^\/\?]+)(?:\?|$)/)
+      if (urlMatch) {
+        const containerName = urlMatch[1]
+        const blobName = decodeURIComponent(urlMatch[2])
+
+        // Backfill blob fields in database for future requests
+        await prisma.customer.update({
+          where: { id },
+          data: {
+            agreementBlobName: blobName,
+            agreementContainerName: containerName
+          }
+        })
+
+        console.log(`[agreement-download] Backfilled blob fields for customer ${id} from legacy URL`)
+
+        // Generate SAS URL
+        const { generateAgreementSasUrl } = await import('../utils/blobSas.js')
+        const sasResult = await generateAgreementSasUrl({
+          containerName,
+          blobName,
+          ttlMinutes: 15
+        })
+
+        return res.status(200).json({
+          url: sasResult.url,
+          fileName: customer.agreementFileName || 'agreement.pdf',
+          mimeType: customer.agreementFileMimeType || 'application/pdf',
+          expiresAt: sasResult.expiresAt.toISOString()
+        })
+      }
+
+      // Legacy local filesystem URL (/uploads/)
+      if (customer.agreementFileUrl.includes('/uploads/')) {
+        return res.status(410).json({
+          error: 'legacy_file_unavailable',
+          message: 'Agreement file is stored in legacy format and unavailable. Please re-upload.'
+        })
+      }
+    }
+
+    // No agreement found
+    return res.status(404).json({
+      error: 'no_agreement',
+      message: 'No agreement uploaded for this customer'
+    })
+
+  } catch (error) {
+    console.error('Error generating agreement download URL:', error)
+    return res.status(500).json({
+      error: 'Failed to generate download URL',
       details: error instanceof Error ? error.message : 'Unknown error'
     })
   }

@@ -6277,26 +6277,59 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       </Select>
                     </FieldRow>
                     
-                    {/* Phase 2 Item 4: DB-backed Agreement Display */}
+                    {/* Phase 2 Item 4: DB-backed Agreement Display (SAS-based) */}
                     <FieldRow label="Agreement">
                       {(() => {
                         const customer = customers.find((c) => c.id === selectedAccount._databaseId)
                         const agreementFileName = (customer as any)?.agreementFileName
-                        const agreementFileUrl = (customer as any)?.agreementFileUrl
+                        const agreementBlobName = (customer as any)?.agreementBlobName
                         const agreementUploadedAt = (customer as any)?.agreementUploadedAt
                         
-                        if (agreementFileUrl && agreementFileName) {
+                        // Check for new blob-based agreement or legacy URL
+                        const hasAgreement = agreementBlobName || (customer as any)?.agreementFileUrl
+                        
+                        if (hasAgreement && agreementFileName) {
+                          const handleViewAgreement = async () => {
+                            try {
+                              const response = await fetch(`/api/customers/${customer.id}/agreement-download`)
+                              if (!response.ok) {
+                                const errorData = await response.json()
+                                if (response.status === 410) {
+                                  toast({
+                                    title: 'Legacy File Unavailable',
+                                    description: 'Please re-upload the agreement file.',
+                                    status: 'warning',
+                                    duration: 5000,
+                                  })
+                                } else {
+                                  throw new Error(errorData.message || 'Failed to load agreement')
+                                }
+                                return
+                              }
+                              const data = await response.json()
+                              window.open(data.url, '_blank')
+                            } catch (error) {
+                              console.error('Error opening agreement:', error)
+                              toast({
+                                title: 'Error',
+                                description: 'Failed to open agreement file',
+                                status: 'error',
+                                duration: 5000,
+                              })
+                            }
+                          }
+
                           return (
                             <HStack spacing={2}>
-                              <Link
-                                href={agreementFileUrl}
-                                isExternal
-                                color="teal.600"
-                                fontSize="md"
+                              <Button
+                                size="sm"
+                                colorScheme="teal"
+                                variant="link"
+                                onClick={handleViewAgreement}
                                 fontWeight="medium"
                               >
                                 {agreementFileName}
-                              </Link>
+                              </Button>
                               {agreementUploadedAt && (
                                 <Text fontSize="xs" color="gray.500">
                                   ({new Date(agreementUploadedAt).toLocaleDateString()})

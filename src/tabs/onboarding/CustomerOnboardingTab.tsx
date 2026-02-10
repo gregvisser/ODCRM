@@ -214,7 +214,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
-  const [agreementData, setAgreementData] = useState<{ fileName?: string; fileUrl?: string; uploadedAt?: string } | null>(null)
+  const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -257,10 +257,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setCustomer(data)
       
       // Load agreement data if present (Phase 2 Item 4)
-      if ((data as any).agreementFileName && (data as any).agreementFileUrl) {
+      // Check for blob-based agreement (new) or legacy URL
+      const hasAgreement = (data as any).agreementBlobName || (data as any).agreementFileUrl
+      if ((data as any).agreementFileName && hasAgreement) {
         setAgreementData({
           fileName: (data as any).agreementFileName,
-          fileUrl: (data as any).agreementFileUrl,
           uploadedAt: (data as any).agreementUploadedAt,
         })
       } else {
@@ -518,7 +519,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       
       const { data, error } = await api.post<{
         success: boolean
-        agreement: { fileName: string; fileUrl: string; uploadedAt: string }
+        agreement: { fileName: string; blobName: string; uploadedAt: string }
         progressUpdated: boolean
       }>(
         `/api/customers/${customer.id}/agreement`,
@@ -535,7 +536,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       } else {
         setAgreementData({
           fileName: data.agreement.fileName,
-          fileUrl: data.agreement.fileUrl,
           uploadedAt: data.agreement.uploadedAt,
         })
         toast({
@@ -1452,13 +1452,47 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     isLoading={uploadingAgreement}
                     isDisabled={uploadingAgreement}
                   >
-                    {agreementData?.fileUrl ? 'Replace Agreement' : 'Upload Agreement'}
+                    {agreementData ? 'Replace Agreement' : 'Upload Agreement'}
                   </Button>
-                  {agreementData?.fileUrl ? (
+                  {agreementData ? (
                     <HStack spacing={2}>
-                      <Link href={agreementData.fileUrl} isExternal fontSize="sm" color="teal.600" fontWeight="medium">
+                      <Button
+                        size="sm"
+                        variant="link"
+                        colorScheme="teal"
+                        fontWeight="medium"
+                        onClick={async () => {
+                          try {
+                            const response = await fetch(`/api/customers/${customer.id}/agreement-download`)
+                            if (!response.ok) {
+                              const errorData = await response.json()
+                              if (response.status === 410) {
+                                toast({
+                                  title: 'Legacy File Unavailable',
+                                  description: 'Please re-upload the agreement file.',
+                                  status: 'warning',
+                                  duration: 5000,
+                                })
+                              } else {
+                                throw new Error(errorData.message || 'Failed to load agreement')
+                              }
+                              return
+                            }
+                            const data = await response.json()
+                            window.open(data.url, '_blank')
+                          } catch (error) {
+                            console.error('Error opening agreement:', error)
+                            toast({
+                              title: 'Error',
+                              description: 'Failed to open agreement file',
+                              status: 'error',
+                              duration: 5000,
+                            })
+                          }
+                        }}
+                      >
                         {agreementData.fileName || 'View agreement'}
-                      </Link>
+                      </Button>
                       {agreementData.uploadedAt && (
                         <Text fontSize="xs" color="gray.500">
                           (Uploaded {new Date(agreementData.uploadedAt).toLocaleDateString()})

@@ -123,11 +123,13 @@ model Customer {
   monthlyLeadActual     Int?
   
   // Agreement upload (Phase 2 Item 4)
-  agreementFileUrl      String?
+  agreementFileUrl      String?              // LEGACY: Direct blob URL (deprecated, use SAS instead)
   agreementFileName     String?
   agreementFileMimeType String?
   agreementUploadedAt   DateTime?
   agreementUploadedByEmail String?          // Server-derived only from auth context
+  agreementBlobName     String?              // Blob name in Azure Storage (for SAS generation)
+  agreementContainerName String?             // Container name (default: customer-agreements)
   
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
