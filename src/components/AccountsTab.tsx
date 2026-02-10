@@ -3523,6 +3523,8 @@ type AccountsTabProps = {
   focusAccountName?: string
   /** When provided, these accounts are used as the source of truth (from DB) */
   dbAccounts?: Account[]
+  /** Raw customers from DB (for fields not on Account type: labels, agreements) */
+  dbCustomers?: CustomerApi[]
   /** Data source indicator for debug display */
   dataSource?: 'DB' | 'CACHE'
 }
@@ -3598,7 +3600,7 @@ function deriveCustomerId(
   return { customerId: null, source: 'dbLookupName_invalidId' }
 }
 
-function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: AccountsTabProps) {
+function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = 'CACHE' }: AccountsTabProps) {
   const toast = useToast()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
@@ -3638,7 +3640,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
   
   // Customers data for displaying labels and agreement info
-  const [customers, setCustomers] = useState<CustomerApi[]>([])
+  // Use prop if provided (canonical), otherwise local state for legacy paths
+  const [customersLocal, setCustomersLocal] = useState<CustomerApi[]>([])
+  const customers = dbCustomers ?? customersLocal
   
   // Column widths state for resizable columns
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -5165,7 +5169,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
       
       // Store customers data for use in rendering (GoogleSheet labels, agreements)
-      setCustomers(data)
+      // Only set if not provided via prop (legacy path support)
+      if (!dbCustomers) {
+        setCustomersLocal(data)
+      }
 
       // Only update if server has data
       if (data.length === 0) {

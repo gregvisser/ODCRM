@@ -231,10 +231,11 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         </Badge>
       </HStack>
       
-      {/* Render AccountsTab with DB accounts as source of truth */}
+      {/* Render AccountsTab with DB accounts and customers as source of truth */}
       <AccountsTab 
         focusAccountName={focusAccountName} 
         dbAccounts={dbAccounts}
+        dbCustomers={customers}
         dataSource="DB"
       />
     </Box>
