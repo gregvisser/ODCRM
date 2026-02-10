@@ -50,6 +50,14 @@ export async function uploadAgreement(
   const containerName =
     process.env.AZURE_STORAGE_CONTAINER_AGREEMENTS || 'customer-agreements'
 
+  // Extract storage account name from connection string
+  // Format: AccountName=<name>;...
+  const accountNameMatch = connectionString.match(/AccountName=([^;]+)/)
+  if (!accountNameMatch) {
+    throw new Error('Could not parse AccountName from AZURE_STORAGE_CONNECTION_STRING')
+  }
+  const storageAccountName = accountNameMatch[1]
+
   try {
     // Initialize Blob Service Client
     const blobServiceClient =
@@ -87,24 +95,21 @@ export async function uploadAgreement(
       )
     }
 
-    // CRITICAL: Manually construct URL with proper encoding
-    // blockBlobClient.url may not properly encode blob names with special chars
-    // We need to encode ONLY the blob name portion, not the entire URL
-    const baseUrl = blockBlobClient.url.split(`/${containerName}/`)[0]
-    const encodedBlobName = encodeURIComponent(blobName)
-    const url = `${baseUrl}/${containerName}/${encodedBlobName}`
+    // CRITICAL: Verify blob exists after upload
+    const blobProperties = await blockBlobClient.getProperties()
+    if (!blobProperties.contentLength || blobProperties.contentLength !== buffer.length) {
+      throw new Error(
+        `Blob verification failed: expected ${buffer.length} bytes, got ${blobProperties.contentLength || 0}`
+      )
+    }
 
-    // Detailed logging for debugging (production-safe)
-    console.log('[blobUpload] Successfully uploaded agreement:', {
-      containerName,
-      blobNameOriginal: blobName,
-      blobNameEncoded: encodedBlobName,
-      urlReturned: url,
-      urlFromSDK: blockBlobClient.url,
-      urlsMatch: url === blockBlobClient.url,
-      size: buffer.length,
-      contentType,
-    })
+    // CRITICAL: Construct URL from scratch - DO NOT trust SDK url
+    // Azure Blob URL format: https://{account}.blob.core.windows.net/{container}/{blob}
+    const encodedBlobName = encodeURIComponent(blobName)
+    const url = `https://${storageAccountName}.blob.core.windows.net/${containerName}/${encodedBlobName}`
+
+    // Concise production logging
+    console.log(`[blobUpload] ✅ ${blobName} → ${url} (${buffer.length} bytes)`)
 
     return {
       url,

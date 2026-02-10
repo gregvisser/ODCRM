@@ -1128,6 +1128,9 @@ router.post('/:id/agreement', async (req, res) => {
 
     const fileUrl = uploadResult.url
 
+    // Log agreement upload details for verification
+    console.log(`[agreement] customerId=${id} blobName=${blobName} url=${fileUrl} size=${buffer.length}`)
+
     // Get actor email from auth context (server-derived only)
     const actorIdentity = getActorIdentity(req)
     const actorEmail = actorIdentity?.email || null
