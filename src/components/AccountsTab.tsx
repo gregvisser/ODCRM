@@ -3521,10 +3521,10 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
 
 type AccountsTabProps = {
   focusAccountName?: string
-  /** When provided, these accounts are used as the source of truth (from DB) */
-  dbAccounts?: Account[]
-  /** Raw customers from DB (for fields not on Account type: labels, agreements) */
-  dbCustomers?: CustomerApi[]
+  /** Accounts from DB (REQUIRED - use AccountsTabDatabase wrapper) */
+  dbAccounts: Account[]
+  /** Raw customers from DB for fields not on Account type: labels, agreements (REQUIRED) */
+  dbCustomers: CustomerApi[]
   /** Data source indicator for debug display */
   dataSource?: 'DB' | 'CACHE'
 }
@@ -3639,10 +3639,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Load deleted accounts to prevent re-adding them
   const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
   
-  // Customers data for displaying labels and agreement info
-  // Use prop if provided (canonical), otherwise local state for legacy paths
-  const [customersLocal, setCustomersLocal] = useState<CustomerApi[]>([])
-  const customers = dbCustomers ?? customersLocal
+  // Customers data for displaying labels and agreement info (CANONICAL SOURCE ONLY)
+  // Defensive guard: ensure always array, but log error if not
+  const customers = Array.isArray(dbCustomers) ? dbCustomers : (() => {
+    console.error('[AccountsTab] dbCustomers is not an array. This is a bug. Use AccountsTabDatabase wrapper.')
+    return []
+  })()
   
   // Column widths state for resizable columns
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
@@ -3753,26 +3755,24 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     setContactsData(loadContactsFromStorage())
   }, [])
 
-  // Load initial data: prefer dbAccounts prop (from DB), fallback to localStorage
+  // Load initial data from dbAccounts prop (REQUIRED - no localStorage fallback)
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
-    // If DB accounts provided, use them as source of truth
-    if (dbAccounts && dbAccounts.length > 0) {
-      console.log('[AccountsTab] Initializing from DB accounts:', dbAccounts.length)
-      return dbAccounts
+    if (!Array.isArray(dbAccounts)) {
+      console.error('[AccountsTab] dbAccounts is not an array. Use AccountsTabDatabase wrapper.')
+      return []
     }
-    // Fallback to localStorage (legacy path)
-    const loaded = loadAccountsFromStorage()
-    const deletedAccountsSet = loadDeletedAccountsFromStorage()
-    console.log('[AccountsTab] Initializing from localStorage:', loaded.length)
-    return loaded.filter(acc => !deletedAccountsSet.has(acc.name))
+    console.log('[AccountsTab] Initializing from DB accounts:', dbAccounts.length)
+    return dbAccounts
   })
   
   // Sync accountsData when dbAccounts prop changes (DB refresh)
   useEffect(() => {
-    if (dbAccounts && dbAccounts.length > 0) {
-      console.log('[AccountsTab] DB accounts updated, syncing:', dbAccounts.length)
-      setAccountsData(dbAccounts)
+    if (!Array.isArray(dbAccounts)) {
+      console.error('[AccountsTab] dbAccounts prop is not an array')
+      return
     }
+    console.log('[AccountsTab] DB accounts updated, syncing:', dbAccounts.length)
+    setAccountsData(dbAccounts)
   }, [dbAccounts])
 
   useEffect(() => {
@@ -5138,75 +5138,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
   }, [accountsData, isServerSourceOfTruth, toast])
 
-  // Rehydrate account details from backend customers (server source of truth).
-  useEffect(() => {
-    if (hasSyncedCustomersRef.current) return
-
-    const syncFromCustomers = async () => {
-      // First, load from localStorage as fallback
-      const localAccounts = loadAccountsFromStorage()
-      const deletedAccountsSet = loadDeletedAccountsFromStorage()
-      const filteredLocalAccounts = localAccounts.filter(acc => !deletedAccountsSet.has(acc.name))
-      
-      // If we have local accounts, set them immediately so UI isn't empty
-      if (filteredLocalAccounts.length > 0 && accountsData.length === 0) {
-        setAccountsData(filteredLocalAccounts)
-        hasHydratedFromServerRef.current = true
-      }
-
-      // Then try to load from server
-      const { data: rawData, error } = await api.get('/api/customers')
-      if (error || !rawData) {
-        console.warn('Failed to load accounts from the customer database. Using local storage data.')
-        // Don't overwrite local storage if server call fails
-        if (filteredLocalAccounts.length > 0) {
-          hasHydratedFromServerRef.current = true
-          return
-        }
-        return
-      }
-      
-      const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
-      
-      // Store customers data for use in rendering (GoogleSheet labels, agreements)
-      // Only set if not provided via prop (legacy path support)
-      if (!dbCustomers) {
-        setCustomersLocal(data)
-      }
-
-      // Only update if server has data
-      if (data.length === 0) {
-        console.warn('Server returned empty accounts array. Keeping local storage data.')
-        if (filteredLocalAccounts.length > 0) {
-          hasHydratedFromServerRef.current = true
-        }
-        return
-      }
-
-      const serverAccounts = data.map(buildAccountFromCustomer)
-      const nextHash = computeAccountsSyncHash(serverAccounts)
-      if (isStorageAvailable()) {
-        setItem(OdcrmStorageKeys.accountsBackendSyncHash, nextHash)
-        setItem(OdcrmStorageKeys.accountsBackendSyncVersion, 'v2-account-data')
-        saveDeletedAccountsToStorage(new Set())
-        saveAccountsToStorage(serverAccounts)
-      }
-      lastSyncedHashRef.current = nextHash
-      hasSyncedCustomersRef.current = true
-      hasHydratedFromServerRef.current = true
-      setAccountsData(serverAccounts)
-      emit('accountsUpdated', serverAccounts)
-      toast({
-        title: 'Accounts updated',
-        description: 'Loaded account details from the customer database.',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      })
-    }
-
-    void syncFromCustomers()
-  }, [toast, accountsData.length])
+  // REMOVED: Legacy local fetch useEffect
+  // AccountsTabDatabase wrapper now handles ALL data loading via useCustomersFromDatabase hook
+  // This component ONLY receives data via props (dbAccounts, dbCustomers)
 
   const hasStoredAccounts = (() => {
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
