@@ -49,6 +49,7 @@ jobs:
         npx prisma migrate resolve --applied "20260202000000_add_lead_status_scoring_conversion" || true
         npx prisma migrate resolve --applied "20260202120000_add_sync_metrics_and_controls" || true
         npx prisma migrate resolve --applied "20260202160000_add_user_model" || true
+        npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
         echo "Baseline complete - existing migrations marked as applied"
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
