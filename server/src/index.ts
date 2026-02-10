@@ -159,6 +159,9 @@ app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
 
 app.use(express.json())
+// LEGACY: Local filesystem uploads (deprecated for new files)
+// New agreement uploads use Azure Blob Storage (see blobUpload.ts)
+// This route kept for backwards compatibility with old file URLs only
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
 
 // Health check

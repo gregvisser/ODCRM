@@ -1052,6 +1052,7 @@ router.get('/:id/audit', async (req, res) => {
 
 // POST /api/customers/:id/agreement - Upload customer agreement
 // Phase 2 Item 4: Agreement upload with auto-tick progress tracker
+// UPDATED: Now uses Azure Blob Storage for durable file storage
 router.post('/:id/agreement', async (req, res) => {
   try {
     const { id } = req.params
@@ -1092,8 +1093,7 @@ router.post('/:id/agreement', async (req, res) => {
       })
     }
 
-    // Upload file using existing infrastructure
-    // Reuse the upload logic from uploads.ts
+    // Decode base64 data
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
     if (!match) {
       return res.status(400).json({ error: 'Invalid dataUrl format' })
@@ -1102,27 +1102,17 @@ router.post('/:id/agreement', async (req, res) => {
     const base64Data = match[2]
     const buffer = Buffer.from(base64Data, 'base64')
 
-    // Save file to uploads directory
-    const fs = await import('node:fs/promises')
-    const path = await import('node:path')
+    // Upload to Azure Blob Storage (replaces local filesystem storage)
+    const { uploadAgreement, generateAgreementBlobName } = await import('../utils/blobUpload.js')
+    const blobName = generateAgreementBlobName(id, fileName)
     
-    const uploadsDir = path.resolve(process.cwd(), 'uploads')
-    await fs.mkdir(uploadsDir, { recursive: true })
+    const uploadResult = await uploadAgreement({
+      buffer,
+      contentType: mimeType,
+      blobName
+    })
 
-    const sanitizeFileName = (name: string): string => {
-      const safe = name.replace(/[^a-zA-Z0-9._-]/g, '_')
-      return safe || 'agreement'
-    }
-
-    const safeName = sanitizeFileName(fileName)
-    const uniqueName = `agreement_${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`
-    const filePath = path.join(uploadsDir, uniqueName)
-
-    await fs.writeFile(filePath, buffer)
-
-    // Construct file URL
-    const baseUrl = process.env.API_PUBLIC_BASE_URL || 'http://localhost:3001'
-    const fileUrl = `${baseUrl}/uploads/${uniqueName}`
+    const fileUrl = uploadResult.url
 
     // Get actor email from auth context (server-derived only)
     const actorIdentity = getActorIdentity(req)
