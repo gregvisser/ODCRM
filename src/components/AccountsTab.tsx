@@ -2049,14 +2049,14 @@ const UK_AREAS = [
 
 const sectionsToPlainText = (sections: AboutSections) =>
   [
-    `What they do: ${sections.whatTheyDo}`,
-    `Company size: ${sections.companySize}`,
-    `Headquarters: ${sections.headquarters}`,
-    `Founded: ${sections.foundingYear}`,
-    `Accreditations: ${sections.accreditations}`,
-    `Key leaders: ${sections.keyLeaders}`,
-    `Company profile: ${sections.companyProfile}`,
-    `Recent news: ${sections.recentNews}`,
+    `What they do: ${sections?.whatTheyDo ?? ''}`,
+    `Company size: ${sections?.companySize ?? ''}`,
+    `Headquarters: ${sections?.headquarters ?? ''}`,
+    `Founded: ${sections?.foundingYear ?? ''}`,
+    `Accreditations: ${sections?.accreditations ?? ''}`,
+    `Key leaders: ${sections?.keyLeaders ?? ''}`,
+    `Company profile: ${sections?.companyProfile ?? ''}`,
+    `Recent news: ${sections?.recentNews ?? ''}`,
   ].join(' ')
 
 const truncateText = (text: string, maxLength = 240) =>
@@ -2096,32 +2096,32 @@ const socialPresenceBlock = (socialMedia: SocialProfile[]) => {
 
 const detailedSections = (sections: AboutSections) => {
   const sectionsList: Array<{ heading: string; value: string }> = [
-    { heading: 'What they do', value: sections.whatTheyDo },
+    { heading: 'What they do', value: sections?.whatTheyDo ?? '' },
   ]
 
-  if (sections.companySize) {
+  if (sections?.companySize) {
     sectionsList.push({ heading: 'Company size', value: sections.companySize })
   }
-  if (sections.headquarters) {
+  if (sections?.headquarters) {
     sectionsList.push({ heading: 'Headquarters', value: sections.headquarters })
   }
-  if (sections.foundingYear) {
+  if (sections?.foundingYear) {
     sectionsList.push({ heading: 'Founded', value: sections.foundingYear })
   }
-  if (!sections.companySize && !sections.headquarters && !sections.foundingYear && sections.companyProfile) {
+  if (!sections?.companySize && !sections?.headquarters && !sections?.foundingYear && sections?.companyProfile) {
     sectionsList.push({ heading: 'Company profile', value: sections.companyProfile })
   }
   
-  if (sections.accreditations) {
+  if (sections?.accreditations) {
     sectionsList.push({ heading: 'Accreditations', value: sections.accreditations })
   }
-  if (sections.keyLeaders) {
+  if (sections?.keyLeaders) {
     sectionsList.push({ heading: 'Key leaders', value: sections.keyLeaders })
   }
-  if (sections.companyProfile && (sections.companySize || sections.headquarters || sections.foundingYear)) {
+  if (sections?.companyProfile && (sections?.companySize || sections?.headquarters || sections?.foundingYear)) {
     sectionsList.push({ heading: 'Company profile', value: sections.companyProfile })
   }
-  if (sections.recentNews) {
+  if (sections?.recentNews) {
     sectionsList.push({ heading: 'Recent news', value: sections.recentNews })
   }
   
@@ -2253,7 +2253,7 @@ const renderAboutField = (
   const shouldShowToggle = hasExtendedAbout(sections)
 
   if (!expanded && shouldShowToggle) {
-    const whatTheyDoFormatted = formatStoredValue(sections.whatTheyDo)
+    const whatTheyDoFormatted = formatStoredValue(sections?.whatTheyDo ?? '')
     return (
       <Stack spacing={3}>
         {/* Website Link */}
@@ -6061,13 +6061,34 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     borderColor="gray.100"
                     bg="gray.50"
                   >
-                    {renderAboutField(
-                      selectedAccount.aboutSections,
-                      expandedAbout[selectedAccount.name],
-                      () => handleToggleAbout(selectedAccount.name),
-                      selectedAccount.socialMedia || [],
-                      selectedAccount.aboutSections?.headquarters,
-                      selectedAccount.website,
+                    {(() => {
+                      // Normalize aboutSections to prevent undefined access crashes
+                      const aboutSections = selectedAccount.aboutSections ?? {
+                        whatTheyDo: '',
+                        accreditations: '',
+                        keyLeaders: '',
+                        companyProfile: '',
+                        recentNews: '',
+                        companySize: '',
+                        headquarters: '',
+                        foundingYear: '',
+                      }
+                      
+                      // DEV-only: Log when normalization is triggered
+                      if (process.env.NODE_ENV === 'development' && !selectedAccount.aboutSections) {
+                        console.error('[AccountsTab] Malformed account record - aboutSections is undefined:', {
+                          accountName: selectedAccount.name,
+                          accountId: selectedAccount.id,
+                        })
+                      }
+                      
+                      return renderAboutField(
+                        aboutSections,
+                        expandedAbout[selectedAccount.name],
+                        () => handleToggleAbout(selectedAccount.name),
+                        selectedAccount.socialMedia || [],
+                        aboutSections.headquarters,
+                        selectedAccount.website,
                       async (newWebsite: string) => {
                         const normalized = normalizeCustomerWebsite(newWebsite)
                         updateAccount(selectedAccount.name, { website: normalized })
@@ -6120,7 +6141,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       isFieldEditing(selectedAccount.name, 'website'),
                       () => startEditing(selectedAccount.name, 'website'),
                       () => stopEditing(selectedAccount.name, 'website'),
-                    )}
+                    )
+                    })()}
                   </Box>
                 </Box>
 
