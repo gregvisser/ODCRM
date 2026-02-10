@@ -6066,7 +6066,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       expandedAbout[selectedAccount.name],
                       () => handleToggleAbout(selectedAccount.name),
                       selectedAccount.socialMedia || [],
-                      selectedAccount.aboutSections.headquarters,
+                      selectedAccount.aboutSections?.headquarters,
                       selectedAccount.website,
                       async (newWebsite: string) => {
                         const normalized = normalizeCustomerWebsite(newWebsite)
