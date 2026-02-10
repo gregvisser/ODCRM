@@ -5808,32 +5808,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
               </Stack>
             </DrawerHeader>
             
-            {/* DEBUG: Debug display for customer ID verification (dev only) */}
-            {import.meta.env.DEV && (
-              <Box bg="yellow.50" px={4} py={2} borderBottom="1px solid" borderColor="yellow.200">
-                <HStack spacing={4} fontSize="xs" fontFamily="mono">
-                  <Text>
-                    <Text as="span" fontWeight="bold">customerId:</Text>{' '}
-                    <Text as="span" color={selectedCustomerId ? 'green.600' : 'red.600'}>
-                      {selectedCustomerId || 'null'}
-                    </Text>
-                  </Text>
-                  <Text>
-                    <Text as="span" fontWeight="bold">source:</Text>{' '}
-                    <Text as="span" color={dataSource === 'DB' ? 'green.600' : 'orange.600'}>
-                      {dataSource}
-                    </Text>
-                  </Text>
-                  <Text>
-                    <Text as="span" fontWeight="bold">account.id:</Text>{' '}
-                    <Text as="span" color={selectedAccount?.id ? 'green.600' : 'red.600'}>
-                      {selectedAccount?.id || 'null'}
-                    </Text>
-                  </Text>
-                </HStack>
-              </Box>
-            )}
-            
             <DrawerBody bg="gray.50" p={6}>
               <Stack spacing={6} w="full">
                 {/* Quick Info Section */}
