@@ -315,13 +315,11 @@ export default function CustomersManagementTab() {
             </Tr>
           </Thead>
           <Tbody>
-            {!Array.isArray(customers) || customers.length === 0 ? (
+            {customers.length === 0 ? (
               <Tr>
                 <Td colSpan={8} textAlign="center" py={8}>
                   <Text color="gray.500">
-                    {!Array.isArray(customers) 
-                      ? 'Error loading customers. Please refresh the page.'
-                      : 'No customers yet. Create your first customer to get started.'}
+                    No customers yet. Create your first customer to get started.
                   </Text>
                 </Td>
               </Tr>
@@ -450,7 +448,7 @@ export default function CustomersManagementTab() {
                             </Box>
                           </Grid>
 
-                          {Array.isArray(customer.customerContacts) && customer.customerContacts.length > 0 && (
+                          {customer.customerContacts.length > 0 && (
                             <>
                               <Divider my={2} />
                               <Text fontWeight="bold" fontSize="sm">

@@ -158,7 +158,15 @@ function detectFailingField(obj: Record<string, any>): { fieldName: string; erro
   return null
 }
 
-// GET /api/customers - List all customers with their contacts
+/**
+ * GET /api/customers - List all customers with their contacts
+ * 
+ * STABLE API CONTRACT:
+ * - ALWAYS returns: { customers: DatabaseCustomer[], warnings?: Warning[] }
+ * - NEVER returns: DatabaseCustomer[] (bare array)
+ * - Even when empty: { customers: [] }
+ * - This prevents frontend shape confusion and makes errors explicit
+ */
 router.get('/', async (req, res) => {
   const correlationId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   
@@ -199,8 +207,9 @@ router.get('/', async (req, res) => {
     console.log(`[${correlationId}] Fetched ${customers.length} customers`)
 
     if (customers.length === 0) {
-      console.log(`[${correlationId}] No customers, returning empty array`)
-      return res.json([])
+      console.log(`[${correlationId}] No customers, returning empty wrapped response`)
+      // STABLE API CONTRACT: Always return { customers: [] } format (never bare array)
+      return res.json({ customers: [] })
     }
 
     console.log(`[${correlationId}] Starting serialization with per-customer sandboxing...`)
