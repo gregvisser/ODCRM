@@ -2073,7 +2073,7 @@ const socialPresenceBlock = (socialMedia: SocialProfile[]) => {
         Social presence
       </Text>
       <Wrap spacing={2}>
-        {socialMedia.map((profile) => (
+        {(socialMedia ?? []).map((profile) => (
           <WrapItem key={profile.label}>
             <Link 
               href={profile.url} 
@@ -2614,12 +2614,12 @@ function getFieldConfig(contactsData: StoredContact[]): FieldConfig[] {
     render: (account) => (
       <Stack spacing={2}>
         <AvatarGroup size="sm" max={4}>
-          {account.users.map((user) => (
+          {(account.users ?? []).map((user) => (
             <Avatar key={user.name} name={user.name} />
           ))}
         </AvatarGroup>
         <Wrap spacing={2}>
-          {account.users.map((user) => (
+          {(account.users ?? []).map((user) => (
             <WrapItem key={`${user.name}-role`}>
               <Badge variant="subtle" colorScheme="gray">
                 {user.name}
@@ -3784,7 +3784,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     setItem(STORAGE_KEY_GOOGLE_SHEETS_CLEARED, 'true')
     if (!hasSheets) return
 
-    const cleared = accountsData.map((account) =>
+    const cleared = (accountsData ?? []).map((account) =>
       account.clientLeadsSheetUrl ? { ...account, clientLeadsSheetUrl: '' } : account,
     )
     setAccountsData(cleared)
@@ -4340,7 +4340,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     if (!accountsData || accountsData.length === 0) return
     hasAutoEnrichedRef.current = true
 
-    const sanitized = accountsData.map((account) => {
+    const sanitized = (accountsData ?? []).map((account) => {
       if (account.aboutSource === 'web') return account
       return {
         ...account,
@@ -4634,7 +4634,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   }
 
   // Sort accounts based on selected column
-  const filteredAndSortedAccounts = [...accountsData].sort((a, b) => {
+  const filteredAndSortedAccounts = [...(accountsData ?? [])].sort((a, b) => {
     const column = sortColumn || 'spend'
     const aValue = (() => {
       switch (column) {
@@ -5149,7 +5149,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     return accounts !== null && accounts.length > 0
   })()
 
-  const accountNames = accountsData.map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
+  const accountNames = (accountsData ?? []).map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
   const fieldConfig = getFieldConfig(contactsData)
 
   // Load leads data function
@@ -5170,7 +5170,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     try {
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
       const sheetAccounts = new Set(
-        accountsData
+        (accountsData ?? [])
           .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
           .map((account) => account.name),
       )
@@ -5961,7 +5961,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     </Box>
                   ) : (
                     <Stack spacing={3}>
-                      {connectedEmails.map((email) => (
+                      {(connectedEmails ?? []).map((email) => (
                         <Box
                           key={email.id}
                           p={3}
