@@ -122,7 +122,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       ]
     }
 
-    // Customer selected - show full onboarding tabs
+    // Customer selected - show full onboarding tabs + option to create new
     return [
       {
         id: 'overview',
@@ -152,8 +152,15 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         content: <ProgressTrackerTab customerId={selectedCustomerId} />,
         sortOrder: 2,
       },
+      {
+        id: 'create-customer',
+        label: '+ Create New Customer',
+        icon: EditIcon,
+        content: <CreateCustomerStep onCustomerCreated={handleCustomerCreated} />,
+        sortOrder: 3,
+      },
     ]
-  }, [selectedCustomerId, handleCustomerCreated])
+  }, [selectedCustomerId, handleCustomerCreated, customerData, handleStatusUpdated])
 
   return (
     <Flex direction="column" h="100%">

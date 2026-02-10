@@ -3637,6 +3637,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   // Load deleted accounts to prevent re-adding them
   const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
   
+  // Customers data for displaying labels and agreement info
+  const [customers, setCustomers] = useState<CustomerApi[]>([])
+  
   // Column widths state for resizable columns
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     const stored = getItem('odcrm_accounts_column_widths')
@@ -5160,6 +5163,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       }
       
       const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
+      
+      // Store customers data for use in rendering (GoogleSheet labels, agreements)
+      setCustomers(data)
 
       // Only update if server has data
       if (data.length === 0) {
