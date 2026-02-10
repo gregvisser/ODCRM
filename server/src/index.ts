@@ -158,7 +158,10 @@ app.use(cors(corsOptions))
 // Handle OPTIONS preflight requests explicitly
 app.options('*', cors(corsOptions))
 
-app.use(express.json())
+// Increased limit for agreement uploads (base64 encoding inflates file size ~1.37x)
+// 25MB JSON limit allows ~18MB original file after base64 decode
+app.use(express.json({ limit: '25mb' }))
+app.use(express.urlencoded({ extended: true, limit: '25mb' }))
 // LEGACY: Local filesystem uploads (deprecated for new files)
 // New agreement uploads use Azure Blob Storage (see blobUpload.ts)
 // This route kept for backwards compatibility with old file URLs only

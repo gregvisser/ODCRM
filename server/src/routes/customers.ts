@@ -1102,6 +1102,20 @@ router.post('/:id/agreement', async (req, res) => {
     const base64Data = match[2]
     const buffer = Buffer.from(base64Data, 'base64')
 
+    // Validate file size (hard cap at 10MB decoded file size)
+    const MAX_FILE_SIZE_MB = 10
+    const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
+    const fileSizeMB = (buffer.length / 1024 / 1024).toFixed(2)
+    
+    if (buffer.length > MAX_FILE_SIZE_BYTES) {
+      return res.status(413).json({ 
+        error: 'agreement_too_large',
+        message: `File size (${fileSizeMB}MB) exceeds maximum allowed size of ${MAX_FILE_SIZE_MB}MB`,
+        maxMb: MAX_FILE_SIZE_MB,
+        actualMb: parseFloat(fileSizeMB)
+      })
+    }
+
     // Upload to Azure Blob Storage (replaces local filesystem storage)
     const { uploadAgreement, generateAgreementBlobName } = await import('../utils/blobUpload.js')
     const blobName = generateAgreementBlobName(id, fileName)
