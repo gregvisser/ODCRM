@@ -36,6 +36,7 @@ import {
   EmailIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { settingsStore } from '../../../platform'
 
 // Customer type
@@ -173,29 +174,20 @@ const InboxTab: React.FC = () => {
   }
 
   const loadCustomers = async () => {
-    const { data, error: apiError } = await api.get<{ customers: Customer[] } | Customer[]>('/api/customers')
+    const { data, error: apiError } = await api.get('/api/customers')
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      // Use default customer if we can't load the list
       const defaultCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
       setSelectedCustomerId(defaultCustomerId)
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
-    } else {
-      // Normalize response: handle both array and { customers: array } shapes
-      let customerList: Customer[]
-      if (Array.isArray(data)) {
-        customerList = data
-      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-        customerList = data.customers
-      } else {
-        console.error('❌ Unexpected API response shape in InboxTab:', data)
-        customerList = []
-      }
-      
+      return
+    }
+
+    try {
+      const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
 
-      // Auto-select the first customer or the current one
       const currentCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
       const currentCustomer = customerList.find(c => c.id === currentCustomerId)
       if (currentCustomer) {
@@ -203,6 +195,11 @@ const InboxTab: React.FC = () => {
       } else if (customerList.length > 0) {
         setSelectedCustomerId(customerList[0].id)
       }
+    } catch (err: any) {
+      console.error('❌ Failed to normalize customers in InboxTab:', err)
+      const defaultCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
     }
   }
 

@@ -13,6 +13,7 @@ import {
 } from '@chakra-ui/react'
 import { RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { settingsStore } from '../../../platform'
 import { on } from '../../../platform/events'
 import { onboardingDebug } from '../utils/debug'
@@ -37,25 +38,22 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true)
     setLoadError(null)
-    const { data, error } = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+    const { data, error } = await api.get('/api/customers')
     if (error) {
       setLoadError(error)
       setIsLoading(false)
       return
     }
     
-    // Normalize response: handle both array and { customers: array } shapes
     let apiCustomers: CustomerApi[]
-    if (Array.isArray(data)) {
-      apiCustomers = data
-    } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-      apiCustomers = data.customers
-    } else {
-      apiCustomers = []
-      if (data) {
-        console.error('❌ Unexpected API response shape in CustomerSelector:', data)
-        setLoadError('Unexpected API response format')
-      }
+    try {
+      // Use canonical normalizer - throws on unexpected shape
+      apiCustomers = normalizeCustomersListResponse(data) as CustomerApi[]
+    } catch (err: any) {
+      console.error('❌ Failed to normalize customers response in CustomerSelector:', err)
+      setLoadError(err.message || 'Failed to parse customers response')
+      setIsLoading(false)
+      return
     }
     setCustomers(apiCustomers)
     if (!selectedCustomerId || !apiCustomers.some((item) => item.id === selectedCustomerId)) {

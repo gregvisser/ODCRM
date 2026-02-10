@@ -66,6 +66,7 @@ import {
   TimeIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { settingsStore } from '../../../platform'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
 
@@ -200,25 +201,19 @@ const SequencesTab: React.FC = () => {
   }, [selectedCustomerId])
 
   const loadCustomers = async () => {
-    const { data, error: apiError } = await api.get<{ customers: Customer[] } | Customer[]>('/api/customers')
+    const { data, error: apiError } = await api.get('/api/customers')
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
       const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
       setSelectedCustomerId(defaultCustomerId)
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
-    } else {
-      // Normalize response: handle both array and { customers: array } shapes
-      let customerList: Customer[]
-      if (Array.isArray(data)) {
-        customerList = data
-      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-        customerList = data.customers
-      } else {
-        console.error('❌ Unexpected API response shape in SequencesTab:', data)
-        customerList = []
-      }
-      
+      return
+    }
+
+    try {
+      // Use canonical normalizer - throws on unexpected shape
+      const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
 
       const currentCustomerId = getCurrentCustomerId('prod-customer-1')
@@ -228,6 +223,11 @@ const SequencesTab: React.FC = () => {
       } else if (customerList.length > 0) {
         setSelectedCustomerId(customerList[0].id)
       }
+    } catch (err: any) {
+      console.error('❌ Failed to normalize customers in SequencesTab:', err)
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
+      setSelectedCustomerId(defaultCustomerId)
+      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
     }
   }
 

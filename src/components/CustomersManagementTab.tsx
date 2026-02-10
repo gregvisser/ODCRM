@@ -49,6 +49,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, EditIcon, DeleteIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
+import { normalizeCustomersListResponse } from '../utils/normalizeApiResponse'
 import { GoogleSheetLink } from './links/GoogleSheetLink'
 
 type CustomerContact = {
@@ -159,40 +160,35 @@ export default function CustomersManagementTab() {
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await api.get<{ customers: Customer[] } | Customer[]>('/api/customers')
+    const { data, error } = await api.get('/api/customers')
+    
     if (error) {
       toast({
-        title: 'Error',
+        title: 'Error loading customers',
         description: error,
         status: 'error',
-        duration: 3000,
+        duration: 5000,
       })
-    } else if (data) {
-      // Normalize response: handle both array and { customers: array } shapes
-      let customersArray: Customer[]
-      
-      if (Array.isArray(data)) {
-        // Direct array response (legacy format)
-        customersArray = data
-      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-        // Wrapped response: { customers: [...] } (current production format)
-        customersArray = data.customers
-      } else {
-        // Unexpected response shape - fail safely
-        console.error('❌ Unexpected API response shape:', data)
-        toast({
-          title: 'Error',
-          description: 'Unexpected API response format. Please refresh.',
-          status: 'error',
-          duration: 5000,
-        })
-        setCustomers([])
-        setLoading(false)
-        return
-      }
-      
-      setCustomers(customersArray)
+      setCustomers([])
+      setLoading(false)
+      return
     }
+    
+    try {
+      // Use canonical normalizer - throws on unexpected shape
+      const customersArray = normalizeCustomersListResponse(data) as Customer[]
+      setCustomers(customersArray)
+    } catch (err: any) {
+      console.error('❌ Failed to normalize customers response:', err)
+      toast({
+        title: 'Error parsing customers',
+        description: err.message || 'Unexpected API response format',
+        status: 'error',
+        duration: 5000,
+      })
+      setCustomers([])
+    }
+    
     setLoading(false)
   }, [toast])
 

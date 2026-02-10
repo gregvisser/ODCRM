@@ -6,6 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../utils/api'
+import { normalizeCustomersListResponse } from '../utils/normalizeApiResponse'
 
 export type DatabaseCustomer = {
   id: string
@@ -74,33 +75,25 @@ export function useCustomersFromDatabase(): UseCustomersResult {
     setLoading(true)
     setError(null)
     
-    const { data, error: fetchError } = await api.get<{ customers: DatabaseCustomer[] } | DatabaseCustomer[]>('/api/customers')
+    const { data, error: fetchError } = await api.get('/api/customers')
     
     if (fetchError) {
       console.error('❌ Failed to fetch customers from database:', fetchError)
       setError(fetchError)
       setCustomers([])
-    } else if (data) {
-      // Normalize response: handle both array and { customers: array } shapes
-      let customersArray: DatabaseCustomer[]
-      
-      if (Array.isArray(data)) {
-        // Direct array response (legacy format)
-        customersArray = data
-      } else if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-        // Wrapped response: { customers: [...] } (current production format)
-        customersArray = data.customers
-      } else {
-        // Unexpected response shape - fail safely
-        console.error('❌ Unexpected API response shape:', data)
-        setError('Unexpected API response format. Please refresh.')
-        setCustomers([])
-        setLoading(false)
-        return
-      }
-      
+      setLoading(false)
+      return
+    }
+    
+    try {
+      // Use canonical normalizer - throws on unexpected shape
+      const customersArray = normalizeCustomersListResponse(data)
       console.log('✅ Loaded customers from database:', customersArray.length)
       setCustomers(customersArray)
+    } catch (err: any) {
+      console.error('❌ Failed to normalize customers response:', err)
+      setError(err.message || 'Failed to parse customers response')
+      setCustomers([])
     }
     
     setLoading(false)

@@ -221,23 +221,8 @@ type CustomerApi = {
   lastEnrichedAt?: string | null
 }
 
-/**
- * Normalize API response - handles both legacy array format and new { customers: [] } format
- * Prevents "t.map is not a function" crashes
- */
-function normalizeCustomersResponse(data: any): CustomerApi[] {
-  if (Array.isArray(data)) {
-    // Legacy format: direct array
-    return data
-  }
-  if (data && typeof data === 'object' && 'customers' in data && Array.isArray(data.customers)) {
-    // Current production format: { customers: [...] }
-    return data.customers
-  }
-  // Unexpected shape - return empty array and log error
-  console.error('❌ Unexpected customers API response shape:', data)
-  return []
-}
+// Import canonical normalizer instead of duplicating logic
+import { normalizeCustomersListResponse } from '../utils/normalizeApiResponse'
 
 export type Account = {
   // Database ID - this is the canonical ID from the database (e.g. "cust_...")
@@ -3855,10 +3840,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       let needsLeadsRefresh = false
 
       try {
-        const { data: rawData, error } = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+        const { data: rawData, error } = await api.get('/api/customers')
         if (error || !rawData) return
         
-        const data = normalizeCustomersResponse(rawData)
+        const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
         if (data.length === 0) return
 
         for (const account of accountsToSync) {
@@ -4478,7 +4463,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
   const deleteAccount = async (accountName: string) => {
     try {
       // First, fetch the customer from the database to get the ID
-      const { data: rawData, error } = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+      const { data: rawData, error } = await api.get('/api/customers')
       
       if (error || !rawData) {
         toast({
@@ -4491,7 +4476,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         return
       }
       
-      const customers = normalizeCustomersResponse(rawData)
+      const customers = normalizeCustomersListResponse(rawData) as CustomerApi[]
 
       const customer = customers.find(c => c.name === accountName)
       
@@ -5163,7 +5148,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
       }
 
       // Then try to load from server
-      const { data: rawData, error } = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+      const { data: rawData, error } = await api.get('/api/customers')
       if (error || !rawData) {
         console.warn('Failed to load accounts from the customer database. Using local storage data.')
         // Don't overwrite local storage if server call fails
@@ -5174,7 +5159,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
         return
       }
       
-      const data = normalizeCustomersResponse(rawData)
+      const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
 
       // Only update if server has data
       if (data.length === 0) {
@@ -6144,18 +6129,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dataSource = 'CACHE' }: Acc
                         // Auto-trigger AI enrichment when website is updated
                         if (normalized && isServerSourceOfTruth) {
                           try {
-                            const customersResponse = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+                            const customersResponse = await api.get('/api/customers')
                             if (!customersResponse.error && customersResponse.data) {
-                              const customersData = normalizeCustomersResponse(customersResponse.data)
+                              const customersData = normalizeCustomersListResponse(customersResponse.data) as CustomerApi[]
                               const customerApi = customersData.find((c) => c.name === selectedAccount.name)
                               if (customerApi) {
                                 // Trigger enrichment in background
                                 await api.post(`/api/customers/${customerApi.id}/enrich-about`, {})
                                 
                                 // Reload account data
-                                const updatedResponse = await api.get<{ customers: CustomerApi[] } | CustomerApi[]>('/api/customers')
+                                const updatedResponse = await api.get('/api/customers')
                                 if (!updatedResponse.error && updatedResponse.data) {
-                                  const updatedCustomersData = normalizeCustomersResponse(updatedResponse.data)
+                                  const updatedCustomersData = normalizeCustomersListResponse(updatedResponse.data) as CustomerApi[]
                                   const updatedCustomer = updatedCustomersData.find((c) => c.id === customerApi.id)
                                   if (updatedCustomer) {
                                     const updatedAccount = buildAccountFromCustomer(updatedCustomer)
