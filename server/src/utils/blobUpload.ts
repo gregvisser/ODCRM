@@ -87,12 +87,21 @@ export async function uploadAgreement(
       )
     }
 
-    // Return the blob URL (publicly accessible if container is public)
-    const url = blockBlobClient.url
+    // CRITICAL: Manually construct URL with proper encoding
+    // blockBlobClient.url may not properly encode blob names with special chars
+    // We need to encode ONLY the blob name portion, not the entire URL
+    const baseUrl = blockBlobClient.url.split(`/${containerName}/`)[0]
+    const encodedBlobName = encodeURIComponent(blobName)
+    const url = `${baseUrl}/${containerName}/${encodedBlobName}`
 
+    // Detailed logging for debugging (production-safe)
     console.log('[blobUpload] Successfully uploaded agreement:', {
-      blobName,
-      url,
+      containerName,
+      blobNameOriginal: blobName,
+      blobNameEncoded: encodedBlobName,
+      urlReturned: url,
+      urlFromSDK: blockBlobClient.url,
+      urlsMatch: url === blockBlobClient.url,
       size: buffer.length,
       contentType,
     })
