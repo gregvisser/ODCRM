@@ -21,7 +21,7 @@ type UploadAgreementParams = {
 }
 
 type UploadAgreementResult = {
-  /** Public or SAS URL to access the uploaded blob */
+  /** Blob URL (for reference only - container is private, access requires SAS) */
   url: string
   /** Full blob name including path */
   blobName: string
@@ -67,10 +67,9 @@ export async function uploadAgreement(
     const containerClient = blobServiceClient.getContainerClient(containerName)
     
     // Create container if it doesn't exist (idempotent)
-    // Note: In production, container should be pre-created with proper access level
-    await containerClient.createIfNotExists({
-      access: 'blob', // Public read access for blobs (not container listing)
-    })
+    // CRITICAL: Container MUST be private - all access via SAS only
+    // Omitting 'access' property defaults to private (no anonymous access)
+    await containerClient.createIfNotExists()
 
     // Get blob client for upload
     const blockBlobClient = containerClient.getBlockBlobClient(blobName)
