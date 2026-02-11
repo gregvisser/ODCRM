@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useRef, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, useRef, type ReactNode } from 'react'
 import {
   Avatar,
   AvatarGroup,
@@ -60,6 +60,7 @@ import {
 import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon, RepeatIcon, ChevronUpIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
 import { useUsersFromDatabase, type DatabaseUser } from '../hooks/useUsersFromDatabase'
+import { useUserPreferencesContext } from '../contexts/UserPreferencesContext'
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
@@ -2909,9 +2910,11 @@ let sharedTargetTitles: string[] = [
 // Notes Section Component
 type NotesSectionProps = {
   account: Account
+  customerId: string | null
   updateAccount: (accountName: string, updates: Partial<Account>) => void
   toast: ReturnType<typeof useToast>
   users: DatabaseUser[]
+  currentUserEmail: string | null
 }
 
 type CalendarEvent = {
@@ -3353,57 +3356,75 @@ function CalendarSection({ account }: CalendarSectionProps) {
   )
 }
 
-function NotesSection({ account, updateAccount, toast, users }: NotesSectionProps) {
+function NotesSection({ account, customerId, updateAccount, toast, users, currentUserEmail }: NotesSectionProps) {
   const [noteContent, setNoteContent] = useState('')
   const [noteUserId, setNoteUserId] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const activeUsers = useMemo(() => users.filter((u) => u.accountStatus === 'Active'), [users])
 
   useEffect(() => {
-    // Default author to existing note author (if any), otherwise first active user.
+    // Default author priority:
+    // 1) Currently signed-in email (if it matches a User Authorization record)
+    // 2) Existing note author (if any)
+    // 3) First active user
+    const matchByEmail = currentUserEmail
+      ? activeUsers.find((u) => u.email.toLowerCase().trim() === currentUserEmail.toLowerCase().trim())?.id || ''
+      : ''
     const existing = (account.notes || []).find((n) => n.userId)?.userId || ''
     const fallback = activeUsers[0]?.id || ''
-    setNoteUserId(existing || fallback)
+    setNoteUserId(matchByEmail || existing || fallback)
   }, [account.name, account.notes, activeUsers])
 
-  const handleAddNote = () => {
-    if (noteContent.trim()) {
-      if (!noteUserId) {
-        toast({
-          title: 'Select an author',
-          description: 'Pick a user from User Authorization before saving a note.',
-          status: 'warning',
-          duration: 3000,
-          isClosable: true,
-        })
-        return
-      }
+  const handleAddNote = async () => {
+    const content = noteContent.trim()
+    if (!content) return
 
-      const author = users.find((u) => u.id === noteUserId) || null
-      const authorName = author ? `${author.firstName} ${author.lastName}`.trim() : 'Unknown'
-      const newNote: AccountNote = {
-        id: Date.now().toString(),
-        content: noteContent.trim(),
-        user: authorName,
-        userId: author?.id,
-        userEmail: author?.email,
-        timestamp: new Date().toISOString(),
-      }
-      
-      const currentNotes = account.notes || []
-      const updatedNotes = [newNote, ...currentNotes]
-      
-      updateAccount(account.name, { notes: updatedNotes })
-      
-      // Clear input
-      setNoteContent('')
-      
+    if (!customerId) {
       toast({
-        title: 'Note added',
-        status: 'success',
-        duration: 2000,
+        title: 'Cannot add note',
+        description: 'This account is not linked to a database customer yet.',
+        status: 'error',
+        duration: 4000,
         isClosable: true,
       })
+      return
     }
+
+    if (!noteUserId) {
+      toast({
+        title: 'Select an author',
+        description: 'Pick a user from User Authorization before saving a note.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setIsSubmitting(true)
+    const { data, error } = await api.post<{ note: AccountNote; notes: AccountNote[] }>(`/api/customers/${customerId}/notes`, {
+      content,
+      userId: noteUserId,
+    })
+    setIsSubmitting(false)
+
+    if (error) {
+      toast({
+        title: 'Failed to add note',
+        description: error,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+
+    if (data?.notes) {
+      updateAccount(account.name, { notes: data.notes })
+    }
+
+    setNoteContent('')
+    toast({ title: 'Note added', status: 'success', duration: 2000, isClosable: true })
   }
 
   return (
@@ -3441,7 +3462,8 @@ function NotesSection({ account, updateAccount, toast, users }: NotesSectionProp
             size="sm"
             colorScheme="gray"
             leftIcon={<CheckIcon />}
-            onClick={handleAddNote}
+            onClick={() => void handleAddNote()}
+            isLoading={isSubmitting}
           >
             Add Note
           </Button>
@@ -3469,24 +3491,6 @@ function NotesSection({ account, updateAccount, toast, users }: NotesSectionProp
                   <Text fontSize="sm" fontWeight="medium" color="gray.700">
                     {note.content}
                   </Text>
-                  <IconButton
-                    aria-label="Delete note"
-                    icon={<DeleteIcon />}
-                    size="xs"
-                    variant="ghost"
-                    colorScheme="gray"
-                    onClick={() => {
-                      const currentNotes = account.notes || []
-                      const updatedNotes = currentNotes.filter((n) => n.id !== note.id)
-                      updateAccount(account.name, { notes: updatedNotes })
-                      toast({
-                        title: 'Note deleted',
-                        status: 'success',
-                        duration: 2000,
-                        isClosable: true,
-                      })
-                    }}
-                  />
                 </HStack>
                 <HStack spacing={2} fontSize="xs" color="gray.500">
                   <Text fontWeight="medium">
@@ -3603,6 +3607,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const toast = useToast()
   // Notes and manager wiring must use the same user source as Settings → User Authorization
   const { users: dbUsers } = useUsersFromDatabase()
+  const { userEmail } = useUserPreferencesContext()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
   const hasSyncedCustomersRef = useRef(false)
@@ -6559,9 +6564,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     >
                       <NotesSection
                         account={selectedAccount}
+                        customerId={selectedAccount._databaseId || null}
                         updateAccount={updateAccount}
                         toast={toast}
                         users={dbUsers}
+                        currentUserEmail={userEmail}
                       />
                     </Box>
                   </Box>

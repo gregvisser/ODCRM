@@ -562,6 +562,39 @@ router.get('/:id', async (req, res) => {
     // Test serialization
     JSON.stringify(serialized)
 
+    // Include assigned account manager user (from User Authorization) when possible.
+    // This is a computed join (no FK in schema), driven by onboarding's assignedAccountManagerId in accountData.
+    try {
+      const ad: any = serialized.accountData && typeof serialized.accountData === 'object' ? serialized.accountData : null
+      const managerId =
+        typeof ad?.accountDetails?.assignedAccountManagerId === 'string'
+          ? ad.accountDetails.assignedAccountManagerId
+          : typeof ad?.assignedAccountManagerId === 'string'
+            ? ad.assignedAccountManagerId
+            : null
+
+      if (managerId) {
+        const user = await prisma.user.findUnique({
+          where: { id: managerId },
+          select: {
+            id: true,
+            userId: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            role: true,
+            department: true,
+            accountStatus: true,
+          },
+        })
+        if (user) {
+          ;(serialized as any).assignedAccountManagerUser = user
+        }
+      }
+    } catch (err) {
+      console.warn(`[${correlationId}] assignedAccountManagerUser lookup failed`, err)
+    }
+
     return res.json(serialized)
   } catch (error: any) {
     console.error(`[${correlationId}] Error fetching customer:`, error.message)
@@ -768,6 +801,12 @@ router.put('/:id/onboarding', async (req, res) => {
   try {
     const { id } = req.params
 
+    const normalizeEmail = (value: unknown): string | null => {
+      if (typeof value !== 'string') return null
+      const trimmed = value.trim().toLowerCase()
+      return trimmed ? trimmed : null
+    }
+
     const onboardingSchema = z
       .object({
         customer: upsertCustomerSchema,
@@ -798,6 +837,21 @@ router.put('/:id/onboarding', async (req, res) => {
 
     const validated = parsed.data.customer
     const contacts = parsed.data.contacts || []
+
+    // Strict-ish validation for contacts: require name, and at least one of email/phone.
+    for (const contact of contacts) {
+      if (!contact.name || !String(contact.name).trim()) {
+        return res.status(400).json({ error: 'Invalid input', details: [{ message: 'contacts[].name is required' }] })
+      }
+      const normalizedEmail = normalizeEmail(contact.email)
+      const phone = typeof contact.phone === 'string' ? contact.phone.trim() : ''
+      if (!normalizedEmail && !phone) {
+        return res.status(400).json({
+          error: 'Invalid input',
+          details: [{ message: 'contacts[] must include at least email or phone' }],
+        })
+      }
+    }
 
     const shouldClearLeads = validated.leadsReportingUrl === null
     const updateData: any = {
@@ -838,54 +892,75 @@ router.put('/:id/onboarding', async (req, res) => {
       // Lock parent row to keep primary-contact demotion atomic in high concurrency cases.
       await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
 
+      const existing = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, accountData: true },
+      })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+
+      // Merge accountData safely to avoid overwriting notes (append-only via /api/customers/:id/notes).
+      const existingAccountData =
+        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+      const incomingAccountData =
+        validated.accountData && typeof validated.accountData === 'object' ? (validated.accountData as any) : {}
+      const mergedAccountData: any = {
+        ...existingAccountData,
+        ...incomingAccountData,
+      }
+      if (incomingAccountData.notes === undefined && existingAccountData.notes !== undefined) {
+        mergedAccountData.notes = existingAccountData.notes
+      }
+
+      updateData.accountData = mergedAccountData
+
       const updatedCustomer = await tx.customer.update({
         where: { id },
         data: updateData,
       })
 
-      // Best-effort: persist primary contact from onboarding snapshot into customer_contacts.
-      try {
-        const accountData = validated.accountData as any
-        const primary = accountData?.accountDetails?.primaryContact
-        const primaryId = typeof primary?.id === 'string' ? primary.id : null
-        const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
-        const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
-        const fullName = `${firstName} ${lastName}`.trim()
+      // Persist primary contact from onboarding snapshot into customer_contacts (same canonical store the UI reads).
+      const primary = mergedAccountData?.accountDetails?.primaryContact
+      const primaryId = typeof primary?.id === 'string' ? primary.id : null
+      const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
+      const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
+      const fullName = `${firstName} ${lastName}`.trim()
 
-        if (primaryId && fullName) {
-          await tx.customerContact.updateMany({
-            where: { customerId: id, isPrimary: true, id: { not: primaryId } },
-            data: { isPrimary: false },
-          })
+      if (primaryId && fullName) {
+        await tx.customerContact.updateMany({
+          where: { customerId: id, isPrimary: true, id: { not: primaryId } },
+          data: { isPrimary: false },
+        })
 
-          await tx.customerContact.upsert({
-            where: { id: primaryId },
-            create: {
-              id: primaryId,
-              customerId: id,
-              name: fullName,
-              email: typeof primary?.email === 'string' ? primary.email : null,
-              phone: typeof primary?.phone === 'string' ? primary.phone : null,
-              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
-              isPrimary: true,
-            },
-            update: {
-              customerId: id,
-              name: fullName,
-              email: typeof primary?.email === 'string' ? primary.email : null,
-              phone: typeof primary?.phone === 'string' ? primary.phone : null,
-              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
-              isPrimary: true,
-            },
-          })
-        }
-      } catch (err) {
-        console.warn('[onboarding_primary_contact_sync_failed]', err)
+        await tx.customerContact.upsert({
+          where: { id: primaryId },
+          create: {
+            id: primaryId,
+            customerId: id,
+            name: fullName,
+            email: normalizeEmail(primary?.email),
+            phone: typeof primary?.phone === 'string' ? primary.phone : null,
+            title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+            isPrimary: true,
+          },
+          update: {
+            customerId: id,
+            name: fullName,
+            email: normalizeEmail(primary?.email),
+            phone: typeof primary?.phone === 'string' ? primary.phone : null,
+            title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+            isPrimary: true,
+          },
+        })
       }
 
       // Optional: upsert additional contacts passed by onboarding
       for (const contact of contacts) {
         let savedContactId: string | null = null
+        const normalizedEmail = normalizeEmail(contact.email)
 
         if (contact.id) {
           const upserted = await tx.customerContact.upsert({
@@ -894,7 +969,7 @@ router.put('/:id/onboarding', async (req, res) => {
               id: contact.id,
               customerId: id,
               name: contact.name,
-              email: contact.email ?? null,
+              email: normalizedEmail,
               phone: contact.phone ?? null,
               title: contact.title ?? null,
               isPrimary: Boolean(contact.isPrimary),
@@ -903,7 +978,7 @@ router.put('/:id/onboarding', async (req, res) => {
             update: {
               customerId: id,
               name: contact.name,
-              email: contact.email ?? null,
+              email: normalizedEmail,
               phone: contact.phone ?? null,
               title: contact.title ?? null,
               isPrimary: Boolean(contact.isPrimary),
@@ -916,7 +991,7 @@ router.put('/:id/onboarding', async (req, res) => {
             data: {
               customerId: id,
               name: contact.name,
-              email: contact.email ?? null,
+              email: normalizedEmail,
               phone: contact.phone ?? null,
               title: contact.title ?? null,
               isPrimary: Boolean(contact.isPrimary),
@@ -939,13 +1014,117 @@ router.put('/:id/onboarding', async (req, res) => {
         include: { customerContacts: true },
       })
 
-      return { updatedCustomer, hydrated }
+      const managerId =
+        typeof mergedAccountData?.accountDetails?.assignedAccountManagerId === 'string'
+          ? mergedAccountData.accountDetails.assignedAccountManagerId
+          : typeof mergedAccountData?.assignedAccountManagerId === 'string'
+            ? mergedAccountData.assignedAccountManagerId
+            : null
+
+      const assignedAccountManagerUser = managerId
+        ? await tx.user.findUnique({
+            where: { id: managerId },
+            select: {
+              id: true,
+              userId: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+              role: true,
+              department: true,
+              accountStatus: true,
+            },
+          })
+        : null
+
+      return { updatedCustomer, hydrated, assignedAccountManagerUser }
     })
 
-    return res.json({ success: true, customer: saved.hydrated ?? saved.updatedCustomer })
+    const responseCustomer: any = saved.hydrated ?? saved.updatedCustomer
+    if (saved.assignedAccountManagerUser) {
+      responseCustomer.assignedAccountManagerUser = saved.assignedAccountManagerUser
+    }
+    return res.json({ success: true, customer: responseCustomer })
   } catch (error: any) {
     console.error('Error saving onboarding payload:', error)
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found' })
+    }
     return res.status(500).json({ error: 'Failed to save onboarding', message: error.message })
+  }
+})
+
+// POST /api/customers/:id/notes - Append a note atomically without overwriting accountData
+router.post('/:id/notes', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const bodySchema = z.object({
+      content: z.string().min(1),
+      userId: z.string().min(1),
+      userEmail: z.string().email().optional(),
+    })
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors })
+    }
+
+    const content = parsed.data.content.trim()
+    const userId = parsed.data.userId
+    const userEmail = parsed.data.userEmail ? parsed.data.userEmail.trim().toLowerCase() : null
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const customer = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, accountData: true },
+      })
+      if (!customer) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+
+      // Verify user exists (link to User Authorization)
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, firstName: true, lastName: true, email: true },
+      })
+      if (!user) {
+        return { status: 400 as const, body: { error: 'invalid_user', message: 'User not found' } }
+      }
+
+      const accountData = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+      const existingNotes = Array.isArray(accountData.notes) ? accountData.notes : []
+
+      const note = {
+        id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        content,
+        user: `${user.firstName} ${user.lastName}`.trim() || user.email,
+        userId: user.id,
+        userEmail: userEmail || user.email,
+        timestamp: new Date().toISOString(),
+      }
+
+      const notes = [note, ...existingNotes]
+      const nextAccountData = { ...accountData, notes }
+
+      await tx.customer.update({
+        where: { id },
+        data: { accountData: nextAccountData, updatedAt: new Date() },
+      })
+
+      return { status: 200 as const, body: { success: true, note, notes } }
+    })
+
+    return res.status(result.status).json(result.body)
+  } catch (error: any) {
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found' })
+    }
+    console.error('Error appending customer note:', error)
+    return res.status(500).json({ error: 'Failed to add note' })
   }
 })
 

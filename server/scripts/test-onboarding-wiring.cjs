@@ -201,31 +201,26 @@ async function run() {
     assert(!contactsAfterDelete.some((c) => c.id === additionalContactId), 'Deleted contact still present after delete')
     console.log('✅ Contact deletion verified')
 
-    // 6) Add a note with userId + timestamp (stored in accountData.notes)
-    const existingAccountData = getAfterDelete.json.accountData && typeof getAfterDelete.json.accountData === 'object'
-      ? getAfterDelete.json.accountData
-      : {}
-    const note = {
-      id: `note_${Date.now()}`,
-      content: 'Test note from regression script',
-      user: managerName,
+    // 6) Add two notes sequentially via append-only endpoint
+    const note1Res = await httpJson('POST', `/api/customers/${customerId}/notes`, {
+      content: 'Test note 1 from regression script',
       userId: managerUser.id,
       userEmail: managerUser.email,
-      timestamp: new Date().toISOString(),
-    }
-    const saveNoteRes = await httpJson('PUT', `/api/customers/${customerId}/onboarding`, {
-      customer: {
-        name: createName,
-        accountData: { ...existingAccountData, notes: [note, ...(Array.isArray(existingAccountData.notes) ? existingAccountData.notes : [])] },
-      },
-      contacts: [],
     })
-    assert(saveNoteRes.status >= 200 && saveNoteRes.status < 300, `Expected 2xx from note save, got ${saveNoteRes.status}: ${saveNoteRes.text}`)
+    assert(note1Res.status === 200, `Expected 200 from add note 1, got ${note1Res.status}: ${note1Res.text}`)
+
+    const note2Res = await httpJson('POST', `/api/customers/${customerId}/notes`, {
+      content: 'Test note 2 from regression script',
+      userId: managerUser.id,
+      userEmail: managerUser.email,
+    })
+    assert(note2Res.status === 200, `Expected 200 from add note 2, got ${note2Res.status}: ${note2Res.text}`)
 
     const getAfterNote = await httpJson('GET', `/api/customers/${customerId}`)
     assert(getAfterNote.status === 200, `Expected 200 from get after note, got ${getAfterNote.status}: ${getAfterNote.text}`)
     const notes = getAfterNote.json?.accountData?.notes
     assert(Array.isArray(notes) && notes.length > 0, 'Expected notes array in accountData')
+    assert(notes.length >= 2, 'Expected at least 2 notes')
     assert(notes[0].userId === managerUser.id, 'Expected note.userId to match selected user')
     assert(typeof notes[0].timestamp === 'string', 'Expected note.timestamp to be a string')
     console.log('✅ Notes wiring verified')
