@@ -993,6 +993,184 @@ router.delete('/:id', async (req, res) => {
   }
 })
 
+// POST /api/customers/:id/unarchive - Restore an archived customer
+// ADMIN CONTROL: Brings customer back to active state, preserving all data
+router.post('/:id/unarchive', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { id } = req.params
+  
+  console.log(`[${requestId}] POST /api/customers/${id}/unarchive - Restoring customer`)
+  
+  try {
+    // Verify customer exists and is archived
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true, isArchived: true, archivedAt: true }
+    })
+    
+    if (!customer) {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'Customer not found',
+        details: `No customer exists with ID: ${id}`,
+        requestId
+      })
+    }
+    
+    if (!customer.isArchived) {
+      return res.status(409).json({
+        error: 'not_archived',
+        message: 'Customer is not archived',
+        details: `Customer "${customer.name}" is already active`,
+        requestId
+      })
+    }
+    
+    // Get actor identity for audit trail
+    const actor = getActorIdentity(req)
+    
+    // Restore the customer
+    const restoredCustomer = await prisma.customer.update({
+      where: { id },
+      data: {
+        isArchived: false,
+        archivedAt: null,
+        archivedByEmail: null,
+        updatedAt: new Date()
+      }
+    })
+    
+    // Create audit event
+    await prisma.customerAuditEvent.create({
+      data: {
+        customerId: id,
+        action: 'unarchive',
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
+        fromStatus: 'inactive', // Was archived
+        toStatus: 'active',     // Now active
+        metadata: {
+          customerName: customer.name,
+          unarchivedAt: new Date().toISOString(),
+          previouslyArchivedAt: customer.archivedAt?.toISOString(),
+          authSource: actor.source
+        }
+      }
+    })
+
+    console.log(`[${requestId}] ✅ Customer unarchived successfully: ${customer.name} (${id})`)
+    
+    return res.json({ 
+      success: true, 
+      unarchived: true,
+      customer: {
+        id: restoredCustomer.id,
+        name: restoredCustomer.name,
+        isArchived: restoredCustomer.isArchived
+      },
+      requestId 
+    })
+  } catch (error: any) {
+    console.error(`[unarchive_customer_failed] requestId=${requestId} customerId=${id} prismaCode=${error.code || 'none'} message="${error.message}"`)
+    
+    if (error.code === 'P2025') {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'Customer not found',
+        prismaCode: error.code,
+        requestId
+      })
+    }
+    
+    return res.status(500).json({ 
+      error: 'server_error',
+      message: error.message || 'Failed to unarchive customer',
+      requestId
+    })
+  }
+})
+
+// POST /api/customers/archive-all - Archive ALL customers (clean slate)
+// ADMIN CONTROL: Archives all non-archived customers, preserving all data
+// WARNING: This is a bulk operation - use with caution
+router.post('/archive-all', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  
+  console.log(`[${requestId}] POST /api/customers/archive-all - BULK ARCHIVE`)
+  
+  try {
+    // Get actor identity for audit trail
+    const actor = getActorIdentity(req)
+    
+    // Find all non-archived customers
+    const customersToArchive = await prisma.customer.findMany({
+      where: { isArchived: false },
+      select: { id: true, name: true }
+    })
+    
+    if (customersToArchive.length === 0) {
+      return res.json({
+        success: true,
+        archived: 0,
+        message: 'No active customers to archive',
+        requestId
+      })
+    }
+    
+    console.log(`[${requestId}] Archiving ${customersToArchive.length} customers...`)
+    
+    // Bulk archive all customers
+    const archiveResult = await prisma.customer.updateMany({
+      where: { isArchived: false },
+      data: {
+        isArchived: true,
+        archivedAt: new Date(),
+        archivedByEmail: actor.email || null,
+        updatedAt: new Date()
+      }
+    })
+    
+    // Create audit events for each archived customer
+    const auditEvents = customersToArchive.map(customer => ({
+      customerId: customer.id,
+      action: 'archive_bulk',
+      actorUserId: actor.userId,
+      actorEmail: actor.email,
+      fromStatus: 'active' as const,
+      toStatus: 'inactive' as const,
+      metadata: {
+        customerName: customer.name,
+        archivedAt: new Date().toISOString(),
+        bulkOperation: true,
+        totalInBatch: customersToArchive.length,
+        authSource: actor.source
+      }
+    }))
+    
+    await prisma.customerAuditEvent.createMany({
+      data: auditEvents
+    })
+
+    console.log(`[${requestId}] ✅ Bulk archive complete: ${archiveResult.count} customers archived`)
+    
+    return res.json({ 
+      success: true, 
+      archived: archiveResult.count,
+      customers: customersToArchive.map(c => ({ id: c.id, name: c.name })),
+      message: `Successfully archived ${archiveResult.count} customers. All data preserved.`,
+      requestId 
+    })
+  } catch (error: any) {
+    console.error(`[archive_all_failed] requestId=${requestId} prismaCode=${error.code || 'none'} message="${error.message}"`)
+    
+    return res.status(500).json({ 
+      error: 'server_error',
+      message: error.message || 'Failed to archive customers',
+      requestId
+    })
+  }
+})
+
 // POST /api/customers/:id/contacts - Add a contact to customer
 router.post('/:id/contacts', async (req, res) => {
   try {
