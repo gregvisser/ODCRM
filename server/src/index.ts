@@ -171,7 +171,25 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Customer-Id', 'X-Admin-Secret', 'X-Admin-Diag-Key'],
+  // IMPORTANT: Header casing varies between browsers/tools.
+  // Also: frontend now sends Cache-Control + Pragma (to avoid cached 304 bodies),
+  // which triggers a preflight. If we don't allow these headers, browser will
+  // fail with "Failed to fetch" (CORS preflight rejection).
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Customer-Id',
+    'x-customer-id',
+    'X-Admin-Secret',
+    'X-Admin-Diag-Key',
+    'Cache-Control',
+    'cache-control',
+    'Pragma',
+    'pragma',
+    'If-None-Match',
+    'if-none-match',
+  ],
+  optionsSuccessStatus: 204,
 }
 
 // Log CORS configuration
@@ -181,7 +199,8 @@ console.log('🔒 CORS Allowed Headers:', corsOptions.allowedHeaders.join(', '))
 // Middleware
 app.use(cors(corsOptions))
 
-// Handle OPTIONS preflight requests explicitly
+// Handle OPTIONS preflight requests explicitly (fast path)
+app.options('/api/*', cors(corsOptions))
 app.options('*', cors(corsOptions))
 
 // Increased limit for agreement uploads (base64 encoding inflates file size ~1.37x)
