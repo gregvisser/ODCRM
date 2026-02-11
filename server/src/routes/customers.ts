@@ -187,6 +187,14 @@ router.get('/', async (req, res) => {
         accountData: true,
         createdAt: true,
         updatedAt: true,
+        // Agreement fields (Phase 2 Item 4)
+        agreementBlobName: true,
+        agreementContainerName: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementUploadedAt: true,
+        agreementUploadedByEmail: true,
+        agreementFileUrl: true, // Legacy field
         customerContacts: {
           select: {
             id: true,
@@ -378,6 +386,14 @@ router.get('/:id', async (req, res) => {
         accountData: true,
         createdAt: true,
         updatedAt: true,
+        // Agreement fields (Phase 2 Item 4)
+        agreementBlobName: true,
+        agreementContainerName: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementUploadedAt: true,
+        agreementUploadedByEmail: true,
+        agreementFileUrl: true, // Legacy field
         customerContacts: {
           select: {
             id: true,
@@ -1153,6 +1169,10 @@ router.post('/:id/agreement', async (req, res) => {
       }
     }
 
+    // CRITICAL: Update customer record with agreement metadata
+    console.log(`[agreement] BEFORE UPDATE: customerId=${id}`)
+    console.log(`[agreement] Writing: blobName=${blobName}, container=${containerName}, fileName=${fileName}`)
+    
     const updatedCustomer = await prisma.customer.update({
       where: { id },
       data: {
@@ -1183,6 +1203,27 @@ router.post('/:id/agreement', async (req, res) => {
       }
     })
 
+    // CRITICAL: Verify update succeeded
+    if (!updatedCustomer) {
+      console.error(`[agreement] ❌ UPDATE FAILED: prisma.customer.update returned null for customerId=${id}`)
+      return res.status(500).json({
+        error: 'database_update_failed',
+        message: 'Agreement blob uploaded but database update failed'
+      })
+    }
+
+    if (!updatedCustomer.agreementBlobName || !updatedCustomer.agreementContainerName) {
+      console.error(`[agreement] ❌ UPDATE INCOMPLETE: blobName=${updatedCustomer.agreementBlobName}, container=${updatedCustomer.agreementContainerName}`)
+      return res.status(500).json({
+        error: 'database_update_incomplete',
+        message: 'Agreement metadata not persisted correctly'
+      })
+    }
+
+    console.log(`[agreement] ✅ AFTER UPDATE: customerId=${id}`)
+    console.log(`[agreement] Verified: blobName=${updatedCustomer.agreementBlobName}`)
+    console.log(`[agreement] Verified: container=${updatedCustomer.agreementContainerName}`)
+    console.log(`[agreement] Verified: fileName=${updatedCustomer.agreementFileName}`)
     console.log(`✅ Agreement uploaded for customer ${customer.name} (${id})`)
     console.log(`   File: ${fileName}`)
     console.log(`   Blob: ${containerName}/${blobName}`)

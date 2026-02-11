@@ -336,6 +336,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     // Initialize Google Sheet fields
     setLeadsGoogleSheetUrl(customer.leadsReportingUrl || '')
     setLeadsGoogleSheetLabel(customer.leadsGoogleSheetLabel || '')
+    
+    // Initialize agreement data from database (fix for disappearing agreement bug)
+    const cust = customer as any
+    if (cust.agreementFileName && (cust.agreementBlobName || cust.agreementFileUrl)) {
+      setAgreementData({
+        fileName: cust.agreementFileName,
+        uploadedAt: cust.agreementUploadedAt || undefined
+      })
+    } else {
+      setAgreementData(null)
+    }
   }, [customer])
 
   // Geographic area search
