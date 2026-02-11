@@ -10,7 +10,7 @@
  *   1 - Required columns missing or verification failed
  */
 
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
 
 const REQUIRED_COLUMNS = [
   'agreementBlobName',
@@ -24,14 +24,15 @@ async function verifyColumns() {
   try {
     console.log('🔍 Verifying agreement columns exist in database...');
     
-    // Query information_schema for customer table columns
-    const result = await prisma.$queryRawUnsafe(`
+    // Query information_schema for customers table columns (using Prisma.sql for safety)
+    const result = await prisma.$queryRaw`
       SELECT column_name, data_type, is_nullable
       FROM information_schema.columns
-      WHERE table_name = 'customer'
-        AND column_name IN (${REQUIRED_COLUMNS.map(c => `'${c}'`).join(', ')})
+      WHERE table_schema = 'public'
+        AND table_name = 'customers'
+        AND column_name IN (${Prisma.join(REQUIRED_COLUMNS)})
       ORDER BY column_name ASC
-    `);
+    `;
     
     console.log(`\nColumns found: ${result.length}`);
     console.table(result);
@@ -41,14 +42,14 @@ async function verifyColumns() {
     const missingColumns = REQUIRED_COLUMNS.filter(col => !foundColumns.includes(col));
     
     if (missingColumns.length > 0) {
-      console.error('\n❌ ERROR: Required columns missing from customer table:');
+      console.error('\n❌ ERROR: Required columns missing from customers table:');
       missingColumns.forEach(col => console.error(`   - ${col}`));
       console.error('\nMigrations may have failed to apply properly.');
       console.error('Check migration logs and run: npx prisma migrate status');
       process.exit(1);
     }
     
-    console.log('\n✅ SUCCESS: All required agreement columns exist');
+    console.log('\n✅ SUCCESS: All required agreement columns exist in customers table');
     console.log('   - agreementBlobName');
     console.log('   - agreementContainerName');
     console.log('   - agreementFileUrl');
