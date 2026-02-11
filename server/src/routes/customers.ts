@@ -1246,36 +1246,56 @@ router.post('/:id/contacts', async (req, res) => {
     // otherwise generate one. Use upsert to make this endpoint idempotent.
     const contactId = validated.id || `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`
 
-    // If marking as primary, ensure all other contacts for this customer are non-primary.
-    if (validated.isPrimary) {
-      await prisma.customerContact.updateMany({
-        where: { customerId: validated.customerId, isPrimary: true, id: { not: contactId } },
-        data: { isPrimary: false },
-      })
-    }
+    const contact = await prisma.$transaction(async (tx) => {
+      // Serialize primary-contact changes per customer (prevents double-primary races).
+      // No schema change required: row lock on the parent customer record.
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${validated.customerId} FOR UPDATE`
 
-    const contact = await prisma.customerContact.upsert({
-      where: { id: contactId },
-      create: {
-        id: contactId,
-        customerId: validated.customerId,
-        name: validated.name,
-        email: validated.email,
-        phone: validated.phone,
-        title: validated.title,
-        isPrimary: validated.isPrimary || false,
-        notes: validated.notes,
-      },
-      update: {
-        // Keep the record tied to this customer (prevents accidental cross-linking)
-        customerId: validated.customerId,
-        name: validated.name,
-        email: validated.email,
-        phone: validated.phone,
-        title: validated.title,
-        isPrimary: validated.isPrimary || false,
-        notes: validated.notes,
-      },
+      // Safety: if contactId already exists for a different customer, do NOT re-link it.
+      const existing = await tx.customerContact.findUnique({
+        where: { id: contactId },
+        select: { id: true, customerId: true },
+      })
+      if (existing && existing.customerId !== validated.customerId) {
+        // Conflict - this contact belongs to a different customer
+        throw Object.assign(new Error('contact_id_conflict'), {
+          statusCode: 409,
+          details: `Contact id ${contactId} already exists for a different customer`,
+        })
+      }
+
+      const upserted = await tx.customerContact.upsert({
+        where: { id: contactId },
+        create: {
+          id: contactId,
+          customerId: validated.customerId,
+          name: validated.name,
+          email: validated.email,
+          phone: validated.phone,
+          title: validated.title,
+          isPrimary: validated.isPrimary || false,
+          notes: validated.notes,
+        },
+        update: {
+          customerId: validated.customerId,
+          name: validated.name,
+          email: validated.email,
+          phone: validated.phone,
+          title: validated.title,
+          isPrimary: validated.isPrimary || false,
+          notes: validated.notes,
+        },
+      })
+
+      // If marking as primary, ensure all other contacts for this customer are non-primary.
+      if (validated.isPrimary) {
+        await tx.customerContact.updateMany({
+          where: { customerId: validated.customerId, isPrimary: true, id: { not: upserted.id } },
+          data: { isPrimary: false },
+        })
+      }
+
+      return upserted
     })
 
     return res.status(201).json({
@@ -1283,6 +1303,14 @@ router.post('/:id/contacts', async (req, res) => {
       name: contact.name,
     })
   } catch (error) {
+    // Local typed conflict (see above)
+    if ((error as any)?.statusCode === 409) {
+      return res.status(409).json({
+        error: 'conflict',
+        message: 'Contact id conflict',
+        details: (error as any)?.details || 'Contact id already exists for another customer',
+      })
+    }
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
@@ -1294,20 +1322,41 @@ router.post('/:id/contacts', async (req, res) => {
 // PUT /api/customers/:customerId/contacts/:contactId - Update a customer contact
 router.put('/:customerId/contacts/:contactId', async (req, res) => {
   try {
-    const { contactId } = req.params
+    const { customerId, contactId } = req.params
     const validated = upsertCustomerContactSchema.omit({ customerId: true }).parse(req.body)
 
-    const contact = await prisma.customerContact.update({
-      where: { id: contactId },
-      data: {
-        name: validated.name,
-        email: validated.email,
-        phone: validated.phone,
-        title: validated.title,
-        isPrimary: validated.isPrimary,
-        notes: validated.notes,
-        updatedAt: new Date(),
-      },
+    const contact = await prisma.$transaction(async (tx) => {
+      // Serialize and enforce "single primary" per customer when updating.
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} FOR UPDATE`
+
+      const existing = await tx.customerContact.findUnique({
+        where: { id: contactId },
+        select: { id: true, customerId: true },
+      })
+
+      if (!existing || existing.customerId !== customerId) {
+        throw Object.assign(new Error('not_found'), { statusCode: 404 })
+      }
+
+      if (validated.isPrimary) {
+        await tx.customerContact.updateMany({
+          where: { customerId, isPrimary: true, id: { not: contactId } },
+          data: { isPrimary: false },
+        })
+      }
+
+      return await tx.customerContact.update({
+        where: { id: contactId },
+        data: {
+          name: validated.name,
+          email: validated.email,
+          phone: validated.phone,
+          title: validated.title,
+          isPrimary: validated.isPrimary,
+          notes: validated.notes,
+          updatedAt: new Date(),
+        },
+      })
     })
 
     return res.json({
@@ -1315,6 +1364,9 @@ router.put('/:customerId/contacts/:contactId', async (req, res) => {
       name: contact.name,
     })
   } catch (error) {
+    if ((error as any)?.statusCode === 404) {
+      return res.status(404).json({ error: 'not_found', message: 'Contact not found for this customer' })
+    }
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }

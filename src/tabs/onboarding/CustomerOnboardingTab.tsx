@@ -765,11 +765,28 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       if (!customerDetailError) {
         const rows = Array.isArray(customerDetail?.customerContacts) ? customerDetail.customerContacts : []
-        const existing =
-          rows.find((c: any) => c?.isPrimary) ||
-          (desiredEmail ? rows.find((c: any) => String(c?.email || '').toLowerCase() === desiredEmail.toLowerCase()) : null) ||
-          rows.find((c: any) => String(c?.name || '').trim().toLowerCase() === primaryName.toLowerCase()) ||
-          null
+        const normalizedPrimaryName = primaryName.trim().toLowerCase()
+        const normalizedEmail = desiredEmail ? desiredEmail.trim().toLowerCase() : null
+
+        // Match strategy (IMPORTANT):
+        // 1) Prefer matching by email (most reliable)
+        // 2) Then by exact name
+        // 3) Only then consider the existing primary contact IF it matches this person
+        const matchByEmail = normalizedEmail
+          ? rows.find((c: any) => String(c?.email || '').trim().toLowerCase() === normalizedEmail) || null
+          : null
+        const matchByName =
+          rows.find((c: any) => String(c?.name || '').trim().toLowerCase() === normalizedPrimaryName) || null
+        const matchPrimarySamePerson =
+          rows.find((c: any) => {
+            if (!c?.isPrimary) return false
+            const cName = String(c?.name || '').trim().toLowerCase()
+            if (cName && cName === normalizedPrimaryName) return true
+            const cEmail = String(c?.email || '').trim().toLowerCase()
+            return normalizedEmail ? cEmail === normalizedEmail : false
+          }) || null
+
+        const existing = matchByEmail || matchByName || matchPrimarySamePerson || null
 
         if (existing?.id) {
           const { error: updateContactError } = await api.put(`/api/customers/${customerId}/contacts/${existing.id}`, {
@@ -784,6 +801,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             onboardingError('⚠️ Primary contact update failed (customer save succeeded):', {
               customerId,
               updateContactError,
+            })
+            toast({
+              title: 'Saved, but contact failed',
+              description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
+              status: 'warning',
+              duration: 6000,
+              isClosable: true,
             })
           }
         } else {
@@ -800,12 +824,26 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               customerId,
               createContactError,
             })
+            toast({
+              title: 'Saved, but contact failed',
+              description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
+              status: 'warning',
+              duration: 6000,
+              isClosable: true,
+            })
           }
         }
       } else {
         onboardingError('⚠️ Could not load customerContacts to sync primary contact (non-fatal):', {
           customerId,
           customerDetailError,
+        })
+        toast({
+          title: 'Saved, but contact failed',
+          description: 'Customer details saved, but we could not verify/sync the primary contact. Please try saving again.',
+          status: 'warning',
+          duration: 6000,
+          isClosable: true,
         })
       }
     }
