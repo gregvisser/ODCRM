@@ -2056,6 +2056,153 @@ router.get('/:id/audit', async (req, res) => {
   }
 })
 
+// PUT /api/customers/:id/onboarding-progress
+// Stores customer-scoped onboarding progress in accountData.onboardingProgress (no migrations).
+router.put('/:id/onboarding-progress', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const stepSchema = z.object({
+      complete: z.boolean(),
+    })
+
+    const bodySchema = z.object({
+      steps: z
+        .object({
+          company: stepSchema.optional(),
+          ownership: stepSchema.optional(),
+          leadSource: stepSchema.optional(),
+          documents: stepSchema.optional(),
+          contacts: stepSchema.optional(),
+          notes: stepSchema.optional(),
+        })
+        .partial()
+        .optional(),
+    })
+
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors })
+    }
+
+    const incomingSteps = parsed.data.steps || {}
+    const hasAnyIncoming = Object.keys(incomingSteps).length > 0
+    if (!hasAnyIncoming) {
+      return res.status(400).json({ error: 'Invalid input', details: [{ message: 'steps is required' }] })
+    }
+
+    const actor = getActorIdentity(req)
+    const updatedByUserId = (actor?.userId || actor?.email || 'unknown') as string
+
+    const now = new Date()
+    const nowIso = now.toISOString()
+
+    const TOTAL_STEPS = ['company', 'ownership', 'leadSource', 'documents', 'contacts', 'notes'] as const
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Concurrency safety: lock row for read-modify-write on accountData JSON.
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, isArchived: true, accountData: true },
+      })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+      if (existing.isArchived) {
+        const err: any = new Error('archived')
+        err.statusCode = 400
+        throw err
+      }
+
+      const currentAccountData =
+        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+
+      const currentProgress =
+        currentAccountData.onboardingProgress && typeof currentAccountData.onboardingProgress === 'object'
+          ? (currentAccountData.onboardingProgress as any)
+          : {}
+
+      const currentSteps =
+        currentProgress.steps && typeof currentProgress.steps === 'object' ? (currentProgress.steps as any) : {}
+
+      const nextSteps: any = { ...currentSteps }
+
+      // Deep-merge only the steps provided; stamp per-step updatedAt.
+      for (const stepKey of Object.keys(incomingSteps)) {
+        const incoming = (incomingSteps as any)[stepKey]
+        if (!incoming || typeof incoming.complete !== 'boolean') continue
+        nextSteps[stepKey] = {
+          ...(currentSteps[stepKey] || {}),
+          complete: incoming.complete,
+          updatedAt: nowIso,
+        }
+      }
+
+      const completedCount = TOTAL_STEPS.filter((k) => nextSteps[k]?.complete === true).length
+      const percentComplete = Math.round((completedCount / TOTAL_STEPS.length) * 100)
+      const isComplete = percentComplete === 100
+
+      const nextProgress = {
+        version: 1,
+        updatedAt: nowIso,
+        updatedByUserId,
+        steps: {
+          company: { complete: Boolean(nextSteps.company?.complete), updatedAt: nextSteps.company?.updatedAt || null },
+          ownership: { complete: Boolean(nextSteps.ownership?.complete), updatedAt: nextSteps.ownership?.updatedAt || null },
+          leadSource: { complete: Boolean(nextSteps.leadSource?.complete), updatedAt: nextSteps.leadSource?.updatedAt || null },
+          documents: { complete: Boolean(nextSteps.documents?.complete), updatedAt: nextSteps.documents?.updatedAt || null },
+          contacts: { complete: Boolean(nextSteps.contacts?.complete), updatedAt: nextSteps.contacts?.updatedAt || null },
+          notes: { complete: Boolean(nextSteps.notes?.complete), updatedAt: nextSteps.notes?.updatedAt || null },
+        },
+        percentComplete,
+        isComplete,
+      }
+
+      const nextAccountData = {
+        ...currentAccountData,
+        onboardingProgress: nextProgress,
+      }
+
+      await tx.customer.update({
+        where: { id },
+        data: { accountData: nextAccountData, updatedAt: new Date() },
+      })
+
+      // Best-effort audit (never blocks success)
+      try {
+        await safeCustomerAuditEvent(tx as any, {
+          customerId: id,
+          action: 'update_onboarding_progress',
+          note: `Updated onboarding progress (${percentComplete}%)`,
+          meta: { percentComplete, isComplete },
+        })
+      } catch {
+        // ignore
+      }
+
+      return nextProgress
+    })
+
+    return res.status(200).json({ success: true, onboardingProgress: result })
+  } catch (error: any) {
+    if (error?.message === 'not_found' || error?.statusCode === 404) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (error?.message === 'archived' || error?.statusCode === 400) {
+      return res.status(400).json({ error: 'Customer is archived' })
+    }
+    console.error('Error updating onboarding progress:', error)
+    return res.status(500).json({
+      error: 'Failed to update onboarding progress',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
 // POST /api/customers/:id/agreement - Upload customer agreement
 // Phase 2 Item 4: Agreement upload with auto-tick progress tracker
 // UPDATED: Now uses Azure Blob Storage for durable file storage

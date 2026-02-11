@@ -59,9 +59,16 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         content: <OnboardingOverview customerId={selectedCustomerId || undefined} />,
         sortOrder: 0,
       },
+      {
+        id: 'progress-tracker',
+        label: 'Progress Tracker',
+        icon: CheckCircleIcon,
+        content: <ProgressTrackerTab />,
+        sortOrder: 2,
+      },
     ]
 
-    // Only show the unified onboarding form and progress tracker when a customer is selected.
+    // Only show the unified onboarding form when a customer is selected.
     if (selectedCustomerId) {
       items.push(
         {
@@ -70,13 +77,6 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           icon: EditIcon,
           content: <CustomerOnboardingTab customerId={selectedCustomerId} />,
           sortOrder: 1,
-        },
-        {
-          id: 'progress-tracker',
-          label: 'Progress Tracker',
-          icon: CheckCircleIcon,
-          content: <ProgressTrackerTab customerId={selectedCustomerId} />,
-          sortOrder: 2,
         },
       )
     }
