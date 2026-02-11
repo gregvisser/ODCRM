@@ -161,6 +161,9 @@ function detectFailingField(obj: Record<string, any>): { fieldName: string; erro
 /**
  * GET /api/customers - List all customers with their contacts
  * 
+ * Query params:
+ * - includeArchived: "true" to include archived customers (default: false)
+ * 
  * STABLE API CONTRACT:
  * - ALWAYS returns: { customers: DatabaseCustomer[], warnings?: Warning[] }
  * - NEVER returns: DatabaseCustomer[] (bare array)
@@ -171,13 +174,16 @@ router.get('/', async (req, res) => {
   const correlationId = `cust_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   
   try {
-    console.log(`[${correlationId}] Starting customers fetch...`)
+    // Check if archived customers should be included
+    const includeArchived = req.query.includeArchived === 'true'
     
-    // PRODUCTION HOTFIX: ALWAYS use minimal safe select - schema drift prevents using include
-    // Many columns missing in production: monthlyRevenueFromCustomer, leadsGoogleSheetLabel, etc.
-    console.warn(`[${correlationId}] Using minimal safe fields only (production schema drift)`)
+    console.log(`[${correlationId}] Starting customers fetch... (includeArchived: ${includeArchived})`)
+    
+    // Build where clause - exclude archived by default
+    const whereClause = includeArchived ? {} : { isArchived: false }
     
     const customers = await prisma.customer.findMany({
+      where: whereClause,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -187,6 +193,37 @@ router.get('/', async (req, res) => {
         accountData: true,
         createdAt: true,
         updatedAt: true,
+        // Archive fields
+        isArchived: true,
+        archivedAt: true,
+        archivedByEmail: true,
+        // Business details
+        leadsReportingUrl: true,
+        leadsGoogleSheetLabel: true,
+        sector: true,
+        clientStatus: true,
+        targetJobTitle: true,
+        prospectingLocation: true,
+        // Financial
+        monthlyIntakeGBP: true,
+        monthlyRevenueFromCustomer: true,
+        defcon: true,
+        // Lead targets
+        weeklyLeadTarget: true,
+        weeklyLeadActual: true,
+        monthlyLeadTarget: true,
+        monthlyLeadActual: true,
+        // About section
+        whatTheyDo: true,
+        accreditations: true,
+        keyLeaders: true,
+        companyProfile: true,
+        recentNews: true,
+        companySize: true,
+        headquarters: true,
+        foundingYear: true,
+        socialPresence: true,
+        lastEnrichedAt: true,
         // Agreement fields (Phase 2 Item 4)
         agreementBlobName: true,
         agreementContainerName: true,
@@ -232,25 +269,33 @@ router.get('/', async (req, res) => {
       try {
         console.log(`[${correlationId}] Serializing customer ${index + 1}/${customers.length}: ${customer.name} (${customer.id})`)
         
-        // Normalize to JSON-safe primitives - handle schema drift (missing fields)
+        // Normalize to JSON-safe primitives
         const c = customer as any
         const normalized = {
           id: c.id,
           name: c.name,
           domain: c.domain || null,
+          // Archive fields
+          isArchived: c.isArchived || false,
+          archivedAt: c.archivedAt?.toISOString() || null,
+          archivedByEmail: c.archivedByEmail || null,
+          // Business details
           leadsReportingUrl: c.leadsReportingUrl || null,
           leadsGoogleSheetLabel: c.leadsGoogleSheetLabel || null,
           sector: c.sector || null,
           clientStatus: c.clientStatus || 'active',
           targetJobTitle: c.targetJobTitle || null,
           prospectingLocation: c.prospectingLocation || null,
+          // Financial
           monthlyIntakeGBP: c.monthlyIntakeGBP ? String(c.monthlyIntakeGBP) : null,
           monthlyRevenueFromCustomer: c.monthlyRevenueFromCustomer ? String(c.monthlyRevenueFromCustomer) : null,
           defcon: c.defcon || null,
+          // Lead targets
           weeklyLeadTarget: c.weeklyLeadTarget || null,
           weeklyLeadActual: c.weeklyLeadActual || null,
           monthlyLeadTarget: c.monthlyLeadTarget || null,
           monthlyLeadActual: c.monthlyLeadActual || null,
+          // About section
           website: c.website || null,
           whatTheyDo: c.whatTheyDo || null,
           accreditations: c.accreditations || null,
@@ -262,11 +307,14 @@ router.get('/', async (req, res) => {
           foundingYear: c.foundingYear || null,
           socialPresence: c.socialPresence ? normalizeToJsonSafe(c.socialPresence) : null,
           lastEnrichedAt: c.lastEnrichedAt?.toISOString() || null,
+          // Agreement
           agreementFileUrl: c.agreementFileUrl || null,
           agreementFileName: c.agreementFileName || null,
           agreementFileMimeType: c.agreementFileMimeType || null,
           agreementUploadedAt: c.agreementUploadedAt?.toISOString() || null,
           agreementUploadedByEmail: c.agreementUploadedByEmail || null,
+          agreementBlobName: c.agreementBlobName || null,
+          agreementContainerName: c.agreementContainerName || null,
           accountData: c.accountData ? normalizeToJsonSafe(c.accountData) : null,
           createdAt: c.createdAt.toISOString(),
           updatedAt: c.updatedAt.toISOString(),
@@ -373,8 +421,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
 
-    // PRODUCTION HOTFIX: ALWAYS use minimal safe select - schema drift prevents using include
-    console.warn(`[${correlationId}] Using minimal safe fields only (production schema drift)`)
+    console.log(`[${correlationId}] Fetching customer: ${id}`)
     
     const customer = await prisma.customer.findUnique({
       where: { id },
@@ -386,6 +433,37 @@ router.get('/:id', async (req, res) => {
         accountData: true,
         createdAt: true,
         updatedAt: true,
+        // Archive fields
+        isArchived: true,
+        archivedAt: true,
+        archivedByEmail: true,
+        // Business details
+        leadsReportingUrl: true,
+        leadsGoogleSheetLabel: true,
+        sector: true,
+        clientStatus: true,
+        targetJobTitle: true,
+        prospectingLocation: true,
+        // Financial
+        monthlyIntakeGBP: true,
+        monthlyRevenueFromCustomer: true,
+        defcon: true,
+        // Lead targets
+        weeklyLeadTarget: true,
+        weeklyLeadActual: true,
+        monthlyLeadTarget: true,
+        monthlyLeadActual: true,
+        // About section
+        whatTheyDo: true,
+        accreditations: true,
+        keyLeaders: true,
+        companyProfile: true,
+        recentNews: true,
+        companySize: true,
+        headquarters: true,
+        foundingYear: true,
+        socialPresence: true,
+        lastEnrichedAt: true,
         // Agreement fields (Phase 2 Item 4)
         agreementBlobName: true,
         agreementContainerName: true,
@@ -417,25 +495,33 @@ router.get('/:id', async (req, res) => {
 
     console.log(`[${correlationId}] Serializing customer: ${customer.name} (${customer.id})`)
 
-    // Use same normalization as list endpoint - handle schema drift
+    // Normalize to JSON-safe
     const c = customer as any
     const serialized = {
       id: c.id,
       name: c.name,
       domain: c.domain || null,
+      // Archive fields
+      isArchived: c.isArchived || false,
+      archivedAt: c.archivedAt?.toISOString() || null,
+      archivedByEmail: c.archivedByEmail || null,
+      // Business details
       leadsReportingUrl: c.leadsReportingUrl || null,
       leadsGoogleSheetLabel: c.leadsGoogleSheetLabel || null,
       sector: c.sector || null,
       clientStatus: c.clientStatus || 'active',
       targetJobTitle: c.targetJobTitle || null,
       prospectingLocation: c.prospectingLocation || null,
+      // Financial
       monthlyIntakeGBP: c.monthlyIntakeGBP ? String(c.monthlyIntakeGBP) : null,
       monthlyRevenueFromCustomer: c.monthlyRevenueFromCustomer ? String(c.monthlyRevenueFromCustomer) : null,
       defcon: c.defcon || null,
+      // Lead targets
       weeklyLeadTarget: c.weeklyLeadTarget || null,
       weeklyLeadActual: c.weeklyLeadActual || null,
       monthlyLeadTarget: c.monthlyLeadTarget || null,
       monthlyLeadActual: c.monthlyLeadActual || null,
+      // About section
       website: c.website || null,
       whatTheyDo: c.whatTheyDo || null,
       accreditations: c.accreditations || null,
@@ -447,11 +533,14 @@ router.get('/:id', async (req, res) => {
       foundingYear: c.foundingYear || null,
       socialPresence: c.socialPresence ? normalizeToJsonSafe(c.socialPresence) : null,
       lastEnrichedAt: c.lastEnrichedAt?.toISOString() || null,
+      // Agreement
       agreementFileUrl: c.agreementFileUrl || null,
       agreementFileName: c.agreementFileName || null,
       agreementFileMimeType: c.agreementFileMimeType || null,
       agreementUploadedAt: c.agreementUploadedAt?.toISOString() || null,
       agreementUploadedByEmail: c.agreementUploadedByEmail || null,
+      agreementBlobName: c.agreementBlobName || null,
+      agreementContainerName: c.agreementContainerName || null,
       accountData: c.accountData ? normalizeToJsonSafe(c.accountData) : null,
       createdAt: c.createdAt.toISOString(),
       updatedAt: c.updatedAt.toISOString(),
@@ -765,15 +854,44 @@ router.put('/:id', async (req, res) => {
   }
 })
 
-// DELETE /api/customers/:id - Delete a customer
+// DELETE /api/customers/:id - Archive a customer (SOFT DELETE - preserves all data)
+// CRITICAL: We NEVER hard-delete customers. This archives them instead.
+// All contacts, sequences, campaigns, and analytics data remain intact.
 router.delete('/:id', async (req, res) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   const { id } = req.params
   
-  console.log(`[${requestId}] DELETE /api/customers/${id} - Deleting customer`)
+  console.log(`[${requestId}] DELETE /api/customers/${id} - Archiving customer (soft-delete)`)
   
   try {
-    // Check for related records (both Contact and CustomerContact tables)
+    // Verify customer exists and is not already archived
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, name: true, isArchived: true }
+    })
+    
+    if (!customer) {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'Customer not found',
+        details: `No customer exists with ID: ${id}`,
+        requestId
+      })
+    }
+    
+    if (customer.isArchived) {
+      return res.status(409).json({
+        error: 'already_archived',
+        message: 'Customer is already archived',
+        details: `Customer "${customer.name}" was previously archived`,
+        requestId
+      })
+    }
+    
+    // Get actor identity for audit trail
+    const actor = getActorIdentity(req)
+    
+    // Count related records for informational logging (we preserve them all)
     const [contactsCount, customerContactsCount, campaignsCount, listsCount, sequencesCount] = await Promise.all([
       prisma.contact.count({ where: { customerId: id } }),
       prisma.customerContact.count({ where: { customerId: id } }),
@@ -783,28 +901,64 @@ router.delete('/:id', async (req, res) => {
     ])
     
     const totalContacts = contactsCount + customerContactsCount
+    
+    // SOFT DELETE: Archive the customer (preserves ALL related data)
+    const archivedCustomer = await prisma.customer.update({
+      where: { id },
+      data: {
+        isArchived: true,
+        archivedAt: new Date(),
+        archivedByEmail: actor.email || null,
+        updatedAt: new Date()
+      }
+    })
+    
+    // Create audit event
+    await prisma.customerAuditEvent.create({
+      data: {
+        customerId: id,
+        action: 'archive',
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
+        fromStatus: customer.isArchived ? 'archived' : 'active',
+        toStatus: 'archived',
+        metadata: {
+          customerName: customer.name,
+          archivedAt: new Date().toISOString(),
+          preservedData: {
+            contacts: totalContacts,
+            campaigns: campaignsCount,
+            lists: listsCount,
+            sequences: sequencesCount
+          },
+          authSource: actor.source
+        }
+      }
+    })
 
-    if (totalContacts > 0 || campaignsCount > 0 || listsCount > 0 || sequencesCount > 0) {
-      const message = `Cannot delete customer because related records exist: ${totalContacts} contacts, ${campaignsCount} campaigns, ${listsCount} lists, ${sequencesCount} sequences`
-      console.error(`[delete_customer_failed] requestId=${requestId} customerId=${id} prismaCode=P2003 message="${message}" meta={"totalContacts":${totalContacts},"contacts":${contactsCount},"customerContacts":${customerContactsCount},"campaigns":${campaignsCount},"lists":${listsCount},"sequences":${sequencesCount}}`)
-      
-      return res.status(409).json({
-        error: 'customer_has_relations',
-        message,
-        details: 'Delete all related contacts, campaigns, lists, and sequences first, then try again',
-        prismaCode: 'P2003', // Foreign key constraint equivalent
-        meta: { totalContacts, contactsCount, customerContactsCount, campaignsCount, listsCount, sequencesCount },
-        requestId
-      })
-    }
-
-    await prisma.customer.delete({ where: { id } })
-
-    console.log(`[${requestId}] ✅ Customer deleted successfully: ${id}`)
-    return res.json({ success: true, requestId })
+    console.log(`[${requestId}] ✅ Customer archived successfully: ${customer.name} (${id})`)
+    console.log(`[${requestId}]    Preserved: ${totalContacts} contacts, ${campaignsCount} campaigns, ${listsCount} lists, ${sequencesCount} sequences`)
+    
+    return res.json({ 
+      success: true, 
+      archived: true,
+      customer: {
+        id: archivedCustomer.id,
+        name: archivedCustomer.name,
+        archivedAt: archivedCustomer.archivedAt?.toISOString(),
+        archivedByEmail: archivedCustomer.archivedByEmail
+      },
+      preservedData: {
+        contacts: totalContacts,
+        campaigns: campaignsCount,
+        lists: listsCount,
+        sequences: sequencesCount
+      },
+      requestId 
+    })
   } catch (error: any) {
     // CRITICAL: Log one structured line for production debugging
-    console.error(`[delete_customer_failed] requestId=${requestId} customerId=${id} prismaCode=${error.code || 'none'} message="${error.message}" meta=${JSON.stringify(error.meta || {})}`)
+    console.error(`[archive_customer_failed] requestId=${requestId} customerId=${id} prismaCode=${error.code || 'none'} message="${error.message}" meta=${JSON.stringify(error.meta || {})}`)
     
     // Handle Prisma P2025 (record not found)
     if (error.code === 'P2025') {
@@ -832,7 +986,7 @@ router.delete('/:id', async (req, res) => {
     // Generic server error
     return res.status(500).json({ 
       error: 'server_error',
-      message: error.message || 'Failed to delete customer',
+      message: error.message || 'Failed to archive customer',
       details: error.stack?.substring(0, 300),
       requestId
     })
