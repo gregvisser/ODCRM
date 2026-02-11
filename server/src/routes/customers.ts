@@ -817,6 +817,53 @@ router.put('/:id', async (req, res) => {
         data: updateData,
       })
 
+      // ----------------------------------------------------------------------
+      // Onboarding wiring: persist primary contact into CustomerContact table
+      //
+      // The onboarding UI stores primaryContact inside accountData.accountDetails.
+      // Customer detail views (and reporting) expect real rows in customer_contacts.
+      // Keep this best-effort and idempotent (upsert by provided primaryContact.id).
+      // ----------------------------------------------------------------------
+      try {
+        const accountData = validated.accountData as any
+        const primary = accountData?.accountDetails?.primaryContact
+        const primaryId = typeof primary?.id === 'string' ? primary.id : null
+        const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
+        const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
+        const fullName = `${firstName} ${lastName}`.trim()
+
+        if (primaryId && fullName) {
+          // Ensure only one primary per customer
+          await tx.customerContact.updateMany({
+            where: { customerId: id, isPrimary: true, id: { not: primaryId } },
+            data: { isPrimary: false },
+          })
+
+          await tx.customerContact.upsert({
+            where: { id: primaryId },
+            create: {
+              id: primaryId,
+              customerId: id,
+              name: fullName,
+              email: typeof primary?.email === 'string' ? primary.email : null,
+              phone: typeof primary?.phone === 'string' ? primary.phone : null,
+              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              isPrimary: true,
+            },
+            update: {
+              customerId: id,
+              name: fullName,
+              email: typeof primary?.email === 'string' ? primary.email : null,
+              phone: typeof primary?.phone === 'string' ? primary.phone : null,
+              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              isPrimary: true,
+            },
+          })
+        }
+      } catch (contactSyncErr: any) {
+        console.warn('[PUT /api/customers/:id] Primary contact sync failed (non-fatal):', contactSyncErr?.message || contactSyncErr)
+      }
+
       if (shouldClearLeads) {
         const clearedAt = new Date()
         await tx.leadRecord.deleteMany({ where: { customerId: id } })
@@ -1195,8 +1242,22 @@ router.post('/:id/contacts', async (req, res) => {
     const { id } = req.params
     const validated = upsertCustomerContactSchema.parse({ ...req.body, customerId: id })
 
-    const contact = await prisma.customerContact.create({ data: {
-        id: `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+    // Allow caller-provided IDs (useful for onboarding primaryContact wiring),
+    // otherwise generate one. Use upsert to make this endpoint idempotent.
+    const contactId = validated.id || `contact_${Date.now()}_${Math.random().toString(36).substring(7)}`
+
+    // If marking as primary, ensure all other contacts for this customer are non-primary.
+    if (validated.isPrimary) {
+      await prisma.customerContact.updateMany({
+        where: { customerId: validated.customerId, isPrimary: true, id: { not: contactId } },
+        data: { isPrimary: false },
+      })
+    }
+
+    const contact = await prisma.customerContact.upsert({
+      where: { id: contactId },
+      create: {
+        id: contactId,
         customerId: validated.customerId,
         name: validated.name,
         email: validated.email,
@@ -1204,7 +1265,16 @@ router.post('/:id/contacts', async (req, res) => {
         title: validated.title,
         isPrimary: validated.isPrimary || false,
         notes: validated.notes,
-        updatedAt: new Date(),
+      },
+      update: {
+        // Keep the record tied to this customer (prevents accidental cross-linking)
+        customerId: validated.customerId,
+        name: validated.name,
+        email: validated.email,
+        phone: validated.phone,
+        title: validated.title,
+        isPrimary: validated.isPrimary || false,
+        notes: validated.notes,
       },
     })
 

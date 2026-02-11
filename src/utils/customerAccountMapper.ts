@@ -4,128 +4,171 @@
  */
 
 import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
+import type { Account } from '../components/AccountsTab'
 
-// AccountsTab Account type (keeping for backward compatibility with UI)
-export type Account = {
-  // Database ID - canonical identifier from database (e.g. "cust_...")
-  id?: string
-  name: string
-  clientLeadsSheetUrl?: string
-  clientLeadsSheetStatus?: 'active' | 'inactive' | 'cleared'
-  sector?: string
-  targetLocation?: string[]
-  targetJobTitle?: string
-  weeklyLeadTarget?: number
-  monthlyLeadTarget?: number
-  weeklyLeadActual?: number
-  monthlyLeadActual?: number
-  monthlyIntake?: number
-  defcon?: number
-  daysPerWeek?: number
-  numberOfContacts?: number
-  clientStatus?: 'active' | 'inactive' | 'onboarding' | 'win_back'
-  contractStart?: string
-  contractEnd?: string
-  logoUrl?: string
-  agreementFiles?: string[]
-  users?: Array<{ name: string; role: string }>
-  
-  // About section (enriched data)
-  website?: string
-  whatTheyDo?: string
-  keyLeaders?: string
-  companyProfile?: string
-  recentNews?: string
-  accreditations?: string
-  socialPresence?: Array<{ label: string; url: string }>
-  companySize?: string
-  headquarters?: string
-  foundingYear?: string
-  
-  // Internal tracking
-  _databaseId?: string // DEPRECATED: Use `id` instead
-  _lastSyncedAt?: string
+function mapClientStatusToAccountStatus(
+  clientStatus: unknown
+): Account['status'] {
+  if (clientStatus === 'inactive') return 'Inactive'
+  if (clientStatus === 'onboarding') return 'On Hold'
+  // active | win_back | unknown
+  return 'Active'
+}
+
+function coerceObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null
+  if (Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function splitCommaList(value: unknown): string[] {
+  if (typeof value !== 'string') return []
+  return value
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+function toNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : null
 }
 
 /**
  * Convert database Customer to AccountsTab Account format
  */
 export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
-  // Parse target locations (stored as comma-separated string in DB)
-  const targetLocation = customer.prospectingLocation
-    ? customer.prospectingLocation.split(',').map(s => s.trim()).filter(Boolean)
-    : undefined
+  // accountData is our canonical snapshot for AccountsTab UI (database-first).
+  // Onboarding writes onboarding-specific fields into accountData.accountDetails/clientProfile as well.
+  const raw = coerceObject(customer.accountData) || {}
+  const accountDetails = coerceObject(raw.accountDetails) || {}
 
-  return {
-    // Database ID (canonical)
+  const targetLocationFromDb = splitCommaList(customer.prospectingLocation)
+
+  const monthlyRevenue = toNumber(customer.monthlyRevenueFromCustomer)
+  const monthlyIntake = toNumber(customer.monthlyIntakeGBP)
+  const monthlySpendGBP =
+    toNumber(raw.monthlySpendGBP) ??
+    monthlyRevenue ??
+    monthlyIntake ??
+    0
+
+  const days =
+    toNumber(raw.days) ??
+    toNumber(accountDetails.daysPerWeek) ??
+    1
+
+  const emailAccounts =
+    (Array.isArray(raw.emailAccounts) ? raw.emailAccounts : null) ??
+    (Array.isArray(accountDetails.emailAccounts) ? accountDetails.emailAccounts : null) ??
+    []
+
+  const emailAccountsSetUp =
+    typeof raw.emailAccountsSetUp === 'boolean'
+      ? raw.emailAccountsSetUp
+      : Array.isArray(emailAccounts) && emailAccounts.some((v) => String(v || '').trim())
+
+  const contactCount = Array.isArray(customer.customerContacts) ? customer.customerContacts.length : 0
+
+  const account: Account = {
+    // IDs
     id: customer.id,
-    name: customer.name,
-    clientLeadsSheetUrl: customer.leadsReportingUrl || undefined,
-    clientLeadsSheetStatus: customer.leadsReportingUrl ? 'active' : undefined,
-    sector: customer.sector || undefined,
-    targetLocation,
-    targetJobTitle: customer.targetJobTitle || undefined,
-    weeklyLeadTarget: customer.weeklyLeadTarget || undefined,
-    monthlyLeadTarget: customer.monthlyLeadTarget || undefined,
-    weeklyLeadActual: customer.weeklyLeadActual || undefined,
-    monthlyLeadActual: customer.monthlyLeadActual || undefined,
-    monthlyIntake: customer.monthlyIntakeGBP ? parseFloat(customer.monthlyIntakeGBP) : undefined,
-    defcon: customer.defcon || undefined,
-    clientStatus: customer.clientStatus as any || 'active',
-    
-    // About section
-    website: customer.website || customer.domain || undefined,
-    whatTheyDo: customer.whatTheyDo || undefined,
-    keyLeaders: customer.keyLeaders || undefined,
-    companyProfile: customer.companyProfile || undefined,
-    recentNews: customer.recentNews || undefined,
-    accreditations: customer.accreditations || undefined,
-    socialPresence: customer.socialPresence || undefined,
-    companySize: customer.companySize || undefined,
-    headquarters: customer.headquarters || undefined,
-    foundingYear: customer.foundingYear || undefined,
-    
-    // Number of contacts from customerContacts array
-    numberOfContacts: customer.customerContacts?.length || 0,
-    
-    // Internal tracking (deprecated, use `id` instead)
     _databaseId: customer.id,
-    _lastSyncedAt: customer.updatedAt,
+
+    // Core
+    name: customer.name,
+    website: String((raw.website ?? customer.website ?? customer.domain ?? '') || ''),
+
+    // AccountData-first fields (if present)
+    aboutSections: (raw.aboutSections as any) ?? {
+      whatTheyDo: customer.whatTheyDo || '',
+      accreditations: customer.accreditations || '',
+      keyLeaders: customer.keyLeaders || '',
+      companyProfile: customer.companyProfile || '',
+      recentNews: customer.recentNews || '',
+      companySize: customer.companySize || '',
+      headquarters: customer.headquarters || '',
+      foundingYear: customer.foundingYear || '',
+    },
+    sector: String((raw.sector ?? customer.sector ?? '') || ''),
+    socialMedia: (raw.socialMedia as any) ?? (Array.isArray(customer.socialPresence) ? customer.socialPresence : []),
+
+    // Onboarding/contact convenience fields (stored in accountData by onboarding)
+    contactPersons: raw.contactPersons as any,
+    contactNumber: raw.contactNumber as any,
+    contactEmail: raw.contactEmail as any,
+    primaryContact: raw.primaryContact as any,
+    contactRoleId: raw.contactRoleId as any,
+    contactRoleLabel: raw.contactRoleLabel as any,
+    contactActive: raw.contactActive as any,
+
+    headOfficeAddress: (raw.headOfficeAddress as any) ?? (accountDetails.headOfficeAddress as any),
+    headOfficePlaceId: (raw.headOfficePlaceId as any) ?? (accountDetails.headOfficePlaceId as any),
+    headOfficePostcode: (raw.headOfficePostcode as any) ?? (accountDetails.headOfficePostcode as any),
+
+    assignedAccountManager: (raw.assignedAccountManager as any) ?? (accountDetails.assignedAccountManagerName as any),
+    assignedAccountManagerId: (raw.assignedAccountManagerId as any) ?? (accountDetails.assignedAccountManagerId as any),
+    assignedClientDdiNumber: (raw.assignedClientDdiNumber as any) ?? (accountDetails.assignedClientDdiNumber as any),
+
+    emailAccounts,
+    emailAccountsSetUp,
+
+    logoUrl: raw.logoUrl as any,
+    aboutSource: raw.aboutSource as any,
+    aboutLocked: raw.aboutLocked as any,
+
+    // Required fields with sane defaults (Account Card must render consistently)
+    status: (raw.status as any) ?? mapClientStatusToAccountStatus(customer.clientStatus),
+    targetLocation: (raw.targetLocation as any) ?? targetLocationFromDb,
+    targetTitle: String((raw.targetTitle ?? customer.targetJobTitle ?? '') || ''),
+    clientProfile: (raw.clientProfile as any) ?? (raw.clientProfile as any) ?? undefined,
+    monthlySpendGBP,
+    agreements: (raw.agreements as any) ?? [],
+    defcon: (toNumber(raw.defcon) ?? customer.defcon ?? 3) as any,
+    contractStart: String((raw.contractStart ?? '') || ''),
+    contractEnd: String((raw.contractEnd ?? '') || ''),
+    days,
+    contacts: (toNumber(raw.contacts) ?? contactCount ?? 0) as any,
+    leads: (toNumber(raw.leads) ?? 0) as any,
+    weeklyTarget: (toNumber(raw.weeklyTarget) ?? customer.weeklyLeadTarget ?? 0) as any,
+    weeklyActual: (toNumber(raw.weeklyActual) ?? customer.weeklyLeadActual ?? 0) as any,
+    monthlyTarget: (toNumber(raw.monthlyTarget) ?? customer.monthlyLeadTarget ?? 0) as any,
+    monthlyActual: (toNumber(raw.monthlyActual) ?? customer.monthlyLeadActual ?? 0) as any,
+    weeklyReport: String((raw.weeklyReport ?? '') || ''),
+    users: (raw.users as any) ?? [],
+
+    // Lead sheet URL is stored as top-level Customer scalar
+    clientLeadsSheetUrl: customer.leadsReportingUrl || undefined,
+    notes: raw.notes as any,
   }
+
+  return account
 }
 
 /**
  * Convert AccountsTab Account to database Customer format (for updates)
  */
 export function accountToDatabaseCustomer(account: Account): Partial<DatabaseCustomer> {
-  // Join target locations back to comma-separated string
-  const prospectingLocation = account.targetLocation?.join(', ') || null
+  // Join target locations back to comma-separated string (DB stores string)
+  const prospectingLocation = Array.isArray(account.targetLocation) ? account.targetLocation.join(', ') : null
 
   return {
     name: account.name,
+    domain: account.website ? account.website : null,
+    website: account.website || null,
     leadsReportingUrl: account.clientLeadsSheetUrl || null,
     sector: account.sector || null,
     prospectingLocation,
-    targetJobTitle: account.targetJobTitle || null,
-    weeklyLeadTarget: account.weeklyLeadTarget || null,
-    monthlyLeadTarget: account.monthlyLeadTarget || null,
-    weeklyLeadActual: account.weeklyLeadActual || null,
-    monthlyLeadActual: account.monthlyLeadActual || null,
-    monthlyIntakeGBP: account.monthlyIntake?.toString() || null,
+    targetJobTitle: account.targetTitle || null,
+    weeklyLeadTarget: account.weeklyTarget || null,
+    weeklyLeadActual: account.weeklyActual || null,
+    monthlyLeadTarget: account.monthlyTarget || null,
+    monthlyLeadActual: account.monthlyActual || null,
+    monthlyIntakeGBP: account.monthlySpendGBP?.toString() || null,
+    // Keep account snapshot in accountData (single source of truth for Account Card)
+    accountData: account as unknown as any,
     defcon: account.defcon || null,
-    clientStatus: account.clientStatus || 'active',
-    
-    // About section
-    website: account.website || null,
-    whatTheyDo: account.whatTheyDo || null,
-    keyLeaders: account.keyLeaders || null,
-    companyProfile: account.companyProfile || null,
-    recentNews: account.recentNews || null,
-    accreditations: account.accreditations || null,
-    socialPresence: account.socialPresence || null,
-    companySize: account.companySize || null,
-    headquarters: account.headquarters || null,
-    foundingYear: account.foundingYear || null,
   }
 }
 

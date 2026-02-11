@@ -725,6 +725,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       name: customer.name,
       accountData: nextAccountData,
       monthlyRevenueFromCustomer: revenueNumber,
+      // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
+      // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
+      monthlyIntakeGBP: revenueNumber,
       leadsReportingUrl: sheetUrl,
       leadsGoogleSheetLabel: sheetLabel,
     })
@@ -747,6 +750,36 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     
+    // Persist primary contact into CustomerContact table (so it appears under customer later)
+    const primary = nextAccountDetails.primaryContact
+    const primaryName = `${primary.firstName} ${primary.lastName}`.trim()
+    if (primaryName) {
+      const primaryContactId = (primary as any).id as string | undefined
+      const { error: contactError } = await api.post(`/api/customers/${customerId}/contacts`, {
+        ...(primaryContactId ? { id: primaryContactId } : {}),
+        name: primaryName,
+        email: primary.email?.trim() || null,
+        phone: primary.phone?.trim() || null,
+        title: primary.roleLabel?.trim() || null,
+        isPrimary: true,
+      })
+
+      if (contactError) {
+        // Non-fatal: customer onboarding data saved; contact wiring failed.
+        onboardingError('⚠️ Primary contact save failed (customer save succeeded):', {
+          customerId,
+          contactError,
+        })
+        toast({
+          title: 'Saved, but contact failed',
+          description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
+          status: 'warning',
+          duration: 6000,
+          isClosable: true,
+        })
+      }
+    }
+
     onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
     
     // SUCCESS: API returned 2xx - NOW update local state

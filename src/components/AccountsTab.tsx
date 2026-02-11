@@ -6346,6 +6346,61 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         )
                       })()}
                     </FieldRow>
+
+                    {/* Onboarding wiring: show CustomerContact rows saved during onboarding */}
+                    <FieldRow label="Client Contacts">
+                      {(() => {
+                        const customer = customers.find((c) => c.id === selectedAccount._databaseId) as any
+                        const contactRows = Array.isArray(customer?.customerContacts) ? customer.customerContacts : []
+
+                        if (contactRows.length === 0) {
+                          return (
+                            <Text fontSize="sm" color="gray.500">
+                              No client contacts saved yet. Add them in Customer Onboarding.
+                            </Text>
+                          )
+                        }
+
+                        return (
+                          <Stack spacing={2}>
+                            {contactRows.map((contact: any) => (
+                              <Box
+                                key={contact.id}
+                                p={3}
+                                border="1px solid"
+                                borderColor="gray.200"
+                                borderRadius="md"
+                                bg="gray.50"
+                              >
+                                <HStack justify="space-between" align="start">
+                                  <Box>
+                                    <HStack spacing={2} mb={1}>
+                                      <Text fontSize="sm" fontWeight="semibold" color="gray.800">
+                                        {contact.name}
+                                      </Text>
+                                      {contact.isPrimary ? (
+                                        <Badge colorScheme="blue" fontSize="xs">
+                                          Primary
+                                        </Badge>
+                                      ) : null}
+                                    </HStack>
+                                    {contact.title ? (
+                                      <Text fontSize="xs" color="gray.600">
+                                        {contact.title}
+                                      </Text>
+                                    ) : null}
+                                    <HStack spacing={4} mt={1} fontSize="xs" color="gray.600" flexWrap="wrap">
+                                      {contact.email ? <Text>{contact.email}</Text> : null}
+                                      {contact.phone ? <Text>{contact.phone}</Text> : null}
+                                    </HStack>
+                                  </Box>
+                                </HStack>
+                              </Box>
+                            ))}
+                          </Stack>
+                        )
+                      })()}
+                    </FieldRow>
                     
                     <FieldRow label="Agreements (Legacy)">
                       <Stack spacing={3}>
