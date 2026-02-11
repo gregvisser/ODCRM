@@ -40,9 +40,49 @@ async function apiRequest<T>(
     console.log(`[API] ${options.method || 'GET'} ${fullUrl} -> ${response.status}`)
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      console.error(`[API ERROR] ${fullUrl}:`, error)
-      return { error: error.error || `HTTP ${response.status}` }
+      // Try to parse JSON error response with detailed structure
+      let errorResponse: any
+      const contentType = response.headers.get('content-type')
+      
+      if (contentType?.includes('application/json')) {
+        try {
+          errorResponse = await response.json()
+        } catch (parseErr) {
+          errorResponse = { error: response.statusText }
+        }
+      } else {
+        // Non-JSON response (e.g., HTML error page)
+        const text = await response.text()
+        errorResponse = { 
+          error: `HTTP ${response.status}: ${response.statusText}`,
+          details: text.substring(0, 200) // First 200 chars for context
+        }
+      }
+      
+      // Build detailed error message for user
+      let errorMessage = errorResponse.error || `HTTP ${response.status}`
+      if (errorResponse.message && errorResponse.message !== errorResponse.error) {
+        errorMessage = errorResponse.message
+      }
+      if (errorResponse.details) {
+        // If details is an array (validation errors), format nicely
+        if (Array.isArray(errorResponse.details)) {
+          const detailsStr = errorResponse.details
+            .map((d: any) => `${d.path?.join('.') || 'field'}: ${d.message}`)
+            .join(', ')
+          errorMessage += ` (${detailsStr})`
+        } else if (typeof errorResponse.details === 'string') {
+          errorMessage += ` (${errorResponse.details})`
+        }
+      }
+      
+      console.error(`[API ERROR] ${fullUrl} [${response.status}]:`, {
+        status: response.status,
+        error: errorResponse,
+        fullResponse: errorResponse
+      })
+      
+      return { error: errorMessage }
     }
 
     const data = await response.json()
