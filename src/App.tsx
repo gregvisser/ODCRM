@@ -142,7 +142,7 @@ function App() {
 
     const handleNavigateToOnboarding = () => {
       setActiveTab('onboarding-home')
-      setActiveView('onboarding')
+      setActiveView('customer-onboarding')
     }
 
     window.addEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
