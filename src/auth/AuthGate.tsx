@@ -9,6 +9,23 @@ type AuthGateProps = {
   children: React.ReactNode
 }
 
+const POST_LOGIN_REDIRECT_KEY = 'odcrm_post_login_redirect_v1'
+
+function isSafeInternalRedirect(value: string): boolean {
+  const v = value.trim()
+  if (!v.startsWith('/')) return false
+  if (v.startsWith('//')) return false
+  if (v.includes('://')) return false
+  if (v.includes('\\')) return false
+  return true
+}
+
+function getIntendedRedirectFromWindow(): string {
+  // Preserve the user's intended deep link across the MSAL redirect (which returns to the site root).
+  // Keep it internal-only and compact: path + search, no origin.
+  return `${window.location.pathname || '/'}${window.location.search || ''}`
+}
+
 const parseList = (value?: string): string[] =>
   value
     ? value
@@ -73,6 +90,16 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   const handleSignIn = async () => {
     if (!authConfigReady) return
+    try {
+      const intended = getIntendedRedirectFromWindow()
+      if (isSafeInternalRedirect(intended)) {
+        sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, intended)
+      } else {
+        sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+      }
+    } catch {
+      // ignore
+    }
     await instance.loginRedirect(loginRequest)
   }
 

@@ -21,9 +21,21 @@ import { HeaderImagePicker } from './components/HeaderImagePicker'
 // import { DiagnosticBanner } from './components/DiagnosticBanner' // REMOVED per user request
 import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
 
+const POST_LOGIN_REDIRECT_KEY = 'odcrm_post_login_redirect_v1'
+
+function isSafeInternalRedirect(value: string): boolean {
+  const v = value.trim()
+  if (!v.startsWith('/')) return false
+  if (v.startsWith('//')) return false
+  if (v.includes('://')) return false
+  if (v.includes('\\')) return false
+  return true
+}
+
 function App() {
   const { instance } = useMsal()
-  const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
+  // Production requirement: first authenticated landing is ALWAYS Dashboard unless a safe deep link overrides it.
+  const [activeTab, setActiveTab] = useState<CrmTopTabId>('dashboards-home')
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
@@ -41,14 +53,39 @@ function App() {
 
   // Deep-linking: keep current tab/view in the URL (?tab=...&view=...&account=...).
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
+    // If user logged in from a deep link, MSAL returns to the configured redirectUri (root).
+    // Restore the intended destination from sessionStorage (internal-only).
+    let sourceUrl = new URL(window.location.href)
+    try {
+      const stored = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY)
+      if (stored && isSafeInternalRedirect(stored)) {
+        sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY)
+        sourceUrl = new URL(stored, window.location.origin)
+      }
+    } catch {
+      // ignore
+    }
+
+    const params = sourceUrl.searchParams
     const tab = params.get('tab')
     const view = params.get('view')
     const account = params.get('account')
 
     if (account) setFocusAccountName(account)
 
-    if (!tab) return
+    // Path-based deep link (preferred for production-safe routing)
+    const fromPath = CRM_TOP_TABS.find((t) => t.path === sourceUrl.pathname)?.id
+
+    if (!tab) {
+      if (fromPath) {
+        setActiveTab(fromPath)
+        if (view) setActiveView(view)
+        return
+      }
+      // Root or unknown path: default authenticated landing is Dashboard.
+      setActiveTab('dashboards-home')
+      return
+    }
     if (isCrmTopTabId(tab)) {
       setActiveTab(tab)
       if (view) setActiveView(view)
@@ -67,6 +104,16 @@ function App() {
 
   useEffect(() => {
     const url = new URL(window.location.href)
+    // Keep pathname aligned with tab path (navigation fallback supports all paths).
+    const tabPath = CRM_TOP_TABS.find((t) => t.id === activeTab)?.path
+    if (tabPath) url.pathname = tabPath
+
+    // Clean MSAL redirect params once we're in the app (prevents odd refresh behavior).
+    url.searchParams.delete('code')
+    url.searchParams.delete('state')
+    url.searchParams.delete('client_info')
+    url.searchParams.delete('session_state')
+
     url.searchParams.set('tab', activeTab)
     url.searchParams.set('view', activeView)
     if (focusAccountName) url.searchParams.set('account', focusAccountName)
