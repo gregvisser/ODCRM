@@ -47,9 +47,20 @@ async function apiRequest<T>(
         new Headers(override.headers).forEach((value, key) => headers.set(key, value))
       }
 
-      headers.set('Content-Type', 'application/json')
-      headers.set('Cache-Control', 'no-cache')
-      headers.set('Pragma', 'no-cache')
+      // Only set Content-Type when we actually send a JSON body.
+      // Setting Content-Type on GET can trigger unnecessary CORS preflights.
+      if (method !== 'GET' && method !== 'HEAD') {
+        headers.set('Content-Type', 'application/json')
+      }
+
+      // Only send Cache-Control/Pragma on GETs (anti-cache for list endpoints).
+      // Sending these on POST/PUT/etc adds extra requested headers in preflight and
+      // can cause "Failed to fetch" if the server/proxy doesn't allow them.
+      if (method === 'GET') {
+        headers.set('Cache-Control', 'no-cache')
+        headers.set('Pragma', 'no-cache')
+      }
+
       if (customerId) headers.set('X-Customer-Id', customerId)
 
       return {
