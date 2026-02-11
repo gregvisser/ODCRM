@@ -1,13 +1,23 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
+  Button,
   FormControl,
   FormLabel,
   HStack,
   IconButton,
+  Input,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Select,
   Spinner,
   Text,
+  useDisclosure,
   useToast,
   VStack,
 } from '@chakra-ui/react'
@@ -17,6 +27,7 @@ import { normalizeCustomersListResponse } from '../../../utils/normalizeApiRespo
 import { settingsStore } from '../../../platform'
 import { on } from '../../../platform/events'
 import { onboardingDebug } from '../utils/debug'
+import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
 
 type CustomerApi = {
   id: string
@@ -29,11 +40,18 @@ interface CustomerSelectorProps {
   onCustomerChange: (customerId: string) => void
 }
 
+const CREATE_NEW_VALUE = '__create_new_customer__'
+
 export default function CustomerSelector({ selectedCustomerId, onCustomerChange }: CustomerSelectorProps) {
   const toast = useToast()
+  const { createCustomer } = useCustomersFromDatabase()
   const [customers, setCustomers] = useState<CustomerApi[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
+
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const [isCreating, setIsCreating] = useState(false)
+  const [createForm, setCreateForm] = useState({ name: '', domainOrWebsite: '' })
 
   const fetchCustomers = useCallback(async () => {
     setIsLoading(true)
@@ -66,6 +84,10 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
     setIsLoading(false)
   }, [selectedCustomerId, onCustomerChange])
 
+  const sortedCustomers = useMemo(() => {
+    return [...customers].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+  }, [customers])
+
   useEffect(() => {
     void fetchCustomers()
   }, [fetchCustomers])
@@ -85,6 +107,58 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
       settingsStore.setCurrentCustomerId(selectedCustomerId)
     }
   }, [selectedCustomerId])
+
+  const handleSelectChange = (value: string) => {
+    if (value === CREATE_NEW_VALUE) {
+      // Open inline create modal; do not change selection yet
+      onOpen()
+      return
+    }
+    onCustomerChange(value)
+  }
+
+  const handleCreate = async () => {
+    const name = createForm.name.trim()
+    if (!name) {
+      toast({ title: 'Name required', status: 'warning', duration: 2500 })
+      return
+    }
+
+    setIsCreating(true)
+    const rawDomain = createForm.domainOrWebsite.trim()
+    // Accept either a domain (acme.com) or a website URL; store as domain for now to match existing API usage.
+    const domain = rawDomain || null
+
+    const { id, error } = await createCustomer({
+      name,
+      domain,
+      clientStatus: 'onboarding',
+      accountData: {
+        createdViaOnboarding: true,
+        createdAt: new Date().toISOString(),
+      },
+    })
+    setIsCreating(false)
+
+    if (error || !id) {
+      toast({
+        title: 'Create customer failed',
+        description: error || 'Unknown error',
+        status: 'error',
+        duration: 6000,
+        isClosable: true,
+      })
+      return
+    }
+
+    toast({ title: 'Customer created', status: 'success', duration: 2000 })
+    setCreateForm({ name: '', domainOrWebsite: '' })
+    onClose()
+
+    // Refresh dropdown from DB and select new customer
+    await fetchCustomers()
+    onCustomerChange(id)
+  }
 
   return (
     <Box
@@ -111,16 +185,17 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
             <HStack spacing={2}>
               <Select
                 value={selectedCustomerId}
-                onChange={(e) => onCustomerChange(e.target.value)}
+                onChange={(e) => handleSelectChange(e.target.value)}
                 placeholder={customers.length ? 'Select customer' : 'No customers found'}
                 size="sm"
                 flex="1"
               >
-                {customers.map((customer) => (
+                {sortedCustomers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
                     {customer.name}
                   </option>
                 ))}
+                <option value={CREATE_NEW_VALUE}>+ Create new customer…</option>
               </Select>
               <IconButton
                 aria-label="Refresh customers"
@@ -147,12 +222,52 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
           </Text>
         )}
 
-        {!isLoading && customers.length === 0 && (
+        {!isLoading && customers.length === 0 ? (
           <Text fontSize="xs" color="gray.500">
-            No customers found. Create a customer in the Customers tab first.
+            No customers found yet. Use “+ Create new customer…” to start onboarding.
           </Text>
-        )}
+        ) : null}
       </VStack>
+
+      <Modal isOpen={isOpen} onClose={onClose}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Create new customer</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <VStack align="stretch" spacing={4}>
+              <FormControl isRequired>
+                <FormLabel fontSize="sm">Customer Name</FormLabel>
+                <Input
+                  value={createForm.name}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}
+                  placeholder="e.g. Acme Corporation Ltd"
+                  autoFocus
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel fontSize="sm">Domain or Website (optional)</FormLabel>
+                <Input
+                  value={createForm.domainOrWebsite}
+                  onChange={(e) => setCreateForm((p) => ({ ...p, domainOrWebsite: e.target.value }))}
+                  placeholder="e.g. acme.com or https://acme.com"
+                />
+              </FormControl>
+              <Text fontSize="xs" color="gray.600">
+                After creating, the customer will be selected and the onboarding form will load from the database.
+              </Text>
+            </VStack>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button colorScheme="teal" onClick={() => void handleCreate()} isLoading={isCreating}>
+              Create & Select
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Box>
   )
 }

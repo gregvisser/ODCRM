@@ -25,7 +25,6 @@ import {
 import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
 import { emit } from '../../platform/events'
-import { getJson, setJson } from '../../platform/storage'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
@@ -127,8 +126,6 @@ const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
   daysPerWeek: 1,
 }
 
-const CONTACT_ROLES_STORAGE_KEY = 'odcrm_contact_roles'
-
 // Helper functions
 const normalizeClientProfile = (raw?: Partial<ClientProfile> | null): ClientProfile => {
   const safe = raw && typeof raw === 'object' ? raw : {}
@@ -180,15 +177,6 @@ const buildAccreditation = (): Accreditation => ({
   name: '',
 })
 
-const loadContactRoles = (): ContactRoleItem[] => {
-  const stored = getJson<ContactRoleItem[]>(CONTACT_ROLES_STORAGE_KEY)
-  return Array.isArray(stored) ? stored : []
-}
-
-const saveContactRoles = (roles: ContactRoleItem[]) => {
-  setJson(CONTACT_ROLES_STORAGE_KEY, roles)
-}
-
 // Component props
 interface CustomerOnboardingTabProps {
   customerId: string
@@ -224,6 +212,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
   const [leadsGoogleSheetLabel, setLeadsGoogleSheetLabel] = useState<string>('')
+  const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -260,6 +249,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         hasAccountData: !!data.accountData,
       })
       setCustomer(data)
+      // Initialize additional contacts from DB (exclude primary; primary lives in accountDetails.primaryContact)
+      const rows = Array.isArray((data as any).customerContacts) ? (data as any).customerContacts : []
+      setAdditionalContacts(rows.filter((c: any) => !c?.isPrimary))
       
       // Load agreement data if present (Phase 2 Item 4)
       // Check for blob-based agreement (new) or legacy URL
@@ -306,7 +298,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   useEffect(() => {
     void fetchCustomer()
     void fetchTaxonomy()
-    setContactRoles(loadContactRoles())
   }, [fetchCustomer, fetchTaxonomy])
 
   // Keep assigned users in sync with DB users (single source of truth)
@@ -572,7 +563,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           duration: 4000,
         })
         
-        // Refresh customer data to get updated progress tracker
+        // DB rehydration is mandatory: refresh customer to reflect metadata + any progress tracker updates
+        await fetchCustomer()
         emit('customerUpdated', { id: customer.id })
       }
       
@@ -633,7 +625,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
     const updated = [...contactRoles, next].sort((a, b) => a.label.localeCompare(b.label))
     setContactRoles(updated)
-    saveContactRoles(updated)
     return next
   }
 
@@ -662,6 +653,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const addContactRole = (label: string) => {
     const item = createContactRole(label)
     if (!item) return
+    // Keep roles in-memory only (DB remains source of truth for selected value in accountDetails.primaryContact).
+    setContactRoles((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]))
     updatePrimaryContact({ roleId: item.id, roleLabel: item.label })
     setContactRoleInput('')
   }
@@ -681,6 +674,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const handleSave = async () => {
     if (!customer) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customer, skipping save')
+      return
+    }
+    if (!customer.name || !customer.name.trim()) {
+      toast({
+        title: 'Customer name is required',
+        description: 'Enter a customer name before saving onboarding.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      })
       return
     }
     onboardingDebug('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
@@ -736,8 +739,38 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const sheetUrl = leadsGoogleSheetUrl.trim() || undefined
     const sheetLabel = leadsGoogleSheetLabel.trim() || undefined
     
+    // Additional contacts are saved as part of onboarding payload.
+    // IMPORTANT: Do not block saving partial progress for the rest of the form.
+    // If a contact is incomplete, omit it from the payload and warn.
+    const normalizedPrimaryId = nextAccountDetails.primaryContact.id
+    const rawAdditional = Array.isArray(additionalContacts) ? additionalContacts : []
+    const contactsToSave = rawAdditional
+      .filter((c: any) => c && c.id !== normalizedPrimaryId)
+      .map((c: any) => ({
+        id: typeof c.id === 'string' ? c.id : undefined,
+        name: String(c.name || '').trim(),
+        email: typeof c.email === 'string' ? c.email.trim() : c.email ?? null,
+        phone: typeof c.phone === 'string' ? c.phone.trim() : c.phone ?? null,
+        title: typeof c.title === 'string' ? c.title.trim() : c.title ?? null,
+        isPrimary: false,
+        notes: typeof c.notes === 'string' ? c.notes : null,
+      }))
+
+    const invalidContacts = contactsToSave.filter((c) => !c.name || (!c.email && !c.phone))
+    const validContacts = contactsToSave.filter((c) => c.name && (c.email || c.phone))
+
+    if (invalidContacts.length > 0) {
+      toast({
+        title: 'Some contacts are incomplete',
+        description: 'Incomplete additional contacts were not saved. Add email or phone to save them.',
+        status: 'warning',
+        duration: 6000,
+        isClosable: true,
+      })
+    }
+
     // Save onboarding payload (single transaction backend route)
-    const { error } = await api.put(`/api/customers/${customerId}/onboarding`, {
+    const { data: saveResult, error } = await api.put(`/api/customers/${customerId}/onboarding`, {
       customer: {
         name: customer.name,
         accountData: nextAccountData,
@@ -748,8 +781,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         leadsReportingUrl: sheetUrl,
         leadsGoogleSheetLabel: sheetLabel,
       },
-      // Additional contacts are managed via the dedicated contacts section endpoints.
-      contacts: [],
+      contacts: validContacts,
     })
     
     if (error) {
@@ -770,123 +802,21 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     
-    // Persist primary contact into CustomerContact table (so it appears under customer later).
-    // IMPORTANT: Make this idempotent even if backend ignores caller-provided `id`.
-    // Strategy: fetch current customerContacts, update an existing primary/matching contact if present,
-    // otherwise create a new one.
-    const primary = nextAccountDetails.primaryContact
-    const primaryName = `${primary.firstName} ${primary.lastName}`.trim()
-    if (primaryName) {
-      const desiredEmail = primary.email?.trim() || null
-      const desiredPhone = primary.phone?.trim() || null
-      const desiredTitle = primary.roleLabel?.trim() || null
-
-      const { data: customerDetail, error: customerDetailError } = await api.get<any>(`/api/customers/${customerId}`)
-
-      if (!customerDetailError) {
-        const rows = Array.isArray(customerDetail?.customerContacts) ? customerDetail.customerContacts : []
-        const normalizedPrimaryName = primaryName.trim().toLowerCase()
-        const normalizedEmail = desiredEmail ? desiredEmail.trim().toLowerCase() : null
-
-        // Match strategy (IMPORTANT):
-        // 1) Prefer matching by email (most reliable)
-        // 2) Then by exact name
-        // 3) Only then consider the existing primary contact IF it matches this person
-        const matchByEmail = normalizedEmail
-          ? rows.find((c: any) => String(c?.email || '').trim().toLowerCase() === normalizedEmail) || null
-          : null
-        const matchByName =
-          rows.find((c: any) => String(c?.name || '').trim().toLowerCase() === normalizedPrimaryName) || null
-        const matchPrimarySamePerson =
-          rows.find((c: any) => {
-            if (!c?.isPrimary) return false
-            const cName = String(c?.name || '').trim().toLowerCase()
-            if (cName && cName === normalizedPrimaryName) return true
-            const cEmail = String(c?.email || '').trim().toLowerCase()
-            return normalizedEmail ? cEmail === normalizedEmail : false
-          }) || null
-
-        const existing = matchByEmail || matchByName || matchPrimarySamePerson || null
-
-        if (existing?.id) {
-          const { error: updateContactError } = await api.put(`/api/customers/${customerId}/contacts/${existing.id}`, {
-            name: primaryName,
-            email: desiredEmail,
-            phone: desiredPhone,
-            title: desiredTitle,
-            isPrimary: true,
-          })
-
-          if (updateContactError) {
-            onboardingError('⚠️ Primary contact update failed (customer save succeeded):', {
-              customerId,
-              updateContactError,
-            })
-            toast({
-              title: 'Saved, but contact failed',
-              description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
-              status: 'warning',
-              duration: 6000,
-              isClosable: true,
-            })
-          }
-        } else {
-          const { error: createContactError } = await api.post(`/api/customers/${customerId}/contacts`, {
-            name: primaryName,
-            email: desiredEmail,
-            phone: desiredPhone,
-            title: desiredTitle,
-            isPrimary: true,
-          })
-
-          if (createContactError) {
-            onboardingError('⚠️ Primary contact create failed (customer save succeeded):', {
-              customerId,
-              createContactError,
-            })
-            toast({
-              title: 'Saved, but contact failed',
-              description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
-              status: 'warning',
-              duration: 6000,
-              isClosable: true,
-            })
-          }
-        }
-      } else {
-        onboardingError('⚠️ Could not load customerContacts to sync primary contact (non-fatal):', {
-          customerId,
-          customerDetailError,
-        })
-        toast({
-          title: 'Saved, but contact failed',
-          description: 'Customer details saved, but we could not verify/sync the primary contact. Please try saving again.',
-          status: 'warning',
-          duration: 6000,
-          isClosable: true,
-        })
-      }
-    }
-
     onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
-    
-    // SUCCESS: API returned 2xx - NOW update local state
-    // Update customer state with fresh data from API response
-    setCustomer((prev) => prev ? { ...prev, accountData: nextAccountData } : null)
-    
-    // Update local form state
-    setAccountDetails(nextAccountDetails)
-    
-    // Emit event for other components (database is source of truth, this is notification only)
-    emit('customerUpdated', { id: customerId, accountData: nextAccountData })
-    
-    // Show success toast ONLY after successful API response
-    toast({ 
-      title: 'Onboarding details saved', 
-      description: 'Changes saved to database',
-      status: 'success', 
+
+    toast({
+      title: 'Onboarding details saved',
+      description: 'Rehydrating from database…',
+      status: 'success',
       duration: 2500,
     })
+
+    // DB rehydration is mandatory: always refetch after save
+    await fetchCustomer()
+
+    // Notify listeners (DB is source of truth; this is a signal only)
+    emit('customerUpdated', { id: customerId })
+
     setIsSaving(false)
   }
 
@@ -1161,7 +1091,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       {/* Customer Contacts Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
-        <CustomerContactsSection customerId={customerId} />
+        <CustomerContactsSection
+          contacts={additionalContacts as any}
+          onChange={(next) => setAdditionalContacts(next as any)}
+        />
       </Box>
 
       {/* Email Accounts Section */}
@@ -1172,12 +1105,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       {/* Client Profile Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
-          <HStack justify="space-between">
-            <Text fontSize="lg" fontWeight="semibold">Client Profile</Text>
-            <Button colorScheme="teal" onClick={handleSave} isLoading={isSaving}>
-              Save Onboarding
-            </Button>
-          </HStack>
+          <Text fontSize="lg" fontWeight="semibold">Client Profile</Text>
 
           <FormControl>
             <FormLabel>Client History</FormLabel>
@@ -1641,6 +1569,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             </Stack>
           </FormControl>
         </Stack>
+      </Box>
+
+      {/* Single bottom save action (unified form) */}
+      <Box pt={2} pb={2}>
+        <Divider mb={4} />
+        <HStack justify="flex-end">
+          <Button colorScheme="teal" onClick={() => void handleSave()} isLoading={isSaving}>
+            Save Onboarding
+          </Button>
+        </HStack>
       </Box>
     </Stack>
   )

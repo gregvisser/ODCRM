@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -16,28 +16,23 @@ import {
   Heading,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EmailIcon, PhoneIcon } from '@chakra-ui/icons'
-import { api } from '../../../utils/api'
 
 interface CustomerContact {
   id: string
-  customerId: string
   name: string
   email?: string | null
   phone?: string | null
   title?: string | null
   isPrimary: boolean
   notes?: string | null
-  createdAt: string
-  updatedAt: string
 }
 
 interface CustomerContactsSectionProps {
-  customerId: string
+  contacts: CustomerContact[]
+  onChange: (next: CustomerContact[]) => void
 }
 
-export function CustomerContactsSection({ customerId }: CustomerContactsSectionProps) {
-  const [contacts, setContacts] = useState<CustomerContact[]>([])
-  const [isLoading, setIsLoading] = useState(true)
+export function CustomerContactsSection({ contacts, onChange }: CustomerContactsSectionProps) {
   const [isAdding, setIsAdding] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   
@@ -51,36 +46,10 @@ export function CustomerContactsSection({ customerId }: CustomerContactsSectionP
   
   const toast = useToast()
 
-  // Load contacts from database
-  const loadContacts = useCallback(async () => {
-    if (!customerId) return
-
-    setIsLoading(true)
-    try {
-      const { data, error } = await api.get<any>(`/api/customers/${customerId}`)
-      
-      if (error) {
-        console.error('Failed to load contacts:', error)
-        toast({
-          title: 'Error loading contacts',
-          description: error,
-          status: 'error',
-          duration: 3000,
-        })
-        return
-      }
-
-      setContacts(data.customerContacts || [])
-    } catch (err) {
-      console.error('Error loading contacts:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [customerId, toast])
-
-  useEffect(() => {
-    void loadContacts()
-  }, [loadContacts])
+  const additionalContacts = useMemo(() => {
+    const list = Array.isArray(contacts) ? contacts : []
+    return list.filter((c) => !c.isPrimary)
+  }, [contacts])
 
   // Add new contact
   const handleAddContact = async () => {
@@ -96,36 +65,21 @@ export function CustomerContactsSection({ customerId }: CustomerContactsSectionP
 
     setIsAdding(true)
     try {
-      const { error } = await api.post(`/api/customers/${customerId}/contacts`, {
+      const next: CustomerContact = {
+        id: `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         name: newContact.name.trim(),
         email: newContact.email.trim() || null,
         phone: newContact.phone.trim() || null,
         title: newContact.title.trim() || null,
-        isPrimary: contacts.length === 0, // First contact is primary
-      })
-
-      if (error) {
-        toast({
-          title: 'Failed to add contact',
-          description: error,
-          status: 'error',
-          duration: 3000,
-        })
-        return
+        isPrimary: false,
+        notes: null,
       }
 
-      toast({
-        title: 'Contact added',
-        status: 'success',
-        duration: 2000,
-      })
+      onChange([...(Array.isArray(contacts) ? contacts : []), next])
 
       // Reset form
       setNewContact({ name: '', email: '', phone: '', title: '' })
       setShowAddForm(false)
-
-      // Reload contacts
-      void loadContacts()
     } catch (err) {
       console.error('Error adding contact:', err)
     } finally {
@@ -138,44 +92,25 @@ export function CustomerContactsSection({ customerId }: CustomerContactsSectionP
     if (!confirm('Delete this contact?')) return
 
     try {
-      const { error } = await api.delete(`/api/customers/${customerId}/contacts/${contactId}`)
-
-      if (error) {
-        toast({
-          title: 'Failed to delete contact',
-          description: error,
-          status: 'error',
-          duration: 3000,
-        })
-        return
-      }
-
-      toast({
-        title: 'Contact deleted',
-        status: 'success',
-        duration: 2000,
-      })
-
-      void loadContacts()
+      onChange((Array.isArray(contacts) ? contacts : []).filter((c) => c.id !== contactId))
     } catch (err) {
       console.error('Error deleting contact:', err)
     }
   }
 
-  if (isLoading) {
-    return <Text fontSize="sm" color="gray.500">Loading contacts...</Text>
-  }
-
   return (
     <Box>
-      <Heading size="sm" mb={4}>
-        Contacts ({contacts.length})
+      <Heading size="sm" mb={1}>
+        Contacts
       </Heading>
+      <Text fontSize="sm" color="gray.600" mb={4}>
+        Additional contacts are saved when you click “Save Onboarding”.
+      </Text>
 
       {/* Existing contacts list */}
-      {contacts.length > 0 && (
+      {additionalContacts.length > 0 && (
         <VStack align="stretch" spacing={3} mb={4}>
-          {contacts.map((contact) => (
+          {additionalContacts.map((contact) => (
             <Box
               key={contact.id}
               p={3}
