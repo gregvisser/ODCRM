@@ -178,8 +178,19 @@ app.get('/api/health', (req, res) => {
     status: 'ok', 
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV || 'development',
-    version: '2026-02-05-v2',
-    commit: process.env.WEBSITE_COMMIT_HASH || null
+    version: '2026-02-11-archive-fix',
+    commit: process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA || null,
+    buildTime: process.env.BUILD_TIME || null
+  })
+})
+
+// Version endpoint for deployment verification
+app.get('/api/version', (req, res) => {
+  res.json({ 
+    gitSha: process.env.GITHUB_SHA || process.env.WEBSITE_COMMIT_HASH || 'unknown',
+    buildTime: process.env.BUILD_TIME || 'unknown',
+    version: '2026-02-11-archive-fix',
+    deployedAt: new Date().toISOString()
   })
 })
 
