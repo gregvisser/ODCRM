@@ -525,7 +525,12 @@ router.get('/:id/email-identities', async (req, res) => {
 
 // POST /api/customers - Create a new customer
 router.post('/', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  
   try {
+    console.log(`[${requestId}] POST /api/customers - Creating customer`)
+    console.log(`[${requestId}] Request body:`, { name: req.body.name, domain: req.body.domain, clientStatus: req.body.clientStatus })
+    
     // Validate with detailed error reporting
     const validationResult = upsertCustomerSchema.safeParse(req.body)
     if (!validationResult.success) {
@@ -533,10 +538,15 @@ router.post('/', async (req, res) => {
       const errorMessage = firstError 
         ? `${firstError.path.join('.')}: ${firstError.message}`
         : 'Invalid input'
-      console.error('Validation failed for POST /api/customers:', validationResult.error.errors)
+      
+      console.error(`[${requestId}] Validation failed:`, validationResult.error.errors)
+      console.error(`[create_customer_failed] requestId=${requestId} prismaCode=none message="${errorMessage}" meta={}`)
+      
       return res.status(400).json({ 
-        error: errorMessage,
-        details: validationResult.error.errors
+        error: 'validation_failed',
+        message: errorMessage,
+        details: validationResult.error.errors,
+        requestId
       })
     }
     
@@ -574,16 +584,85 @@ router.post('/', async (req, res) => {
       },
     })
 
+    console.log(`[${requestId}] ✅ Customer created successfully:`, { id: customer.id, name: customer.name })
+    
     return res.status(201).json({
       id: customer.id,
       name: customer.name,
+      requestId
     })
-  } catch (error) {
+  } catch (error: any) {
+    // CRITICAL: Log one structured line for production debugging
+    console.error(`[create_customer_failed] requestId=${requestId} prismaCode=${error.code || 'none'} message="${error.message}" meta=${JSON.stringify(error.meta || {})}`)
+    
+    // Handle Zod validation errors
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid input', details: error.errors })
+      const firstError = error.errors[0]
+      const fieldPath = firstError?.path?.join('.') || 'input'
+      const fieldMessage = firstError?.message || 'Invalid'
+      
+      return res.status(400).json({ 
+        error: 'validation_failed',
+        message: `${fieldPath}: ${fieldMessage}`,
+        details: error.errors,
+        requestId
+      })
     }
-    console.error('Error creating customer:', error)
-    return res.status(500).json({ error: 'Failed to create customer' })
+    
+    // Handle Prisma unique constraint violation (P2002)
+    if (error.code === 'P2002') {
+      const fields = error.meta?.target || ['unknown field']
+      return res.status(409).json({
+        error: 'customer_exists',
+        message: `Customer already exists (unique constraint on ${fields.join(', ')})`,
+        details: `A customer with this ${fields.join('/')} already exists in the database`,
+        prismaCode: error.code,
+        meta: { conflictingFields: fields },
+        requestId
+      })
+    }
+    
+    // Handle Prisma foreign key constraint (P2003)
+    if (error.code === 'P2003') {
+      return res.status(400).json({
+        error: 'invalid_reference',
+        message: 'Invalid reference: Related record does not exist',
+        details: error.meta?.field_name || 'foreign key constraint failed',
+        prismaCode: error.code,
+        requestId
+      })
+    }
+    
+    // Handle Prisma record not found (P2025)
+    if (error.code === 'P2025') {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'Record not found',
+        details: error.meta?.cause || 'Required record does not exist',
+        prismaCode: error.code,
+        requestId
+      })
+    }
+    
+    // Handle other Prisma errors
+    if (error.code?.startsWith('P')) {
+      return res.status(500).json({
+        error: 'database_error',
+        message: `Database error (${error.code}): ${error.message}`,
+        details: error.message,
+        prismaCode: error.code,
+        meta: error.meta,
+        requestId
+      })
+    }
+    
+    // Generic server error
+    return res.status(500).json({ 
+      error: 'server_error',
+      message: error.message || 'Failed to create customer. Please try again or contact support.',
+      details: error.stack?.substring(0, 300),
+      requestId
+    })
   }
 })
 

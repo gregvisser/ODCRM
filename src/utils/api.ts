@@ -16,6 +16,13 @@ if (!API_BASE_URL && typeof window !== 'undefined') {
 export interface ApiResponse<T> {
   data?: T
   error?: string
+  errorDetails?: {
+    status: number
+    message: string
+    requestId?: string
+    prismaCode?: string
+    details?: any
+  }
 }
 
 async function apiRequest<T>(
@@ -64,25 +71,45 @@ async function apiRequest<T>(
       if (errorResponse.message && errorResponse.message !== errorResponse.error) {
         errorMessage = errorResponse.message
       }
+      
+      // Add requestId if present
+      if (errorResponse.requestId) {
+        errorMessage += ` (requestId: ${errorResponse.requestId})`
+      }
+      
+      // Add prismaCode if present
+      if (errorResponse.prismaCode) {
+        errorMessage += ` [${errorResponse.prismaCode}]`
+      }
+      
       if (errorResponse.details) {
         // If details is an array (validation errors), format nicely
         if (Array.isArray(errorResponse.details)) {
           const detailsStr = errorResponse.details
             .map((d: any) => `${d.path?.join('.') || 'field'}: ${d.message}`)
             .join(', ')
-          errorMessage += ` (${detailsStr})`
-        } else if (typeof errorResponse.details === 'string') {
-          errorMessage += ` (${errorResponse.details})`
+          errorMessage += ` - ${detailsStr}`
         }
       }
       
       console.error(`[API ERROR] ${fullUrl} [${response.status}]:`, {
         status: response.status,
-        error: errorResponse,
+        errorMessage,
+        requestId: errorResponse.requestId,
+        prismaCode: errorResponse.prismaCode,
         fullResponse: errorResponse
       })
       
-      return { error: errorMessage }
+      return { 
+        error: errorMessage,
+        errorDetails: {
+          status: response.status,
+          message: errorResponse.message || errorMessage,
+          requestId: errorResponse.requestId,
+          prismaCode: errorResponse.prismaCode,
+          details: errorResponse.details
+        }
+      }
     }
 
     const data = await response.json()

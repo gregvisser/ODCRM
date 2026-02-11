@@ -67,14 +67,14 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
     setIsSubmitting(false)
 
     if (error || !id) {
-      const errorMsg = error || 'Failed to create customer'
+      const errorMsg = error || 'Failed to create customer (no error details returned)'
       onboardingError('❌ CreateCustomerStep: Customer creation failed:', errorMsg)
       setFormError(errorMsg)
       toast({
-        title: 'Failed to create customer',
+        title: 'Create customer failed',
         description: errorMsg,
         status: 'error',
-        duration: 5000,
+        duration: 8000,
         isClosable: true,
       })
       return
