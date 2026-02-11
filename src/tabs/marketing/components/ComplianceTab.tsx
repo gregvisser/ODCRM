@@ -33,9 +33,8 @@ import {
   List,
   ListItem,
   ListIcon,
-  CheckIcon,
 } from '@chakra-ui/react'
-import { DeleteIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
+import { DeleteIcon, AttachmentIcon, CloseIcon, CheckIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { settingsStore } from '../../../platform'
 
