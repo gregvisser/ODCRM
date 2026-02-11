@@ -56,11 +56,16 @@ jobs:
     - name: Log DB connection info (sanitized)
       run: |
         cd server
-        # Extract and log only the hostname (never password)
+        # Extract hostname (never password)
         DB_HOST=$(echo "$DATABASE_URL" | grep -oP '(?<=@)[^:/]+' || echo "PARSE_FAILED")
         echo "✅ DB Host: $DB_HOST"
-        if [ "$DB_HOST" = "PARSE_FAILED" ]; then
-          echo "⚠️  WARNING: Could not parse DB hostname from DATABASE_URL"
+        
+        # Extract database name (path segment after hostname, before query string)
+        DB_NAME=$(echo "$DATABASE_URL" | grep -oP '(?<=\/)[^?]+(?=\?|$)' || echo "PARSE_FAILED")
+        echo "✅ DB Name: $DB_NAME"
+        
+        if [ "$DB_HOST" = "PARSE_FAILED" ] || [ "$DB_NAME" = "PARSE_FAILED" ]; then
+          echo "⚠️  WARNING: Could not parse DB connection details from DATABASE_URL"
         fi
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -97,6 +102,11 @@ jobs:
         cd server
         npx prisma migrate status
         echo "✅ Database schema is up to date!"
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+    - name: Verify required columns exist
+      run: cd server && node scripts/verify-columns.cjs
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
