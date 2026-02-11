@@ -35,14 +35,38 @@ async function apiRequest<T>(
     
     console.log(`[API] ${options.method || 'GET'} ${fullUrl}`)
     
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(customerId ? { 'X-Customer-Id': customerId } : {}),
-        ...options.headers
+    const method = (options.method || 'GET').toUpperCase()
+
+    // CRITICAL: Avoid cached 304 responses with empty bodies (breaks response.json()).
+    // - Force no-store caching mode in fetch
+    // - Add explicit no-cache request headers (helps with some proxies/CDNs)
+    const buildRequestInit = (override?: Partial<RequestInit>): RequestInit => {
+      // Use Headers() to safely merge all supported header shapes (object, array, Headers)
+      const headers = new Headers(options.headers)
+      if (override?.headers) {
+        new Headers(override.headers).forEach((value, key) => headers.set(key, value))
       }
-    })
+
+      headers.set('Content-Type', 'application/json')
+      headers.set('Cache-Control', 'no-cache')
+      headers.set('Pragma', 'no-cache')
+      if (customerId) headers.set('X-Customer-Id', customerId)
+
+      return {
+        ...options,
+        ...override,
+        cache: 'no-store',
+        headers
+      }
+    }
+
+    let response = await fetch(fullUrl, buildRequestInit())
+
+    // Defensive: If a proxy still returns 304 (no body), retry once with same no-store settings.
+    if (response.status === 304 && method === 'GET') {
+      console.warn(`[API] ${method} ${fullUrl} -> 304 (no body). Retrying with no-store...`)
+      response = await fetch(fullUrl, buildRequestInit())
+    }
 
     console.log(`[API] ${options.method || 'GET'} ${fullUrl} -> ${response.status}`)
 
@@ -110,6 +134,19 @@ async function apiRequest<T>(
           details: errorResponse.details
         }
       }
+    }
+
+    // CRITICAL: Some intermediaries can still respond 304 with empty body.
+    // Avoid crashing on response.json() and keep the app stable.
+    if (response.status === 304) {
+      // Safe fallback for the customer LIST endpoint (prevents crashes).
+      // Backend should prevent this, but keep frontend resilient.
+      if (endpoint === '/api/customers' || endpoint.startsWith('/api/customers?')) {
+        return { data: ([] as unknown) as T }
+      }
+
+      // For other endpoints, return null rather than throwing.
+      return { data: (null as unknown) as T }
     }
 
     const data = await response.json()

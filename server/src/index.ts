@@ -70,6 +70,32 @@ startupDiagnostics()
 
 const app = express()
 
+// ============================================================================
+// API CACHING / ETAG DISABLE (CRITICAL)
+// ----------------------------------------------------------------------------
+// Production bug: Some clients/proxies were receiving 304 Not Modified responses
+// for GET /api/* with NO body, causing frontend crashes when calling .json().
+//
+// Goal: All API endpoints must always return JSON bodies (no 304) and must not
+// be cached. Disable Express ETags and set strict no-cache headers for /api/*.
+// ============================================================================
+app.set('etag', false)
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    // Disable all caching for API routes (browser + proxy/CDN)
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    res.setHeader('Pragma', 'no-cache')
+    res.setHeader('Expires', '0')
+    res.setHeader('Surrogate-Control', 'no-store')
+
+    // Ensure no ETag is present (Express ETag disabled above, but be explicit)
+    res.removeHeader('ETag')
+  }
+
+  next()
+})
+
 const parseAllowedOrigins = () => {
   // Parse FRONTEND_URLS (comma-separated), FRONTEND_URL (single URL), and FRONTDOOR_URL
   const envUrls = []
