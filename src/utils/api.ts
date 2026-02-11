@@ -47,9 +47,10 @@ async function apiRequest<T>(
         new Headers(override.headers).forEach((value, key) => headers.set(key, value))
       }
 
-      // Only set Content-Type when we actually send a JSON body.
-      // Setting Content-Type on GET can trigger unnecessary CORS preflights.
-      if (method !== 'GET' && method !== 'HEAD') {
+      // Only set Content-Type for methods that actually send our JSON bodies.
+      // Setting Content-Type on methods without a body (e.g. DELETE) is misleading and
+      // can trigger unnecessary CORS preflights.
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
         headers.set('Content-Type', 'application/json')
       }
 
