@@ -27,17 +27,15 @@ type UploadAgreementResult = {
   blobName: string
 }
 
-/**
- * Upload a customer agreement file to Azure Blob Storage
- * 
- * @param params - Upload parameters (buffer, contentType, blobName)
- * @returns Promise<UploadAgreementResult> - URL and blob name
- * @throws Error if upload fails or env vars missing
- */
-export async function uploadAgreement(
-  params: UploadAgreementParams
-): Promise<UploadAgreementResult> {
-  const { buffer, contentType, blobName } = params
+type UploadToContainerParams = {
+  buffer: Buffer
+  contentType: string
+  containerName: string
+  blobName: string
+}
+
+async function uploadToContainer(params: UploadToContainerParams): Promise<UploadAgreementResult> {
+  const { buffer, contentType, containerName, blobName } = params
 
   // Validate environment variables
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING
@@ -47,11 +45,7 @@ export async function uploadAgreement(
     )
   }
 
-  const containerName =
-    process.env.AZURE_STORAGE_CONTAINER_AGREEMENTS || 'customer-agreements'
-
   // Extract storage account name from connection string
-  // Format: AccountName=<name>;...
   const accountNameMatch = connectionString.match(/AccountName=([^;]+)/)
   if (!accountNameMatch) {
     throw new Error('Could not parse AccountName from AZURE_STORAGE_CONNECTION_STRING')
@@ -59,29 +53,20 @@ export async function uploadAgreement(
   const storageAccountName = accountNameMatch[1]
 
   try {
-    // Initialize Blob Service Client
-    const blobServiceClient =
-      BlobServiceClient.fromConnectionString(connectionString)
-
-    // Get container client (create if not exists)
+    const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString)
     const containerClient = blobServiceClient.getContainerClient(containerName)
-    
-    // Create container if it doesn't exist (idempotent)
+
     // CRITICAL: Container MUST be private - all access via SAS only
-    // Omitting 'access' property defaults to private (no anonymous access)
     await containerClient.createIfNotExists()
 
-    // Get blob client for upload
     const blockBlobClient = containerClient.getBlockBlobClient(blobName)
 
-    // Upload options
     const uploadOptions: BlockBlobUploadOptions = {
       blobHTTPHeaders: {
         blobContentType: contentType,
       },
     }
 
-    // Upload file
     const uploadResponse = await blockBlobClient.upload(
       buffer,
       buffer.length,
@@ -94,7 +79,7 @@ export async function uploadAgreement(
       )
     }
 
-    // CRITICAL: Verify blob exists after upload
+    // Verify blob exists after upload
     const blobProperties = await blockBlobClient.getProperties()
     if (!blobProperties.contentLength || blobProperties.contentLength !== buffer.length) {
       throw new Error(
@@ -102,12 +87,10 @@ export async function uploadAgreement(
       )
     }
 
-    // CRITICAL: Construct URL from scratch - DO NOT trust SDK url
-    // Azure Blob URL format: https://{account}.blob.core.windows.net/{container}/{blob}
+    // Construct URL from scratch - DO NOT trust SDK url
     const encodedBlobName = encodeURIComponent(blobName)
     const url = `https://${storageAccountName}.blob.core.windows.net/${containerName}/${encodedBlobName}`
 
-    // Concise production logging
     console.log(`[blobUpload] ✅ ${blobName} → ${url} (${buffer.length} bytes)`)
 
     return {
@@ -115,16 +98,34 @@ export async function uploadAgreement(
       blobName,
     }
   } catch (error) {
-    console.error('[blobUpload] Failed to upload agreement:', {
+    console.error('[blobUpload] Failed to upload blob:', {
+      containerName,
       blobName,
       error: error instanceof Error ? error.message : 'Unknown error',
     })
     throw new Error(
-      `Failed to upload agreement to Azure Blob Storage: ${
+      `Failed to upload blob to Azure Blob Storage: ${
         error instanceof Error ? error.message : 'Unknown error'
       }`
     )
   }
+}
+
+/**
+ * Upload a customer agreement file to Azure Blob Storage
+ * 
+ * @param params - Upload parameters (buffer, contentType, blobName)
+ * @returns Promise<UploadAgreementResult> - URL and blob name
+ * @throws Error if upload fails or env vars missing
+ */
+export async function uploadAgreement(
+  params: UploadAgreementParams
+): Promise<UploadAgreementResult> {
+  const { buffer, contentType, blobName } = params
+
+  const containerName =
+    process.env.AZURE_STORAGE_CONTAINER_AGREEMENTS || 'customer-agreements'
+  return uploadToContainer({ buffer, contentType, containerName, blobName })
 }
 
 /**
@@ -150,4 +151,38 @@ export function generateAgreementBlobName(
   const blobName = `agreement_${customerId}_${timestamp}_${randomId}_${safeName}`
 
   return blobName
+}
+
+export type UploadCustomerAttachmentParams = {
+  buffer: Buffer
+  contentType: string
+  blobName: string
+}
+
+export type UploadCustomerAttachmentResult = UploadAgreementResult & {
+  containerName: string
+}
+
+export async function uploadCustomerAttachment(
+  params: UploadCustomerAttachmentParams
+): Promise<UploadCustomerAttachmentResult> {
+  const { buffer, contentType, blobName } = params
+  const containerName =
+    process.env.AZURE_STORAGE_CONTAINER_ATTACHMENTS || 'customer-attachments'
+
+  const result = await uploadToContainer({ buffer, contentType, containerName, blobName })
+  return { ...result, containerName }
+}
+
+export function generateCustomerAttachmentBlobName(
+  customerId: string,
+  attachmentType: string,
+  fileName: string
+): string {
+  const sanitizedType = String(attachmentType || 'attachment').replace(/[^a-zA-Z0-9._-]/g, '_')
+  const sanitized = String(fileName || '').replace(/[^a-zA-Z0-9._-]/g, '_')
+  const safeName = sanitized || 'attachment'
+  const timestamp = Date.now()
+  const randomId = Math.random().toString(36).slice(2, 8)
+  return `attachment_${customerId}_${sanitizedType}_${timestamp}_${randomId}_${safeName}`
 }

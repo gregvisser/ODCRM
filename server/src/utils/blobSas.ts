@@ -38,7 +38,7 @@ type GenerateSasUrlResult = {
  * @returns Promise<GenerateSasUrlResult> - SAS URL and expiration
  * @throws Error if connection string invalid or blob generation fails
  */
-export async function generateAgreementSasUrl(
+export async function generateBlobSasUrl(
   params: GenerateSasUrlParams
 ): Promise<GenerateSasUrlResult> {
   const { containerName, blobName, ttlMinutes = 15 } = params
@@ -124,4 +124,11 @@ export async function generateAgreementSasUrl(
       }`
     )
   }
+}
+
+// Back-compat: Agreement codepaths call this name.
+export async function generateAgreementSasUrl(
+  params: GenerateSasUrlParams
+): Promise<GenerateSasUrlResult> {
+  return generateBlobSasUrl(params)
 }

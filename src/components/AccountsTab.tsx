@@ -1300,9 +1300,8 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
 function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): Account {
   const updated: Account = { ...account }
   if (customer.name) updated.name = customer.name
-  // Prioritize website from DB field
+  // Web Address is a first-class DB field. Do NOT derive it from domain.
   if (customer.website) updated.website = customer.website
-  else if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
   if (customer.sector) updated.sector = customer.sector
   if (customer.clientStatus) updated.status = mapClientStatusToAccountStatus(customer.clientStatus)
   if (customer.prospectingLocation) updated.targetLocation = [customer.prospectingLocation]
@@ -1346,8 +1345,8 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
 }
 
 function buildAccountFromCustomer(customer: CustomerApi): Account {
-  // Prioritize website from DB field, fallback to domain
-  const website = customer.website || normalizeCustomerWebsite(customer.domain)
+  // Web Address is a first-class DB field. Do NOT derive it from domain.
+  const website = customer.website || ''
   
   // Build About sections from DB fields if available
   const aboutSectionsFromDb = customer.whatTheyDo ||
@@ -1438,9 +1437,6 @@ function mergeAccountFromCustomer(account: Account, customer: CustomerApi): Acco
   }
   if ((!account.monthlySpendGBP || account.monthlySpendGBP === 0) && customer.monthlyIntakeGBP) {
     updates.monthlySpendGBP = Number(customer.monthlyIntakeGBP || 0)
-  }
-  if (!account.website && customer.domain) {
-    updates.website = normalizeCustomerWebsite(customer.domain)
   }
   return Object.keys(updates).length ? { ...account, ...updates } : account
 }
@@ -2260,9 +2256,12 @@ const renderAboutField = (
     const whatTheyDoFormatted = formatStoredValue(sections?.whatTheyDo ?? '')
     return (
       <Stack spacing={3}>
-        {/* Website Link */}
-        {website && (
-          <Box mb={2}>
+        {/* Web Address (DB truth) */}
+        <Stack spacing={1}>
+          <Text fontSize="sm" fontWeight="semibold" color="gray.600">
+            Web Address
+          </Text>
+          {website ? (
             <Link
               href={website}
               isExternal
@@ -2270,11 +2269,16 @@ const renderAboutField = (
               fontSize="sm"
               fontWeight="medium"
               textDecoration="underline"
+              rel="noopener noreferrer"
             >
               {website}
             </Link>
-          </Box>
-        )}
+          ) : (
+            <Text fontSize="sm" color="gray.500">
+              Not set
+            </Text>
+          )}
+        </Stack>
         <Text fontSize="sm" fontWeight="semibold" color="gray.600">
           What they do
         </Text>
@@ -2290,10 +2294,13 @@ const renderAboutField = (
 
   return (
     <Stack spacing={5}>
-      {/* Website Link - always at top */}
-      {website && (
-        <Box>
-          {isEditingWebsite ? (
+      {/* Web Address (DB truth) */}
+      <Box>
+        <Text fontSize="sm" fontWeight="semibold" color="gray.600" mb={1}>
+          Web Address
+        </Text>
+        {website ? (
+          isEditingWebsite ? (
             <Input
               defaultValue={website}
               autoFocus
@@ -2321,6 +2328,7 @@ const renderAboutField = (
                 fontSize="sm"
                 fontWeight="medium"
                 textDecoration="underline"
+                rel="noopener noreferrer"
               >
                 {website}
               </Link>
@@ -2334,9 +2342,13 @@ const renderAboutField = (
                 />
               )}
             </HStack>
-          )}
-        </Box>
-      )}
+          )
+        ) : (
+          <Text fontSize="sm" color="gray.500">
+            Not set
+          </Text>
+        )}
+      </Box>
       {visibleSections.map((item) => {
         // Special handling for Recent news section with links
         if (item.heading === 'Recent news' && item.newsItems && item.newsItems.length > 0) {
@@ -6094,7 +6106,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         () => handleToggleAbout(selectedAccount.name),
                         selectedAccount.socialMedia || [],
                         aboutSections.headquarters,
-                        selectedAccount.website,
+                        // Web Address must reflect DB truth (no derived fallback from domain).
+                        (() => {
+                          const customer = customers.find((c) => c.id === selectedAccount._databaseId)
+                          return customer?.website || undefined
+                        })(),
                       async (newWebsite: string) => {
                         const normalized = normalizeCustomerWebsite(newWebsite)
                         updateAccount(selectedAccount.name, { website: normalized })
@@ -6353,6 +6369,154 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       })()}
                     </FieldRow>
 
+                    {/* Documents (Azure Blob-backed attachments) */}
+                    <FieldRow label="Documents">
+                      {(() => {
+                        const customer = customers.find((c) => c.id === selectedAccount._databaseId) as any
+                        const accountData =
+                          customer?.accountData && typeof customer.accountData === 'object' ? customer.accountData : {}
+                        const attachments = Array.isArray(accountData?.attachments) ? accountData.attachments : []
+
+                        const uploadInputId = `documents-upload-${selectedAccount._databaseId || selectedAccount.name}`
+
+                        const handleUpload = async (file: File | undefined) => {
+                          if (!file) return
+                          if (!customer?.id) {
+                            toast({
+                              title: 'No customer selected',
+                              description: 'Unable to upload document without a database customer ID.',
+                              status: 'error',
+                              duration: 5000,
+                            })
+                            return
+                          }
+
+                          const allowedTypes = [
+                            'application/pdf',
+                            'application/msword',
+                            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                          ]
+                          if (!allowedTypes.includes(file.type)) {
+                            toast({
+                              title: 'Invalid file type',
+                              description: 'Only PDF, DOC, and DOCX files are allowed',
+                              status: 'error',
+                              duration: 5000,
+                            })
+                            return
+                          }
+
+                          try {
+                            const formData = new FormData()
+                            formData.append('file', file, file.name)
+                            formData.append('attachmentType', 'document')
+
+                            const response = await fetch(`/api/customers/${customer.id}/attachments`, {
+                              method: 'POST',
+                              body: formData,
+                            })
+
+                            if (!response.ok) {
+                              let message = `Upload failed (${response.status})`
+                              try {
+                                const errorData = await response.json()
+                                message = errorData?.message || errorData?.error || message
+                              } catch {
+                                // ignore
+                              }
+                              throw new Error(message)
+                            }
+
+                            toast({
+                              title: 'Document uploaded',
+                              description: 'Refreshing from database…',
+                              status: 'success',
+                              duration: 2500,
+                            })
+
+                            emit('customerUpdated', { id: customer.id })
+                          } catch (e) {
+                            toast({
+                              title: 'Upload failed',
+                              description: e instanceof Error ? e.message : 'Unable to upload document',
+                              status: 'error',
+                              duration: 5000,
+                            })
+                          }
+                        }
+
+                        return (
+                          <Stack spacing={3}>
+                            <Input
+                              type="file"
+                              accept=".pdf,.doc,.docx"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                void handleUpload(file)
+                                e.currentTarget.value = ''
+                              }}
+                              size="md"
+                              display="none"
+                              id={uploadInputId}
+                            />
+                            <Button
+                              as="label"
+                              htmlFor={uploadInputId}
+                              leftIcon={<AttachmentIcon />}
+                              size="sm"
+                              variant="outline"
+                            >
+                              Upload document
+                            </Button>
+
+                            {attachments.length === 0 ? (
+                              <Text fontSize="sm" color="gray.500">
+                                No documents uploaded yet.
+                              </Text>
+                            ) : (
+                              <Stack spacing={2}>
+                                {attachments
+                                  .slice()
+                                  .reverse()
+                                  .map((att: any) => (
+                                    <Box
+                                      key={att.id || `${att.fileName}-${att.uploadedAt}`}
+                                      p={3}
+                                      border="1px solid"
+                                      borderColor="gray.200"
+                                      borderRadius="md"
+                                      bg="white"
+                                    >
+                                      <Stack spacing={1}>
+                                        <HStack justify="space-between" align="start">
+                                          <Link
+                                            href={att.fileUrl}
+                                            isExternal
+                                            color="teal.600"
+                                            fontSize="sm"
+                                            fontWeight="medium"
+                                            rel="noopener noreferrer"
+                                          >
+                                            {att.fileName || 'View document'}
+                                          </Link>
+                                          <Text fontSize="xs" color="gray.500">
+                                            {att.uploadedByEmail || 'Unknown'}
+                                          </Text>
+                                        </HStack>
+                                        <Text fontSize="xs" color="gray.500">
+                                          {att.type || 'document'}
+                                          {att.uploadedAt ? ` • ${new Date(att.uploadedAt).toLocaleString()}` : ''}
+                                        </Text>
+                                      </Stack>
+                                    </Box>
+                                  ))}
+                              </Stack>
+                            )}
+                          </Stack>
+                        )
+                      })()}
+                    </FieldRow>
+
                     {/* Onboarding wiring: show CustomerContact rows saved during onboarding */}
                     <FieldRow label="Client Contacts">
                       {(() => {
@@ -6412,20 +6576,69 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       <Stack spacing={3}>
                         <Input
                           type="file"
-                          accept=".pdf,.doc,.docx,.txt"
+                          accept=".pdf,.doc,.docx"
                           onChange={(e) => {
                             const file = e.target.files?.[0]
-                            if (file) {
-                              const newFile: AgreementFile = {
-                                id: Date.now().toString(),
-                                name: file.name,
-                                url: URL.createObjectURL(file),
-                                uploadedAt: new Date().toISOString(),
-                              }
-                              updateAccount(selectedAccount.name, {
-                                agreements: [...(selectedAccount.agreements || []), newFile],
+                            const customer = customers.find((c) => c.id === selectedAccount._databaseId) as any
+                            if (!file || !customer?.id) return
+
+                            const allowedTypes = [
+                              'application/pdf',
+                              'application/msword',
+                              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                            ]
+                            if (!allowedTypes.includes(file.type)) {
+                              toast({
+                                title: 'Invalid file type',
+                                description: 'Only PDF, DOC, and DOCX files are allowed',
+                                status: 'error',
+                                duration: 5000,
                               })
+                              e.currentTarget.value = ''
+                              return
                             }
+
+                            void (async () => {
+                              try {
+                                const formData = new FormData()
+                                formData.append('file', file, file.name)
+                                formData.append('attachmentType', 'legacy_agreement')
+
+                                const response = await fetch(`/api/customers/${customer.id}/attachments`, {
+                                  method: 'POST',
+                                  body: formData,
+                                })
+
+                                if (!response.ok) {
+                                  let message = `Upload failed (${response.status})`
+                                  try {
+                                    const errorData = await response.json()
+                                    message = errorData?.message || errorData?.error || message
+                                  } catch {
+                                    // ignore
+                                  }
+                                  throw new Error(message)
+                                }
+
+                                toast({
+                                  title: 'Agreement uploaded',
+                                  description: 'Refreshing from database…',
+                                  status: 'success',
+                                  duration: 2500,
+                                })
+
+                                emit('customerUpdated', { id: customer.id })
+                              } catch (err) {
+                                toast({
+                                  title: 'Upload failed',
+                                  description: err instanceof Error ? err.message : 'Unable to upload agreement',
+                                  status: 'error',
+                                  duration: 5000,
+                                })
+                              }
+                            })()
+
+                            e.currentTarget.value = ''
                           }}
                           size="md"
                           display="none"
@@ -6441,41 +6654,50 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         >
                           Attach Agreement
                         </Button>
-                        {(selectedAccount.agreements || []).length > 0 && (
-                          <Stack spacing={2} mt={2}>
-                            {(selectedAccount.agreements || []).map((file) => (
-                              <Box
-                                key={file.id}
-                                p={3}
-                                border="1px solid"
-                                borderColor="gray.200"
-                                borderRadius="md"
-                                bg="white"
-                                display="flex"
-                                justifyContent="space-between"
-                                alignItems="center"
-                              >
-                                <Link href={file.url} isExternal color="text.muted" fontSize="md" fontWeight="medium">
-                                  {file.name}
-                                </Link>
-                                <IconButton
-                                  aria-label="Remove file"
-                                  icon={<DeleteIcon />}
-                                  size="sm"
-                                  variant="ghost"
-                                  colorScheme="gray"
-                                  onClick={() => {
-                                    updateAccount(selectedAccount.name, {
-                                      agreements: (selectedAccount.agreements || []).filter(
-                                        (f) => f.id !== file.id,
-                                      ),
-                                    })
-                                  }}
-                                />
-                              </Box>
-                            ))}
-                          </Stack>
-                        )}
+                        {(() => {
+                          const customer = customers.find((c) => c.id === selectedAccount._databaseId) as any
+                          const accountData =
+                            customer?.accountData && typeof customer.accountData === 'object' ? customer.accountData : {}
+                          const attachments = Array.isArray(accountData?.attachments) ? accountData.attachments : []
+                          const legacyAgreements = attachments.filter((a: any) => String(a?.type || '') === 'legacy_agreement')
+
+                          if (legacyAgreements.length === 0) return null
+
+                          return (
+                            <Stack spacing={2} mt={2}>
+                              {legacyAgreements
+                                .slice()
+                                .reverse()
+                                .map((att: any) => (
+                                  <Box
+                                    key={att.id || `${att.fileName}-${att.uploadedAt}`}
+                                    p={3}
+                                    border="1px solid"
+                                    borderColor="gray.200"
+                                    borderRadius="md"
+                                    bg="white"
+                                    display="flex"
+                                    justifyContent="space-between"
+                                    alignItems="center"
+                                  >
+                                    <Link
+                                      href={att.fileUrl}
+                                      isExternal
+                                      color="teal.600"
+                                      fontSize="sm"
+                                      fontWeight="medium"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {att.fileName || 'View file'}
+                                    </Link>
+                                    <Text fontSize="xs" color="gray.500">
+                                      {att.uploadedAt ? new Date(att.uploadedAt).toLocaleDateString() : ''}
+                                    </Text>
+                                  </Box>
+                                ))}
+                            </Stack>
+                          )
+                        })()}
                       </Stack>
                     </FieldRow>
                   </SimpleGrid>

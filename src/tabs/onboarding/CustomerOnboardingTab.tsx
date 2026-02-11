@@ -43,6 +43,7 @@ import type {
 type CustomerApi = {
   id: string
   name: string
+  website?: string | null
   accountData?: Record<string, unknown> | null
   monthlyRevenueFromCustomer?: string | null
   leadsReportingUrl?: string | null
@@ -172,6 +173,16 @@ const isValidUrl = (value: string): boolean => {
   }
 }
 
+const normalizeWebAddress = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+
+  // If user entered a URL without a scheme, default to https://
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)
+  return hasScheme ? trimmed : `https://${trimmed}`
+}
+
 const buildAccreditation = (): Accreditation => ({
   id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   name: '',
@@ -220,7 +231,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const accountData = customer.accountData as Record<string, unknown> | null
     return {
       name: customer.name,
-      website: accountData?.website as string | undefined,
+      website: customer.website ?? undefined,
       weeklyTarget: accountData?.weeklyTarget as number | undefined,
       _databaseId: customer.id,
     } as Partial<Account>
@@ -440,6 +451,56 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const handleAccreditationFileChange = (id: string, file: File | null) => {
     if (!file) return
+
+    const allowedDocTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ]
+
+    // PDF/DOC/DOCX must use Azure Blob via /api/customers/:id/attachments
+    if (allowedDocTypes.includes(file.type)) {
+      setUploadingAccreditations((prev) => ({ ...prev, [id]: true }))
+      void (async () => {
+        try {
+          const formData = new FormData()
+          formData.append('file', file, file.name)
+          formData.append('attachmentType', `accreditation_evidence:${id}`)
+
+          const response = await fetch(`/api/customers/${customerId}/attachments`, {
+            method: 'POST',
+            body: formData,
+          })
+
+          if (!response.ok) {
+            let message = `Upload failed (${response.status})`
+            try {
+              const errorData = await response.json()
+              message = errorData?.message || errorData?.error || message
+            } catch {
+              // ignore
+            }
+            throw new Error(message)
+          }
+
+          // DB rehydration is mandatory: refresh customer to reflect new attachment metadata + wired profile fields
+          await fetchCustomer()
+          emit('customerUpdated', { id: customerId })
+        } catch (e) {
+          toast({
+            title: 'Upload failed',
+            description: e instanceof Error ? e.message : 'Unable to upload file',
+            status: 'error',
+            duration: 5000,
+          })
+        } finally {
+          setUploadingAccreditations((prev) => ({ ...prev, [id]: false }))
+        }
+      })()
+      return
+    }
+
+    // Non-doc evidence (e.g. images) stays on the legacy uploader for now.
     const reader = new FileReader()
     reader.onload = async () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : ''
@@ -478,6 +539,56 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const handleCaseStudiesFileChange = (file: File | null) => {
     if (!file) return
+
+    const allowedDocTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ]
+
+    // PDF/DOC/DOCX must use Azure Blob via /api/customers/:id/attachments
+    if (allowedDocTypes.includes(file.type)) {
+      setUploadingCaseStudies(true)
+      void (async () => {
+        try {
+          const formData = new FormData()
+          formData.append('file', file, file.name)
+          formData.append('attachmentType', 'case_studies')
+
+          const response = await fetch(`/api/customers/${customerId}/attachments`, {
+            method: 'POST',
+            body: formData,
+          })
+
+          if (!response.ok) {
+            let message = `Upload failed (${response.status})`
+            try {
+              const errorData = await response.json()
+              message = errorData?.message || errorData?.error || message
+            } catch {
+              // ignore
+            }
+            throw new Error(message)
+          }
+
+          // DB rehydration is mandatory
+          await fetchCustomer()
+          emit('customerUpdated', { id: customerId })
+        } catch (e) {
+          toast({
+            title: 'Upload failed',
+            description: e instanceof Error ? e.message : 'Unable to upload file',
+            status: 'error',
+            duration: 5000,
+          })
+        } finally {
+          setUploadingCaseStudies(false)
+        }
+      })()
+      return
+    }
+
+    // Non-doc evidence (e.g. images) stays on the legacy uploader for now.
     const reader = new FileReader()
     reader.onload = async () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : ''
@@ -773,6 +884,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const { data: saveResult, error } = await api.put(`/api/customers/${customerId}/onboarding`, {
       customer: {
         name: customer.name,
+        website: normalizeWebAddress(customer.website),
         accountData: nextAccountData,
         monthlyRevenueFromCustomer: revenueNumber,
         // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
@@ -947,9 +1059,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormControl>
               <FormLabel>Web Address</FormLabel>
               <Input
-                value={accountSnapshot?.website || ''}
-                isReadOnly
-                placeholder="Website from account card"
+                type="url"
+                value={customer.website || ''}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setCustomer((prev) => (prev ? { ...prev, website: next } : prev))
+                }}
+                placeholder="https://example.com"
               />
             </FormControl>
             <FormControl>

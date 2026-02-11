@@ -7,6 +7,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../utils/api'
 import { normalizeCustomersListResponse } from '../utils/normalizeApiResponse'
+import { on } from '../platform/events'
 
 export type DatabaseCustomer = {
   id: string
@@ -102,6 +103,20 @@ export function useCustomersFromDatabase(): UseCustomersResult {
   // Load on mount
   useEffect(() => {
     fetchCustomers()
+  }, [fetchCustomers])
+
+  // Keep customers fresh across the app when anything updates a customer in DB.
+  useEffect(() => {
+    const off = on('customerUpdated', () => {
+      void fetchCustomers()
+    })
+    const offCreated = on('customerCreated', () => {
+      void fetchCustomers()
+    })
+    return () => {
+      off()
+      offCreated()
+    }
   }, [fetchCustomers])
 
   const createCustomer = useCallback(async (data: Partial<DatabaseCustomer>) => {

@@ -6,11 +6,27 @@
 
 import { Router } from 'express'
 import { z } from 'zod'
+import multer from 'multer'
 import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
 
 const router = Router()
+
+// Shared attachment constraints (match Agreement upload)
+const ALLOWED_DOC_MIME_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]
+
+const MAX_ATTACHMENT_FILE_SIZE_MB = 10
+const MAX_ATTACHMENT_FILE_SIZE_BYTES = MAX_ATTACHMENT_FILE_SIZE_MB * 1024 * 1024
+
+const attachmentsUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_ATTACHMENT_FILE_SIZE_BYTES },
+})
 
 // Schema validation (matches OpensDoorsV2 ClientAccount)
 const upsertCustomerSchema = z.object({
@@ -2324,6 +2340,258 @@ router.get('/:id/agreement-download', async (req, res) => {
     return res.status(500).json({
       error: 'Failed to generate download URL',
       details: error instanceof Error ? error.message : 'Unknown error'
+    })
+  }
+})
+
+// POST /api/customers/:id/attachments - Upload a generic customer attachment (Azure Blob)
+// Stores attachment metadata append-only in accountData.attachments[] (no migrations).
+router.post('/:id/attachments', (req, res) => {
+  attachmentsUpload.single('file')(req as any, res as any, async (err: any) => {
+    try {
+      const { id } = req.params as any
+
+      if (err) {
+        // Handle multer size limit
+        if (err?.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({
+            error: 'attachment_too_large',
+            message: `File exceeds maximum allowed size of ${MAX_ATTACHMENT_FILE_SIZE_MB}MB`,
+            maxMb: MAX_ATTACHMENT_FILE_SIZE_MB,
+          })
+        }
+        console.error('Error parsing attachment multipart:', err)
+        return res.status(400).json({ error: 'Invalid multipart upload' })
+      }
+
+      const file = (req as any).file as
+        | { originalname: string; mimetype: string; buffer: Buffer; size: number }
+        | undefined
+      const attachmentType = String(((req as any).body || {}).attachmentType || '').trim()
+
+      if (!file || !file.buffer || !file.originalname) {
+        return res.status(400).json({ error: 'Missing file' })
+      }
+      if (!attachmentType) {
+        return res.status(400).json({ error: 'Missing attachmentType' })
+      }
+
+      const mimeType = String(file.mimetype || '').trim()
+      if (!ALLOWED_DOC_MIME_TYPES.includes(mimeType)) {
+        return res.status(400).json({
+          error: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.',
+          receivedMimeType: mimeType,
+        })
+      }
+
+      // Validate customer exists + not archived
+      const customer = await prisma.customer.findUnique({
+        where: { id },
+        select: { id: true, name: true, isArchived: true, accountData: true },
+      })
+      if (!customer) {
+        return res.status(404).json({ error: 'Customer not found' })
+      }
+      if (customer.isArchived) {
+        return res.status(400).json({ error: 'Customer is archived' })
+      }
+
+      // Hard cap (defense-in-depth; multer already limits)
+      if (file.size > MAX_ATTACHMENT_FILE_SIZE_BYTES) {
+        return res.status(413).json({
+          error: 'attachment_too_large',
+          message: `File exceeds maximum allowed size of ${MAX_ATTACHMENT_FILE_SIZE_MB}MB`,
+          maxMb: MAX_ATTACHMENT_FILE_SIZE_MB,
+        })
+      }
+
+      // Upload to Azure Blob (reuse helper used by Agreement)
+      const { uploadCustomerAttachment, generateCustomerAttachmentBlobName } = await import(
+        '../utils/blobUpload.js'
+      )
+      const blobName = generateCustomerAttachmentBlobName(id, attachmentType, file.originalname)
+      const uploadResult = await uploadCustomerAttachment({
+        buffer: file.buffer,
+        contentType: mimeType,
+        blobName,
+      })
+
+      const actorIdentity = getActorIdentity(req as any)
+      const actorEmail = actorIdentity?.email || null
+
+      const attachmentId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const now = new Date()
+
+      const baseUrl =
+        process.env.API_PUBLIC_BASE_URL || `${(req as any).protocol}://${(req as any).get('host')}`
+      const downloadUrl = `${baseUrl}/api/customers/${id}/attachments/${attachmentId}/download`
+
+      const attachment = {
+        id: attachmentId,
+        type: attachmentType,
+        fileName: file.originalname,
+        fileUrl: downloadUrl,
+        mimeType,
+        blobName: uploadResult.blobName,
+        containerName: uploadResult.containerName,
+        uploadedAt: now.toISOString(),
+        uploadedByEmail: actorEmail,
+      }
+
+      const updatedCustomer = await prisma.$transaction(async (tx) => {
+        // Prevent lost updates when multiple uploads happen close together.
+        await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+        const existing = await tx.customer.findUnique({
+          where: { id },
+          select: { id: true, accountData: true },
+        })
+        if (!existing) return null
+
+        const currentAccountData =
+          existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+        const currentAttachments = Array.isArray(currentAccountData.attachments)
+          ? currentAccountData.attachments
+          : []
+
+        const nextAccountData: any = {
+          ...currentAccountData,
+          attachments: [...currentAttachments, attachment],
+        }
+
+        // Optional: also wire known onboarding fields to keep UX consistent after DB rehydrate.
+        // This allows existing UI fields (accreditations evidence + case studies file) to keep working,
+        // while still standardizing the storage of the binary + metadata in accountData.attachments[].
+        try {
+          const profile = nextAccountData.clientProfile && typeof nextAccountData.clientProfile === 'object'
+            ? nextAccountData.clientProfile
+            : {}
+
+          // case_studies → clientProfile.caseStudiesFile*
+          if (attachmentType === 'case_studies') {
+            nextAccountData.clientProfile = {
+              ...profile,
+              caseStudiesFileName: attachment.fileName,
+              caseStudiesFileUrl: attachment.fileUrl,
+            }
+          }
+
+          // accreditation_evidence:<accreditationId> → update matching clientProfile.accreditations[]
+          if (attachmentType.startsWith('accreditation_evidence:')) {
+            const accreditationId = attachmentType.split(':')[1] || ''
+            const accs = Array.isArray(profile.accreditations) ? profile.accreditations : []
+            nextAccountData.clientProfile = {
+              ...profile,
+              accreditations: accs.map((acc: any) => {
+                if (!acc || acc.id !== accreditationId) return acc
+                return {
+                  ...acc,
+                  fileName: attachment.fileName,
+                  fileUrl: attachment.fileUrl,
+                }
+              }),
+            }
+          }
+        } catch {
+          // ignore profile wiring failures - attachments[] still persists
+        }
+
+        const next = await tx.customer.update({
+          where: { id },
+          data: {
+            accountData: nextAccountData,
+            updatedAt: new Date(),
+          },
+          select: { id: true },
+        })
+
+        // Best-effort audit
+        try {
+          await safeCustomerAuditEvent(tx as any, {
+            customerId: id,
+            action: 'upload_attachment',
+            note: `Uploaded attachment (${attachmentType}): ${file.originalname}`,
+            meta: {
+              attachmentId,
+              attachmentType,
+              fileName: file.originalname,
+              blobName: uploadResult.blobName,
+              containerName: uploadResult.containerName,
+              mimeType,
+            },
+          })
+        } catch {
+          // ignore audit failures
+        }
+
+        return next
+      })
+
+      if (!updatedCustomer) {
+        return res.status(500).json({
+          error: 'database_update_failed',
+          message: 'Attachment blob uploaded but database update failed',
+        })
+      }
+
+      console.log(
+        `[attachments] ✅ customerId=${id} type=${attachmentType} file=${file.originalname} blob=${uploadResult.containerName}/${uploadResult.blobName}`
+      )
+
+      return res.status(201).json({ success: true, attachment })
+    } catch (error) {
+      console.error('Error uploading attachment:', error)
+      return res.status(500).json({
+        error: 'Failed to upload attachment',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  })
+})
+
+// GET /api/customers/:id/attachments/:attachmentId/download - Generate SAS URL for attachment download
+router.get('/:id/attachments/:attachmentId/download', async (req, res) => {
+  try {
+    const { id, attachmentId } = req.params
+
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: { id: true, accountData: true, isArchived: true },
+    })
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const accountData = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+    const attachments = Array.isArray(accountData.attachments) ? accountData.attachments : []
+    const attachment = attachments.find((a: any) => a && a.id === attachmentId) || null
+
+    if (!attachment) {
+      return res.status(404).json({ error: 'Attachment not found' })
+    }
+    if (!attachment.blobName || !attachment.containerName) {
+      return res.status(410).json({
+        error: 'attachment_unavailable',
+        message: 'Attachment is stored in legacy format and unavailable. Please re-upload.',
+      })
+    }
+
+    const { generateBlobSasUrl } = await import('../utils/blobSas.js')
+    const sasResult = await generateBlobSasUrl({
+      containerName: attachment.containerName,
+      blobName: attachment.blobName,
+      ttlMinutes: 15,
+    })
+
+    // Prefer link-friendly behavior: redirect straight to the short-lived SAS URL.
+    // This makes `attachment.fileUrl` usable as a normal clickable hyperlink.
+    res.setHeader('Cache-Control', 'no-store')
+    return res.redirect(sasResult.url)
+  } catch (error) {
+    console.error('Error generating attachment download URL:', error)
+    return res.status(500).json({
+      error: 'Failed to generate download URL',
+      details: error instanceof Error ? error.message : 'Unknown error',
     })
   }
 })
