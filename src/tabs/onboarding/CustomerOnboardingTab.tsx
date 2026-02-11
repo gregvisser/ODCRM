@@ -750,32 +750,62 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     
-    // Persist primary contact into CustomerContact table (so it appears under customer later)
+    // Persist primary contact into CustomerContact table (so it appears under customer later).
+    // IMPORTANT: Make this idempotent even if backend ignores caller-provided `id`.
+    // Strategy: fetch current customerContacts, update an existing primary/matching contact if present,
+    // otherwise create a new one.
     const primary = nextAccountDetails.primaryContact
     const primaryName = `${primary.firstName} ${primary.lastName}`.trim()
     if (primaryName) {
-      const primaryContactId = (primary as any).id as string | undefined
-      const { error: contactError } = await api.post(`/api/customers/${customerId}/contacts`, {
-        ...(primaryContactId ? { id: primaryContactId } : {}),
-        name: primaryName,
-        email: primary.email?.trim() || null,
-        phone: primary.phone?.trim() || null,
-        title: primary.roleLabel?.trim() || null,
-        isPrimary: true,
-      })
+      const desiredEmail = primary.email?.trim() || null
+      const desiredPhone = primary.phone?.trim() || null
+      const desiredTitle = primary.roleLabel?.trim() || null
 
-      if (contactError) {
-        // Non-fatal: customer onboarding data saved; contact wiring failed.
-        onboardingError('⚠️ Primary contact save failed (customer save succeeded):', {
+      const { data: customerDetail, error: customerDetailError } = await api.get<any>(`/api/customers/${customerId}`)
+
+      if (!customerDetailError) {
+        const rows = Array.isArray(customerDetail?.customerContacts) ? customerDetail.customerContacts : []
+        const existing =
+          rows.find((c: any) => c?.isPrimary) ||
+          (desiredEmail ? rows.find((c: any) => String(c?.email || '').toLowerCase() === desiredEmail.toLowerCase()) : null) ||
+          rows.find((c: any) => String(c?.name || '').trim().toLowerCase() === primaryName.toLowerCase()) ||
+          null
+
+        if (existing?.id) {
+          const { error: updateContactError } = await api.put(`/api/customers/${customerId}/contacts/${existing.id}`, {
+            name: primaryName,
+            email: desiredEmail,
+            phone: desiredPhone,
+            title: desiredTitle,
+            isPrimary: true,
+          })
+
+          if (updateContactError) {
+            onboardingError('⚠️ Primary contact update failed (customer save succeeded):', {
+              customerId,
+              updateContactError,
+            })
+          }
+        } else {
+          const { error: createContactError } = await api.post(`/api/customers/${customerId}/contacts`, {
+            name: primaryName,
+            email: desiredEmail,
+            phone: desiredPhone,
+            title: desiredTitle,
+            isPrimary: true,
+          })
+
+          if (createContactError) {
+            onboardingError('⚠️ Primary contact create failed (customer save succeeded):', {
+              customerId,
+              createContactError,
+            })
+          }
+        }
+      } else {
+        onboardingError('⚠️ Could not load customerContacts to sync primary contact (non-fatal):', {
           customerId,
-          contactError,
-        })
-        toast({
-          title: 'Saved, but contact failed',
-          description: 'Customer details saved, but primary contact did not sync. Please try saving again.',
-          status: 'warning',
-          duration: 6000,
-          isClosable: true,
+          customerDetailError,
         })
       }
     }
