@@ -59,6 +59,7 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon, RepeatIcon, ChevronUpIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
+import { useUsersFromDatabase, type DatabaseUser } from '../hooks/useUsersFromDatabase'
 import { emit, on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
@@ -107,6 +108,8 @@ type AccountNote = {
   id: string
   content: string
   user: string
+  userId?: string
+  userEmail?: string
   timestamp: string
 }
 
@@ -2908,6 +2911,7 @@ type NotesSectionProps = {
   account: Account
   updateAccount: (accountName: string, updates: Partial<Account>) => void
   toast: ReturnType<typeof useToast>
+  users: DatabaseUser[]
 }
 
 type CalendarEvent = {
@@ -3349,31 +3353,39 @@ function CalendarSection({ account }: CalendarSectionProps) {
   )
 }
 
-function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
+function NotesSection({ account, updateAccount, toast, users }: NotesSectionProps) {
   const [noteContent, setNoteContent] = useState('')
-  const [noteUser, setNoteUser] = useState('')
+  const [noteUserId, setNoteUserId] = useState('')
+  const activeUsers = useMemo(() => users.filter((u) => u.accountStatus === 'Active'), [users])
 
-  // Load user name from localStorage when account changes
   useEffect(() => {
-    const noteUserKey = `note_user_${account.name}`
-    const savedUser = getItem(noteUserKey) || ''
-    setNoteUser(savedUser)
-  }, [account.name])
-
-  // Save user name to localStorage when it changes (debounced)
-  useEffect(() => {
-    if (noteUser) {
-      const noteUserKey = `note_user_${account.name}`
-      setItem(noteUserKey, noteUser)
-    }
-  }, [noteUser, account.name])
+    // Default author to existing note author (if any), otherwise first active user.
+    const existing = (account.notes || []).find((n) => n.userId)?.userId || ''
+    const fallback = activeUsers[0]?.id || ''
+    setNoteUserId(existing || fallback)
+  }, [account.name, account.notes, activeUsers])
 
   const handleAddNote = () => {
     if (noteContent.trim()) {
+      if (!noteUserId) {
+        toast({
+          title: 'Select an author',
+          description: 'Pick a user from User Authorization before saving a note.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+
+      const author = users.find((u) => u.id === noteUserId) || null
+      const authorName = author ? `${author.firstName} ${author.lastName}`.trim() : 'Unknown'
       const newNote: AccountNote = {
         id: Date.now().toString(),
         content: noteContent.trim(),
-        user: noteUser || 'Anonymous',
+        user: authorName,
+        userId: author?.id,
+        userEmail: author?.email,
         timestamp: new Date().toISOString(),
       }
       
@@ -3405,18 +3417,19 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
         bg="gray.50"
       >
         <Stack spacing={3}>
-          <HStack spacing={2}>
-            <Input
-              placeholder="Enter your name"
-              size="sm"
-              value={noteUser}
-              onChange={(e) => setNoteUser(e.target.value)}
-              maxW="200px"
-            />
-            <Text fontSize="xs" color="gray.500">
-              (saved locally)
-            </Text>
-          </HStack>
+          <FormControl>
+            <FormLabel fontSize="xs" mb={1}>
+              Author (from User Authorization)
+            </FormLabel>
+            <Select size="sm" value={noteUserId} onChange={(e) => setNoteUserId(e.target.value)}>
+              <option value="">Select author</option>
+              {activeUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {`${u.firstName} ${u.lastName}`.trim()} ({u.email})
+                </option>
+              ))}
+            </Select>
+          </FormControl>
           <Textarea
             placeholder="Add a note..."
             size="sm"
@@ -3476,29 +3489,15 @@ function NotesSection({ account, updateAccount, toast }: NotesSectionProps) {
                   />
                 </HStack>
                 <HStack spacing={2} fontSize="xs" color="gray.500">
-                  {account.users.some(u => u.name === note.user) ? (
-                    <Link
-                      fontWeight="medium"
-                      color="text.muted"
-                      _hover={{ textDecoration: 'underline' }}
-                      onClick={() => {
-                        const user = account.users.find(u => u.name === note.user)
-                        if (user) {
-                          toast({
-                            title: `${user.name}`,
-                            description: `Role: ${user.role}`,
-                            status: 'info',
-                            duration: 3000,
-                            isClosable: true,
-                          })
-                        }
-                      }}
-                    >
-                      {note.user}
-                    </Link>
-                  ) : (
-                    <Text fontWeight="medium">{note.user}</Text>
-                  )}
+                  <Text fontWeight="medium">
+                    {(() => {
+                      const user =
+                        (note.userId ? users.find((u) => u.id === note.userId) : null) ||
+                        (note.userEmail ? users.find((u) => u.email === note.userEmail) : null) ||
+                        null
+                      return user ? `${user.firstName} ${user.lastName}`.trim() : note.user
+                    })()}
+                  </Text>
                   <Text>•</Text>
                   <Text>
                     {new Date(note.timestamp).toLocaleString('en-GB', {
@@ -3602,6 +3601,8 @@ function deriveCustomerId(
 
 function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = 'CACHE' }: AccountsTabProps) {
   const toast = useToast()
+  // Notes and manager wiring must use the same user source as Settings → User Authorization
+  const { users: dbUsers } = useUsersFromDatabase()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
   const hasSyncedCustomersRef = useRef(false)
@@ -6556,7 +6557,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       borderColor="gray.100"
                       bg="gray.50"
                     >
-                      <NotesSection account={selectedAccount} updateAccount={updateAccount} toast={toast} />
+                      <NotesSection
+                        account={selectedAccount}
+                        updateAccount={updateAccount}
+                        toast={toast}
+                        users={dbUsers}
+                      />
                     </Box>
                   </Box>
                   <Box
@@ -6574,20 +6580,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   </Box>
                 </SimpleGrid>
 
-                {/* Calendar Section */}
-                <Box
-                  bg="white"
-                  borderRadius="xl"
-                  p={6}
-                  border="1px solid"
-                  borderColor="gray.200"
-                  boxShadow="sm"
-                >
-                  <Heading size="md" mb={4} color="gray.700">
-                    Calendar
-                  </Heading>
-                  <CalendarSection account={selectedAccount} />
-                </Box>
+                {/* Calendar removed for production launch stability */}
 
                 {/* Delete Account Section */}
                 <Box

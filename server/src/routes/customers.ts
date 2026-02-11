@@ -756,6 +756,199 @@ router.post('/', async (req, res) => {
   }
 })
 
+// PUT /api/customers/:id/onboarding - Save onboarding payload (single transaction)
+// Payload shape:
+// {
+//   customer: { ...same shape as PUT /api/customers/:id ... },
+//   contacts?: [{ id?, name, email?, phone?, title?, isPrimary? }]
+// }
+//
+// NOTE: This reuses the existing customer + customer_contacts models only (no new tables).
+router.put('/:id/onboarding', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const onboardingSchema = z
+      .object({
+        customer: upsertCustomerSchema,
+        contacts: z
+          .array(
+            upsertCustomerContactSchema
+              .omit({ customerId: true })
+              .extend({ id: z.string().optional() }),
+          )
+          .optional(),
+      })
+      .superRefine((value, ctx) => {
+        const contacts = value.contacts || []
+        const primaryCount = contacts.filter((c) => c.isPrimary).length
+        if (primaryCount > 1) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['contacts'],
+            message: 'Only one contact can be primary per customer',
+          })
+        }
+      })
+
+    const parsed = onboardingSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors })
+    }
+
+    const validated = parsed.data.customer
+    const contacts = parsed.data.contacts || []
+
+    const shouldClearLeads = validated.leadsReportingUrl === null
+    const updateData: any = {
+      name: validated.name,
+      domain: validated.domain,
+      accountData: validated.accountData ?? null,
+      website: validated.website,
+      whatTheyDo: validated.whatTheyDo,
+      accreditations: validated.accreditations,
+      keyLeaders: validated.keyLeaders,
+      companyProfile: validated.companyProfile,
+      recentNews: validated.recentNews,
+      companySize: validated.companySize,
+      headquarters: validated.headquarters,
+      foundingYear: validated.foundingYear,
+      socialPresence: validated.socialPresence ?? undefined,
+      leadsReportingUrl: validated.leadsReportingUrl,
+      leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
+      sector: validated.sector,
+      clientStatus: validated.clientStatus,
+      targetJobTitle: validated.targetJobTitle,
+      prospectingLocation: validated.prospectingLocation,
+      monthlyIntakeGBP: validated.monthlyIntakeGBP,
+      monthlyRevenueFromCustomer: validated.monthlyRevenueFromCustomer,
+      defcon: validated.defcon,
+      weeklyLeadTarget: validated.weeklyLeadTarget,
+      weeklyLeadActual: validated.weeklyLeadActual,
+      monthlyLeadTarget: validated.monthlyLeadTarget,
+      monthlyLeadActual: validated.monthlyLeadActual,
+      updatedAt: new Date(),
+    }
+    if (shouldClearLeads) {
+      updateData.weeklyLeadActual = 0
+      updateData.monthlyLeadActual = 0
+    }
+
+    const saved = await prisma.$transaction(async (tx) => {
+      // Lock parent row to keep primary-contact demotion atomic in high concurrency cases.
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const updatedCustomer = await tx.customer.update({
+        where: { id },
+        data: updateData,
+      })
+
+      // Best-effort: persist primary contact from onboarding snapshot into customer_contacts.
+      try {
+        const accountData = validated.accountData as any
+        const primary = accountData?.accountDetails?.primaryContact
+        const primaryId = typeof primary?.id === 'string' ? primary.id : null
+        const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
+        const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
+        const fullName = `${firstName} ${lastName}`.trim()
+
+        if (primaryId && fullName) {
+          await tx.customerContact.updateMany({
+            where: { customerId: id, isPrimary: true, id: { not: primaryId } },
+            data: { isPrimary: false },
+          })
+
+          await tx.customerContact.upsert({
+            where: { id: primaryId },
+            create: {
+              id: primaryId,
+              customerId: id,
+              name: fullName,
+              email: typeof primary?.email === 'string' ? primary.email : null,
+              phone: typeof primary?.phone === 'string' ? primary.phone : null,
+              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              isPrimary: true,
+            },
+            update: {
+              customerId: id,
+              name: fullName,
+              email: typeof primary?.email === 'string' ? primary.email : null,
+              phone: typeof primary?.phone === 'string' ? primary.phone : null,
+              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              isPrimary: true,
+            },
+          })
+        }
+      } catch (err) {
+        console.warn('[onboarding_primary_contact_sync_failed]', err)
+      }
+
+      // Optional: upsert additional contacts passed by onboarding
+      for (const contact of contacts) {
+        let savedContactId: string | null = null
+
+        if (contact.id) {
+          const upserted = await tx.customerContact.upsert({
+            where: { id: contact.id },
+            create: {
+              id: contact.id,
+              customerId: id,
+              name: contact.name,
+              email: contact.email ?? null,
+              phone: contact.phone ?? null,
+              title: contact.title ?? null,
+              isPrimary: Boolean(contact.isPrimary),
+              notes: contact.notes ?? null,
+            },
+            update: {
+              customerId: id,
+              name: contact.name,
+              email: contact.email ?? null,
+              phone: contact.phone ?? null,
+              title: contact.title ?? null,
+              isPrimary: Boolean(contact.isPrimary),
+              notes: contact.notes ?? null,
+            },
+          })
+          savedContactId = upserted.id
+        } else {
+          const created = await tx.customerContact.create({
+            data: {
+              customerId: id,
+              name: contact.name,
+              email: contact.email ?? null,
+              phone: contact.phone ?? null,
+              title: contact.title ?? null,
+              isPrimary: Boolean(contact.isPrimary),
+              notes: contact.notes ?? null,
+            },
+          })
+          savedContactId = created.id
+        }
+
+        if (contact.isPrimary && savedContactId) {
+          await tx.customerContact.updateMany({
+            where: { customerId: id, isPrimary: true, id: { not: savedContactId } },
+            data: { isPrimary: false },
+          })
+        }
+      }
+
+      const hydrated = await tx.customer.findUnique({
+        where: { id },
+        include: { customerContacts: true },
+      })
+
+      return { updatedCustomer, hydrated }
+    })
+
+    return res.json({ success: true, customer: saved.hydrated ?? saved.updatedCustomer })
+  } catch (error: any) {
+    console.error('Error saving onboarding payload:', error)
+    return res.status(500).json({ error: 'Failed to save onboarding', message: error.message })
+  }
+})
+
 // PUT /api/customers/:id - Update a customer
 router.put('/:id', async (req, res) => {
   try {
@@ -1378,11 +1571,16 @@ router.put('/:customerId/contacts/:contactId', async (req, res) => {
 // DELETE /api/customers/:customerId/contacts/:contactId - Delete a customer contact
 router.delete('/:customerId/contacts/:contactId', async (req, res) => {
   try {
-    const { contactId } = req.params
+    const { customerId, contactId } = req.params
 
-    await prisma.customerContact.delete({
-      where: { id: contactId },
+    // Safety: ensure the contact belongs to the customer (prevents cross-customer deletion)
+    const result = await prisma.customerContact.deleteMany({
+      where: { id: contactId, customerId },
     })
+
+    if (result.count === 0) {
+      return res.status(404).json({ error: 'not_found', message: 'Contact not found for this customer' })
+    }
 
     return res.json({ success: true })
   } catch (error) {
@@ -1895,7 +2093,7 @@ router.get('/:id/agreement-download', async (req, res) => {
 
     // Legacy: Try to parse blobName from agreementFileUrl if available
     if (customer.agreementFileUrl) {
-      const urlMatch = customer.agreementFileUrl.match(/\/([^\/]+)\/([^\/\?]+)(?:\?|$)/)
+      const urlMatch = customer.agreementFileUrl.match(/\/([^/]+)\/([^/?]+)(?:\?|$)/)
       if (urlMatch) {
         const containerName = urlMatch[1]
         const blobName = decodeURIComponent(urlMatch[2])

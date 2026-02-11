@@ -26,11 +26,11 @@ import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
 import { emit } from '../../platform/events'
 import { getJson, setJson } from '../../platform/storage'
-import { OdcrmStorageKeys } from '../../platform/keys'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
+import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
 import type {
   Account,
   Accreditation,
@@ -45,6 +45,9 @@ type CustomerApi = {
   id: string
   name: string
   accountData?: Record<string, unknown> | null
+  monthlyRevenueFromCustomer?: string | null
+  leadsReportingUrl?: string | null
+  leadsGoogleSheetLabel?: string | null
 }
 
 type JobTaxonomyItem = {
@@ -193,6 +196,8 @@ interface CustomerOnboardingTabProps {
 
 export default function CustomerOnboardingTab({ customerId }: CustomerOnboardingTabProps) {
   const toast = useToast()
+  // CRITICAL: Use the same DB-backed source as Settings → User Authorization
+  const { users: dbUsers } = useUsersFromDatabase()
   const [customer, setCustomer] = useState<CustomerApi | null>(null)
   const [clientProfile, setClientProfile] = useState<ClientProfile>(EMPTY_PROFILE)
   const [accountDetails, setAccountDetails] = useState<AccountDetails>(EMPTY_ACCOUNT_DETAILS)
@@ -302,11 +307,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     void fetchCustomer()
     void fetchTaxonomy()
     setContactRoles(loadContactRoles())
-    const storedUsers = getJson<AssignedUser[]>(OdcrmStorageKeys.users)
-    if (Array.isArray(storedUsers)) {
-      setAssignedUsers(storedUsers.filter((user) => user.accountStatus === 'Active'))
-    }
   }, [fetchCustomer, fetchTaxonomy])
+
+  // Keep assigned users in sync with DB users (single source of truth)
+  useEffect(() => {
+    const active = (Array.isArray(dbUsers) ? dbUsers : [])
+      .filter((u: DatabaseUser) => u.accountStatus === 'Active')
+      .map((u: DatabaseUser) => ({
+        id: u.id,
+        userId: u.userId,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        accountStatus: u.accountStatus,
+      }))
+    setAssignedUsers(active)
+  }, [dbUsers])
 
   // Update form state when customer data loads
   useEffect(() => {
@@ -557,7 +573,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         })
         
         // Refresh customer data to get updated progress tracker
-        emit('customer-updated', { customerId: customer.id })
+        emit('customerUpdated', { id: customer.id })
       }
       
       setUploadingAgreement(false)
@@ -720,16 +736,20 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const sheetUrl = leadsGoogleSheetUrl.trim() || undefined
     const sheetLabel = leadsGoogleSheetLabel.trim() || undefined
     
-    // Call API and wait for response before updating UI
-    const { error } = await api.put(`/api/customers/${customerId}`, {
-      name: customer.name,
-      accountData: nextAccountData,
-      monthlyRevenueFromCustomer: revenueNumber,
-      // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
-      // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
-      monthlyIntakeGBP: revenueNumber,
-      leadsReportingUrl: sheetUrl,
-      leadsGoogleSheetLabel: sheetLabel,
+    // Save onboarding payload (single transaction backend route)
+    const { error } = await api.put(`/api/customers/${customerId}/onboarding`, {
+      customer: {
+        name: customer.name,
+        accountData: nextAccountData,
+        monthlyRevenueFromCustomer: revenueNumber,
+        // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
+        // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
+        monthlyIntakeGBP: revenueNumber,
+        leadsReportingUrl: sheetUrl,
+        leadsGoogleSheetLabel: sheetLabel,
+      },
+      // Additional contacts are managed via the dedicated contacts section endpoints.
+      contacts: [],
     })
     
     if (error) {
@@ -1155,7 +1175,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <HStack justify="space-between">
             <Text fontSize="lg" fontWeight="semibold">Client Profile</Text>
             <Button colorScheme="teal" onClick={handleSave} isLoading={isSaving}>
-              Save Client Profile
+              Save Onboarding
             </Button>
           </HStack>
 

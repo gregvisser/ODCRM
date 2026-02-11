@@ -3,13 +3,15 @@
  *
  * Goals:
  * 1) Create customer via API (POST /api/customers)
- * 2) Save onboarding details (PUT /api/customers/:id) including accountData + revenue + lead sheet
+ * 2) Save onboarding details (PUT /api/customers/:id/onboarding) including accountData + revenue + lead sheet
  * 3) Ensure primary contact is persisted into CustomerContact table (via onboarding save logic + /contacts upsert)
  * 4) Add an additional contact (POST /api/customers/:id/contacts)
  * 5) Fetch customer detail (GET /api/customers/:id) and assert:
  *    - customer scalar fields persisted
  *    - customerContacts contains primary + additional, linked to customerId
- * 6) Soft-archive customer at end (NO hard deletes)
+ * 6) Delete a contact (DELETE /api/customers/:customerId/contacts/:contactId) and assert it no longer appears
+ * 7) Add a note (stored in accountData.notes) with userId + timestamp
+ * 8) Soft-archive customer at end (NO hard deletes)
  *
  * Usage:
  *   node server/scripts/test-onboarding-wiring.cjs
@@ -54,8 +56,43 @@ async function run() {
   console.log('API_BASE_URL:', API_BASE_URL)
 
   let customerId = null
+  let managerUser = null
 
   try {
+    // 0) Pick a real user from User Authorization endpoint (single source of truth)
+    const usersRes = await httpJson('GET', '/api/users')
+    assert(usersRes.status === 200, `Expected 200 from users, got ${usersRes.status}: ${usersRes.text}`)
+    assert(Array.isArray(usersRes.json), 'Expected array response from /api/users')
+
+    if (usersRes.json.length === 0) {
+      // If the DB has no users yet, create a temporary one via the SAME endpoint used by User Authorization.
+      const today = new Date().toISOString().split('T')[0]
+      const suffix = String(Date.now()).slice(-8).padStart(8, '0')
+      const userId = `ODS${suffix}`
+      const email = `test.${suffix}@script.local`
+      const createUserRes = await httpJson('POST', '/api/users', {
+        userId,
+        firstName: 'Test',
+        lastName: 'User',
+        email,
+        username: email,
+        phoneNumber: null,
+        role: 'Operations',
+        department: 'Operations',
+        accountStatus: 'Active',
+        lastLoginDate: 'Never',
+        createdDate: today,
+        profilePhoto: null,
+      })
+      assert(createUserRes.status === 201, `Expected 201 from create user, got ${createUserRes.status}: ${createUserRes.text}`)
+      managerUser = createUserRes.json
+      console.log('✅ Created temporary user:', managerUser.id)
+    } else {
+      managerUser = usersRes.json.find((u) => u && u.accountStatus === 'Active') || usersRes.json[0]
+    }
+
+    assert(managerUser && managerUser.id, 'Selected manager user missing id')
+
     // 1) Create customer
     const createName = `TEST Onboarding Wiring ${Date.now()}`
     const createRes = await httpJson('POST', '/api/customers', {
@@ -77,48 +114,52 @@ async function run() {
     const primaryContactId = `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const sheetUrl = 'https://docs.google.com/spreadsheets/d/example'
     const sheetLabel = 'Test Lead Sheet'
+    const managerName = `${managerUser.firstName || ''} ${managerUser.lastName || ''}`.trim() || managerUser.email || 'Manager'
 
-    const putRes = await httpJson('PUT', `/api/customers/${customerId}`, {
-      name: createName,
-      accountData: {
-        accountDetails: {
-          primaryContact: {
-            id: primaryContactId,
-            firstName: 'Main',
-            lastName: 'Contact',
-            email: 'main.contact@example.com',
-            phone: '0123456789',
-            roleLabel: 'Manager',
-            status: 'Active',
+    const onboardingRes = await httpJson('PUT', `/api/customers/${customerId}/onboarding`, {
+      customer: {
+        name: createName,
+        accountData: {
+          accountDetails: {
+            primaryContact: {
+              id: primaryContactId,
+              firstName: 'Main',
+              lastName: 'Contact',
+              email: 'main.contact@example.com',
+              phone: '0123456789',
+              roleLabel: 'Manager',
+              status: 'Active',
+            },
+            headOfficeAddress: '1 Test Street, London',
+            assignedAccountManagerId: managerUser.id,
+            assignedAccountManagerName: managerName,
+            assignedClientDdiNumber: '0207 000 0000',
+            daysPerWeek: 3,
+            emailAccounts: ['am@example.com'],
           },
+          // Convenience top-level fields (expected by legacy Account Card)
+          contactPersons: 'Main Contact',
+          contactEmail: 'main.contact@example.com',
+          contactNumber: '0123456789',
+          contactRoleLabel: 'Manager',
+          contactActive: true,
           headOfficeAddress: '1 Test Street, London',
-          assignedAccountManagerId: 'test-user-id',
-          assignedAccountManagerName: 'Test Manager',
+          assignedAccountManager: managerName,
+          assignedAccountManagerId: managerUser.id,
           assignedClientDdiNumber: '0207 000 0000',
-          daysPerWeek: 3,
           emailAccounts: ['am@example.com'],
+          emailAccountsSetUp: true,
+          days: 3,
         },
-        // Convenience top-level fields (expected by legacy Account Card)
-        contactPersons: 'Main Contact',
-        contactEmail: 'main.contact@example.com',
-        contactNumber: '0123456789',
-        contactRoleLabel: 'Manager',
-        contactActive: true,
-        headOfficeAddress: '1 Test Street, London',
-        assignedAccountManager: 'Test Manager',
-        assignedAccountManagerId: 'test-user-id',
-        assignedClientDdiNumber: '0207 000 0000',
-        emailAccounts: ['am@example.com'],
-        emailAccountsSetUp: true,
-        days: 3,
+        monthlyRevenueFromCustomer: 5000,
+        monthlyIntakeGBP: 5000,
+        leadsReportingUrl: sheetUrl,
+        leadsGoogleSheetLabel: sheetLabel,
       },
-      monthlyRevenueFromCustomer: 5000,
-      monthlyIntakeGBP: 5000,
-      leadsReportingUrl: sheetUrl,
-      leadsGoogleSheetLabel: sheetLabel,
+      contacts: [],
     })
 
-    assert(putRes.status >= 200 && putRes.status < 300, `Expected 2xx from update, got ${putRes.status}: ${putRes.text}`)
+    assert(onboardingRes.status >= 200 && onboardingRes.status < 300, `Expected 2xx from onboarding save, got ${onboardingRes.status}: ${onboardingRes.text}`)
     console.log('✅ Saved onboarding details')
 
     // 3) Add an additional customer contact
@@ -130,7 +171,9 @@ async function run() {
       isPrimary: false,
     })
     assert(addRes.status === 201, `Expected 201 from add contact, got ${addRes.status}: ${addRes.text}`)
-    console.log('✅ Added additional CustomerContact:', addRes.json?.id)
+    const additionalContactId = addRes.json?.id
+    assert(additionalContactId, 'Add contact response missing id')
+    console.log('✅ Added additional CustomerContact:', additionalContactId)
 
     // 4) Fetch customer detail and assert
     const getRes = await httpJson('GET', `/api/customers/${customerId}`)
@@ -148,7 +191,46 @@ async function run() {
 
     console.log('✅ Wiring assertions passed')
 
-    // 5) Soft archive customer to keep slate clean (no hard delete)
+    // 5) Delete the additional contact and verify it no longer appears
+    const delRes = await httpJson('DELETE', `/api/customers/${customerId}/contacts/${additionalContactId}`)
+    assert(delRes.status === 200, `Expected 200 from delete contact, got ${delRes.status}: ${delRes.text}`)
+
+    const getAfterDelete = await httpJson('GET', `/api/customers/${customerId}`)
+    assert(getAfterDelete.status === 200, `Expected 200 from get after delete, got ${getAfterDelete.status}: ${getAfterDelete.text}`)
+    const contactsAfterDelete = Array.isArray(getAfterDelete.json.customerContacts) ? getAfterDelete.json.customerContacts : []
+    assert(!contactsAfterDelete.some((c) => c.id === additionalContactId), 'Deleted contact still present after delete')
+    console.log('✅ Contact deletion verified')
+
+    // 6) Add a note with userId + timestamp (stored in accountData.notes)
+    const existingAccountData = getAfterDelete.json.accountData && typeof getAfterDelete.json.accountData === 'object'
+      ? getAfterDelete.json.accountData
+      : {}
+    const note = {
+      id: `note_${Date.now()}`,
+      content: 'Test note from regression script',
+      user: managerName,
+      userId: managerUser.id,
+      userEmail: managerUser.email,
+      timestamp: new Date().toISOString(),
+    }
+    const saveNoteRes = await httpJson('PUT', `/api/customers/${customerId}/onboarding`, {
+      customer: {
+        name: createName,
+        accountData: { ...existingAccountData, notes: [note, ...(Array.isArray(existingAccountData.notes) ? existingAccountData.notes : [])] },
+      },
+      contacts: [],
+    })
+    assert(saveNoteRes.status >= 200 && saveNoteRes.status < 300, `Expected 2xx from note save, got ${saveNoteRes.status}: ${saveNoteRes.text}`)
+
+    const getAfterNote = await httpJson('GET', `/api/customers/${customerId}`)
+    assert(getAfterNote.status === 200, `Expected 200 from get after note, got ${getAfterNote.status}: ${getAfterNote.text}`)
+    const notes = getAfterNote.json?.accountData?.notes
+    assert(Array.isArray(notes) && notes.length > 0, 'Expected notes array in accountData')
+    assert(notes[0].userId === managerUser.id, 'Expected note.userId to match selected user')
+    assert(typeof notes[0].timestamp === 'string', 'Expected note.timestamp to be a string')
+    console.log('✅ Notes wiring verified')
+
+    // 7) Soft archive customer to keep slate clean (no hard delete)
     await prisma.customer.update({
       where: { id: customerId },
       data: { isArchived: true, archivedAt: new Date(), archivedByEmail: 'test@script.local' },
