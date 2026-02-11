@@ -3,7 +3,7 @@ import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { MdAssessment } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
-import AccountsTab from '../../components/AccountsTab'
+import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
 
@@ -33,12 +33,7 @@ export default function CustomersHomePage({
       id: 'accounts',
       label: 'Accounts',
       icon: ViewIcon,
-      content: (
-        <AccountsTab
-          focusAccountName={focusAccountName}
-          onNavigateToContacts={() => onNavigate?.('contacts')}
-        />
-      ),
+      content: <AccountsTabDatabase focusAccountName={focusAccountName} />,
     },
     {
       id: 'contacts',

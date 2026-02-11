@@ -70,7 +70,6 @@ import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import MigrateAccountsPanel from './MigrateAccountsPanel'
 import { GoogleSheetLink } from './links/GoogleSheetLink'
-import AccountsOperationalPanel from './accounts/AccountsOperationalPanel'
 
 type Contact = {
   name: string
@@ -6785,4 +6784,4 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   )
 }
 
-export default AccountsOperationalPanel
+export default AccountsTab
