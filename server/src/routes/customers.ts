@@ -865,9 +865,10 @@ router.delete('/:id', async (req, res) => {
   
   try {
     // Verify customer exists and is not already archived
+    // Include clientStatus for audit event (must be valid ClientStatus enum)
     const customer = await prisma.customer.findUnique({
       where: { id },
-      select: { id: true, name: true, isArchived: true }
+      select: { id: true, name: true, isArchived: true, clientStatus: true }
     })
     
     if (!customer) {
@@ -913,28 +914,43 @@ router.delete('/:id', async (req, res) => {
       }
     })
     
-    // Create audit event
-    await prisma.customerAuditEvent.create({
-      data: {
-        customerId: id,
-        action: 'archive',
-        actorUserId: actor.userId,
-        actorEmail: actor.email,
-        fromStatus: customer.isArchived ? 'archived' : 'active',
-        toStatus: 'archived',
-        metadata: {
-          customerName: customer.name,
-          archivedAt: new Date().toISOString(),
-          preservedData: {
-            contacts: totalContacts,
-            campaigns: campaignsCount,
-            lists: listsCount,
-            sequences: sequencesCount
-          },
-          authSource: actor.source
+    // Audit logging is best-effort - don't fail the archive if audit fails
+    let auditLogged = false
+    let auditError: string | null = null
+    try {
+      // Use valid ClientStatus enum values (NOT "archived" - that's not a valid status)
+      // Archive state is tracked by isArchived boolean, not clientStatus
+      const validStatus = customer.clientStatus || 'active'
+      
+      await prisma.customerAuditEvent.create({
+        data: {
+          customerId: id,
+          action: 'archive',
+          actorUserId: actor.userId,
+          actorEmail: actor.email,
+          fromStatus: validStatus,
+          toStatus: validStatus, // Status unchanged; archive state is in isArchived field
+          metadata: {
+            customerName: customer.name,
+            archiveAction: 'soft-delete',
+            archivedAt: new Date().toISOString(),
+            wasArchived: false,
+            isNowArchived: true,
+            preservedData: {
+              contacts: totalContacts,
+              campaigns: campaignsCount,
+              lists: listsCount,
+              sequences: sequencesCount
+            },
+            authSource: actor.source
+          }
         }
-      }
-    })
+      })
+      auditLogged = true
+    } catch (auditErr: any) {
+      console.warn(`[${requestId}] ⚠️ Audit logging failed (customer archive succeeded): ${auditErr.message}`)
+      auditError = auditErr.message || 'Audit logging failed'
+    }
 
     console.log(`[${requestId}] ✅ Customer archived successfully: ${customer.name} (${id})`)
     console.log(`[${requestId}]    Preserved: ${totalContacts} contacts, ${campaignsCount} campaigns, ${listsCount} lists, ${sequencesCount} sequences`)
@@ -942,6 +958,8 @@ router.delete('/:id', async (req, res) => {
     return res.json({ 
       success: true, 
       archived: true,
+      auditLogged,
+      ...(auditError && { auditError }),
       customer: {
         id: archivedCustomer.id,
         name: archivedCustomer.name,
@@ -1003,9 +1021,10 @@ router.post('/:id/unarchive', async (req, res) => {
   
   try {
     // Verify customer exists and is archived
+    // Include clientStatus for audit event (must be valid ClientStatus enum)
     const customer = await prisma.customer.findUnique({
       where: { id },
-      select: { id: true, name: true, isArchived: true, archivedAt: true }
+      select: { id: true, name: true, isArchived: true, archivedAt: true, clientStatus: true }
     })
     
     if (!customer) {
@@ -1040,29 +1059,46 @@ router.post('/:id/unarchive', async (req, res) => {
       }
     })
     
-    // Create audit event
-    await prisma.customerAuditEvent.create({
-      data: {
-        customerId: id,
-        action: 'unarchive',
-        actorUserId: actor.userId,
-        actorEmail: actor.email,
-        fromStatus: 'inactive', // Was archived
-        toStatus: 'active',     // Now active
-        metadata: {
-          customerName: customer.name,
-          unarchivedAt: new Date().toISOString(),
-          previouslyArchivedAt: customer.archivedAt?.toISOString(),
-          authSource: actor.source
+    // Audit logging is best-effort - don't fail the unarchive if audit fails
+    let auditLogged = false
+    let auditError: string | null = null
+    try {
+      // Use valid ClientStatus enum values (NOT "archived")
+      // Archive state is tracked by isArchived boolean, not clientStatus
+      const validStatus = customer.clientStatus || 'active'
+      
+      await prisma.customerAuditEvent.create({
+        data: {
+          customerId: id,
+          action: 'unarchive',
+          actorUserId: actor.userId,
+          actorEmail: actor.email,
+          fromStatus: validStatus,
+          toStatus: validStatus, // Status unchanged; archive state is in isArchived field
+          metadata: {
+            customerName: customer.name,
+            archiveAction: 'restore',
+            unarchivedAt: new Date().toISOString(),
+            wasArchived: true,
+            isNowArchived: false,
+            previouslyArchivedAt: customer.archivedAt?.toISOString(),
+            authSource: actor.source
+          }
         }
-      }
-    })
+      })
+      auditLogged = true
+    } catch (auditErr: any) {
+      console.warn(`[${requestId}] ⚠️ Audit logging failed (customer unarchive succeeded): ${auditErr.message}`)
+      auditError = auditErr.message || 'Audit logging failed'
+    }
 
     console.log(`[${requestId}] ✅ Customer unarchived successfully: ${customer.name} (${id})`)
     
     return res.json({ 
       success: true, 
       unarchived: true,
+      auditLogged,
+      ...(auditError && { auditError }),
       customer: {
         id: restoredCustomer.id,
         name: restoredCustomer.name,
@@ -1102,10 +1138,10 @@ router.post('/archive-all', async (req, res) => {
     // Get actor identity for audit trail
     const actor = getActorIdentity(req)
     
-    // Find all non-archived customers
+    // Find all non-archived customers (include clientStatus for audit events)
     const customersToArchive = await prisma.customer.findMany({
       where: { isArchived: false },
-      select: { id: true, name: true }
+      select: { id: true, name: true, clientStatus: true }
     })
     
     if (customersToArchive.length === 0) {
@@ -1130,32 +1166,48 @@ router.post('/archive-all', async (req, res) => {
       }
     })
     
-    // Create audit events for each archived customer
-    const auditEvents = customersToArchive.map(customer => ({
-      customerId: customer.id,
-      action: 'archive_bulk',
-      actorUserId: actor.userId,
-      actorEmail: actor.email,
-      fromStatus: 'active' as const,
-      toStatus: 'inactive' as const,
-      metadata: {
-        customerName: customer.name,
-        archivedAt: new Date().toISOString(),
-        bulkOperation: true,
-        totalInBatch: customersToArchive.length,
-        authSource: actor.source
-      }
-    }))
-    
-    await prisma.customerAuditEvent.createMany({
-      data: auditEvents
-    })
+    // Audit logging is best-effort - don't fail the archive if audit fails
+    let auditLogged = false
+    let auditError: string | null = null
+    try {
+      // Create audit events for each archived customer
+      // Use valid ClientStatus enum values (NOT "archived" or "inactive" as archive indicator)
+      // Archive state is tracked by isArchived boolean, not clientStatus
+      const auditEvents = customersToArchive.map(customer => ({
+        customerId: customer.id,
+        action: 'archive_bulk',
+        actorUserId: actor.userId,
+        actorEmail: actor.email,
+        fromStatus: customer.clientStatus || 'active',
+        toStatus: customer.clientStatus || 'active', // Status unchanged; archive state is in isArchived
+        metadata: {
+          customerName: customer.name,
+          archiveAction: 'bulk-archive',
+          archivedAt: new Date().toISOString(),
+          wasArchived: false,
+          isNowArchived: true,
+          bulkOperation: true,
+          totalInBatch: customersToArchive.length,
+          authSource: actor.source
+        }
+      }))
+      
+      await prisma.customerAuditEvent.createMany({
+        data: auditEvents
+      })
+      auditLogged = true
+    } catch (auditErr: any) {
+      console.warn(`[${requestId}] ⚠️ Audit logging failed (bulk archive succeeded): ${auditErr.message}`)
+      auditError = auditErr.message || 'Audit logging failed'
+    }
 
     console.log(`[${requestId}] ✅ Bulk archive complete: ${archiveResult.count} customers archived`)
     
     return res.json({ 
       success: true, 
       archived: archiveResult.count,
+      auditLogged,
+      ...(auditError && { auditError }),
       customers: customersToArchive.map(c => ({ id: c.id, name: c.name })),
       message: `Successfully archived ${archiveResult.count} customers. All data preserved.`,
       requestId 
