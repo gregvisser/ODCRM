@@ -767,29 +767,75 @@ router.put('/:id', async (req, res) => {
 
 // DELETE /api/customers/:id - Delete a customer
 router.delete('/:id', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { id } = req.params
+  
+  console.log(`[${requestId}] DELETE /api/customers/${id} - Deleting customer`)
+  
   try {
-    const { id } = req.params
-
-    // Check for related records
-    const [contactsCount, campaignsCount, listsCount, sequencesCount] = await Promise.all([
+    // Check for related records (both Contact and CustomerContact tables)
+    const [contactsCount, customerContactsCount, campaignsCount, listsCount, sequencesCount] = await Promise.all([
       prisma.contact.count({ where: { customerId: id } }),
+      prisma.customerContact.count({ where: { customerId: id } }),
       prisma.emailCampaign.count({ where: { customerId: id } }),
       prisma.contactList.count({ where: { customerId: id } }),
       prisma.emailSequence.count({ where: { customerId: id } }),
     ])
+    
+    const totalContacts = contactsCount + customerContactsCount
 
-    if (contactsCount > 0 || campaignsCount > 0 || listsCount > 0 || sequencesCount > 0) {
-      return res.status(400).json({
-        error: `Cannot delete customer: it has ${contactsCount} contacts, ${campaignsCount} campaigns, ${listsCount} lists, and ${sequencesCount} sequences. Delete those first.`,
+    if (totalContacts > 0 || campaignsCount > 0 || listsCount > 0 || sequencesCount > 0) {
+      const message = `Cannot delete customer because related records exist: ${totalContacts} contacts, ${campaignsCount} campaigns, ${listsCount} lists, ${sequencesCount} sequences`
+      console.error(`[delete_customer_failed] requestId=${requestId} customerId=${id} prismaCode=P2003 message="${message}" meta={"totalContacts":${totalContacts},"contacts":${contactsCount},"customerContacts":${customerContactsCount},"campaigns":${campaignsCount},"lists":${listsCount},"sequences":${sequencesCount}}`)
+      
+      return res.status(409).json({
+        error: 'customer_has_relations',
+        message,
+        details: 'Delete all related contacts, campaigns, lists, and sequences first, then try again',
+        prismaCode: 'P2003', // Foreign key constraint equivalent
+        meta: { totalContacts, contactsCount, customerContactsCount, campaignsCount, listsCount, sequencesCount },
+        requestId
       })
     }
 
     await prisma.customer.delete({ where: { id } })
 
-    return res.json({ success: true })
-  } catch (error) {
-    console.error('Error deleting customer:', error)
-    return res.status(500).json({ error: 'Failed to delete customer' })
+    console.log(`[${requestId}] ✅ Customer deleted successfully: ${id}`)
+    return res.json({ success: true, requestId })
+  } catch (error: any) {
+    // CRITICAL: Log one structured line for production debugging
+    console.error(`[delete_customer_failed] requestId=${requestId} customerId=${id} prismaCode=${error.code || 'none'} message="${error.message}" meta=${JSON.stringify(error.meta || {})}`)
+    
+    // Handle Prisma P2025 (record not found)
+    if (error.code === 'P2025') {
+      return res.status(404).json({
+        error: 'not_found',
+        message: 'Customer not found',
+        details: `No customer exists with ID: ${id}`,
+        prismaCode: error.code,
+        requestId
+      })
+    }
+    
+    // Handle other Prisma errors
+    if (error.code?.startsWith('P')) {
+      return res.status(500).json({
+        error: 'database_error',
+        message: `Database error (${error.code}): ${error.message}`,
+        details: error.message,
+        prismaCode: error.code,
+        meta: error.meta,
+        requestId
+      })
+    }
+    
+    // Generic server error
+    return res.status(500).json({ 
+      error: 'server_error',
+      message: error.message || 'Failed to delete customer',
+      details: error.stack?.substring(0, 300),
+      requestId
+    })
   }
 })
 
