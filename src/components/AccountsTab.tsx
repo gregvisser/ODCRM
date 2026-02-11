@@ -6313,23 +6313,15 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         if (hasAgreement && agreementFileName) {
                           const handleViewAgreement = async () => {
                             try {
-                              const response = await fetch(`/api/customers/${customer.id}/agreement-download`)
-                              if (!response.ok) {
-                                const errorData = await response.json()
-                                if (response.status === 410) {
-                                  toast({
-                                    title: 'Legacy File Unavailable',
-                                    description: 'Please re-upload the agreement file.',
-                                    status: 'warning',
-                                    duration: 5000,
-                                  })
-                                } else {
-                                  throw new Error(errorData.message || 'Failed to load agreement')
-                                }
-                                return
+                              const w = window.open(`/api/customers/${customer.id}/agreement/download`, '_blank', 'noopener,noreferrer')
+                              if (!w) {
+                                toast({
+                                  title: 'Popup blocked',
+                                  description: 'Allow popups to open the agreement file.',
+                                  status: 'warning',
+                                  duration: 5000,
+                                })
                               }
-                              const data = await response.json()
-                              window.open(data.url, '_blank')
                             } catch (error) {
                               console.error('Error opening agreement:', error)
                               toast({

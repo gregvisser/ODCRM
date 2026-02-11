@@ -2491,6 +2491,87 @@ router.get('/:id/agreement-download', async (req, res) => {
   }
 })
 
+// GET /api/customers/:id/agreement/download - Redirect to a short-lived SAS URL (preferred for private containers)
+// IMPORTANT: Do NOT store SAS in DB. Do NOT change agreement storage fields.
+router.get('/:id/agreement/download', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const customer = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        agreementBlobName: true,
+        agreementContainerName: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementFileUrl: true, // legacy
+      },
+    })
+
+    if (!customer) {
+      res.status(404)
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      return res.send('<h3>No such customer</h3>')
+    }
+
+    const { generateAgreementSasUrl } = await import('../utils/blobSas.js')
+
+    // New blob-based agreement (expected)
+    if (customer.agreementBlobName && customer.agreementContainerName) {
+      const sas = await generateAgreementSasUrl({
+        containerName: customer.agreementContainerName,
+        blobName: customer.agreementBlobName,
+        ttlMinutes: 5,
+      })
+      res.setHeader('Cache-Control', 'no-store')
+      return res.redirect(sas.url)
+    }
+
+    // Legacy: Try to parse blobName from agreementFileUrl if available
+    if (customer.agreementFileUrl) {
+      const urlMatch = customer.agreementFileUrl.match(/\/([^/]+)\/([^/?]+)(?:\?|$)/)
+      if (urlMatch) {
+        const containerName = urlMatch[1]
+        const blobName = decodeURIComponent(urlMatch[2])
+
+        // Backfill blob fields for future requests
+        await prisma.customer.update({
+          where: { id },
+          data: { agreementBlobName: blobName, agreementContainerName: containerName },
+        })
+
+        const sas = await generateAgreementSasUrl({
+          containerName,
+          blobName,
+          ttlMinutes: 5,
+        })
+        res.setHeader('Cache-Control', 'no-store')
+        return res.redirect(sas.url)
+      }
+
+      // Legacy local filesystem URL (/uploads/)
+      if (customer.agreementFileUrl.includes('/uploads/')) {
+        res.status(410)
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        return res.send(
+          '<h3>Legacy agreement file unavailable</h3><p>Please re-upload the agreement file in Customer Onboarding.</p>',
+        )
+      }
+    }
+
+    res.status(404)
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    return res.send('<h3>No agreement uploaded for this customer</h3>')
+  } catch (error) {
+    console.error('Error redirecting agreement download URL:', error)
+    res.status(500)
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    return res.send('<h3>Failed to open agreement</h3><p>Please try again.</p>')
+  }
+})
+
 // POST /api/customers/:id/attachments - Upload a generic customer attachment (Azure Blob)
 // Stores attachment metadata append-only in accountData.attachments[] (no migrations).
 router.post('/:id/attachments', (req, res) => {

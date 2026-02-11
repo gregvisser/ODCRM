@@ -183,6 +183,30 @@ const normalizeWebAddress = (raw: unknown): string | null => {
   return hasScheme ? trimmed : `https://${trimmed}`
 }
 
+const areaKey = (area: any): string => {
+  const raw = String(area?.id || area?.placeId || area?.label || '')
+  return raw.toLowerCase().trim()
+}
+
+const dedupeAreas = (areas: any[]): TargetGeographicalArea[] => {
+  const out: TargetGeographicalArea[] = []
+  const seen = new Set<string>()
+  for (const a of Array.isArray(areas) ? areas : []) {
+    if (!a) continue
+    const label = typeof a.label === 'string' ? a.label.trim() : ''
+    const id = typeof a.placeId === 'string' ? a.placeId : typeof a.id === 'string' ? a.id : ''
+    if (!label && !id) continue
+    const key = areaKey({ id, label })
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      label,
+      placeId: id || undefined,
+    })
+  }
+  return out
+}
+
 const buildAccreditation = (): Accreditation => ({
   id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   name: '',
@@ -212,6 +236,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [geoQuery, setGeoQuery] = useState('')
   const [geoOptions, setGeoOptions] = useState<TargetGeographicalArea[]>([])
   const [geoLoading, setGeoLoading] = useState(false)
+  const [targetGeographicalAreas, setTargetGeographicalAreas] = useState<TargetGeographicalArea[]>([])
   const [headOfficeQuery, setHeadOfficeQuery] = useState('')
   const [headOfficeOptions, setHeadOfficeOptions] = useState<TargetGeographicalArea[]>([])
   const [headOfficeLoading, setHeadOfficeLoading] = useState(false)
@@ -335,7 +360,19 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         : {}
     const nextProfile = normalizeClientProfile((rawAccountData as { clientProfile?: ClientProfile }).clientProfile)
     setClientProfile(nextProfile)
-    setGeoQuery(nextProfile.targetGeographicalArea?.label || '')
+
+    // Target Geographical Areas (multi-select) stored under accountData.targetGeographicalAreas (array)
+    // Back-compat: if legacy single targetGeographicalArea exists, hydrate it into the array in-memory.
+    const rawAreas = (rawAccountData as any)?.targetGeographicalAreas
+    const fromArray = Array.isArray(rawAreas)
+      ? rawAreas.map((a: any) => ({
+          label: typeof a?.label === 'string' ? a.label : '',
+          placeId: typeof a?.id === 'string' ? a.id : typeof a?.placeId === 'string' ? a.placeId : undefined,
+        }))
+      : []
+    const legacySingle = nextProfile?.targetGeographicalArea ? [nextProfile.targetGeographicalArea] : []
+    setTargetGeographicalAreas(dedupeAreas([...(fromArray as any), ...(legacySingle as any)]))
+    setGeoQuery('')
 
     const rawDetails = rawAccountData as Partial<AccountDetails> & {
       accountDetails?: Partial<AccountDetails>
@@ -378,11 +415,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       const { data } = await api.get<TargetGeographicalArea[]>(
         `/api/places?query=${encodeURIComponent(geoQuery.trim())}`,
       )
-      setGeoOptions(Array.isArray(data) ? data : [])
+      // Deduplicate + never show selected areas in results
+      const selectedKeys = new Set(targetGeographicalAreas.map((a) => areaKey({ id: a.placeId, label: a.label })))
+      const normalized = dedupeAreas(Array.isArray(data) ? data : []).filter(
+        (a) => !selectedKeys.has(areaKey({ id: a.placeId, label: a.label })),
+      )
+      setGeoOptions(normalized)
       setGeoLoading(false)
     }, 350)
     return () => window.clearTimeout(handle)
-  }, [geoQuery])
+  }, [geoQuery, targetGeographicalAreas])
 
   // Head office address search
   useEffect(() => {
@@ -819,9 +861,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     
     // SAFE MERGE: Preserve other accountData fields (e.g., progressTracker)
     // Only update clientProfile and accountDetails sections
+    const normalizedTargetAreas = dedupeAreas(targetGeographicalAreas).map((a) => ({
+      id: String(a.placeId || a.label).trim(),
+      label: String(a.label || '').trim(),
+    }))
+
     const nextAccountData = safeAccountDataMerge(currentAccountData, {
-      clientProfile,
+      // Clear legacy single-select field going forward (persist multi-select array only)
+      clientProfile: { ...(clientProfile as any), targetGeographicalArea: null },
       accountDetails: nextAccountDetails,
+      targetGeographicalAreas: normalizedTargetAreas,
       // Also update top-level convenience fields for backward compatibility
       contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
       contactEmail: accountDetails.primaryContact.email,
@@ -1318,6 +1367,30 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <FormControl>
             <FormLabel>Target Geographical Area</FormLabel>
             <Stack spacing={2}>
+              {targetGeographicalAreas.length > 0 ? (
+                <HStack spacing={2} flexWrap="wrap">
+                  {targetGeographicalAreas.map((area) => {
+                    const key = area.placeId || area.label
+                    return (
+                      <Tag key={key} size="sm" colorScheme="blue" borderRadius="full">
+                        <TagLabel>{area.label}</TagLabel>
+                        <TagCloseButton
+                          onClick={() => {
+                            const removeKey = areaKey({ id: area.placeId, label: area.label })
+                            setTargetGeographicalAreas((prev) =>
+                              dedupeAreas(prev).filter((a) => areaKey({ id: a.placeId, label: a.label }) !== removeKey),
+                            )
+                          }}
+                        />
+                      </Tag>
+                    )
+                  })}
+                </HStack>
+              ) : (
+                <Text fontSize="sm" color="gray.500">
+                  No areas selected yet.
+                </Text>
+              )}
               <Input
                 value={geoQuery}
                 onChange={(e) => setGeoQuery(e.target.value)}
@@ -1341,8 +1414,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                         justifyContent="flex-start"
                         fontWeight="normal"
                         onClick={() => {
-                          updateProfile({ targetGeographicalArea: option })
-                          setGeoQuery(option.label)
+                          const next = dedupeAreas([...(targetGeographicalAreas as any), option as any])
+                          setTargetGeographicalAreas(next)
+                          setGeoQuery('')
                           setGeoOptions([])
                         }}
                       >
@@ -1351,11 +1425,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     ))}
                   </VStack>
                 </Box>
-              ) : null}
-              {clientProfile.targetGeographicalArea ? (
-                <Text fontSize="sm" color="gray.600">
-                  Selected: {clientProfile.targetGeographicalArea.label}
-                </Text>
               ) : null}
             </Stack>
           </FormControl>
@@ -1639,23 +1708,15 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                         fontWeight="medium"
                         onClick={async () => {
                           try {
-                            const response = await fetch(`/api/customers/${customer.id}/agreement-download`)
-                            if (!response.ok) {
-                              const errorData = await response.json()
-                              if (response.status === 410) {
-                                toast({
-                                  title: 'Legacy File Unavailable',
-                                  description: 'Please re-upload the agreement file.',
-                                  status: 'warning',
-                                  duration: 5000,
-                                })
-                              } else {
-                                throw new Error(errorData.message || 'Failed to load agreement')
-                              }
-                              return
+                            const w = window.open(`/api/customers/${customer.id}/agreement/download`, '_blank', 'noopener,noreferrer')
+                            if (!w) {
+                              toast({
+                                title: 'Popup blocked',
+                                description: 'Allow popups to open the agreement file.',
+                                status: 'warning',
+                                duration: 5000,
+                              })
                             }
-                            const data = await response.json()
-                            window.open(data.url, '_blank')
                           } catch (error) {
                             console.error('Error opening agreement:', error)
                             toast({
