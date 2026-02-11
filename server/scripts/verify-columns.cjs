@@ -18,7 +18,8 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 const REQUIRED_COLUMNS = [
   'agreementBlobName',
   'agreementContainerName',
-  'agreementFileUrl'
+  'agreementFileUrl',
+  'leads_google_sheet_label'  // Note: database uses snake_case
 ];
 
 async function verifyColumns() {
