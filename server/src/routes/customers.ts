@@ -3140,7 +3140,10 @@ router.post('/:id/suppression-import', (req, res) => {
             uploadedAt: now.toISOString(),
             uploadedByEmail: actor.email || null,
             totalParsed: parsedRows.length,
-            totalImported: dataToInsert.length,
+            // IMPORTANT: totalImported must reflect rows actually inserted.
+            // createMany(skipDuplicates) can skip rows if they already exist.
+            totalUniqueInFile: dataToInsert.length,
+            totalImported: created,
             duplicatesRemoved,
             replacedExistingEmailEntries: deleted.count,
           },
@@ -3157,7 +3160,7 @@ router.post('/:id/suppression-import', (req, res) => {
         return {
           deletedEmailEntries: deleted.count,
           totalParsed: parsedRows.length,
-          totalImported: dataToInsert.length,
+          totalUniqueInFile: dataToInsert.length,
           duplicatesRemoved,
           timestamp: now.toISOString(),
           createdCount: created,
@@ -3165,11 +3168,17 @@ router.post('/:id/suppression-import', (req, res) => {
       })
 
       return res.json({
-        totalImported: result.totalImported,
-        totalSkipped: Math.max(0, result.totalParsed - result.totalImported),
+        // Back-compat fields
+        totalImported: result.createdCount,
+        totalSkipped: Math.max(0, result.totalParsed - result.createdCount),
         timestamp: result.timestamp,
         duplicatesRemoved: result.duplicatesRemoved,
         replacedEmailEntries: result.deletedEmailEntries,
+
+        // Additional diagnostics
+        totalParsed: result.totalParsed,
+        totalUniqueInFile: result.totalUniqueInFile,
+        createdCount: result.createdCount,
       })
     } catch (error: any) {
       if (error?.statusCode === 404 || error?.message === 'not_found') {
