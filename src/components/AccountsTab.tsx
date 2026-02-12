@@ -56,6 +56,11 @@ import {
   FormLabel,
   Icon,
   Tooltip,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, SearchIcon, AttachmentIcon, DeleteIcon, EditIcon, CheckIcon, CloseIcon, RepeatIcon, ChevronUpIcon, ChevronDownIcon } from '@chakra-ui/icons'
 import { MdCalendarToday, MdEvent, MdChevronLeft, MdChevronRight } from 'react-icons/md'
@@ -3964,6 +3969,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+  const isDrawerOpen = Boolean(selectedAccount)
   
   // Stable customer ID for email identity fetching (prevents render loops)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
@@ -4857,7 +4863,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
     : '0.0'
 
-  const isDrawerOpen = Boolean(selectedAccount)
   const clientProfileSummary = selectedAccount
     ? normalizeClientProfile(selectedAccount.clientProfile)
     : null
