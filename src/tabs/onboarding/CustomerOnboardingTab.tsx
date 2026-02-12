@@ -2347,7 +2347,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 isLoading={isSaving}
                 onClick={async () => {
                   const ok = await handleSave()
-                  if (!ok) return
+                  if (!ok) {
+                    // IMPORTANT: resolve pending promise to avoid hanging connect attempt.
+                    pendingConnectResolver.current?.(false)
+                    pendingConnectResolver.current = null
+                    dirtyConnectDisclosure.onClose()
+                    return
+                  }
                   pendingConnectResolver.current?.(true)
                   pendingConnectResolver.current = null
                   dirtyConnectDisclosure.onClose()
