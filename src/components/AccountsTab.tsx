@@ -4037,7 +4037,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         setLoadingCustomerDetail(false)
         return
       }
-      if (!isDrawerOpen) return
+      if (!isDrawerOpen) {
+        // If the drawer closes while we were loading, ensure we don't leave the UI "stuck" in loading state.
+        setLoadingCustomerDetail(false)
+        return
+      }
 
       setLoadingCustomerDetail(true)
       setCustomerDetailError(null)
