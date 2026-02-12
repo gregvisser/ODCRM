@@ -4,6 +4,7 @@ import { InteractionStatus } from '@azure/msal-browser'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import LoginPage from './LoginPage'
 import { authConfigReady, loginRequest } from './msalConfig'
+import { api } from '../utils/api'
 
 type AuthGateProps = {
   children: React.ReactNode
@@ -26,48 +27,29 @@ function getIntendedRedirectFromWindow(): string {
   return `${window.location.pathname || '/'}${window.location.search || ''}`
 }
 
-const parseList = (value?: string): string[] =>
-  value
-    ? value
-        .split(/[,\s]+/)
-        .map((entry) => entry.trim().toLowerCase())
-        .filter(Boolean)
-    : []
+type AuthorizationStatus =
+  | { status: 'checking' }
+  | { status: 'authorized'; email?: string }
+  | { status: 'unauthorized'; email?: string; reason?: string }
+  | { status: 'error'; email?: string; message?: string }
 
-const envAllowedEmails = parseList(import.meta.env.VITE_AUTH_ALLOWED_EMAILS)
-const envAllowedDomains = parseList(import.meta.env.VITE_AUTH_ALLOWED_DOMAINS)
-
-const loadUserEmailsFromStorage = (): string[] => {
-  try {
-    const stored = localStorage.getItem('users')
-    if (!stored) return []
-    const users = JSON.parse(stored) as Array<{ email?: string }>
-    return users
-      .map((user) => user.email?.toLowerCase().trim())
-      .filter((email): email is string => Boolean(email))
-  } catch {
-    return []
-  }
+function extractEmailFromMsalAccount(account: any): string {
+  const claims = (account?.idTokenClaims || {}) as Record<string, any>
+  const raw =
+    claims.preferred_username ||
+    claims.email ||
+    claims.upn ||
+    account?.username ||
+    ''
+  return String(raw || '').trim().toLowerCase()
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
   const { instance, accounts, inProgress } = useMsal()
   const isAuthenticated = useIsAuthenticated()
-  const [userEmails, setUserEmails] = useState<string[]>(() => loadUserEmailsFromStorage())
+  const [authz, setAuthz] = useState<AuthorizationStatus>({ status: 'checking' })
 
-  const activeEmail = useMemo(() => accounts[0]?.username?.toLowerCase() || '', [accounts])
-
-  const effectiveAllowedEmails = userEmails.length > 0 ? userEmails : envAllowedEmails
-  const effectiveAllowedDomains = userEmails.length > 0 ? [] : envAllowedDomains
-  const isAllowlistConfigured =
-    effectiveAllowedEmails.length > 0 || effectiveAllowedDomains.length > 0
-
-  const isEmailAllowed = (email: string): boolean => {
-    if (!isAllowlistConfigured) return false
-    if (effectiveAllowedEmails.includes(email)) return true
-    const domain = email.split('@')[1]
-    return Boolean(domain && effectiveAllowedDomains.includes(domain))
-  }
+  const activeEmail = useMemo(() => extractEmailFromMsalAccount(accounts[0]), [accounts])
 
   useEffect(() => {
     if (accounts[0]) {
@@ -76,17 +58,50 @@ export default function AuthGate({ children }: AuthGateProps) {
   }, [accounts, instance])
 
   useEffect(() => {
-    const refreshUsers = () => setUserEmails(loadUserEmailsFromStorage())
-    const handleStorage = (event: StorageEvent) => {
-      if (event.key === 'users') refreshUsers()
+    // Authorize against ODCRM users table (DB source of truth)
+    // In production, the API call carries Azure SWA identity headers automatically.
+    let cancelled = false
+    const run = async () => {
+      if (!isAuthenticated || inProgress !== InteractionStatus.None) return
+      setAuthz({ status: 'checking' })
+      const { data, error, errorDetails } = await api.get<{
+        authorized: boolean
+        email?: string
+        user?: { id: string; userId: string; email: string; role: string; department: string }
+        autoProvisioned?: boolean
+        error?: string
+      }>('/api/users/me')
+
+      if (cancelled) return
+
+      if (error) {
+        // If backend can't resolve identity in dev, keep a clear message.
+        setAuthz({
+          status: errorDetails?.status === 403 ? 'unauthorized' : 'error',
+          email: activeEmail || undefined,
+          reason: error,
+          message: error,
+        } as any)
+        return
+      }
+
+      if (data?.authorized) {
+        setAuthz({ status: 'authorized', email: data.email || activeEmail || undefined })
+        return
+      }
+
+      setAuthz({
+        status: 'unauthorized',
+        email: data?.email || activeEmail || undefined,
+        reason: data?.error || 'not_registered',
+      })
     }
-    window.addEventListener('usersUpdated', refreshUsers)
-    window.addEventListener('storage', handleStorage)
+
+    void run()
     return () => {
-      window.removeEventListener('usersUpdated', refreshUsers)
-      window.removeEventListener('storage', handleStorage)
+      cancelled = true
     }
-  }, [])
+  }, [activeEmail, inProgress, isAuthenticated])
 
   const handleSignIn = async () => {
     if (!authConfigReady) return
@@ -121,7 +136,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     )
   }
 
-  if (!isAllowlistConfigured) {
+  if (authz.status === 'checking') {
     return (
       <Flex minH="100vh" align="center" justify="center" bg="gray.50" px={6}>
         <Box
@@ -134,22 +149,16 @@ export default function AuthGate({ children }: AuthGateProps) {
           maxW="520px"
           w="100%"
         >
-          <Stack spacing={4} textAlign="center">
-            <Heading size="md">Access not configured</Heading>
-            <Text color="gray.600">
-              Your account signed in successfully, but no authorized users are configured yet. Add
-              users in Operations → User Authorization or set allowlist environment variables.
-            </Text>
-            <Button colorScheme="gray" onClick={handleSignOut}>
-              Sign out
-            </Button>
+          <Stack spacing={3} textAlign="center">
+            <Heading size="md">Signing you in…</Heading>
+            <Text color="gray.600">Checking ODCRM access for your Microsoft account.</Text>
           </Stack>
         </Box>
       </Flex>
     )
   }
 
-  if (!isEmailAllowed(activeEmail)) {
+  if (authz.status === 'unauthorized') {
     return (
       <Flex minH="100vh" align="center" justify="center" bg="gray.50" px={6}>
         <Box
@@ -165,8 +174,36 @@ export default function AuthGate({ children }: AuthGateProps) {
           <Stack spacing={4} textAlign="center">
             <Heading size="md">Access denied</Heading>
             <Text color="gray.600">
-              The signed-in Microsoft account is not authorized for ODCRM. Contact the admin to
-              request access.
+              This account is not yet registered in ODCRM. Contact an administrator to request
+              access.
+            </Text>
+            <Button colorScheme="gray" onClick={handleSignOut}>
+              Sign out
+            </Button>
+          </Stack>
+        </Box>
+      </Flex>
+    )
+  }
+
+  if (authz.status === 'error') {
+    return (
+      <Flex minH="100vh" align="center" justify="center" bg="gray.50" px={6}>
+        <Box
+          bg="white"
+          p={{ base: 8, md: 10 }}
+          borderRadius="2xl"
+          border="1px solid"
+          borderColor="gray.200"
+          boxShadow="lg"
+          maxW="520px"
+          w="100%"
+        >
+          <Stack spacing={4} textAlign="center">
+            <Heading size="md">Unable to verify access</Heading>
+            <Text color="gray.600">
+              Your Microsoft sign-in succeeded, but ODCRM could not verify your registration.
+              Please try again or contact an administrator.
             </Text>
             <Button colorScheme="gray" onClick={handleSignOut}>
               Sign out
