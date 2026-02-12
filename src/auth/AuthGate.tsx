@@ -49,6 +49,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [authz, setAuthz] = useState<AuthorizationStatus>({ status: 'checking' })
   const apiBaseUrl = import.meta.env.VITE_API_URL?.trim() || ''
 
+  const activeAccount = accounts[0]
   const activeEmail = useMemo(() => extractEmailFromMsalAccount(accounts[0]), [accounts])
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       try {
         const result = await instance.acquireTokenSilent({
           ...loginRequest,
-          account: accounts[0],
+          account: activeAccount,
         })
         token = (result as any)?.idToken || (result as any)?.accessToken || null
       } catch {
@@ -153,7 +154,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     return () => {
       cancelled = true
     }
-  }, [activeEmail, inProgress, isAuthenticated])
+  }, [activeAccount, activeEmail, apiBaseUrl, inProgress, instance, isAuthenticated])
 
   const handleSignIn = async () => {
     if (!authConfigReady) return
