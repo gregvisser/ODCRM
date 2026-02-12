@@ -4,7 +4,6 @@ import { InteractionStatus } from '@azure/msal-browser'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import LoginPage from './LoginPage'
 import { authConfigReady, loginRequest } from './msalConfig'
-import { api } from '../utils/api'
 
 type AuthGateProps = {
   children: React.ReactNode
@@ -48,6 +47,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   const { instance, accounts, inProgress } = useMsal()
   const isAuthenticated = useIsAuthenticated()
   const [authz, setAuthz] = useState<AuthorizationStatus>({ status: 'checking' })
+  const apiBaseUrl = import.meta.env.VITE_API_URL?.trim() || ''
 
   const activeEmail = useMemo(() => extractEmailFromMsalAccount(accounts[0]), [accounts])
 
@@ -59,41 +59,93 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   useEffect(() => {
     // Authorize against ODCRM users table (DB source of truth)
-    // In production, the API call carries Azure SWA identity headers automatically.
+    // IMPORTANT: In production this project calls a separate API (App Service).
+    // Azure SWA identity headers won't be present in that case, so we send a
+    // Microsoft token and let the backend verify it.
     let cancelled = false
     const run = async () => {
       if (!isAuthenticated || inProgress !== InteractionStatus.None) return
       setAuthz({ status: 'checking' })
-      const { data, error, errorDetails } = await api.get<{
-        authorized: boolean
-        email?: string
-        user?: { id: string; userId: string; email: string; role: string; department: string }
-        autoProvisioned?: boolean
-        error?: string
-      }>('/api/users/me')
+      let token: string | null = null
+      try {
+        const result = await instance.acquireTokenSilent({
+          ...loginRequest,
+          account: accounts[0],
+        })
+        token = (result as any)?.idToken || (result as any)?.accessToken || null
+      } catch {
+        // If silent token acquisition fails, MSAL will handle prompting on the next interaction.
+        token = null
+      }
+
+      const urlsToTry = [
+        apiBaseUrl ? `${apiBaseUrl}/api/users/me` : null,
+        '/api/users/me',
+      ].filter(Boolean) as string[]
+
+      let lastError: { status?: number; message: string } | null = null
+      let data: any = null
+
+      for (const url of urlsToTry) {
+        try {
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+            cache: 'no-store',
+          })
+
+          if (res.status === 404) {
+            // Try next URL (e.g., SWA proxy not configured)
+            lastError = { status: 404, message: 'Not found' }
+            continue
+          }
+
+          const contentType = res.headers.get('content-type') || ''
+          const body = contentType.includes('application/json') ? await res.json() : null
+          if (!res.ok) {
+            const message =
+              body?.message || body?.error || `HTTP ${res.status}`
+            lastError = { status: res.status, message }
+            continue
+          }
+
+          data = body
+          lastError = null
+          break
+        } catch (e: any) {
+          lastError = { message: e?.message || 'Network error' }
+        }
+      }
 
       if (cancelled) return
-
-      if (error) {
-        // If backend can't resolve identity in dev, keep a clear message.
-        setAuthz({
-          status: errorDetails?.status === 403 ? 'unauthorized' : 'error',
-          email: activeEmail || undefined,
-          reason: error,
-          message: error,
-        } as any)
-        return
-      }
 
       if (data?.authorized) {
         setAuthz({ status: 'authorized', email: data.email || activeEmail || undefined })
         return
       }
 
+      if (lastError?.status === 403) {
+        setAuthz({
+          status: 'unauthorized',
+          email: data?.email || activeEmail || undefined,
+          reason: data?.error || 'not_registered',
+        })
+        return
+      }
+
+      if (lastError?.status === 401) {
+        setAuthz({
+          status: 'error',
+          email: activeEmail || undefined,
+          message: 'ODCRM could not verify your Microsoft session. Please sign out and sign in again.',
+        })
+        return
+      }
+
       setAuthz({
-        status: 'unauthorized',
-        email: data?.email || activeEmail || undefined,
-        reason: data?.error || 'not_registered',
+        status: 'error',
+        email: activeEmail || undefined,
+        message: lastError?.message || 'Unable to verify registration',
       })
     }
 

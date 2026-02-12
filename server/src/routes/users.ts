@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { randomUUID } from 'crypto'
+import { verifyMicrosoftJwtAndExtractIdentity } from '../utils/entraJwt.js'
 
 const router = Router()
 
@@ -99,20 +100,57 @@ async function generateUniqueUserId(): Promise<string> {
 router.get('/me', async (req, res) => {
   try {
     const allowAutoProvision = String(process.env.ALLOW_AUTO_USER_PROVISION || '').toLowerCase() === 'true'
+    const expectedAudience = process.env.MICROSOFT_CLIENT_ID || process.env.AZURE_CLIENT_ID || ''
     const info = extractEmailFromRequest(req)
 
-    if (!info.emailNormalized) {
+    let normalizedEmail = info.emailNormalized
+    let claimUsed = info.claimUsed
+    let actorSource = info.actorSource
+    let principalPresent = info.principalPresent
+    let availableClaimTypes = info.availableClaimTypes
+
+    // Fallback: if SWA principal is not available (frontend calling App Service directly),
+    // accept a verified Microsoft Entra JWT via Authorization: Bearer.
+    if (!normalizedEmail) {
+      const authHeader = (req.headers['authorization'] as string | undefined) || ''
+      if (authHeader.startsWith('Bearer ')) {
+        if (!expectedAudience) {
+          console.error('[AuthZ] MICROSOFT_CLIENT_ID/AZURE_CLIENT_ID not set; cannot verify bearer tokens')
+          return res.status(500).json({ authorized: false, error: 'server_misconfigured' })
+        }
+        try {
+          const token = authHeader.slice(7).trim()
+          const verified = await verifyMicrosoftJwtAndExtractIdentity({
+            token,
+            expectedAudience,
+          })
+          normalizedEmail = verified.emailNormalized
+          claimUsed = verified.claimUsed || 'bearer'
+          actorSource = 'jwt'
+          principalPresent = false
+          availableClaimTypes = []
+        } catch (e: any) {
+          console.warn('[AuthZ] bearer token verification failed', {
+            error: e?.message || String(e),
+            code: e?.code,
+          })
+          return res.status(401).json({ authorized: false, error: 'unauthenticated' })
+        }
+      }
+    }
+
+    if (!normalizedEmail) {
       console.warn('[AuthZ] /api/users/me unauthenticated', {
-        principalPresent: info.principalPresent,
-        actorSource: info.actorSource,
-        availableClaimTypes: info.availableClaimTypes.slice(0, 12),
+        principalPresent,
+        actorSource,
+        availableClaimTypes: availableClaimTypes.slice(0, 12),
       })
       return res.status(401).json({ authorized: false, error: 'unauthenticated' })
     }
 
     const user = await prisma.user.findFirst({
       where: {
-        email: { equals: info.emailNormalized, mode: 'insensitive' },
+        email: { equals: normalizedEmail, mode: 'insensitive' },
       },
     })
 
@@ -120,9 +158,9 @@ router.get('/me', async (req, res) => {
       // Deny inactive accounts
       if (String(user.accountStatus || 'Active') !== 'Active') {
         console.warn('[AuthZ] denied (inactive user)', {
-          emailNormalized: info.emailNormalized,
-          claimUsed: info.claimUsed,
-          actorSource: info.actorSource,
+          emailNormalized: normalizedEmail,
+          claimUsed,
+          actorSource,
           userId: user.userId,
           accountStatus: user.accountStatus,
         })
@@ -131,7 +169,7 @@ router.get('/me', async (req, res) => {
 
       // Normalize stored email (best-effort) + update lastLoginDate
       try {
-        const nextEmail = info.emailNormalized
+        const nextEmail = normalizedEmail
         const needsEmailNormalize = user.email !== nextEmail
         await prisma.user.update({
           where: { id: user.id },
@@ -143,15 +181,15 @@ router.get('/me', async (req, res) => {
       } catch (e: any) {
         // Don't block login if normalization fails due to uniqueness edge cases
         console.warn('[AuthZ] user normalization update failed (non-fatal)', {
-          emailNormalized: info.emailNormalized,
-          claimUsed: info.claimUsed,
+          emailNormalized: normalizedEmail,
+          claimUsed,
           error: e?.message || String(e),
         })
       }
 
       return res.json({
         authorized: true,
-        email: info.emailNormalized,
+        email: normalizedEmail,
         user: {
           id: user.id,
           userId: user.userId,
@@ -166,17 +204,17 @@ router.get('/me', async (req, res) => {
     // Not found
     if (!allowAutoProvision) {
       console.warn('[AuthZ] denied (user not registered)', {
-        emailNormalized: info.emailNormalized,
-        claimUsed: info.claimUsed,
-        actorSource: info.actorSource,
-        principalPresent: info.principalPresent,
-        availableClaimTypes: info.availableClaimTypes.slice(0, 12),
+        emailNormalized: normalizedEmail,
+        claimUsed,
+        actorSource,
+        principalPresent,
+        availableClaimTypes: availableClaimTypes.slice(0, 12),
       })
       return res.status(403).json({ authorized: false, error: 'not_registered' })
     }
 
     // Auto-provision (flag gated)
-    const local = info.emailNormalized.split('@')[0] || 'User'
+    const local = normalizedEmail.split('@')[0] || 'User'
     const parts = local.split(/[._-]+/).filter(Boolean)
     const cap = (v: string) => (v ? v.charAt(0).toUpperCase() + v.slice(1) : v)
     const firstName = cap(parts[0] || 'User')
@@ -189,8 +227,8 @@ router.get('/me', async (req, res) => {
         userId: newUserId,
         firstName,
         lastName,
-        email: info.emailNormalized,
-        username: info.emailNormalized,
+        email: normalizedEmail,
+        username: normalizedEmail,
         role: 'user',
         department: 'General',
         accountStatus: 'Active',
@@ -200,16 +238,16 @@ router.get('/me', async (req, res) => {
     })
 
     console.log('[AuthZ] auto-provisioned user', {
-      emailNormalized: info.emailNormalized,
-      claimUsed: info.claimUsed,
-      actorSource: info.actorSource,
+      emailNormalized: normalizedEmail,
+      claimUsed,
+      actorSource,
       userId: created.userId,
       role: created.role,
     })
 
     return res.json({
       authorized: true,
-      email: info.emailNormalized,
+      email: normalizedEmail,
       user: {
         id: created.id,
         userId: created.userId,
