@@ -51,6 +51,7 @@ type SuppressionEntry = {
 }
 
 export default function ComplianceTab() {
+  const apiBaseUrl = import.meta.env.VITE_API_URL || ''
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [type, setType] = useState<'domain' | 'email'>('domain')
@@ -60,6 +61,11 @@ export default function ComplianceTab() {
     settingsStore.getCurrentCustomerId('prod-customer-1'),
   )
   const [importing, setImporting] = useState(false)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [summary, setSummary] = useState<{
+    totalSuppressedEmails: number
+    lastUpload: { fileName: string | null; uploadedAt: string | null; uploadedByEmail: string | null; totalImported: number | null } | null
+  } | null>(null)
   const [csvData, setCsvData] = useState('')
   const [importResults, setImportResults] = useState<{
     imported: number
@@ -82,8 +88,19 @@ export default function ComplianceTab() {
     setLoading(false)
   }, [customerId, toast])
 
+  const loadSummary = useCallback(async () => {
+    const { data } = await api.get<{
+      totalSuppressedEmails: number
+      lastUpload: { fileName: string | null; uploadedAt: string | null; uploadedByEmail: string | null; totalImported: number | null } | null
+    }>(`/api/customers/${customerId}/suppression-summary`)
+    if (data) setSummary(data)
+  }, [customerId])
+
   useEffect(() => {
-    if (customerId) loadEntries()
+    if (customerId) {
+      loadEntries()
+      loadSummary()
+    }
   }, [customerId, loadEntries])
 
   useEffect(() => {
@@ -93,6 +110,36 @@ export default function ComplianceTab() {
     })
     return () => unsubscribe()
   }, [])
+
+  const handleUploadSuppressionFile = async (file: File | null) => {
+    if (!file) return
+    setUploadingFile(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${apiBaseUrl}/api/customers/${customerId}/suppression-import`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `Upload failed (${res.status})`)
+      }
+      const data = (await res.json()) as { totalImported: number; totalSkipped: number }
+      toast({
+        title: 'Suppression list uploaded',
+        description: `Imported ${data.totalImported} emails (${data.totalSkipped} skipped)`,
+        status: 'success',
+        duration: 5000,
+      })
+      await loadEntries()
+      await loadSummary()
+    } catch (e: any) {
+      toast({ title: 'Upload failed', description: e?.message || 'Unable to upload file', status: 'error', duration: 7000 })
+    } finally {
+      setUploadingFile(false)
+    }
+  }
 
   const handleAdd = async () => {
     const payload = {
@@ -226,6 +273,53 @@ export default function ComplianceTab() {
             Suppression lists prevent emails from being sent to unsubscribed or problematic recipients. Each entry is scoped to the selected customer.
           </AlertDescription>
         </Alert>
+
+        <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
+          <HStack justify="space-between" align="flex-start" flexWrap="wrap" spacing={4}>
+            <Box>
+              <Heading size="sm" mb={1}>Customer-scoped DNC</Heading>
+              <Text fontSize="sm" color="gray.600">
+                {summary ? (
+                  <>
+                    <Badge colorScheme="purple" mr={2}>
+                      {summary.totalSuppressedEmails} suppressed emails
+                    </Badge>
+                    {summary.lastUpload?.uploadedAt ? `Last upload: ${new Date(summary.lastUpload.uploadedAt).toLocaleString()}` : 'No uploads yet'}
+                  </>
+                ) : (
+                  'Loading summary...'
+                )}
+              </Text>
+              {summary?.lastUpload?.fileName ? (
+                <Text fontSize="xs" color="gray.500">
+                  File: {summary.lastUpload.fileName}
+                  {summary.lastUpload.uploadedByEmail ? ` · ${summary.lastUpload.uploadedByEmail}` : ''}
+                </Text>
+              ) : null}
+            </Box>
+            <Box>
+              <Input
+                type="file"
+                accept=".csv,.xlsx,.txt"
+                display="none"
+                id="suppression-file-upload"
+                onChange={(e) => void handleUploadSuppressionFile(e.target.files?.[0] || null)}
+              />
+              <Button
+                as="label"
+                htmlFor="suppression-file-upload"
+                leftIcon={<AttachmentIcon />}
+                colorScheme="purple"
+                variant="outline"
+                size="sm"
+                isLoading={uploadingFile}
+                isDisabled={uploadingFile}
+              >
+                {summary?.lastUpload?.fileName ? 'Replace list' : 'Upload list'}
+              </Button>
+            </Box>
+          </HStack>
+        </Box>
 
         <Tabs variant="enclosed">
           <TabList>

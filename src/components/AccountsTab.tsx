@@ -6461,7 +6461,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 {c?.agreementFileName && customerId ? (
                                   <Stack spacing={1}>
                                     <Link
-                                      href={`/api/customers/${customerId}/agreement/download`}
+                                      href={`${import.meta.env.VITE_API_URL || ''}/api/customers/${customerId}/agreement/download`}
                                       isExternal
                                       color="blue.600"
                                       fontWeight="medium"
@@ -7051,36 +7051,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         const hasAgreement = agreementBlobName || (customer as any)?.agreementFileUrl
                         
                         if (hasAgreement && agreementFileName) {
-                          const handleViewAgreement = async () => {
-                            try {
-                              const w = window.open(`/api/customers/${customer.id}/agreement/download`, '_blank', 'noopener,noreferrer')
-                              if (!w) {
-                                toast({
-                                  title: 'Popup blocked',
-                                  description: 'Allow popups to open the agreement file.',
-                                  status: 'warning',
-                                  duration: 5000,
-                                })
-                              }
-                            } catch (error) {
-                              console.error('Error opening agreement:', error)
-                              toast({
-                                title: 'Error',
-                                description: 'Failed to open agreement file',
-                                status: 'error',
-                                duration: 5000,
-                              })
-                            }
-                          }
-
+                          const href = `${import.meta.env.VITE_API_URL || ''}/api/customers/${customer.id}/agreement/download`
                           return (
                             <HStack spacing={2}>
                               <Button
+                                as={Link}
+                                href={href}
+                                isExternal
                                 size="sm"
                                 colorScheme="teal"
                                 variant="link"
-                                onClick={handleViewAgreement}
                                 fontWeight="medium"
+                                rel="noopener noreferrer"
                               >
                                 {agreementFileName}
                               </Button>

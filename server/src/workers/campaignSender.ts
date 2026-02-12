@@ -47,26 +47,38 @@ function isWithinSendWindow(
 /**
  * Check if email is suppressed
  */
-async function isSuppressed(
+async function loadSuppressionSets(
   prisma: PrismaClient,
   customerId: string,
-  email: string
-): Promise<boolean> {
-  const emailLower = email.toLowerCase()
-  const domain = emailLower.split('@')[1] || ''
-  
-  // Check for exact email or domain suppression
-  const suppression = await prisma.suppressionEntry.findFirst({
-    where: {
-      customerId,
-      OR: [
-        { type: 'email', value: emailLower },
-        { type: 'domain', value: domain }
-      ]
-    }
+): Promise<{ emails: Set<string>; domains: Set<string> }> {
+  const entries = await prisma.suppressionEntry.findMany({
+    where: { customerId, OR: [{ type: 'email' }, { type: 'domain' }] },
+    select: { type: true, value: true, emailNormalized: true },
   })
-  
-  return !!suppression
+
+  const emails = new Set<string>()
+  const domains = new Set<string>()
+  for (const e of entries) {
+    if (e.type === 'email') {
+      const v = String(e.emailNormalized || e.value || '').trim().toLowerCase()
+      if (v) emails.add(v)
+    } else if (e.type === 'domain') {
+      const v = String(e.value || '').trim().toLowerCase()
+      if (v) domains.add(v)
+    }
+  }
+
+  return { emails, domains }
+}
+
+function isSuppressedInSets(
+  suppression: { emails: Set<string>; domains: Set<string> },
+  email: string
+): boolean {
+  const emailLower = String(email || '').trim().toLowerCase()
+  if (!emailLower || !emailLower.includes('@')) return false
+  const domain = emailLower.split('@')[1] || ''
+  return suppression.emails.has(emailLower) || (domain ? suppression.domains.has(domain) : false)
 }
 
 /**
@@ -226,6 +238,9 @@ export async function processSequenceBasedCampaigns(
       continue
     }
 
+    // Load suppression sets once per campaign (customer-scoped)
+    const suppressionSets = await loadSuppressionSets(prisma, campaign.customerId)
+
     // Get prospects for this campaign that are pending
     // Filter out prospects who have replied, bounced, or unsubscribed
     // NOTE: We also exclude 'sending' status to avoid double-processing
@@ -244,9 +259,40 @@ export async function processSequenceBasedCampaigns(
       take: Math.min(batchSize, dailyCap - sentToday),
     })
 
-    scannedCount += prospects.length
-
+    // Filter suppressed recipients BEFORE sending (customer-scoped)
+    const originalCount = prospects.length
+    const suppressedProspectIds: string[] = []
+    const allowedProspects: typeof prospects = []
     for (const prospect of prospects) {
+      const email = String(prospect.contact?.email || '').trim()
+      if (email && isSuppressedInSets(suppressionSets, email)) {
+        suppressedProspectIds.push(prospect.id)
+      } else {
+        allowedProspects.push(prospect)
+      }
+    }
+
+    if (suppressedProspectIds.length > 0) {
+      // Mark suppressed so we don't repeatedly scan them
+      await prisma.emailCampaignProspect.updateMany({
+        where: { id: { in: suppressedProspectIds }, lastStatus: 'pending' },
+        data: { lastStatus: 'suppressed' } as any,
+      })
+    }
+
+    const suppressedCount = suppressedProspectIds.length
+    const finalCount = allowedProspects.length
+    if (suppressedCount > 0) {
+      console.log(
+        `[campaignSender] customerId=${campaign.customerId} campaignId=${campaign.id} ` +
+          `suppressed=${suppressedCount} original=${originalCount} final=${finalCount}`
+      )
+    }
+
+    scannedCount += originalCount
+    skippedCount += suppressedCount
+
+    for (const prospect of allowedProspects) {
       const contact = prospect.contact
 
       // ATOMIC CLAIM: Try to claim this prospect for sending
@@ -262,8 +308,8 @@ export async function processSequenceBasedCampaigns(
 
       // We have the lock - now process
       try {
-        // Check global suppression list
-        const suppressed = await isSuppressed(prisma, campaign.customerId, contact.email)
+        // Check customer-scoped suppression list (DNC)
+        const suppressed = isSuppressedInSets(suppressionSets, String(contact?.email || ''))
         if (suppressed) {
           console.log(
             `[campaignSender] SUPPRESSED prospectId=${prospect.id} email=${contact.email} instance=${INSTANCE_ID}`

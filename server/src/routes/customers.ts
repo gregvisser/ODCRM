@@ -7,6 +7,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import multer from 'multer'
+import * as XLSX from 'xlsx'
 import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
@@ -26,6 +27,14 @@ const MAX_ATTACHMENT_FILE_SIZE_BYTES = MAX_ATTACHMENT_FILE_SIZE_MB * 1024 * 1024
 const attachmentsUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_ATTACHMENT_FILE_SIZE_BYTES },
+})
+
+// Suppression list upload constraints (DNC)
+const MAX_SUPPRESSION_FILE_SIZE_MB = 15
+const MAX_SUPPRESSION_FILE_SIZE_BYTES = MAX_SUPPRESSION_FILE_SIZE_MB * 1024 * 1024
+const suppressionUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_SUPPRESSION_FILE_SIZE_BYTES },
 })
 
 // Schema validation (matches OpensDoorsV2 ClientAccount)
@@ -2921,6 +2930,290 @@ router.get('/:id/attachments/:attachmentId/download', async (req, res) => {
       error: 'Failed to generate download URL',
       details: error instanceof Error ? error.message : 'Unknown error',
     })
+  }
+})
+
+// POST /api/customers/:id/suppression-import - Import customer-scoped DNC suppression list
+// Accepts multipart/form-data: file (.csv|.xlsx|.txt)
+// Replaces ALL existing email-type suppressions for this customer (domain suppressions preserved).
+router.post('/:id/suppression-import', (req, res) => {
+  suppressionUpload.single('file')(req as any, res as any, async (err: any) => {
+    try {
+      const { id } = req.params as any
+
+      if (err) {
+        if (err?.code === 'LIMIT_FILE_SIZE') {
+          return res.status(413).json({
+            error: 'suppression_file_too_large',
+            message: `File exceeds maximum allowed size of ${MAX_SUPPRESSION_FILE_SIZE_MB}MB`,
+            maxMb: MAX_SUPPRESSION_FILE_SIZE_MB,
+          })
+        }
+        console.error('Error parsing suppression multipart:', err)
+        return res.status(400).json({ error: 'Invalid multipart upload' })
+      }
+
+      const file = (req as any).file as
+        | { originalname: string; mimetype: string; buffer: Buffer; size: number }
+        | undefined
+
+      if (!file || !file.buffer || !file.originalname) {
+        return res.status(400).json({ error: 'Missing file' })
+      }
+
+      const originalName = String(file.originalname || 'suppression-upload').trim()
+      const ext = (originalName.split('.').pop() || '').toLowerCase()
+      if (!['csv', 'xlsx', 'txt'].includes(ext)) {
+        return res.status(400).json({
+          error: 'unsupported_file_type',
+          message: 'Supported file types: .csv, .xlsx, .txt',
+          received: ext || null,
+        })
+      }
+
+      const normalizeEmail = (raw: unknown): string | null => {
+        if (typeof raw !== 'string') return null
+        const v = raw.trim().toLowerCase()
+        if (!v) return null
+        const ok = z.string().email().safeParse(v).success
+        return ok ? v : null
+      }
+
+      type ParsedRow = {
+        email: string
+        reason?: string
+        source?: string
+        name?: string
+        company?: string
+        notes?: string
+      }
+
+      const parsedRows: ParsedRow[] = []
+      let emailHeaderPresent = true
+
+      if (ext === 'txt') {
+        const text = file.buffer.toString('utf8')
+        const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+        for (const line of lines) {
+          const email = normalizeEmail(line)
+          if (!email) continue
+          parsedRows.push({ email, source: 'client_upload' })
+        }
+      } else {
+        // Use first sheet; header matching is case-insensitive.
+        const workbook =
+          ext === 'csv'
+            ? XLSX.read(file.buffer.toString('utf8'), { type: 'string' })
+            : XLSX.read(file.buffer, { type: 'buffer' })
+
+        const sheetName = workbook.SheetNames?.[0]
+        if (!sheetName) {
+          return res.status(400).json({ error: 'empty_file', message: 'No sheets found in upload' })
+        }
+        const sheet = workbook.Sheets[sheetName]
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Array<Record<string, any>>
+
+        // Find header key for "email" case-insensitively
+        const headerKeys = new Set<string>()
+        for (const r of rows) {
+          Object.keys(r || {}).forEach((k) => headerKeys.add(k))
+        }
+        const headerKeyEmail =
+          Array.from(headerKeys).find((k) => String(k).trim().toLowerCase() === 'email') || null
+        if (!headerKeyEmail) {
+          emailHeaderPresent = false
+        } else {
+          for (const r of rows) {
+            if (!r) continue
+            const email = normalizeEmail(String((r as any)[headerKeyEmail] ?? ''))
+            if (!email) continue
+
+            const getOpt = (key: string): string | undefined => {
+              const found = Object.keys(r).find((k) => String(k).trim().toLowerCase() === key)
+              if (!found) return undefined
+              const v = String((r as any)[found] ?? '').trim()
+              return v ? v : undefined
+            }
+
+            parsedRows.push({
+              email,
+              reason: getOpt('reason'),
+              source: getOpt('source'),
+              name: getOpt('name'),
+              company: getOpt('company'),
+              notes: getOpt('notes'),
+            })
+          }
+        }
+      }
+
+      if (!emailHeaderPresent) {
+        return res.status(400).json({
+          error: 'missing_email_header',
+          message: 'Upload must contain an "email" header (case-insensitive).',
+        })
+      }
+
+      // Deduplicate within file
+      const seen = new Set<string>()
+      const deduped: ParsedRow[] = []
+      let duplicatesRemoved = 0
+      for (const row of parsedRows) {
+        if (!row?.email) continue
+        if (seen.has(row.email)) {
+          duplicatesRemoved++
+          continue
+        }
+        seen.add(row.email)
+        deduped.push(row)
+      }
+
+      // Replace existing customer-scoped email suppressions
+      const actor = getActorIdentity(req)
+      const now = new Date()
+
+      const result = await prisma.$transaction(async (tx) => {
+        // Lock customer row to serialize replace operations
+        await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+        const customer = await tx.customer.findUnique({
+          where: { id },
+          select: { id: true, name: true, isArchived: true, accountData: true },
+        })
+        if (!customer) {
+          const e: any = new Error('not_found')
+          e.statusCode = 404
+          throw e
+        }
+        if (customer.isArchived) {
+          const e: any = new Error('archived')
+          e.statusCode = 400
+          throw e
+        }
+
+        // Delete existing email suppressions for this customer (preserve domain suppressions)
+        const deleted = await tx.suppressionEntry.deleteMany({
+          where: { customerId: id, type: 'email' },
+        })
+
+        const dataToInsert = deduped.map((r) => {
+          // We cannot add columns without migrations; store optional fields safely in `reason` when present.
+          const baseReason = String(r.reason || '').trim()
+          const extraParts: string[] = []
+          if (r.name) extraParts.push(`name=${r.name}`)
+          if (r.company) extraParts.push(`company=${r.company}`)
+          if (r.notes) extraParts.push(`notes=${r.notes}`)
+          const mergedReason =
+            extraParts.length > 0
+              ? `${baseReason || 'client_upload'} | ${extraParts.join(' | ')}`.slice(0, 500)
+              : (baseReason || null)
+
+          return {
+            customerId: id,
+            type: 'email',
+            value: r.email,
+            emailNormalized: r.email,
+            reason: mergedReason,
+            source: String(r.source || 'client_upload').trim() || 'client_upload',
+            sourceFileName: originalName,
+          }
+        })
+
+        // Insert in batches (createMany is faster)
+        const batchSize = 1000
+        let created = 0
+        for (let i = 0; i < dataToInsert.length; i += batchSize) {
+          const batch = dataToInsert.slice(i, i + batchSize)
+          const createdBatch = await tx.suppressionEntry.createMany({
+            data: batch as any,
+            skipDuplicates: true,
+          })
+          created += createdBatch.count || 0
+        }
+
+        // Save upload metadata on accountData (DB truth for UI)
+        const existingAccountData =
+          customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+        const nextAccountData = {
+          ...existingAccountData,
+          dncSuppression: {
+            fileName: originalName,
+            uploadedAt: now.toISOString(),
+            uploadedByEmail: actor.email || null,
+            totalParsed: parsedRows.length,
+            totalImported: dataToInsert.length,
+            duplicatesRemoved,
+            replacedExistingEmailEntries: deleted.count,
+          },
+        }
+
+        await tx.customer.update({
+          where: { id },
+          data: {
+            accountData: nextAccountData,
+            updatedAt: now,
+          },
+        })
+
+        return {
+          deletedEmailEntries: deleted.count,
+          totalParsed: parsedRows.length,
+          totalImported: dataToInsert.length,
+          duplicatesRemoved,
+          timestamp: now.toISOString(),
+          createdCount: created,
+        }
+      })
+
+      return res.json({
+        totalImported: result.totalImported,
+        totalSkipped: Math.max(0, result.totalParsed - result.totalImported),
+        timestamp: result.timestamp,
+        duplicatesRemoved: result.duplicatesRemoved,
+        replacedEmailEntries: result.deletedEmailEntries,
+      })
+    } catch (error: any) {
+      if (error?.statusCode === 404 || error?.message === 'not_found') {
+        return res.status(404).json({ error: 'Customer not found' })
+      }
+      if (error?.statusCode === 400 || error?.message === 'archived') {
+        return res.status(400).json({ error: 'Customer is archived' })
+      }
+      console.error('Error importing suppression list:', error)
+      return res.status(500).json({
+        error: 'suppression_import_failed',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      })
+    }
+  })
+})
+
+// GET /api/customers/:id/suppression-summary - Customer-scoped suppression count + last upload metadata
+router.get('/:id/suppression-summary', async (req, res) => {
+  try {
+    const { id } = req.params
+    const [count, customer] = await Promise.all([
+      prisma.suppressionEntry.count({ where: { customerId: id, type: 'email' } }),
+      prisma.customer.findUnique({ where: { id }, select: { id: true, accountData: true } }),
+    ])
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const ad = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+    const meta = ad?.dncSuppression && typeof ad.dncSuppression === 'object' ? ad.dncSuppression : null
+
+    return res.json({
+      totalSuppressedEmails: count,
+      lastUpload: meta
+        ? {
+            fileName: meta.fileName || null,
+            uploadedAt: meta.uploadedAt || null,
+            uploadedByEmail: meta.uploadedByEmail || null,
+            totalImported: meta.totalImported ?? null,
+          }
+        : null,
+    })
+  } catch (error) {
+    console.error('Error fetching suppression summary:', error)
+    return res.status(500).json({ error: 'suppression_summary_failed' })
   }
 })
 

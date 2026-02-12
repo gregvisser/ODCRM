@@ -219,6 +219,7 @@ interface CustomerOnboardingTabProps {
 
 export default function CustomerOnboardingTab({ customerId }: CustomerOnboardingTabProps) {
   const toast = useToast()
+  const apiBaseUrl = import.meta.env.VITE_API_URL || ''
   // CRITICAL: Use the same DB-backed source as Settings → User Authorization
   const { users: dbUsers } = useUsersFromDatabase()
   const [customer, setCustomer] = useState<CustomerApi | null>(null)
@@ -244,6 +245,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
   const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
+  const [uploadingSuppression, setUploadingSuppression] = useState(false)
+  const [suppressionMeta, setSuppressionMeta] = useState<{
+    fileName?: string | null
+    uploadedAt?: string | null
+    uploadedByEmail?: string | null
+    totalImported?: number | null
+    totalSuppressedEmails?: number | null
+  } | null>(null)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -335,6 +344,42 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     void fetchCustomer()
     void fetchTaxonomy()
   }, [fetchCustomer, fetchTaxonomy])
+
+  // Load suppression summary (customer-scoped DNC) for UI display
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!customer?.id) {
+        setSuppressionMeta(null)
+        return
+      }
+      try {
+        const { data } = await api.get<{
+          totalSuppressedEmails: number
+          lastUpload: {
+            fileName: string | null
+            uploadedAt: string | null
+            uploadedByEmail: string | null
+            totalImported: number | null
+          } | null
+        }>(`/api/customers/${customer.id}/suppression-summary`)
+        if (cancelled) return
+        setSuppressionMeta({
+          fileName: data?.lastUpload?.fileName ?? null,
+          uploadedAt: data?.lastUpload?.uploadedAt ?? null,
+          uploadedByEmail: data?.lastUpload?.uploadedByEmail ?? null,
+          totalImported: data?.lastUpload?.totalImported ?? null,
+          totalSuppressedEmails: typeof data?.totalSuppressedEmails === 'number' ? data.totalSuppressedEmails : null,
+        })
+      } catch {
+        if (!cancelled) setSuppressionMeta(null)
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [customer?.id])
 
   // Keep assigned users in sync with DB users (single source of truth)
   useEffect(() => {
@@ -724,6 +769,50 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setUploadingAgreement(false)
     }
     reader.readAsDataURL(file)
+  }
+
+  const handleSuppressionFileChange = async (file: File | null) => {
+    if (!file || !customer?.id) return
+    setUploadingSuppression(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+
+      const res = await fetch(`${apiBaseUrl}/api/customers/${customer.id}/suppression-import`, {
+        method: 'POST',
+        body: form,
+      })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text || `Upload failed (${res.status})`)
+      }
+      const data = (await res.json()) as {
+        totalImported: number
+        totalSkipped: number
+        timestamp: string
+      }
+
+      toast({
+        title: 'Suppression list uploaded',
+        description: `Imported ${data.totalImported} emails (${data.totalSkipped} skipped)`,
+        status: 'success',
+        duration: 5000,
+        isClosable: true,
+      })
+
+      await fetchCustomer()
+      emit('customerUpdated', { customerId: customer.id })
+    } catch (error: any) {
+      toast({
+        title: 'Upload failed',
+        description: error?.message || 'Unable to upload suppression list',
+        status: 'error',
+        duration: 7000,
+        isClosable: true,
+      })
+    } finally {
+      setUploadingSuppression(false)
+    }
   }
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
@@ -1251,6 +1340,58 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               ) : null}
             </Stack>
           </FormControl>
+
+          <Divider />
+
+          {/* Customer-scoped DNC suppression list */}
+          <FormControl>
+            <FormLabel>Suppression List (DNC)</FormLabel>
+            <Stack spacing={3}>
+              <Text fontSize="sm" color="gray.600">
+                Upload a customer-specific Do Not Contact list. Suppressed emails are excluded from outreach campaigns for this customer only.
+              </Text>
+              <Input
+                type="file"
+                accept=".csv,.xlsx,.txt"
+                display="none"
+                id="suppression-upload"
+                onChange={(e) => void handleSuppressionFileChange(e.target.files?.[0] || null)}
+              />
+              <HStack spacing={3} align="center" flexWrap="wrap">
+                <Button
+                  as="label"
+                  htmlFor="suppression-upload"
+                  leftIcon={<AttachmentIcon />}
+                  variant="outline"
+                  size="sm"
+                  colorScheme="purple"
+                  isLoading={uploadingSuppression}
+                  isDisabled={uploadingSuppression}
+                >
+                  {suppressionMeta?.fileName ? 'Replace Suppression List' : 'Upload Suppression List'}
+                </Button>
+                {suppressionMeta?.fileName ? (
+                  <Stack spacing={0}>
+                    <Text fontSize="sm" fontWeight="medium">
+                      {suppressionMeta.fileName}
+                    </Text>
+                    <Text fontSize="xs" color="gray.500">
+                      {typeof suppressionMeta.totalSuppressedEmails === 'number'
+                        ? `${suppressionMeta.totalSuppressedEmails} suppressed emails`
+                        : 'Suppression list uploaded'}
+                      {suppressionMeta.uploadedAt
+                        ? ` · Uploaded ${new Date(suppressionMeta.uploadedAt).toLocaleDateString()}`
+                        : ''}
+                    </Text>
+                  </Stack>
+                ) : (
+                  <Text fontSize="sm" color="gray.500">
+                    No suppression list uploaded
+                  </Text>
+                )}
+              </HStack>
+            </Stack>
+          </FormControl>
         </Stack>
       </Box>
 
@@ -1702,31 +1843,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   {agreementData ? (
                     <HStack spacing={2}>
                       <Button
+                        as={Link}
                         size="sm"
                         variant="link"
                         colorScheme="teal"
                         fontWeight="medium"
-                        onClick={async () => {
-                          try {
-                            const w = window.open(`/api/customers/${customer.id}/agreement/download`, '_blank', 'noopener,noreferrer')
-                            if (!w) {
-                              toast({
-                                title: 'Popup blocked',
-                                description: 'Allow popups to open the agreement file.',
-                                status: 'warning',
-                                duration: 5000,
-                              })
-                            }
-                          } catch (error) {
-                            console.error('Error opening agreement:', error)
-                            toast({
-                              title: 'Error',
-                              description: 'Failed to open agreement file',
-                              status: 'error',
-                              duration: 5000,
-                            })
-                          }
-                        }}
+                        href={`${apiBaseUrl}/api/customers/${customer.id}/agreement/download`}
+                        isExternal
+                        rel="noopener noreferrer"
                       >
                         {agreementData.fileName || 'View agreement'}
                       </Button>

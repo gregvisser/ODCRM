@@ -146,6 +146,9 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       continue
     }
 
+    // Preload customer-scoped suppression set once per campaign (DNC)
+    const suppressionSets = await loadSuppressionSets(prisma, campaign.customerId)
+
     // Preferred path: N-step sequences via EmailCampaignProspectStep.
     // If schema/client isn't migrated yet, fall back to legacy 2-step columns.
     let usedNewStepScheduling = false
@@ -172,8 +175,38 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       })
 
       if (Array.isArray(dueSteps)) {
+        // Filter suppressed recipients before sending (customer-scoped)
+        const originalCount = dueSteps.length
+        const suppressedRows = dueSteps.filter((row: any) =>
+          isSuppressedInSets(suppressionSets, String(row?.prospect?.contact?.email || '')),
+        )
+        const allowedRows = dueSteps.filter((row: any) =>
+          !isSuppressedInSets(suppressionSets, String(row?.prospect?.contact?.email || '')),
+        )
+        if (suppressedRows.length > 0) {
+          console.log(
+            `[emailScheduler] ${SCHEDULER_INSTANCE_ID} - customerId=${campaign.customerId} campaignId=${campaign.id} ` +
+              `suppressed=${suppressedRows.length} original=${originalCount} final=${allowedRows.length}`,
+          )
+          // Mark suppressed prospects and remove any unsent future steps (best-effort)
+          await prisma.emailCampaignProspect.updateMany({
+            where: { id: { in: suppressedRows.map((r: any) => r.prospect?.id).filter(Boolean) } },
+            data: { lastStatus: 'suppressed' } as any,
+          })
+          try {
+            await (prisma as any).emailCampaignProspectStep.deleteMany({
+              where: {
+                campaignProspectId: { in: suppressedRows.map((r: any) => r.prospect?.id).filter(Boolean) },
+                sentAt: null,
+              },
+            })
+          } catch {
+            // ignore if schema not migrated yet
+          }
+        }
+
         usedNewStepScheduling = true
-        for (const row of dueSteps) {
+        for (const row of allowedRows) {
           if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
 
           // Re-check customer cap as we send in batches
@@ -278,7 +311,23 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       take: 10 // Process in batches
     })
 
-    for (const prospect of step1Ready) {
+    // Filter suppressed recipients before sending (customer-scoped)
+    {
+      const originalCount = step1Ready.length
+      const suppressed = step1Ready.filter((p: any) => isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))
+      if (suppressed.length > 0) {
+        console.log(
+          `[emailScheduler] ${SCHEDULER_INSTANCE_ID} - customerId=${campaign.customerId} campaignId=${campaign.id} step=1 ` +
+            `suppressed=${suppressed.length} original=${originalCount} final=${originalCount - suppressed.length}`,
+        )
+        await prisma.emailCampaignProspect.updateMany({
+          where: { id: { in: suppressed.map((p: any) => p.id) }, lastStatus: 'pending' },
+          data: { lastStatus: 'suppressed' } as any,
+        })
+      }
+    }
+
+    for (const prospect of step1Ready.filter((p: any) => !isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
       
       // ATOMIC CLAIM: Change status from 'pending' to 'sending'
@@ -323,7 +372,23 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       take: 10 // Process in batches
     })
 
-    for (const prospect of step2Ready) {
+    // Filter suppressed recipients before sending (customer-scoped)
+    {
+      const originalCount = step2Ready.length
+      const suppressed = step2Ready.filter((p: any) => isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))
+      if (suppressed.length > 0) {
+        console.log(
+          `[emailScheduler] ${SCHEDULER_INSTANCE_ID} - customerId=${campaign.customerId} campaignId=${campaign.id} step=2 ` +
+            `suppressed=${suppressed.length} original=${originalCount} final=${originalCount - suppressed.length}`,
+        )
+        await prisma.emailCampaignProspect.updateMany({
+          where: { id: { in: suppressed.map((p: any) => p.id) }, lastStatus: 'step1_sent' },
+          data: { lastStatus: 'suppressed' } as any,
+        })
+      }
+    }
+
+    for (const prospect of step2Ready.filter((p: any) => !isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))) {
       if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
       
       // ATOMIC CLAIM: Change status from 'step1_sent' to 'sending'
@@ -354,6 +419,32 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
   }
   
   return { sent: sentCount, errors: errorCount }
+}
+
+async function loadSuppressionSets(prisma: PrismaClient, customerId: string) {
+  const entries = await prisma.suppressionEntry.findMany({
+    where: { customerId, OR: [{ type: 'email' }, { type: 'domain' }] },
+    select: { type: true, value: true, emailNormalized: true },
+  })
+  const emails = new Set<string>()
+  const domains = new Set<string>()
+  for (const e of entries) {
+    if (e.type === 'email') {
+      const v = String(e.emailNormalized || e.value || '').trim().toLowerCase()
+      if (v) emails.add(v)
+    } else if (e.type === 'domain') {
+      const v = String(e.value || '').trim().toLowerCase()
+      if (v) domains.add(v)
+    }
+  }
+  return { emails, domains }
+}
+
+function isSuppressedInSets(s: { emails: Set<string>; domains: Set<string> }, email: string) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  const domain = normalizedEmail.split('@')[1]
+  if (!normalizedEmail || !domain) return false
+  return s.emails.has(normalizedEmail) || s.domains.has(domain)
 }
 
 async function isSuppressed(prisma: PrismaClient, customerId: string, email: string) {
