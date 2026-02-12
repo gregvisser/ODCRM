@@ -2203,6 +2203,106 @@ router.put('/:id/onboarding-progress', async (req, res) => {
   }
 })
 
+// PUT /api/customers/:id/progress-tracker
+// Updates ONLY accountData.progressTracker (customer-scoped checklist) with safe merge + row lock.
+router.put('/:id/progress-tracker', async (req, res) => {
+  try {
+    const { id } = req.params
+
+    const bodySchema = z.object({
+      group: z.enum(['sales', 'ops', 'am']),
+      itemKey: z.string().min(1),
+      checked: z.boolean(),
+    })
+
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors })
+    }
+
+    const { group, itemKey, checked } = parsed.data
+
+    const actor = getActorIdentity(req)
+    const updatedByUserId = (actor?.userId || actor?.email || 'unknown') as string
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, isArchived: true, accountData: true },
+      })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+      if (existing.isArchived) {
+        const err: any = new Error('archived')
+        err.statusCode = 400
+        throw err
+      }
+
+      const currentAccountData =
+        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+
+      const currentProgressTracker =
+        currentAccountData.progressTracker && typeof currentAccountData.progressTracker === 'object'
+          ? (currentAccountData.progressTracker as any)
+          : { sales: {}, ops: {}, am: {} }
+
+      const nextProgressTracker = {
+        ...currentProgressTracker,
+        [group]: {
+          ...(currentProgressTracker[group] || {}),
+          [itemKey]: checked,
+        },
+        // Optional metadata (non-breaking): helps debugging without affecting UI contract
+        updatedAt: new Date().toISOString(),
+        updatedByUserId,
+      }
+
+      const nextAccountData = {
+        ...currentAccountData,
+        progressTracker: nextProgressTracker,
+      }
+
+      await tx.customer.update({
+        where: { id },
+        data: { accountData: nextAccountData, updatedAt: new Date() },
+      })
+
+      // Best-effort audit
+      try {
+        await safeCustomerAuditEvent(tx as any, {
+          customerId: id,
+          action: 'update_progress_tracker',
+          note: `Updated progress tracker: ${group}.${itemKey}=${checked}`,
+          meta: { group, itemKey, checked },
+        })
+      } catch {
+        // ignore
+      }
+
+      return nextProgressTracker
+    })
+
+    return res.status(200).json({ success: true, progressTracker: result })
+  } catch (error: any) {
+    if (error?.message === 'not_found' || error?.statusCode === 404) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (error?.message === 'archived' || error?.statusCode === 400) {
+      return res.status(400).json({ error: 'Customer is archived' })
+    }
+    console.error('Error updating progress tracker:', error)
+    return res.status(500).json({
+      error: 'Failed to update progress tracker',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    })
+  }
+})
+
 // POST /api/customers/:id/agreement - Upload customer agreement
 // Phase 2 Item 4: Agreement upload with auto-tick progress tracker
 // UPDATED: Now uses Azure Blob Storage for durable file storage
