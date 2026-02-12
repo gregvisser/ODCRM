@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
@@ -21,6 +21,14 @@ import {
   TagLabel,
   Text,
   Textarea,
+  useDisclosure,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  ModalCloseButton,
   useToast,
   VStack,
 } from '@chakra-ui/react'
@@ -227,6 +235,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const apiBaseUrl = import.meta.env.VITE_API_URL || ''
   // CRITICAL: Use the same DB-backed source as Settings → User Authorization
   const { users: dbUsers } = useUsersFromDatabase()
+  const [isDirty, setIsDirty] = useState(false)
+  const dirtyConnectDisclosure = useDisclosure()
+  const pendingConnectResolver = useRef<((proceed: boolean) => void) | null>(null)
   const [customer, setCustomer] = useState<CustomerApi | null>(null)
   const [clientProfile, setClientProfile] = useState<ClientProfile>(EMPTY_PROFILE)
   const [accountDetails, setAccountDetails] = useState<AccountDetails>(EMPTY_ACCOUNT_DETAILS)
@@ -318,6 +329,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       } else {
         setAgreementData(null)
       }
+
+      // Fresh DB hydrate: local form state is no longer dirty.
+      setIsDirty(false)
     }
     setIsLoading(false)
   }, [customerId])
@@ -353,6 +367,27 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     void fetchCustomer()
     void fetchTaxonomy()
   }, [fetchCustomer, fetchTaxonomy])
+
+  // After returning from Outlook OAuth, force DB rehydrate and clear the URL flag.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href)
+      if (url.searchParams.get('emailConnected') !== '1') return
+      const qpCustomerId = url.searchParams.get('customerId')
+      if (qpCustomerId && qpCustomerId !== customerId) return
+
+      void (async () => {
+        await fetchCustomer()
+        emit('customerUpdated', { id: customerId })
+      })()
+
+      url.searchParams.delete('emailConnected')
+      url.searchParams.delete('connectedEmail')
+      window.history.replaceState({}, document.title, url.pathname + url.search + url.hash)
+    } catch {
+      // ignore
+    }
+  }, [customerId, fetchCustomer])
 
   // Load suppression summary (customer-scoped DNC) for UI display
   useEffect(() => {
@@ -503,10 +538,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const updateProfile = useCallback((updates: Partial<ClientProfile>) => {
     setClientProfile((prev) => ({ ...prev, ...updates }))
+    setIsDirty(true)
   }, [])
 
   const updateAccountDetails = useCallback((updates: Partial<AccountDetails>) => {
     setAccountDetails((prev) => ({ ...prev, ...updates }))
+    setIsDirty(true)
   }, [])
 
   const updatePrimaryContact = useCallback((updates: Partial<PrimaryContact>) => {
@@ -517,6 +554,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         ...updates,
       },
     }))
+    setIsDirty(true)
   }, [])
 
   const updateSocial = useCallback(
@@ -881,7 +919,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         existing: String(customer?.website || ''),
         suggested: String(draft?.website || ''),
         supported: true,
-        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, website: value } : prev)),
+        apply: (value: string) => {
+          setCustomer((prev) => (prev ? { ...prev, website: value } : prev))
+          setIsDirty(true)
+        },
       },
       {
         id: 'customer.whatTheyDo',
@@ -889,7 +930,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         existing: String(customer?.whatTheyDo || ''),
         suggested: String(draft?.whatTheyDo || ''),
         supported: true,
-        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, whatTheyDo: value } : prev)),
+        apply: (value: string) => {
+          setCustomer((prev) => (prev ? { ...prev, whatTheyDo: value } : prev))
+          setIsDirty(true)
+        },
       },
       {
         id: 'customer.companyProfile',
@@ -897,7 +941,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         existing: String(customer?.companyProfile || ''),
         suggested: String(draft?.companyProfile || ''),
         supported: true,
-        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, companyProfile: value } : prev)),
+        apply: (value: string) => {
+          setCustomer((prev) => (prev ? { ...prev, companyProfile: value } : prev))
+          setIsDirty(true)
+        },
       },
       {
         id: 'client.social.websiteUrl',
@@ -1107,10 +1154,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
   }
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     if (!customer) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customer, skipping save')
-      return
+      return false
     }
     if (!customer.name || !customer.name.trim()) {
       toast({
@@ -1120,7 +1167,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         duration: 4000,
         isClosable: true,
       })
-      return
+      return false
     }
     onboardingDebug('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
     setIsSaving(true)
@@ -1246,7 +1293,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         isClosable: true,
       })
       setIsSaving(false)
-      return
+      return false
     }
     
     onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
@@ -1265,6 +1312,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     emit('customerUpdated', { id: customerId })
 
     setIsSaving(false)
+    setIsDirty(false)
+    return true
   }
 
   if (isLoading) {
@@ -1399,6 +1448,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 onChange={(e) => {
                   const next = e.target.value
                   setCustomer((prev) => (prev ? { ...prev, website: next } : prev))
+                  setIsDirty(true)
                 }}
                 placeholder="https://example.com"
               />
@@ -1736,7 +1786,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       {/* Email Accounts Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
-        <EmailAccountsEnhancedTab />
+        <EmailAccountsEnhancedTab
+          customerId={customerId}
+          onBeforeConnectOutlook={async () => {
+            if (!isDirty) return true
+            return await new Promise<boolean>((resolve) => {
+              pendingConnectResolver.current = resolve
+              dirtyConnectDisclosure.onOpen()
+            })
+          }}
+        />
       </Box>
 
       {/* Client Profile Section */}
@@ -1758,9 +1817,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>What they do</FormLabel>
             <Textarea
               value={customer?.whatTheyDo || ''}
-              onChange={(e) =>
+              onChange={(e) => {
+                setIsDirty(true)
                 setCustomer((prev) => (prev ? { ...prev, whatTheyDo: e.target.value } : prev))
-              }
+              }}
               minH="90px"
               placeholder="Short description of what the company does…"
             />
@@ -1770,9 +1830,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Company profile</FormLabel>
             <Textarea
               value={customer?.companyProfile || ''}
-              onChange={(e) =>
+              onChange={(e) => {
+                setIsDirty(true)
                 setCustomer((prev) => (prev ? { ...prev, companyProfile: e.target.value } : prev))
-              }
+              }}
               minH="140px"
               placeholder="Longer profile / overview…"
             />
@@ -2236,6 +2297,68 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           </Button>
         </HStack>
       </Box>
+
+      {/* Unsaved changes guard for external OAuth redirect (email connect) */}
+      <Modal
+        isOpen={dirtyConnectDisclosure.isOpen}
+        onClose={() => {
+          pendingConnectResolver.current?.(false)
+          pendingConnectResolver.current = null
+          dirtyConnectDisclosure.onClose()
+        }}
+        isCentered
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Unsaved changes</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text fontSize="sm" color="gray.700">
+              You have unsaved onboarding changes. Connecting an Outlook account will temporarily leave this page.
+            </Text>
+            <Text fontSize="sm" color="gray.700" mt={2}>
+              Would you like to save your onboarding changes first?
+            </Text>
+          </ModalBody>
+          <ModalFooter>
+            <HStack spacing={3}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  pendingConnectResolver.current?.(false)
+                  pendingConnectResolver.current = null
+                  dirtyConnectDisclosure.onClose()
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  pendingConnectResolver.current?.(true)
+                  pendingConnectResolver.current = null
+                  dirtyConnectDisclosure.onClose()
+                }}
+              >
+                Continue without saving
+              </Button>
+              <Button
+                colorScheme="teal"
+                isLoading={isSaving}
+                onClick={async () => {
+                  const ok = await handleSave()
+                  if (!ok) return
+                  pendingConnectResolver.current?.(true)
+                  pendingConnectResolver.current = null
+                  dirtyConnectDisclosure.onClose()
+                }}
+              >
+                Save &amp; continue
+              </Button>
+            </HStack>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Stack>
   )
 }

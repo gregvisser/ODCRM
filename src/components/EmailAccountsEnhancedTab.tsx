@@ -79,15 +79,22 @@ type SmtpFormState = {
   dailySendLimit: number
 }
 
-export default function EmailAccountsEnhancedTab() {
+type EmailAccountsEnhancedTabProps = {
+  customerId?: string
+  /**
+   * Optional preflight before starting OAuth redirect.
+   * Return true to proceed; false to cancel.
+   */
+  onBeforeConnectOutlook?: () => Promise<boolean> | boolean
+}
+
+export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, onBeforeConnectOutlook }: EmailAccountsEnhancedTabProps) {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>(
-    settingsStore.getCurrentCustomerId('prod-customer-1')
-  )
+  const [customerId, setCustomerId] = useState<string>(customerIdProp || settingsStore.getCurrentCustomerId('prod-customer-1'))
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: settingsStore.getCurrentCustomerId('prod-customer-1'),
+    customerId: customerIdProp || settingsStore.getCurrentCustomerId('prod-customer-1'),
     emailAddress: '',
     displayName: '',
     smtpHost: '',
@@ -118,7 +125,16 @@ export default function EmailAccountsEnhancedTab() {
     }
   }, [customerId, fetchIdentities])
 
+  // Keep internal state synced to provided prop (embedded onboarding mode)
   useEffect(() => {
+    if (!customerIdProp) return
+    setCustomerId(customerIdProp)
+    setSmtpForm((prev) => ({ ...prev, customerId: customerIdProp }))
+  }, [customerIdProp])
+
+  useEffect(() => {
+    // In embedded mode (prop-controlled), do not subscribe to global settingsStore.
+    if (customerIdProp) return
     const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
       const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
       if (next) {
@@ -127,9 +143,9 @@ export default function EmailAccountsEnhancedTab() {
       }
     })
     return () => unsubscribe()
-  }, [])
+  }, [customerIdProp])
 
-  const handleConnectOutlook = () => {
+  const handleConnectOutlook = async () => {
     // LOCKDOWN: Require valid customerId before connecting
     if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
       toast({
@@ -141,14 +157,48 @@ export default function EmailAccountsEnhancedTab() {
       })
       return
     }
+
+    try {
+      if (onBeforeConnectOutlook) {
+        const ok = await onBeforeConnectOutlook()
+        if (!ok) return
+      }
+    } catch {
+      return
+    }
     
     // Use centralized API URL from environment
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
-    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
+    const returnTo = window.location.pathname + window.location.search + window.location.hash
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${encodeURIComponent(customerId)}&returnTo=${encodeURIComponent(returnTo)}`
   }
   
   // Check if a valid customer is selected
   const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
+
+  // After returning from OAuth, show a toast + refresh identities, then clear URL flag.
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href)
+      if (url.searchParams.get('emailConnected') !== '1') return
+      const connectedEmail = url.searchParams.get('connectedEmail') || url.searchParams.get('email') || ''
+      toast({
+        title: 'Email connected',
+        description: connectedEmail ? `Connected ${connectedEmail}` : 'Outlook account connected successfully.',
+        status: 'success',
+        duration: 4500,
+        isClosable: true,
+      })
+      void fetchIdentities()
+      url.searchParams.delete('emailConnected')
+      url.searchParams.delete('connectedEmail')
+      url.searchParams.delete('oauth')
+      url.searchParams.delete('email')
+      window.history.replaceState({}, document.title, url.pathname + url.search + url.hash)
+    } catch {
+      // ignore
+    }
+  }, [fetchIdentities, toast])
 
   const handleCreateSMTP = () => {
     setSmtpForm({

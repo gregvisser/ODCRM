@@ -22,6 +22,17 @@ const FRONTDOOR_URL = process.env.FRONTDOOR_URL || 'https://odcrm.bidlow.co.uk'
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
 const OAUTH_CALLBACK_MODE = process.env.OAUTH_CALLBACK_MODE || 'frontdoor'
 
+function sanitizeReturnTo(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const v = value.trim()
+  if (!v) return null
+  // Internal-only path. Prevent open redirects.
+  if (!v.startsWith('/')) return null
+  if (v.startsWith('//')) return null
+  if (v.includes('http://') || v.includes('https://')) return null
+  return v
+}
+
 function getOAuthRedirectUri(): string {
   // Explicit REDIRECT_URI env var takes highest precedence (legacy support)
   if (process.env.REDIRECT_URI) {
@@ -75,6 +86,7 @@ router.get('/auth', async (req, res) => {
   
   // LOCKDOWN: customerId is REQUIRED and must exist in database
   const customerId = (req.query.customerId as string) || (req.headers['x-customer-id'] as string)
+  const returnTo = sanitizeReturnTo(req.query.returnTo)
   
   if (!customerId) {
     return res.status(400).send(`
@@ -85,7 +97,7 @@ router.get('/auth', async (req, res) => {
           <p>You must select a customer before connecting an Outlook account.</p>
           <p>Please go back to the application and select a customer first.</p>
           <hr>
-          <p><a href="${FRONTDOOR_URL}">Return to Application</a></p>
+          <p><a href="${returnTo ? `${FRONTDOOR_URL}${returnTo}` : FRONTDOOR_URL}">Return to Application</a></p>
         </body>
       </html>
     `)
@@ -121,8 +133,8 @@ router.get('/auth', async (req, res) => {
     'offline_access'
   ].join(' ')
 
-  // Include customerId in state parameter
-  const state = Buffer.from(JSON.stringify({ customerId })).toString('base64')
+  // Include customerId + returnTo in state parameter (internal-only)
+  const state = Buffer.from(JSON.stringify({ customerId, returnTo })).toString('base64')
 
   // CRITICAL: Force account selection every time to allow connecting different mailboxes
   // prompt=select_account forces the Microsoft account picker even if user has a cached session
@@ -144,6 +156,7 @@ router.get('/auth', async (req, res) => {
     redirectUri,
     tenantId,
     customerId,
+    returnTo,
     scopes,
     prompt: 'select_account',
     nonce
@@ -228,10 +241,12 @@ router.get('/callback', async (req, res) => {
 
     // LOCKDOWN: Extract and validate customerId from state parameter
     let customerId: string | null = null
+    let returnTo: string | null = null
     if (state) {
       try {
         const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString())
         customerId = stateData.customerId || null
+        returnTo = sanitizeReturnTo(stateData.returnTo)
       } catch (e) {
         console.warn('⚠️ Failed to parse state')
       }
@@ -507,12 +522,23 @@ router.get('/callback', async (req, res) => {
         newCount: newActiveCount
       })
 
-      // Redirect back to frontend with success message
-      const successUrl = new URL(FRONTDOOR_URL)
-      successUrl.searchParams.set('oauth', 'success')
-      successUrl.searchParams.set('email', emailAddress)
-      successUrl.searchParams.set('customerId', customerId)
-      
+      // Redirect back to frontend.
+      // If returnTo is provided (internal-only), send the user back to that exact screen (e.g. onboarding)
+      // and include a one-time flag so the UI can rehydrate and refresh identities.
+      let successUrl: URL
+      if (returnTo) {
+        successUrl = new URL(returnTo, FRONTDOOR_URL)
+        successUrl.searchParams.set('emailConnected', '1')
+        successUrl.searchParams.set('connectedEmail', emailAddress)
+        successUrl.searchParams.set('customerId', customerId)
+      } else {
+        // Back-compat behavior
+        successUrl = new URL(FRONTDOOR_URL)
+        successUrl.searchParams.set('oauth', 'success')
+        successUrl.searchParams.set('email', emailAddress)
+        successUrl.searchParams.set('customerId', customerId)
+      }
+
       console.log('🔄 Redirecting to frontend:', successUrl.toString())
       res.redirect(successUrl.toString())
     } catch (dbError: any) {
