@@ -206,6 +206,7 @@ type CustomerApi = {
   clientStatus?: string | null
   targetJobTitle?: string | null
   prospectingLocation?: string | null
+  monthlyRevenueFromCustomer?: number | string | null
   monthlyIntakeGBP?: number | string | null
   defcon?: number | null
   weeklyLeadTarget?: number | null
@@ -223,6 +224,47 @@ type CustomerApi = {
   foundingYear?: string | null
   socialPresence?: Array<{ label: string; url: string }> | null
   lastEnrichedAt?: string | null
+}
+
+type CustomerContactApi = {
+  id: string
+  customerId: string
+  name: string
+  email: string | null
+  phone: string | null
+  title: string | null
+  isPrimary: boolean
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+type AssignedAccountManagerUserApi = {
+  id: string
+  userId: string
+  firstName: string | null
+  lastName: string | null
+  email: string
+  role: string | null
+  department: string | null
+  accountStatus: string | null
+}
+
+type CustomerDetailApi = CustomerApi & {
+  isArchived?: boolean
+  archivedAt?: string | null
+  archivedByEmail?: string | null
+
+  agreementFileUrl?: string | null
+  agreementFileName?: string | null
+  agreementFileMimeType?: string | null
+  agreementUploadedAt?: string | null
+  agreementUploadedByEmail?: string | null
+  agreementBlobName?: string | null
+  agreementContainerName?: string | null
+
+  customerContacts?: CustomerContactApi[]
+  assignedAccountManagerUser?: AssignedAccountManagerUserApi
 }
 
 // Import canonical normalizer instead of duplicating logic
@@ -3925,12 +3967,100 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   
   // Stable customer ID for email identity fetching (prevents render loops)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+
+  // Customer detail used by the Account Card (DB source of truth: GET /api/customers/:id)
+  const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<CustomerDetailApi | null>(null)
+  const [loadingCustomerDetail, setLoadingCustomerDetail] = useState(false)
+  const [customerDetailError, setCustomerDetailError] = useState<string | null>(null)
+
+  // Customer-contacts detail modal (customer_contacts table)
+  const [selectedCustomerContact, setSelectedCustomerContact] = useState<CustomerContactApi | null>(null)
+
+  // Taxonomy labels for Client Profile display (ids → labels)
+  const [jobSectorsById, setJobSectorsById] = useState<Record<string, string>>({})
+  const [jobRolesById, setJobRolesById] = useState<Record<string, string>>({})
   
   // Connected email identities for the selected account
   const [connectedEmails, setConnectedEmails] = useState<ConnectedEmailIdentity[]>([])
   const [loadingEmails, setLoadingEmails] = useState(false)
   const [emailFetchError, setEmailFetchError] = useState<string | null>(null)
   const [contactsData, setContactsData] = useState<StoredContact[]>(() => loadContactsFromStorage())
+
+  // Load job taxonomy once (used to render onboarding-stored IDs as labels in the Account Card)
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchTaxonomy = async () => {
+      try {
+        const [sectorsRes, rolesRes] = await Promise.all([
+          api.get<Array<{ id: string; label: string }>>('/api/job-sectors'),
+          api.get<Array<{ id: string; label: string }>>('/api/job-roles'),
+        ])
+
+        if (cancelled) return
+
+        if (sectorsRes.data) {
+          const next: Record<string, string> = {}
+          for (const s of sectorsRes.data) {
+            if (s?.id && s?.label) next[String(s.id)] = String(s.label)
+          }
+          setJobSectorsById(next)
+        }
+
+        if (rolesRes.data) {
+          const next: Record<string, string> = {}
+          for (const r of rolesRes.data) {
+            if (r?.id && r?.label) next[String(r.id)] = String(r.label)
+          }
+          setJobRolesById(next)
+        }
+      } catch (err) {
+        // Non-fatal; we can still render raw IDs.
+        console.warn('[AccountCard] Failed to load job taxonomy', err)
+      }
+    }
+
+    void fetchTaxonomy()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Hydrate Account Card from DB (never from localStorage truth)
+  useEffect(() => {
+    let cancelled = false
+
+    const fetchCustomerDetail = async () => {
+      if (!selectedCustomerId) {
+        setSelectedCustomerDetail(null)
+        setCustomerDetailError(null)
+        setLoadingCustomerDetail(false)
+        return
+      }
+      if (!isDrawerOpen) return
+
+      setLoadingCustomerDetail(true)
+      setCustomerDetailError(null)
+
+      const { data, error } = await api.get<CustomerDetailApi>(`/api/customers/${selectedCustomerId}`)
+      if (cancelled) return
+
+      if (error || !data) {
+        setSelectedCustomerDetail(null)
+        setCustomerDetailError(typeof error === 'string' ? error : 'Failed to load customer details')
+        setLoadingCustomerDetail(false)
+        return
+      }
+
+      setSelectedCustomerDetail(data)
+      setLoadingCustomerDetail(false)
+    }
+
+    void fetchCustomerDetail()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedCustomerId, isDrawerOpen])
 
   // Sync contact counts when contactsData changes (initial load and updates)
   // Note: contactsData already excludes deleted contacts since loadContactsFromStorage filters them
@@ -4563,8 +4693,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       }
       
       toast({
-        title: 'Account deleted',
-        description: `${accountName} has been permanently deleted from the database`,
+        title: 'Account archived',
+        description: `${accountName} has been archived (soft-delete) in the database`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -4572,7 +4702,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     } catch (err: any) {
       console.error('Error deleting account:', err)
       toast({
-        title: 'Delete failed',
+        title: 'Archive failed',
         description: err?.message || 'An unexpected error occurred',
         status: 'error',
         duration: 5000,
@@ -5794,7 +5924,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       </Heading>
                       <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="gray" variant="subtle" px={3} py={1} fontSize="sm">
-                          {(sectorsMap[selectedAccount.name] ?? selectedAccount.sector) || 'No sector'}
+                          {(selectedCustomerDetail?.sector ?? sectorsMap[selectedAccount.name] ?? selectedAccount.sector) || 'No sector'}
                         </Badge>
                         <Badge
                           colorScheme={selectedAccount.status === 'Active' ? 'green' : selectedAccount.status === 'Inactive' ? 'red' : 'orange'}
@@ -5805,9 +5935,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         >
                           {selectedAccount.status}
                         </Badge>
-                        {selectedAccount.defcon && (
+                        {(selectedCustomerDetail?.defcon ?? selectedAccount.defcon) && (
                           <Badge colorScheme="gray" variant="outline" px={3} py={1} fontSize="sm">
-                            DEFCON {selectedAccount.defcon}
+                            DEFCON {selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
                           </Badge>
                         )}
                         {/* Debug: Show customerId in dev mode */}
@@ -5854,6 +5984,607 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
             
             <DrawerBody bg="gray.50" p={6}>
               <Stack spacing={6} w="full">
+                {/*
+                  PRODUCTION: Account Card must mirror Customer Onboarding and be hydrated from DB.
+                  Source of truth: GET /api/customers/:id (selectedCustomerDetail).
+                  Notes UI must remain unchanged (see Notes tab below).
+                */}
+                {customerDetailError && (
+                  <Box py={3} px={4} bg="red.50" borderRadius="md" border="1px solid" borderColor="red.200">
+                    <Text fontSize="sm" color="red.700">
+                      Failed to load customer details: {customerDetailError}
+                    </Text>
+                  </Box>
+                )}
+
+                {loadingCustomerDetail && (
+                  <HStack justify="center" py={6}>
+                    <Spinner size="sm" />
+                    <Text color="gray.500">Loading customer details...</Text>
+                  </HStack>
+                )}
+
+                <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.200" boxShadow="sm">
+                  <Tabs variant="enclosed" colorScheme="gray" isLazy>
+                    <TabList
+                      position="sticky"
+                      top={0}
+                      zIndex={2}
+                      bg="white"
+                      borderTopRadius="xl"
+                      borderBottom="1px solid"
+                      borderColor="gray.200"
+                      px={2}
+                    >
+                      <Tab>Account Details</Tab>
+                      <Tab>Client Profile</Tab>
+                      <Tab>Contacts</Tab>
+                      <Tab>Email Accounts</Tab>
+                      <Tab>Documents</Tab>
+                      <Tab>Notes</Tab>
+                    </TabList>
+
+                    <TabPanels>
+                      <TabPanel p={6}>
+                        {(() => {
+                          const c = selectedCustomerDetail
+                          const ad = c?.accountData && typeof c.accountData === 'object' ? (c.accountData as any) : null
+                          const details = ad?.accountDetails && typeof ad.accountDetails === 'object' ? ad.accountDetails : {}
+                          const manager = c?.assignedAccountManagerUser
+                          const website = typeof c?.website === 'string' ? c.website.trim() : ''
+                          const leadsUrl = typeof c?.leadsReportingUrl === 'string' ? c.leadsReportingUrl.trim() : ''
+                          const leadsLabel = typeof c?.leadsGoogleSheetLabel === 'string' ? c.leadsGoogleSheetLabel.trim() : ''
+                          const daysPerWeek =
+                            typeof details?.daysPerWeek === 'number'
+                              ? details.daysPerWeek
+                              : typeof ad?.days === 'number'
+                                ? ad.days
+                                : null
+
+                          return (
+                            <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                              <FieldRow label="Customer Name">
+                                <Text fontWeight="medium">{c?.name || selectedAccount.name}</Text>
+                              </FieldRow>
+                              <FieldRow label="Domain">
+                                <Text color={c?.domain ? 'gray.800' : 'gray.500'}>{c?.domain || 'Not set'}</Text>
+                              </FieldRow>
+
+                              <FieldRow label="Web Address">
+                                {website ? (
+                                  <Link href={website} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                    {website}
+                                  </Link>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </FieldRow>
+
+                              <FieldRow label="Sector">
+                                <Text color={c?.sector ? 'gray.800' : 'gray.500'}>{c?.sector || 'Not set'}</Text>
+                              </FieldRow>
+
+                              <FieldRow label="Leads Google Sheet URL">
+                                {leadsUrl ? (
+                                  <Link href={leadsUrl} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                    {leadsUrl}
+                                  </Link>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </FieldRow>
+
+                              <FieldRow label="Leads Google Sheet Label">
+                                {leadsLabel ? (
+                                  leadsUrl ? (
+                                    <Link href={leadsUrl} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                      {leadsLabel}
+                                    </Link>
+                                  ) : (
+                                    <Text fontWeight="medium">{leadsLabel}</Text>
+                                  )
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </FieldRow>
+
+                              <FieldRow label="Assigned Account Manager">
+                                {manager ? (
+                                  <Stack spacing={1}>
+                                    <Text fontWeight="medium">
+                                      {`${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email}
+                                    </Text>
+                                    <HStack spacing={2}>
+                                      {manager.role ? <Badge variant="subtle">{manager.role}</Badge> : null}
+                                      {manager.department ? <Badge variant="outline">{manager.department}</Badge> : null}
+                                    </HStack>
+                                  </Stack>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </FieldRow>
+
+                              <FieldRow label="Assigned Client DDI & Number">
+                                <Text color={details?.assignedClientDdiNumber ? 'gray.800' : 'gray.500'}>
+                                  {details?.assignedClientDdiNumber || 'Not set'}
+                                </Text>
+                              </FieldRow>
+
+                              <FieldRow label="Days a week">
+                                <Text color={daysPerWeek ? 'gray.800' : 'gray.500'}>{daysPerWeek ?? 'Not set'}</Text>
+                              </FieldRow>
+
+                              <FieldRow label="Email accounts (slots)">
+                                {Array.isArray(details?.emailAccounts) && details.emailAccounts.some((v: any) => String(v || '').trim()) ? (
+                                  <Stack spacing={1}>
+                                    {details.emailAccounts
+                                      .map((v: any) => String(v || '').trim())
+                                      .filter(Boolean)
+                                      .map((v: string) => (
+                                        <Text key={v} fontSize="sm">
+                                          {v}
+                                        </Text>
+                                      ))}
+                                  </Stack>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </FieldRow>
+                            </SimpleGrid>
+                          )
+                        })()}
+                      </TabPanel>
+
+                      <TabPanel p={6}>
+                        {(() => {
+                          const c = selectedCustomerDetail
+                          const ad = c?.accountData && typeof c.accountData === 'object' ? (c.accountData as any) : null
+                          const profile = ad?.clientProfile && typeof ad.clientProfile === 'object' ? ad.clientProfile : {}
+                          const accreditations = Array.isArray(profile?.accreditations) ? profile.accreditations : []
+                          const targetAreas = Array.isArray(ad?.targetGeographicalAreas) ? ad.targetGeographicalAreas : []
+                          const sectorIds = Array.isArray(profile?.targetJobSectorIds) ? profile.targetJobSectorIds : []
+                          const roleIds = Array.isArray(profile?.targetJobRoleIds) ? profile.targetJobRoleIds : []
+                          const social = profile?.socialMediaPresence && typeof profile.socialMediaPresence === 'object' ? profile.socialMediaPresence : {}
+
+                          return (
+                            <Stack spacing={6}>
+                              <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                <FieldRow label="Client History">
+                                  <Text whiteSpace="pre-wrap" color={profile?.clientHistory ? 'gray.800' : 'gray.500'}>
+                                    {profile?.clientHistory || 'Not set'}
+                                  </Text>
+                                </FieldRow>
+
+                                <FieldRow label="Key Business Objectives">
+                                  <Text whiteSpace="pre-wrap" color={profile?.keyBusinessObjectives ? 'gray.800' : 'gray.500'}>
+                                    {profile?.keyBusinessObjectives || 'Not set'}
+                                  </Text>
+                                </FieldRow>
+
+                                <FieldRow label="Client USPs">
+                                  <Text whiteSpace="pre-wrap" color={profile?.clientUSPs ? 'gray.800' : 'gray.500'}>
+                                    {profile?.clientUSPs || 'Not set'}
+                                  </Text>
+                                </FieldRow>
+
+                                <FieldRow label="Qualifying Questions">
+                                  <Text whiteSpace="pre-wrap" color={profile?.qualifyingQuestions ? 'gray.800' : 'gray.500'}>
+                                    {profile?.qualifyingQuestions || 'Not set'}
+                                  </Text>
+                                </FieldRow>
+                              </SimpleGrid>
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Target Geographical Areas
+                                </Text>
+                                {targetAreas.length > 0 ? (
+                                  <HStack spacing={2} flexWrap="wrap">
+                                    {targetAreas.map((a: any) => {
+                                      const key = String(a?.placeId || a?.label || '').toLowerCase().trim() || Math.random().toString(36)
+                                      return (
+                                        <Tag key={key} size="sm" variant="subtle" colorScheme="gray">
+                                          <TagLabel>{String(a?.label || 'Unknown')}</TagLabel>
+                                        </Tag>
+                                      )
+                                    })}
+                                  </HStack>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </Box>
+
+                              <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                <FieldRow label="Target Job Sectors">
+                                  {sectorIds.length ? (
+                                    <Stack spacing={1}>
+                                      {sectorIds.map((id: any) => {
+                                        const key = String(id || '')
+                                        return (
+                                          <Text key={key} fontSize="sm">
+                                            {jobSectorsById[key] || key}
+                                          </Text>
+                                        )
+                                      })}
+                                    </Stack>
+                                  ) : (
+                                    <Text color="gray.500">Not set</Text>
+                                  )}
+                                </FieldRow>
+
+                                <FieldRow label="Target Job Roles">
+                                  {roleIds.length ? (
+                                    <Stack spacing={1}>
+                                      {roleIds.map((id: any) => {
+                                        const key = String(id || '')
+                                        return (
+                                          <Text key={key} fontSize="sm">
+                                            {jobRolesById[key] || key}
+                                          </Text>
+                                        )
+                                      })}
+                                    </Stack>
+                                  ) : (
+                                    <Text color="gray.500">Not set</Text>
+                                  )}
+                                </FieldRow>
+                              </SimpleGrid>
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Accreditations
+                                </Text>
+                                {accreditations.length ? (
+                                  <Stack spacing={2}>
+                                    {accreditations.map((a: any) => {
+                                      const key = String(a?.id || a?.name || Math.random())
+                                      const fileUrl = typeof a?.fileUrl === 'string' ? a.fileUrl : ''
+                                      const fileName = typeof a?.fileName === 'string' ? a.fileName : ''
+                                      return (
+                                        <HStack key={key} justify="space-between" align="flex-start">
+                                          <Text fontSize="sm" fontWeight="medium">
+                                            {String(a?.name || 'Unnamed')}
+                                          </Text>
+                                          {fileUrl ? (
+                                            <Link href={fileUrl} isExternal fontSize="sm" color="blue.600" rel="noopener noreferrer">
+                                              {fileName || 'View file'}
+                                            </Link>
+                                          ) : (
+                                            <Text fontSize="sm" color="gray.500">
+                                              Not set
+                                            </Text>
+                                          )}
+                                        </HStack>
+                                      )
+                                    })}
+                                  </Stack>
+                                ) : (
+                                  <Text color="gray.500">Not set</Text>
+                                )}
+                              </Box>
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Social Media Presence
+                                </Text>
+                                <SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
+                                  {[
+                                    ['LinkedIn', social.linkedinUrl],
+                                    ['Facebook', social.facebookUrl],
+                                    ['X', social.xUrl],
+                                    ['Instagram', social.instagramUrl],
+                                    ['TikTok', social.tiktokUrl],
+                                    ['YouTube', social.youtubeUrl],
+                                    ['Website', social.websiteUrl],
+                                  ].map(([label, url]) => {
+                                    const v = typeof url === 'string' ? url.trim() : ''
+                                    return (
+                                      <FieldRow key={label} label={label}>
+                                        {v ? (
+                                          <Link href={v} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                            {v}
+                                          </Link>
+                                        ) : (
+                                          <Text color="gray.500">Not set</Text>
+                                        )}
+                                      </FieldRow>
+                                    )
+                                  })}
+                                </SimpleGrid>
+                              </Box>
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Case Studies / Testimonials
+                                </Text>
+                                <Text whiteSpace="pre-wrap" color={profile?.caseStudiesOrTestimonials ? 'gray.800' : 'gray.500'}>
+                                  {profile?.caseStudiesOrTestimonials || 'Not set'}
+                                </Text>
+                                {profile?.caseStudiesFileUrl ? (
+                                  <Box mt={2}>
+                                    <Link
+                                      href={String(profile.caseStudiesFileUrl)}
+                                      isExternal
+                                      fontSize="sm"
+                                      color="blue.600"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {String(profile.caseStudiesFileName || 'View attachment')}
+                                    </Link>
+                                  </Box>
+                                ) : null}
+                              </Box>
+                            </Stack>
+                          )
+                        })()}
+                      </TabPanel>
+
+                      <TabPanel p={6}>
+                        {(() => {
+                          const contacts = selectedCustomerDetail?.customerContacts || []
+                          if (!contacts.length) return <Text color="gray.500">No contacts added yet.</Text>
+
+                          return (
+                            <TableContainer border="1px solid" borderColor="gray.200" borderRadius="lg">
+                              <Table size="sm">
+                                <Thead bg="gray.50">
+                                  <Tr>
+                                    <Th>Name</Th>
+                                    <Th>Title</Th>
+                                    <Th>Email</Th>
+                                    <Th>Phone</Th>
+                                    <Th>Primary</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {contacts.map((c) => (
+                                    <Tr key={c.id} _hover={{ bg: 'gray.50', cursor: 'pointer' }} onClick={() => setSelectedCustomerContact(c)}>
+                                      <Td fontWeight="medium">{c.name}</Td>
+                                      <Td>{c.title || <Text color="gray.500">Not set</Text>}</Td>
+                                      <Td>{c.email || <Text color="gray.500">Not set</Text>}</Td>
+                                      <Td>{c.phone || <Text color="gray.500">Not set</Text>}</Td>
+                                      <Td>{c.isPrimary ? <Badge colorScheme="green">Primary</Badge> : <Text color="gray.500">—</Text>}</Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </TableContainer>
+                          )
+                        })()}
+                      </TabPanel>
+
+                      <TabPanel p={6}>
+                        <Stack spacing={4}>
+                          <HStack justify="space-between">
+                            <Heading size="sm" color="gray.700">
+                              Sending mailboxes (Email Identities)
+                            </Heading>
+                            <HStack spacing={2}>
+                              <Button size="sm" variant="outline" onClick={() => window.dispatchEvent(new Event('navigateToOnboarding'))}>
+                                Manage Email Accounts
+                              </Button>
+                              <Tooltip
+                                label={connectedEmails.length >= 5 ? 'Limit reached (5). Disconnect one to add another.' : ''}
+                                isDisabled={connectedEmails.length < 5}
+                              >
+                                <Button
+                                  size="sm"
+                                  colorScheme="blue"
+                                  onClick={handleConnectOutlook}
+                                  isDisabled={!selectedCustomerId || connectedEmails.length >= 5}
+                                >
+                                  Connect Outlook
+                                </Button>
+                              </Tooltip>
+                              <IconButton
+                                aria-label="Refresh email accounts"
+                                icon={<RepeatIcon />}
+                                size="sm"
+                                variant="ghost"
+                                colorScheme="gray"
+                                isLoading={loadingEmails}
+                                isDisabled={!selectedCustomerId}
+                                onClick={refreshConnectedEmails}
+                                title="Refresh email accounts"
+                              />
+                            </HStack>
+                          </HStack>
+
+                          {emailFetchError && (
+                            <Box py={3} px={4} bg="red.50" borderRadius="md" border="1px solid" borderColor="red.200">
+                              <Text fontSize="sm" color="red.700">
+                                Failed to load email accounts: {emailFetchError}
+                              </Text>
+                            </Box>
+                          )}
+
+                          {loadingEmails ? (
+                            <HStack justify="center" py={4}>
+                              <Spinner size="sm" />
+                              <Text color="gray.500">Loading email accounts...</Text>
+                            </HStack>
+                          ) : connectedEmails.length === 0 ? (
+                            <Text color="gray.500">No email accounts connected yet.</Text>
+                          ) : (
+                            <Stack spacing={3}>
+                              {(connectedEmails ?? []).map((email) => (
+                                <Box key={email.id} p={3} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
+                                  <HStack justify="space-between" mb={2}>
+                                    <HStack spacing={2}>
+                                      <Badge colorScheme={email.provider === 'outlook' ? 'blue' : 'gray'} textTransform="capitalize">
+                                        {email.provider}
+                                      </Badge>
+                                      <Badge colorScheme={email.isActive ? 'green' : 'red'} variant="subtle">
+                                        {email.isActive ? 'Active' : 'Inactive'}
+                                      </Badge>
+                                    </HStack>
+                                    <Text fontSize="xs" color="gray.500">
+                                      {new Date(email.createdAt).toLocaleDateString('en-GB', {
+                                        day: 'numeric',
+                                        month: 'short',
+                                        year: 'numeric',
+                                      })}
+                                    </Text>
+                                  </HStack>
+                                  <Text fontWeight="medium" fontSize="sm">
+                                    {email.emailAddress}
+                                  </Text>
+                                </Box>
+                              ))}
+                            </Stack>
+                          )}
+                        </Stack>
+                      </TabPanel>
+
+                      <TabPanel p={6}>
+                        {(() => {
+                          const c = selectedCustomerDetail
+                          const ad = c?.accountData && typeof c.accountData === 'object' ? (c.accountData as any) : null
+                          const attachments = Array.isArray(ad?.attachments) ? ad.attachments : []
+                          const customerId = selectedCustomerId
+
+                          return (
+                            <Stack spacing={6}>
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Agreement
+                                </Text>
+                                {c?.agreementFileName && customerId ? (
+                                  <Stack spacing={1}>
+                                    <Link
+                                      href={`/api/customers/${customerId}/agreement/download`}
+                                      isExternal
+                                      color="blue.600"
+                                      fontWeight="medium"
+                                      rel="noopener noreferrer"
+                                    >
+                                      {c.agreementFileName}
+                                    </Link>
+                                    <Text fontSize="xs" color="gray.600">
+                                      Uploaded:{' '}
+                                      {c.agreementUploadedAt ? new Date(c.agreementUploadedAt).toLocaleString() : 'Not set'}
+                                      {c.agreementUploadedByEmail ? ` · ${c.agreementUploadedByEmail}` : ''}
+                                    </Text>
+                                  </Stack>
+                                ) : (
+                                  <Text color="gray.500">No agreement uploaded</Text>
+                                )}
+                              </Box>
+
+                              <Divider />
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Other Documents
+                                </Text>
+                                {attachments.length ? (
+                                  <Stack spacing={3}>
+                                    {attachments.map((att: any) => (
+                                      <Box
+                                        key={String(att?.id || att?.blobName || att?.fileUrl || Math.random())}
+                                        p={3}
+                                        bg="gray.50"
+                                        borderRadius="md"
+                                        border="1px solid"
+                                        borderColor="gray.200"
+                                      >
+                                        <Link
+                                          href={String(att?.fileUrl || '')}
+                                          isExternal
+                                          color="blue.600"
+                                          fontWeight="medium"
+                                          rel="noopener noreferrer"
+                                        >
+                                          {String(att?.fileName || 'View file')}
+                                        </Link>
+                                        <Text fontSize="xs" color="gray.600">
+                                          {att?.uploadedAt ? new Date(att.uploadedAt).toLocaleString() : 'Not set'}
+                                          {att?.uploadedByEmail ? ` · ${att.uploadedByEmail}` : ''}
+                                        </Text>
+                                      </Box>
+                                    ))}
+                                  </Stack>
+                                ) : (
+                                  <Text color="gray.500">No documents uploaded</Text>
+                                )}
+                              </Box>
+                            </Stack>
+                          )
+                        })()}
+                      </TabPanel>
+
+                      <TabPanel p={6}>
+                        <Box p={4} borderRadius="lg" border="1px solid" borderColor="gray.100" bg="gray.50">
+                          <NotesSection
+                            account={selectedAccount}
+                            customerId={selectedAccount._databaseId || null}
+                            updateAccount={updateAccount}
+                            toast={toast}
+                            users={dbUsers}
+                            currentUserEmail={userEmail}
+                          />
+                        </Box>
+                      </TabPanel>
+                    </TabPanels>
+                  </Tabs>
+                </Box>
+
+                <Modal isOpen={Boolean(selectedCustomerContact)} onClose={() => setSelectedCustomerContact(null)} size="md">
+                  <ModalOverlay />
+                  <ModalContent>
+                    <ModalHeader>Contact Details</ModalHeader>
+                    <ModalCloseButton />
+                    <ModalBody>
+                      {selectedCustomerContact ? (
+                        <Stack spacing={3}>
+                          <FieldRow label="Name">
+                            <Text fontWeight="medium">{selectedCustomerContact.name}</Text>
+                          </FieldRow>
+                          <FieldRow label="Title">
+                            <Text color={selectedCustomerContact.title ? 'gray.800' : 'gray.500'}>
+                              {selectedCustomerContact.title || 'Not set'}
+                            </Text>
+                          </FieldRow>
+                          <FieldRow label="Email">
+                            {selectedCustomerContact.email ? (
+                              <Link href={`mailto:${selectedCustomerContact.email}`} color="blue.600">
+                                {selectedCustomerContact.email}
+                              </Link>
+                            ) : (
+                              <Text color="gray.500">Not set</Text>
+                            )}
+                          </FieldRow>
+                          <FieldRow label="Phone">
+                            {selectedCustomerContact.phone ? (
+                              <Link href={`tel:${selectedCustomerContact.phone}`} color="blue.600">
+                                {selectedCustomerContact.phone}
+                              </Link>
+                            ) : (
+                              <Text color="gray.500">Not set</Text>
+                            )}
+                          </FieldRow>
+                          <FieldRow label="Primary">
+                            {selectedCustomerContact.isPrimary ? <Badge colorScheme="green">Primary</Badge> : <Text color="gray.500">No</Text>}
+                          </FieldRow>
+                          <FieldRow label="Notes">
+                            <Text whiteSpace="pre-wrap" color={selectedCustomerContact.notes ? 'gray.800' : 'gray.500'}>
+                              {selectedCustomerContact.notes || 'Not set'}
+                            </Text>
+                          </FieldRow>
+                        </Stack>
+                      ) : null}
+                    </ModalBody>
+                    <ModalFooter>
+                      <Button variant="outline" onClick={() => setSelectedCustomerContact(null)}>
+                        Close
+                      </Button>
+                    </ModalFooter>
+                  </ModalContent>
+                </Modal>
+
+                {/* Legacy account drawer UI (dashboard/metrics/events) is disabled for production launch. */}
+                {false && (
+                  <>
                 {/* Quick Info Section */}
                 <Box
                   bg="white"
@@ -6802,6 +7533,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 </SimpleGrid>
 
                 {/* Calendar removed for production launch stability */}
+                  </>
+                )}
 
                 {/* Delete Account Section */}
                 <Box
@@ -6821,7 +7554,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       onClick={onDeleteModalOpen}
                     size="md"
                     >
-                      Delete Account
+                      Archive Account
                     </Button>
                   </Box>
                 </Stack>
@@ -6835,11 +7568,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
           <Modal isOpen={isDeleteModalOpen} onClose={onDeleteModalClose}>
             <ModalOverlay />
             <ModalContent>
-              <ModalHeader>Delete Account</ModalHeader>
+              <ModalHeader>Archive Account</ModalHeader>
               <ModalCloseButton />
               <ModalBody>
                 <Text>
-                  Are you sure you want to delete <strong>{selectedAccount.name}</strong>? This action cannot be undone.
+                  Are you sure you want to archive <strong>{selectedAccount.name}</strong>? This is a soft-delete: the customer (and all related data) is preserved, but hidden from active views.
                 </Text>
               </ModalBody>
               <ModalFooter>
@@ -6856,7 +7589,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     }
                   }}
                 >
-                  Delete
+                  Archive
                 </Button>
               </ModalFooter>
             </ModalContent>
