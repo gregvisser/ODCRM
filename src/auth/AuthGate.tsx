@@ -107,6 +107,12 @@ export default function AuthGate({ children }: AuthGateProps) {
             const message =
               body?.message || body?.error || `HTTP ${res.status}`
             lastError = { status: res.status, message }
+            // IMPORTANT: 401/403 responses can contain valid JSON authz details.
+            // Treat them as authoritative (do not retry another URL and lose the reason).
+            if (res.status === 401 || res.status === 403) {
+              data = body
+              break
+            }
             continue
           }
 
