@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Badge,
   Box,
   Button,
+  Checkbox,
   Divider,
   FormControl,
   FormErrorMessage,
@@ -253,6 +255,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     totalImported?: number | null
     totalSuppressedEmails?: number | null
   } | null>(null)
+  const [enrichmentWebsiteInput, setEnrichmentWebsiteInput] = useState<string>('')
+  const [enrichmentDomainInput, setEnrichmentDomainInput] = useState<string>('')
+  const [enrichmentLoading, setEnrichmentLoading] = useState(false)
+  const [enrichmentApply, setEnrichmentApply] = useState<Record<string, boolean>>({})
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -447,6 +453,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     } else {
       setAgreementData(null)
     }
+
+    // Prefill enrichment inputs from DB (no localStorage)
+    setEnrichmentWebsiteInput(String(customer.website || '').trim())
+    setEnrichmentDomainInput(String(customer.domain || '').trim())
   }, [customer])
 
   // Geographic area search
@@ -813,6 +823,165 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     } finally {
       setUploadingSuppression(false)
     }
+  }
+
+  const getEnrichment = () => {
+    const ad = customer?.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+    const enrichment = ad?.enrichment && typeof ad.enrichment === 'object' ? ad.enrichment : null
+    return enrichment as
+      | null
+      | {
+          status?: 'idle' | 'running' | 'done' | 'failed'
+          fetchedAt?: string | null
+          fetchedByUserEmail?: string | null
+          draft?: any
+          error?: string | null
+        }
+  }
+
+  const sanitizeInline = (value: string, maxLen: number) =>
+    String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxLen)
+
+  const handleRunEnrichment = async () => {
+    if (!customer?.id) return
+    setEnrichmentLoading(true)
+    try {
+      const payload = {
+        website: enrichmentWebsiteInput.trim() || undefined,
+        domain: enrichmentDomainInput.trim() || undefined,
+      }
+      const { error } = await api.post(`/api/customers/${customer.id}/enrich`, payload)
+      if (error) {
+        toast({ title: 'Enrichment failed', description: error, status: 'error', duration: 6000, isClosable: true })
+        return
+      }
+      // DB rehydrate
+      await fetchCustomer()
+      toast({ title: 'Enrichment completed', description: 'Draft suggestions loaded from DB.', status: 'success', duration: 3000 })
+    } finally {
+      setEnrichmentLoading(false)
+    }
+  }
+
+  const buildEnrichmentSuggestions = () => {
+    const enrichment = getEnrichment()
+    const draft = enrichment?.draft && typeof enrichment.draft === 'object' ? enrichment.draft : {}
+    const social = draft?.socialPresence && typeof draft.socialPresence === 'object' ? draft.socialPresence : {}
+
+    return [
+      {
+        id: 'customer.website',
+        label: 'Web Address',
+        existing: String(customer?.website || ''),
+        suggested: String(draft?.website || ''),
+        supported: true,
+        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, website: value } : prev)),
+      },
+      {
+        id: 'client.social.websiteUrl',
+        label: 'Social Website URL',
+        existing: String(clientProfile.socialMediaPresence.websiteUrl || ''),
+        suggested: String(draft?.website || ''),
+        supported: true,
+        apply: (value: string) => updateSocial({ websiteUrl: value }),
+      },
+      {
+        id: 'client.social.linkedinUrl',
+        label: 'LinkedIn URL',
+        existing: String(clientProfile.socialMediaPresence.linkedinUrl || ''),
+        suggested: String(social?.linkedin || ''),
+        supported: true,
+        apply: (value: string) => updateSocial({ linkedinUrl: value }),
+      },
+      {
+        id: 'client.social.xUrl',
+        label: 'X / Twitter URL',
+        existing: String(clientProfile.socialMediaPresence.xUrl || ''),
+        suggested: String(social?.twitter || ''),
+        supported: true,
+        apply: (value: string) => updateSocial({ xUrl: value }),
+      },
+      {
+        id: 'client.social.facebookUrl',
+        label: 'Facebook URL',
+        existing: String(clientProfile.socialMediaPresence.facebookUrl || ''),
+        suggested: String(social?.facebook || ''),
+        supported: true,
+        apply: (value: string) => updateSocial({ facebookUrl: value }),
+      },
+      {
+        id: 'client.social.instagramUrl',
+        label: 'Instagram URL',
+        existing: String(clientProfile.socialMediaPresence.instagramUrl || ''),
+        suggested: String(social?.instagram || ''),
+        supported: true,
+        apply: (value: string) => updateSocial({ instagramUrl: value }),
+      },
+      // Draft-only fields (no mapped onboarding field in current UI)
+      {
+        id: 'draft.whatTheyDo',
+        label: 'What they do (draft)',
+        existing: '',
+        suggested: String(draft?.whatTheyDo || ''),
+        supported: false,
+        apply: null,
+      },
+      {
+        id: 'draft.companyProfile',
+        label: 'Company profile (draft)',
+        existing: '',
+        suggested: String(draft?.companyProfile || ''),
+        supported: false,
+        apply: null,
+      },
+    ] as Array<{
+      id: string
+      label: string
+      existing: string
+      suggested: string
+      supported: boolean
+      apply: null | ((value: string) => void)
+    }>
+  }
+
+  useEffect(() => {
+    // Default apply selection: ON if existing empty, OFF if existing non-empty
+    if (!customer) return
+    const enrichment = getEnrichment()
+    if (!enrichment?.draft) return
+    const suggestions = buildEnrichmentSuggestions().filter((s) => s.supported && s.suggested.trim())
+    setEnrichmentApply((prev) => {
+      const next: Record<string, boolean> = { ...prev }
+      for (const s of suggestions) {
+        if (next[s.id] === undefined) {
+          next[s.id] = !s.existing.trim()
+        }
+      }
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.id, (customer as any)?.accountData])
+
+  const handleApplyEnrichmentSelected = () => {
+    const suggestions = buildEnrichmentSuggestions().filter((s) => s.supported && s.apply && s.suggested.trim())
+    let applied = 0
+    for (const s of suggestions) {
+      if (!enrichmentApply[s.id]) continue
+      // Never overwrite unless user checked it; checkbox defaults handle safe behavior.
+      const value = sanitizeInline(s.suggested, 500)
+      s.apply?.(value)
+      applied++
+    }
+    toast({
+      title: 'Suggestions applied',
+      description: applied > 0 ? `Applied ${applied} suggestion(s) to the form. Remember to Save Onboarding.` : 'No suggestions selected.',
+      status: applied > 0 ? 'success' : 'info',
+      duration: 4000,
+      isClosable: true,
+    })
   }
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
@@ -1205,6 +1374,137 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 }}
                 placeholder="https://example.com"
               />
+            </FormControl>
+            <FormControl>
+              <FormLabel>Auto-populate from web</FormLabel>
+              <Box borderWidth="1px" borderRadius="lg" p={3} bg="white">
+                {(() => {
+                  const enrichment = getEnrichment()
+                  const status = String(enrichment?.status || 'idle')
+                  const draft = enrichment?.draft && typeof enrichment.draft === 'object' ? enrichment.draft : null
+                  const suggestions = buildEnrichmentSuggestions()
+                    .filter((s) => s.suggested.trim())
+                    .filter((s) => s.supported || (!s.supported && s.suggested.trim()))
+
+                  const statusColor =
+                    status === 'done'
+                      ? 'green'
+                      : status === 'running'
+                        ? 'blue'
+                        : status === 'failed'
+                          ? 'red'
+                          : 'gray'
+
+                  return (
+                    <Stack spacing={3}>
+                      <HStack justify="space-between" flexWrap="wrap">
+                        <HStack>
+                          <Badge colorScheme={statusColor}>{status}</Badge>
+                          {enrichment?.fetchedAt ? (
+                            <Text fontSize="xs" color="gray.600">
+                              Last: {new Date(enrichment.fetchedAt).toLocaleString()}
+                            </Text>
+                          ) : null}
+                        </HStack>
+                        <Button
+                          size="sm"
+                          colorScheme="purple"
+                          variant="outline"
+                          onClick={() => void handleRunEnrichment()}
+                          isLoading={enrichmentLoading}
+                          isDisabled={!customer?.id || status === 'running'}
+                        >
+                          Fetch company info
+                        </Button>
+                      </HStack>
+
+                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                        <FormControl>
+                          <FormLabel fontSize="xs" mb={1}>
+                            Website URL
+                          </FormLabel>
+                          <Input
+                            size="sm"
+                            value={enrichmentWebsiteInput}
+                            onChange={(e) => setEnrichmentWebsiteInput(e.target.value)}
+                            placeholder="https://example.com"
+                          />
+                        </FormControl>
+                        <FormControl>
+                          <FormLabel fontSize="xs" mb={1}>
+                            Domain (optional)
+                          </FormLabel>
+                          <Input
+                            size="sm"
+                            value={enrichmentDomainInput}
+                            onChange={(e) => setEnrichmentDomainInput(e.target.value)}
+                            placeholder="example.com"
+                          />
+                        </FormControl>
+                      </SimpleGrid>
+
+                      {status === 'failed' && enrichment?.error ? (
+                        <Text fontSize="xs" color="red.600">
+                          {enrichment.error}
+                        </Text>
+                      ) : null}
+
+                      {draft && suggestions.length > 0 ? (
+                        <Stack spacing={2}>
+                          <Text fontSize="xs" color="gray.600">
+                            Review suggestions. Nothing is applied automatically.
+                          </Text>
+                          {suggestions.map((s) => (
+                            <Box key={s.id} borderWidth="1px" borderRadius="md" p={2} bg="gray.50">
+                              <HStack justify="space-between" align="flex-start" spacing={3} flexWrap="wrap">
+                                <Box flex="1" minW={{ base: '100%', md: '260px' }}>
+                                  <Text fontSize="sm" fontWeight="semibold">
+                                    {s.label}
+                                  </Text>
+                                  <Text fontSize="xs" color="gray.600">
+                                    Current: {s.existing?.trim() ? sanitizeInline(s.existing, 120) : 'Not set'}
+                                  </Text>
+                                  <Text fontSize="xs" color="gray.700">
+                                    Suggested: {sanitizeInline(s.suggested, 200)}
+                                  </Text>
+                                  {!s.supported ? (
+                                    <Text fontSize="xs" color="gray.500">
+                                      Draft only (not mapped to an onboarding field) — copy/paste if useful.
+                                    </Text>
+                                  ) : null}
+                                </Box>
+                                {s.supported ? (
+                                  <Checkbox
+                                    isChecked={Boolean(enrichmentApply[s.id])}
+                                    onChange={(e) =>
+                                      setEnrichmentApply((prev) => ({ ...prev, [s.id]: e.target.checked }))
+                                    }
+                                    alignSelf="center"
+                                  >
+                                    Apply
+                                  </Checkbox>
+                                ) : null}
+                              </HStack>
+                            </Box>
+                          ))}
+                          <HStack justify="flex-end">
+                            <Button size="sm" colorScheme="purple" onClick={handleApplyEnrichmentSelected}>
+                              Apply selected
+                            </Button>
+                          </HStack>
+                          <Text fontSize="xs" color="gray.500">
+                            Suggestions apply to the form only. Use the existing <strong>Save Onboarding</strong> button below to persist.
+                          </Text>
+                        </Stack>
+                      ) : (
+                        <Text fontSize="xs" color="gray.500">
+                          {status === 'done' ? 'No suggestions found.' : 'Fetch to generate draft suggestions.'}
+                        </Text>
+                      )}
+                    </Stack>
+                  )
+                })()}
+              </Box>
             </FormControl>
             <FormControl>
               <FormLabel>Assigned Account Manager</FormLabel>

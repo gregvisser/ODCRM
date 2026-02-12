@@ -8,6 +8,7 @@ import { Router } from 'express'
 import { z } from 'zod'
 import multer from 'multer'
 import * as XLSX from 'xlsx'
+import * as cheerio from 'cheerio'
 import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
@@ -3223,6 +3224,382 @@ router.get('/:id/suppression-summary', async (req, res) => {
   } catch (error) {
     console.error('Error fetching suppression summary:', error)
     return res.status(500).json({ error: 'suppression_summary_failed' })
+  }
+})
+
+// ============================================================================
+// Web enrichment (safe draft, no auto-apply)
+// ============================================================================
+
+const enrichmentStartSchema = z.object({
+  website: z.string().optional(),
+  domain: z.string().optional(),
+})
+
+const ENRICHMENT_RATE_LIMIT_MS = 60_000 // 1/min per customer
+const ENRICHMENT_TIMEOUT_MS = 10_000
+const ENRICHMENT_MAX_FETCHES = 2 // homepage + (optional) about
+
+const sanitizeText = (value: string, maxLen: number) => {
+  const v = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[^\S\r\n]+/g, ' ')
+    .trim()
+  if (!v) return ''
+  return v.length > maxLen ? v.slice(0, maxLen).trim() : v
+}
+
+const isPrivateOrLocalHost = (hostname: string): boolean => {
+  const host = hostname.trim().toLowerCase()
+  if (!host) return true
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+  if (host.endsWith('.local')) return true
+
+  // block literal private IPs
+  const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host)
+  if (!isIPv4) return false
+
+  const parts = host.split('.').map((p) => Number(p))
+  if (parts.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return true
+
+  const [a, b] = parts
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 0) return true
+  if (a === 169 && b === 254) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  return false
+}
+
+const normalizeWebsiteUrl = (input: string): string => {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const withScheme = raw.startsWith('http://') || raw.startsWith('https://') ? raw : `https://${raw}`
+  const url = new URL(withScheme)
+  // Normalize to origin only (avoid paths/query as canonical website)
+  return `${url.protocol}//${url.host}`
+}
+
+const safeWebsiteFromInputs = (opts: {
+  website?: string
+  domain?: string
+  dbWebsite?: string | null
+  dbDomain?: string | null
+}): { websiteUrl: string; input: { website?: string; domain?: string } } => {
+  const websiteRaw = String(opts.website || '').trim()
+  const domainRaw = String(opts.domain || '').trim()
+  const dbWebsiteRaw = String(opts.dbWebsite || '').trim()
+  const dbDomainRaw = String(opts.dbDomain || '').trim()
+
+  const websiteCandidate = websiteRaw || dbWebsiteRaw || ''
+  const domainCandidate = domainRaw || dbDomainRaw || ''
+
+  if (websiteCandidate) {
+    return { websiteUrl: normalizeWebsiteUrl(websiteCandidate), input: { website: websiteCandidate || undefined } }
+  }
+  if (domainCandidate) {
+    return { websiteUrl: normalizeWebsiteUrl(domainCandidate), input: { domain: domainCandidate || undefined } }
+  }
+  return { websiteUrl: '', input: {} }
+}
+
+const fetchWithTimeout = async (url: string, timeoutMs: number) => {
+  const controller = new AbortController()
+  const handle = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'ODCRM Web Enrichment (lightweight)',
+        'Accept': 'text/html,application/xhtml+xml',
+      },
+      redirect: 'follow',
+    })
+  } finally {
+    clearTimeout(handle)
+  }
+}
+
+const pickAboutUrl = (baseUrl: string, html: string): string | null => {
+  try {
+    const $ = cheerio.load(html)
+    const candidates: string[] = []
+    $('a[href]').each((_, el) => {
+      const href = String($(el).attr('href') || '').trim()
+      if (!href) return
+      const lower = href.toLowerCase()
+      if (
+        lower.includes('about') ||
+        lower.includes('who-we-are') ||
+        lower.includes('our-story') ||
+        lower.includes('company')
+      ) {
+        candidates.push(href)
+      }
+    })
+    const first = candidates[0]
+    if (!first) return null
+    const absolute = new URL(first, baseUrl).toString()
+    // Only allow same host
+    if (new URL(absolute).host !== new URL(baseUrl).host) return null
+    return absolute
+  } catch {
+    return null
+  }
+}
+
+const extractSocialLinks = (baseUrl: string, html: string) => {
+  const out: Record<string, string> = {}
+  try {
+    const $ = cheerio.load(html)
+    const links = new Set<string>()
+    $('a[href]').each((_, el) => {
+      const href = String($(el).attr('href') || '').trim()
+      if (!href) return
+      try {
+        const absolute = new URL(href, baseUrl).toString()
+        links.add(absolute)
+      } catch {
+        // ignore
+      }
+    })
+
+    const pick = (key: string, match: RegExp) => {
+      const found = Array.from(links).find((u) => match.test(u))
+      if (found) out[key] = found
+    }
+    pick('linkedin', /linkedin\.com/i)
+    pick('twitter', /twitter\.com|x\.com/i)
+    pick('facebook', /facebook\.com/i)
+    pick('instagram', /instagram\.com/i)
+    return out
+  } catch {
+    return out
+  }
+}
+
+const extractLightDraft = (websiteUrl: string, pages: Array<{ url: string; html: string }>) => {
+  const primary = pages[0]
+  const html = primary?.html || ''
+
+  const $ = cheerio.load(html)
+  const title = sanitizeText($('title').first().text() || '', 140)
+  const metaDescription = sanitizeText($('meta[name="description"]').attr('content') || '', 300)
+
+  const h1 = sanitizeText($('h1').first().text() || '', 120)
+  const firstP = sanitizeText($('p').first().text() || '', 700)
+
+  const bodyText = sanitizeText($('body').text() || '', 1200)
+  const heroSnippet = sanitizeText([h1, firstP].filter(Boolean).join(' — '), 500)
+
+  const social = extractSocialLinks(websiteUrl, html)
+
+  const whatTheyDo = sanitizeText(metaDescription || heroSnippet || bodyText || title, 600)
+  const companyProfile = sanitizeText(firstP || heroSnippet || bodyText, 1000)
+
+  return {
+    website: websiteUrl,
+    whatTheyDo: whatTheyDo || undefined,
+    companyProfile: companyProfile || undefined,
+    socialPresence: Object.keys(social).length ? social : undefined,
+  }
+}
+
+// POST /api/customers/:id/enrich - Safe lightweight web enrichment (draft only)
+router.post('/:id/enrich', async (req, res) => {
+  const startedAt = Date.now()
+  try {
+    const { id } = req.params
+    const body = enrichmentStartSchema.parse(req.body || {})
+    const actor = getActorIdentity(req)
+
+    // Read customer and rate-limit / running gate under row lock
+    const { websiteUrl, input } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+      const customer = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, website: true, domain: true, accountData: true, isArchived: true },
+      })
+      if (!customer) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+      if (customer.isArchived) {
+        const err: any = new Error('archived')
+        err.statusCode = 400
+        throw err
+      }
+
+      const ad = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+      const existingEnrichment =
+        ad?.enrichment && typeof ad.enrichment === 'object' ? (ad.enrichment as any) : {}
+
+      const status = String(existingEnrichment.status || 'idle')
+      if (status === 'running') {
+        const err: any = new Error('already_running')
+        err.statusCode = 409
+        throw err
+      }
+
+      const lastFetchedAt = existingEnrichment.fetchedAt ? new Date(existingEnrichment.fetchedAt).getTime() : 0
+      if (lastFetchedAt && Date.now() - lastFetchedAt < ENRICHMENT_RATE_LIMIT_MS) {
+        const err: any = new Error('rate_limited')
+        err.statusCode = 429
+        throw err
+      }
+
+      const resolved = safeWebsiteFromInputs({
+        website: body.website,
+        domain: body.domain,
+        dbWebsite: customer.website,
+        dbDomain: customer.domain,
+      })
+
+      if (!resolved.websiteUrl) {
+        const err: any = new Error('missing_website')
+        err.statusCode = 400
+        throw err
+      }
+
+      const u = new URL(resolved.websiteUrl)
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        const err: any = new Error('invalid_protocol')
+        err.statusCode = 400
+        throw err
+      }
+      if (isPrivateOrLocalHost(u.hostname)) {
+        const err: any = new Error('blocked_host')
+        err.statusCode = 400
+        throw err
+      }
+
+      const nextEnrichment = {
+        status: 'running',
+        fetchedAt: new Date().toISOString(),
+        fetchedByUserEmail: actor.email || null,
+        input: resolved.input,
+        sources: { websiteUrl: resolved.websiteUrl, fetchedUrls: [] as string[] },
+        draft: {},
+        error: null,
+      }
+
+      const nextAccountData = { ...ad, enrichment: nextEnrichment }
+      await tx.customer.update({
+        where: { id },
+        data: { accountData: nextAccountData },
+      })
+
+      return { websiteUrl: resolved.websiteUrl, input: resolved.input }
+    })
+
+    // Synchronous lightweight enrichment with strict cap on time and requests
+    const fetchedUrls: string[] = []
+    const pages: Array<{ url: string; html: string }> = []
+
+    const homepageRes = await fetchWithTimeout(websiteUrl, ENRICHMENT_TIMEOUT_MS)
+    if (!homepageRes.ok) {
+      throw new Error(`Website fetch failed (HTTP ${homepageRes.status})`)
+    }
+    const homepageHtml = await homepageRes.text()
+    fetchedUrls.push(websiteUrl)
+    pages.push({ url: websiteUrl, html: homepageHtml })
+
+    if (pages.length < ENRICHMENT_MAX_FETCHES) {
+      const aboutUrl = pickAboutUrl(websiteUrl, homepageHtml)
+      if (aboutUrl && fetchedUrls.length < ENRICHMENT_MAX_FETCHES) {
+        try {
+          const aboutRes = await fetchWithTimeout(aboutUrl, ENRICHMENT_TIMEOUT_MS)
+          if (aboutRes.ok) {
+            const aboutHtml = await aboutRes.text()
+            fetchedUrls.push(aboutUrl)
+            pages.push({ url: aboutUrl, html: aboutHtml })
+          }
+        } catch {
+          // ignore about page failures
+        }
+      }
+    }
+
+    const draft = extractLightDraft(websiteUrl, pages)
+    const elapsedMs = Date.now() - startedAt
+
+    // Persist done state (draft only)
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+      const customer = await tx.customer.findUnique({ where: { id }, select: { id: true, accountData: true } })
+      if (!customer) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+      const ad = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+      const nextEnrichment = {
+        status: 'done',
+        fetchedAt: new Date().toISOString(),
+        fetchedByUserEmail: actor.email || null,
+        input,
+        sources: { websiteUrl, fetchedUrls },
+        draft,
+        error: null,
+        elapsedMs,
+      }
+      const nextAccountData = { ...ad, enrichment: nextEnrichment }
+      await tx.customer.update({ where: { id }, data: { accountData: nextAccountData } })
+      return nextEnrichment
+    })
+
+    return res.json({ success: true, status: result.status, fetchedAt: result.fetchedAt, draft: result.draft })
+  } catch (error: any) {
+    const statusCode = error?.statusCode || 500
+    const message = error instanceof Error ? error.message : 'Unknown error'
+
+    // Best-effort: persist failed state (do not throw if this fails)
+    try {
+      const { id } = req.params
+      const actor = getActorIdentity(req)
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+        const customer = await tx.customer.findUnique({ where: { id }, select: { id: true, accountData: true } })
+        if (!customer) return
+        const ad = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+        const prev = ad?.enrichment && typeof ad.enrichment === 'object' ? (ad.enrichment as any) : {}
+        const nextEnrichment = {
+          ...prev,
+          status: 'failed',
+          fetchedAt: new Date().toISOString(),
+          fetchedByUserEmail: actor.email || null,
+          error: sanitizeText(message, 300),
+        }
+        await tx.customer.update({ where: { id }, data: { accountData: { ...ad, enrichment: nextEnrichment } } })
+      })
+    } catch {
+      // ignore
+    }
+
+    if (statusCode === 409) return res.status(409).json({ error: 'enrichment_running', message: 'Enrichment already running' })
+    if (statusCode === 429) return res.status(429).json({ error: 'rate_limited', message: 'Please wait before running enrichment again' })
+    if (statusCode === 404) return res.status(404).json({ error: 'Customer not found' })
+    if (statusCode === 400) return res.status(400).json({ error: 'invalid_request', message })
+    console.error('Error running web enrichment:', error)
+    return res.status(500).json({ error: 'enrichment_failed', message: sanitizeText(message, 200) })
+  }
+})
+
+// GET /api/customers/:id/enrichment - return current enrichment draft/status
+router.get('/:id/enrichment', async (req, res) => {
+  try {
+    const { id } = req.params
+    const customer = await prisma.customer.findUnique({ where: { id }, select: { id: true, accountData: true } })
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+    const ad = customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+    const enrichment = ad?.enrichment && typeof ad.enrichment === 'object' ? ad.enrichment : null
+    return res.json(enrichment || {})
+  } catch (error) {
+    console.error('Error fetching enrichment state:', error)
+    return res.status(500).json({ error: 'enrichment_fetch_failed' })
   }
 })
 
