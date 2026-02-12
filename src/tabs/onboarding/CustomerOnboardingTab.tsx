@@ -45,7 +45,10 @@ import type {
 type CustomerApi = {
   id: string
   name: string
+  domain?: string | null
   website?: string | null
+  whatTheyDo?: string | null
+  companyProfile?: string | null
   accountData?: Record<string, unknown> | null
   monthlyRevenueFromCustomer?: string | null
   leadsReportingUrl?: string | null
@@ -881,6 +884,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, website: value } : prev)),
       },
       {
+        id: 'customer.whatTheyDo',
+        label: 'What they do',
+        existing: String(customer?.whatTheyDo || ''),
+        suggested: String(draft?.whatTheyDo || ''),
+        supported: true,
+        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, whatTheyDo: value } : prev)),
+      },
+      {
+        id: 'customer.companyProfile',
+        label: 'Company profile',
+        existing: String(customer?.companyProfile || ''),
+        suggested: String(draft?.companyProfile || ''),
+        supported: true,
+        apply: (value: string) => setCustomer((prev) => (prev ? { ...prev, companyProfile: value } : prev)),
+      },
+      {
         id: 'client.social.websiteUrl',
         label: 'Social Website URL',
         existing: String(clientProfile.socialMediaPresence.websiteUrl || ''),
@@ -920,23 +939,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         supported: true,
         apply: (value: string) => updateSocial({ instagramUrl: value }),
       },
-      // Draft-only fields (no mapped onboarding field in current UI)
-      {
-        id: 'draft.whatTheyDo',
-        label: 'What they do (draft)',
-        existing: '',
-        suggested: String(draft?.whatTheyDo || ''),
-        supported: false,
-        apply: null,
-      },
-      {
-        id: 'draft.companyProfile',
-        label: 'Company profile (draft)',
-        existing: '',
-        suggested: String(draft?.companyProfile || ''),
-        supported: false,
-        apply: null,
-      },
     ] as Array<{
       id: string
       label: string
@@ -971,7 +973,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     for (const s of suggestions) {
       if (!enrichmentApply[s.id]) continue
       // Never overwrite unless user checked it; checkbox defaults handle safe behavior.
-      const value = sanitizeInline(s.suggested, 500)
+      const maxLen =
+        s.id === 'customer.companyProfile' ? 3000 : s.id === 'customer.whatTheyDo' ? 1200 : 500
+      const value = sanitizeInline(s.suggested, maxLen)
       s.apply?.(value)
       applied++
     }
@@ -980,6 +984,27 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       description: applied > 0 ? `Applied ${applied} suggestion(s) to the form. Remember to Save Onboarding.` : 'No suggestions selected.',
       status: applied > 0 ? 'success' : 'info',
       duration: 4000,
+      isClosable: true,
+    })
+  }
+
+  const handleApplyAllEmptyFields = () => {
+    const suggestions = buildEnrichmentSuggestions().filter((s) => s.supported && s.apply && s.suggested.trim())
+    let applied = 0
+    for (const s of suggestions) {
+      if (s.existing.trim()) continue // never overwrite
+      const maxLen =
+        s.id === 'customer.companyProfile' ? 3000 : s.id === 'customer.whatTheyDo' ? 1200 : 500
+      const value = sanitizeInline(s.suggested, maxLen)
+      if (!value.trim()) continue
+      s.apply?.(value)
+      applied++
+    }
+    toast({
+      title: 'Applied empty fields',
+      description: `Applied ${applied} suggestion(s).`,
+      status: applied > 0 ? 'success' : 'info',
+      duration: 3500,
       isClosable: true,
     })
   }
@@ -1192,6 +1217,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       customer: {
         name: customer.name,
         website: normalizeWebAddress(customer.website),
+        whatTheyDo: customer.whatTheyDo && customer.whatTheyDo.trim() ? customer.whatTheyDo.trim() : null,
+        companyProfile:
+          customer.companyProfile && customer.companyProfile.trim() ? customer.companyProfile.trim() : null,
         accountData: nextAccountData,
         monthlyRevenueFromCustomer: revenueNumber,
         // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
@@ -1488,6 +1516,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             </Box>
                           ))}
                           <HStack justify="flex-end">
+                            <Button size="sm" variant="outline" onClick={handleApplyAllEmptyFields}>
+                              Apply all empty fields
+                            </Button>
                             <Button size="sm" colorScheme="purple" onClick={handleApplyEnrichmentSelected}>
                               Apply selected
                             </Button>
@@ -1720,6 +1751,30 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               onChange={(e) => updateProfile({ clientHistory: e.target.value })}
               minH="120px"
               placeholder="Write a narrative history of the client..."
+            />
+          </FormControl>
+
+          <FormControl>
+            <FormLabel>What they do</FormLabel>
+            <Textarea
+              value={customer?.whatTheyDo || ''}
+              onChange={(e) =>
+                setCustomer((prev) => (prev ? { ...prev, whatTheyDo: e.target.value } : prev))
+              }
+              minH="90px"
+              placeholder="Short description of what the company does…"
+            />
+          </FormControl>
+
+          <FormControl>
+            <FormLabel>Company profile</FormLabel>
+            <Textarea
+              value={customer?.companyProfile || ''}
+              onChange={(e) =>
+                setCustomer((prev) => (prev ? { ...prev, companyProfile: e.target.value } : prev))
+              }
+              minH="140px"
+              placeholder="Longer profile / overview…"
             />
           </FormControl>
 
