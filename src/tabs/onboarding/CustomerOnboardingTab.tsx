@@ -901,8 +901,48 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           fetchedAt?: string | null
           fetchedByUserEmail?: string | null
           draft?: any
+          sourcesData?: any
           error?: string | null
         }
+  }
+
+  const determineSourceForSuggestion = (suggestionId: string, enrichment: any): string | null => {
+    const sourcesData = enrichment?.sourcesData && typeof enrichment.sourcesData === 'object' ? enrichment.sourcesData : null
+    const hasCompaniesHouse = !!sourcesData?.companiesHouse && typeof sourcesData.companiesHouse === 'object' && !sourcesData.companiesHouse.error
+    const hasWikidata = !!sourcesData?.wikidata && typeof sourcesData.wikidata === 'object' && !sourcesData.wikidata.error
+
+    // Companies House fields (only if CH succeeded)
+    if (
+      ['draft.registeredName', 'draft.companyNumber', 'draft.registeredAddress', 'draft.sicCodes', 'draft.foundingYear'].includes(
+        suggestionId,
+      )
+    ) {
+      return hasCompaniesHouse ? 'Companies House' : null
+    }
+
+    // Discovery is Bing, but accreditations extraction is from fetched website pages
+    if (suggestionId === 'client.accreditations') return 'Website'
+
+    // Website-derived fields
+    if (
+      [
+        'customer.website',
+        'customer.whatTheyDo',
+        'customer.companyProfile',
+        'client.social.websiteUrl',
+        'client.social.linkedinUrl',
+        'client.social.xUrl',
+        'client.social.facebookUrl',
+        'client.social.instagramUrl',
+      ].includes(suggestionId)
+    ) {
+      return 'Website'
+    }
+
+    // Wikidata (we only conservatively fill whatTheyDo in pipeline, but keep mapping explicit)
+    if (suggestionId === 'draft.wikidata') return hasWikidata ? 'Wikidata' : null
+
+    return null
   }
 
   const sanitizeInline = (value: string, maxLen: number) =>
@@ -1619,6 +1659,211 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             </Text>
                           ) : null}
 
+                          {(() => {
+                            const sourcesData =
+                              enrichment?.sourcesData && typeof enrichment.sourcesData === 'object'
+                                ? enrichment.sourcesData
+                                : null
+                            const websiteUrls = Array.isArray(sourcesData?.website?.fetchedUrls)
+                              ? (sourcesData.website.fetchedUrls as any[]).map((u) => String(u)).filter(Boolean)
+                              : []
+                            const companiesHouse =
+                              sourcesData?.companiesHouse && typeof sourcesData.companiesHouse === 'object'
+                                ? sourcesData.companiesHouse
+                                : null
+                            const bing =
+                              sourcesData?.bing && typeof sourcesData.bing === 'object' ? sourcesData.bing : null
+                            const wikidata =
+                              sourcesData?.wikidata && typeof sourcesData.wikidata === 'object'
+                                ? sourcesData.wikidata
+                                : null
+
+                            const hasAnySources =
+                              websiteUrls.length > 0 || !!companiesHouse || !!bing || !!wikidata
+
+                            const renderTruncatedList = (items: string[], key: string, maxItems = 3) => {
+                              const expanded = Boolean(enrichmentExpanded[key])
+                              const shown = expanded ? items : items.slice(0, maxItems)
+                              return (
+                                <Stack spacing={1}>
+                                  <Text fontSize="xs" color="gray.700">
+                                    {shown.join('\n')}
+                                  </Text>
+                                  {items.length > maxItems ? (
+                                    <Button
+                                      size="xs"
+                                      variant="link"
+                                      colorScheme="purple"
+                                      onClick={() =>
+                                        setEnrichmentExpanded((prev) => ({ ...prev, [key]: !expanded }))
+                                      }
+                                      alignSelf="flex-start"
+                                    >
+                                      {expanded ? 'Show less' : `Show all (${items.length})`}
+                                    </Button>
+                                  ) : null}
+                                </Stack>
+                              )
+                            }
+
+                            if (!hasAnySources) return null
+
+                            const fetchedAt = enrichment?.fetchedAt ? new Date(enrichment.fetchedAt).toLocaleString() : null
+                            const okBadge = (ok: boolean) => (
+                              <Badge colorScheme={ok ? 'green' : 'red'}>{ok ? 'OK' : 'Failed'}</Badge>
+                            )
+
+                            const hasError = (obj: any) => !!obj?.error
+
+                            return (
+                              <Accordion allowToggle>
+                                <AccordionItem border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                                  <h3>
+                                    <AccordionButton bg="white" _hover={{ bg: 'gray.50' }}>
+                                      <HStack flex="1" justify="space-between" align="center">
+                                        <Text fontWeight="semibold" fontSize="sm">
+                                          Sources
+                                        </Text>
+                                        <Text fontSize="xs" color="gray.500">
+                                          Provenance for this draft
+                                        </Text>
+                                      </HStack>
+                                      <AccordionIcon />
+                                    </AccordionButton>
+                                  </h3>
+                                  <AccordionPanel pt={0} pb={3}>
+                                    <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                                      <Table size="sm">
+                                        <Thead bg="gray.50">
+                                          <Tr>
+                                            <Th>Source</Th>
+                                            <Th>Status</Th>
+                                            <Th>Details</Th>
+                                          </Tr>
+                                        </Thead>
+                                        <Tbody>
+                                          <Tr>
+                                            <Td fontWeight="semibold">Website</Td>
+                                            <Td>{okBadge(websiteUrls.length > 0 && !hasError(sourcesData?.website))}</Td>
+                                            <Td>
+                                              <Stack spacing={1}>
+                                                {fetchedAt ? (
+                                                  <Text fontSize="xs" color="gray.600">
+                                                    Updated: {fetchedAt}
+                                                  </Text>
+                                                ) : null}
+                                                {websiteUrls.length ? (
+                                                  renderTruncatedList(websiteUrls, 'src.website.urls', 3)
+                                                ) : (
+                                                  <Text fontSize="xs" color="gray.500">
+                                                    No URLs recorded
+                                                  </Text>
+                                                )}
+                                              </Stack>
+                                            </Td>
+                                          </Tr>
+
+                                          {companiesHouse ? (
+                                            <Tr>
+                                              <Td fontWeight="semibold">Companies House</Td>
+                                              <Td>{okBadge(!hasError(companiesHouse))}</Td>
+                                              <Td>
+                                                {hasError(companiesHouse) ? (
+                                                  <Text fontSize="xs" color="gray.600">
+                                                    {String(companiesHouse.error)}
+                                                  </Text>
+                                                ) : (
+                                                  <Stack spacing={1}>
+                                                    <Text fontSize="xs" color="gray.600">
+                                                      Company number: {String(companiesHouse.company_number || '') || '—'}
+                                                    </Text>
+                                                    <Text fontSize="xs" color="gray.600">
+                                                      Status: {String(companiesHouse.company_status || '') || '—'}
+                                                    </Text>
+                                                  </Stack>
+                                                )}
+                                              </Td>
+                                            </Tr>
+                                          ) : null}
+
+                                          {bing ? (
+                                            <Tr>
+                                              <Td fontWeight="semibold">Bing (discovery)</Td>
+                                              <Td>{okBadge(!hasError(bing))}</Td>
+                                              <Td>
+                                                {hasError(bing) ? (
+                                                  <Text fontSize="xs" color="gray.600">
+                                                    {String(bing.error)}
+                                                  </Text>
+                                                ) : (
+                                                  <Stack spacing={2}>
+                                                    {Array.isArray(bing.queries) && bing.queries.length ? (
+                                                      <Box>
+                                                        <Text fontSize="xs" color="gray.600" fontWeight="semibold">
+                                                          Queries
+                                                        </Text>
+                                                        {renderTruncatedList(
+                                                          (bing.queries as any[]).map((q) => String(q)).filter(Boolean),
+                                                          'src.bing.queries',
+                                                          2,
+                                                        )}
+                                                      </Box>
+                                                    ) : null}
+                                                    {Array.isArray(bing.keptSameDomainUrls) && bing.keptSameDomainUrls.length ? (
+                                                      <Box>
+                                                        <Text fontSize="xs" color="gray.600" fontWeight="semibold">
+                                                          URLs chosen
+                                                        </Text>
+                                                        {renderTruncatedList(
+                                                          (bing.keptSameDomainUrls as any[])
+                                                            .map((u) => String(u))
+                                                            .filter(Boolean),
+                                                          'src.bing.urls',
+                                                          3,
+                                                        )}
+                                                      </Box>
+                                                    ) : (
+                                                      <Text fontSize="xs" color="gray.500">
+                                                        No URLs chosen
+                                                      </Text>
+                                                    )}
+                                                  </Stack>
+                                                )}
+                                              </Td>
+                                            </Tr>
+                                          ) : null}
+
+                                          {wikidata ? (
+                                            <Tr>
+                                              <Td fontWeight="semibold">Wikidata</Td>
+                                              <Td>{okBadge(!hasError(wikidata))}</Td>
+                                              <Td>
+                                                {hasError(wikidata) ? (
+                                                  <Text fontSize="xs" color="gray.600">
+                                                    {String(wikidata.error)}
+                                                  </Text>
+                                                ) : (
+                                                  <Stack spacing={1}>
+                                                    <Text fontSize="xs" color="gray.600">
+                                                      Entity: {String(wikidata.id || '') || '—'}
+                                                    </Text>
+                                                    <Text fontSize="xs" color="gray.600">
+                                                      Label: {String(wikidata.label || '') || '—'}
+                                                    </Text>
+                                                  </Stack>
+                                                )}
+                                              </Td>
+                                            </Tr>
+                                          ) : null}
+                                        </Tbody>
+                                      </Table>
+                                    </Box>
+                                  </AccordionPanel>
+                                </AccordionItem>
+                              </Accordion>
+                            )
+                          })()}
+
                           {draft && suggestions.length > 0 ? (
                             <Stack spacing={3}>
                               <Text fontSize="sm" color="gray.700">
@@ -1653,6 +1898,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                                             <Text fontSize="sm" color="gray.800">
                                               {suggestedPreview}
                                             </Text>
+                                            {(() => {
+                                              const src = determineSourceForSuggestion(s.id, enrichment)
+                                              return src ? (
+                                                <Text fontSize="xs" color="gray.500">
+                                                  Source: {src}
+                                                </Text>
+                                              ) : null
+                                            })()}
                                             {s.suggested.length > 240 ? (
                                               <Button
                                                 size="xs"
