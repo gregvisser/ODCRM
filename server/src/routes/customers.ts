@@ -12,6 +12,7 @@ import * as cheerio from 'cheerio'
 import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
+import { runUkEnrichmentPipeline } from '../lib/enrichment/pipeline.js'
 
 const router = Router()
 
@@ -2814,7 +2815,7 @@ router.post('/:id/attachments', (req, res) => {
             }
           }
 
-          // accreditation_evidence:<accreditationId> → update matching clientProfile.accreditations[]
+          // accreditation_evidence:<accreditationId> → update matching clientProfile.accreditations[] (back-compat)
           if (attachmentType.startsWith('accreditation_evidence:')) {
             const accreditationId = attachmentType.split(':')[1] || ''
             const accs = Array.isArray(profile.accreditations) ? profile.accreditations : []
@@ -2828,6 +2829,33 @@ router.post('/:id/attachments', (req, res) => {
                   fileUrl: attachment.fileUrl,
                 }
               }),
+            }
+          }
+
+          // certification_evidence → store linkage under clientProfile.accreditationsEvidence[accreditationName][]
+          if (attachmentType === 'certification_evidence') {
+            const accreditationName = String(((req as any).body || {}).accreditationName || '').trim()
+            if (accreditationName) {
+              const evidence =
+                profile.accreditationsEvidence && typeof profile.accreditationsEvidence === 'object'
+                  ? profile.accreditationsEvidence
+                  : {}
+              const existing = Array.isArray((evidence as any)[accreditationName])
+                ? (evidence as any)[accreditationName]
+                : []
+              const nextEntry = {
+                attachmentId: attachment.id,
+                fileName: attachment.fileName,
+                fileUrl: attachment.fileUrl,
+                uploadedAt: attachment.uploadedAt,
+              }
+              nextAccountData.clientProfile = {
+                ...profile,
+                accreditationsEvidence: {
+                  ...evidence,
+                  [accreditationName]: [...existing, nextEntry],
+                },
+              }
             }
           }
         } catch {
@@ -3416,11 +3444,11 @@ router.post('/:id/enrich', async (req, res) => {
     const actor = getActorIdentity(req)
 
     // Read customer and rate-limit / running gate under row lock
-    const { websiteUrl, input } = await prisma.$transaction(async (tx) => {
+    const { websiteUrl, domain, input, customerName } = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
       const customer = await tx.customer.findUnique({
         where: { id },
-        select: { id: true, website: true, domain: true, accountData: true, isArchived: true },
+        select: { id: true, name: true, website: true, domain: true, accountData: true, isArchived: true },
       })
       if (!customer) {
         const err: any = new Error('not_found')
@@ -3476,12 +3504,23 @@ router.post('/:id/enrich', async (req, res) => {
         throw err
       }
 
+      const normalizedDomain = String(body.domain || customer.domain || u.hostname || '')
+        .trim()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+        .toLowerCase()
+
       const nextEnrichment = {
         status: 'running',
         fetchedAt: new Date().toISOString(),
         fetchedByUserEmail: actor.email || null,
-        input: resolved.input,
-        sources: { websiteUrl: resolved.websiteUrl, fetchedUrls: [] as string[] },
+        input: { ...(resolved.input || {}), domain: normalizedDomain || undefined },
+        sourcesData: {
+          website: { fetchedUrls: [] as string[] },
+          companiesHouse: null,
+          bing: null,
+          wikidata: null,
+        },
         draft: {},
         error: null,
       }
@@ -3492,38 +3531,43 @@ router.post('/:id/enrich', async (req, res) => {
         data: { accountData: nextAccountData },
       })
 
-      return { websiteUrl: resolved.websiteUrl, input: resolved.input }
+      return { websiteUrl: resolved.websiteUrl, domain: normalizedDomain, input: resolved.input, customerName: customer.name }
     })
 
-    // Synchronous lightweight enrichment with strict cap on time and requests
-    const fetchedUrls: string[] = []
-    const pages: Array<{ url: string; html: string }> = []
+    const enableCompaniesHouse = String(process.env.ENABLE_COMPANIES_HOUSE_ENRICHMENT || '').toLowerCase() === 'true'
+    const companiesHouseApiKey = String(process.env.COMPANIES_HOUSE_API_KEY || '').trim()
+    const enableBing = String(process.env.ENABLE_BING_ENRICHMENT || '').toLowerCase() === 'true'
+    const bingKey = String(process.env.BING_SEARCH_KEY || '').trim()
+    const bingEndpoint = String(process.env.BING_SEARCH_ENDPOINT || 'https://api.bing.microsoft.com').trim()
+    const bingMarket = String(process.env.BING_SEARCH_MARKET || 'en-GB').trim()
+    const bingCount = Number(process.env.BING_SEARCH_COUNT || 5)
+    const enableWikidata = String(process.env.ENABLE_WIKIDATA_ENRICHMENT || '').toLowerCase() === 'true'
 
-    const homepageRes = await fetchWithTimeout(websiteUrl, ENRICHMENT_TIMEOUT_MS)
-    if (!homepageRes.ok) {
-      throw new Error(`Website fetch failed (HTTP ${homepageRes.status})`)
-    }
-    const homepageHtml = await homepageRes.text()
-    fetchedUrls.push(websiteUrl)
-    pages.push({ url: websiteUrl, html: homepageHtml })
+    const pipeline = await runUkEnrichmentPipeline({
+      customer: { id, name: customerName, website: null, domain: null },
+      input: { websiteUrl, domain },
+      limits: {
+        totalMs: 20_000,
+        perFetchMs: 10_000,
+        maxPages: 5,
+        companiesHouseMs: 9_000,
+        bingMs: 9_000,
+        wikidataMs: 7_000,
+      },
+      flags: {
+        enableCompaniesHouse,
+        companiesHouseApiKey,
+        enableBing,
+        bingKey,
+        bingEndpoint,
+        bingMarket,
+        bingCount: Number.isFinite(bingCount) ? bingCount : 5,
+        enableWikidata,
+      },
+    })
 
-    if (pages.length < ENRICHMENT_MAX_FETCHES) {
-      const aboutUrl = pickAboutUrl(websiteUrl, homepageHtml)
-      if (aboutUrl && fetchedUrls.length < ENRICHMENT_MAX_FETCHES) {
-        try {
-          const aboutRes = await fetchWithTimeout(aboutUrl, ENRICHMENT_TIMEOUT_MS)
-          if (aboutRes.ok) {
-            const aboutHtml = await aboutRes.text()
-            fetchedUrls.push(aboutUrl)
-            pages.push({ url: aboutUrl, html: aboutHtml })
-          }
-        } catch {
-          // ignore about page failures
-        }
-      }
-    }
-
-    const draft = extractLightDraft(websiteUrl, pages)
+    const draft = pipeline.draft
+    const sourcesData = pipeline.sourcesData
     const elapsedMs = Date.now() - startedAt
 
     // Persist done state (draft only)
@@ -3540,8 +3584,8 @@ router.post('/:id/enrich', async (req, res) => {
         status: 'done',
         fetchedAt: new Date().toISOString(),
         fetchedByUserEmail: actor.email || null,
-        input,
-        sources: { websiteUrl, fetchedUrls },
+        input: { ...(input || {}), domain: domain || undefined },
+        sourcesData,
         draft,
         error: null,
         elapsedMs,
@@ -3551,7 +3595,13 @@ router.post('/:id/enrich', async (req, res) => {
       return nextEnrichment
     })
 
-    return res.json({ success: true, status: result.status, fetchedAt: result.fetchedAt, draft: result.draft })
+    return res.json({
+      success: true,
+      status: result.status,
+      fetchedAt: result.fetchedAt,
+      draft: result.draft,
+      sourcesData: (result as any).sourcesData || sourcesData,
+    })
   } catch (error: any) {
     const statusCode = error?.statusCode || 500
     const message = error instanceof Error ? error.message : 'Unknown error'

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Accordion,
+  AccordionButton,
+  AccordionIcon,
+  AccordionItem,
+  AccordionPanel,
   Badge,
   Box,
   Button,
@@ -16,11 +21,17 @@ import {
   SimpleGrid,
   Spinner,
   Stack,
+  Table,
   Tag,
   TagCloseButton,
   TagLabel,
+  Tbody,
+  Td,
+  Th,
+  Thead,
   Text,
   Textarea,
+  Tr,
   useDisclosure,
   Modal,
   ModalOverlay,
@@ -273,6 +284,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [enrichmentDomainInput, setEnrichmentDomainInput] = useState<string>('')
   const [enrichmentLoading, setEnrichmentLoading] = useState(false)
   const [enrichmentApply, setEnrichmentApply] = useState<Record<string, boolean>>({})
+  const [enrichmentExpanded, setEnrichmentExpanded] = useState<Record<string, boolean>>({})
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -598,12 +610,25 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
     // PDF/DOC/DOCX must use Azure Blob via /api/customers/:id/attachments
     if (allowedDocTypes.includes(file.type)) {
+      const accreditationName =
+        clientProfile.accreditations.find((a) => a.id === id)?.name?.trim() || ''
+      if (!accreditationName) {
+        toast({
+          title: 'Accreditation name required',
+          description: 'Enter the accreditation name before uploading evidence.',
+          status: 'warning',
+          duration: 4000,
+          isClosable: true,
+        })
+        return
+      }
       setUploadingAccreditations((prev) => ({ ...prev, [id]: true }))
       void (async () => {
         try {
           const formData = new FormData()
           formData.append('file', file, file.name)
-          formData.append('attachmentType', `accreditation_evidence:${id}`)
+          formData.append('attachmentType', 'certification_evidence')
+          formData.append('accreditationName', accreditationName)
 
           const response = await fetch(`/api/customers/${customerId}/attachments`, {
             method: 'POST',
@@ -911,6 +936,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const enrichment = getEnrichment()
     const draft = enrichment?.draft && typeof enrichment.draft === 'object' ? enrichment.draft : {}
     const social = draft?.socialPresence && typeof draft.socialPresence === 'object' ? draft.socialPresence : {}
+    const suggestedAccreditations = Array.isArray((draft as any)?.accreditations) ? (draft as any).accreditations : []
+    const suggestedAccNames = suggestedAccreditations
+      .map((a: any) => String(a?.name || '').trim())
+      .filter(Boolean)
+    const existingAccNames = Array.isArray(clientProfile.accreditations)
+      ? clientProfile.accreditations.map((a) => String((a as any)?.name || '').trim()).filter(Boolean)
+      : []
 
     return [
       {
@@ -986,13 +1018,65 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         supported: true,
         apply: (value: string) => updateSocial({ instagramUrl: value }),
       },
+      {
+        id: 'client.accreditations',
+        label: 'Accreditations / Certifications',
+        existing: existingAccNames.join(', '),
+        suggested: suggestedAccNames.join(', '),
+        supported: true,
+        apply: () => {
+          const existingLower = new Set(existingAccNames.map((n) => n.toLowerCase()))
+          const toAdd = suggestedAccNames.filter((n) => !existingLower.has(n.toLowerCase()))
+          if (toAdd.length === 0) return
+          setIsDirty(true)
+          updateProfile({
+            accreditations: [
+              ...(Array.isArray(clientProfile.accreditations) ? clientProfile.accreditations : []),
+              ...toAdd.map((name: string) => ({ id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name })),
+            ] as any,
+          })
+        },
+      },
+      // Draft-only fields (copy/paste)
+      {
+        id: 'draft.registeredName',
+        label: 'Registered name (Companies House)',
+        existing: '',
+        suggested: String((draft as any)?.registeredName || ''),
+        supported: false,
+        apply: null,
+      },
+      {
+        id: 'draft.companyNumber',
+        label: 'Company number (Companies House)',
+        existing: '',
+        suggested: String((draft as any)?.companyNumber || ''),
+        supported: false,
+        apply: null,
+      },
+      {
+        id: 'draft.registeredAddress',
+        label: 'Registered address (Companies House)',
+        existing: '',
+        suggested: String((draft as any)?.registeredAddress || ''),
+        supported: false,
+        apply: null,
+      },
+      {
+        id: 'draft.sicCodes',
+        label: 'SIC codes (Companies House)',
+        existing: '',
+        suggested: Array.isArray((draft as any)?.sicCodes) ? (draft as any).sicCodes.join(', ') : '',
+        supported: false,
+        apply: null,
+      },
     ] as Array<{
       id: string
       label: string
       existing: string
       suggested: string
       supported: boolean
-      apply: null | ((value: string) => void)
+      apply: null | ((value: any) => void)
     }>
   }
 
@@ -1454,138 +1538,183 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
-              <FormLabel>Auto-populate from web</FormLabel>
-              <Box borderWidth="1px" borderRadius="lg" p={3} bg="white">
-                {(() => {
-                  const enrichment = getEnrichment()
-                  const status = String(enrichment?.status || 'idle')
-                  const draft = enrichment?.draft && typeof enrichment.draft === 'object' ? enrichment.draft : null
-                  const suggestions = buildEnrichmentSuggestions()
-                    .filter((s) => s.suggested.trim())
-                    .filter((s) => s.supported || (!s.supported && s.suggested.trim()))
+              {(() => {
+                const enrichment = getEnrichment()
+                const status = String(enrichment?.status || 'idle')
+                const draft = enrichment?.draft && typeof enrichment.draft === 'object' ? enrichment.draft : null
+                const suggestions = buildEnrichmentSuggestions()
+                  .filter((s) => s.suggested.trim())
 
-                  const statusColor =
-                    status === 'done'
-                      ? 'green'
-                      : status === 'running'
-                        ? 'blue'
-                        : status === 'failed'
-                          ? 'red'
-                          : 'gray'
+                const statusColor =
+                  status === 'done'
+                    ? 'green'
+                    : status === 'running'
+                      ? 'blue'
+                      : status === 'failed'
+                        ? 'red'
+                        : 'gray'
 
-                  return (
-                    <Stack spacing={3}>
-                      <HStack justify="space-between" flexWrap="wrap">
-                        <HStack>
-                          <Badge colorScheme={statusColor}>{status}</Badge>
-                          {enrichment?.fetchedAt ? (
-                            <Text fontSize="xs" color="gray.600">
-                              Last: {new Date(enrichment.fetchedAt).toLocaleString()}
-                            </Text>
-                          ) : null}
-                        </HStack>
-                        <Button
-                          size="sm"
-                          colorScheme="purple"
-                          variant="outline"
-                          onClick={() => void handleRunEnrichment()}
-                          isLoading={enrichmentLoading}
-                          isDisabled={!customer?.id || status === 'running'}
-                        >
-                          Fetch company info
-                        </Button>
-                      </HStack>
+                const statusLabel =
+                  status === 'done' ? 'Updated' : status === 'running' ? 'Fetching' : status === 'failed' ? 'Failed' : 'Idle'
 
-                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
-                        <FormControl>
-                          <FormLabel fontSize="xs" mb={1}>
-                            Website URL
-                          </FormLabel>
-                          <Input
-                            size="sm"
-                            value={enrichmentWebsiteInput}
-                            onChange={(e) => setEnrichmentWebsiteInput(e.target.value)}
-                            placeholder="https://example.com"
-                          />
-                        </FormControl>
-                        <FormControl>
-                          <FormLabel fontSize="xs" mb={1}>
-                            Domain (optional)
-                          </FormLabel>
-                          <Input
-                            size="sm"
-                            value={enrichmentDomainInput}
-                            onChange={(e) => setEnrichmentDomainInput(e.target.value)}
-                            placeholder="example.com"
-                          />
-                        </FormControl>
-                      </SimpleGrid>
-
-                      {status === 'failed' && enrichment?.error ? (
-                        <Text fontSize="xs" color="red.600">
-                          {enrichment.error}
-                        </Text>
-                      ) : null}
-
-                      {draft && suggestions.length > 0 ? (
-                        <Stack spacing={2}>
-                          <Text fontSize="xs" color="gray.600">
-                            Review suggestions. Nothing is applied automatically.
-                          </Text>
-                          {suggestions.map((s) => (
-                            <Box key={s.id} borderWidth="1px" borderRadius="md" p={2} bg="gray.50">
-                              <HStack justify="space-between" align="flex-start" spacing={3} flexWrap="wrap">
-                                <Box flex="1" minW={{ base: '100%', md: '260px' }}>
-                                  <Text fontSize="sm" fontWeight="semibold">
-                                    {s.label}
-                                  </Text>
-                                  <Text fontSize="xs" color="gray.600">
-                                    Current: {s.existing?.trim() ? sanitizeInline(s.existing, 120) : 'Not set'}
-                                  </Text>
-                                  <Text fontSize="xs" color="gray.700">
-                                    Suggested: {sanitizeInline(s.suggested, 200)}
-                                  </Text>
-                                  {!s.supported ? (
-                                    <Text fontSize="xs" color="gray.500">
-                                      Draft only (not mapped to an onboarding field) — copy/paste if useful.
-                                    </Text>
-                                  ) : null}
-                                </Box>
-                                {s.supported ? (
-                                  <Checkbox
-                                    isChecked={Boolean(enrichmentApply[s.id])}
-                                    onChange={(e) =>
-                                      setEnrichmentApply((prev) => ({ ...prev, [s.id]: e.target.checked }))
-                                    }
-                                    alignSelf="center"
-                                  >
-                                    Apply
-                                  </Checkbox>
-                                ) : null}
-                              </HStack>
+                return (
+                  <Accordion allowToggle defaultIndex={draft ? [0] : undefined}>
+                    <AccordionItem border="1px solid" borderColor="gray.200" borderRadius="lg" overflow="hidden">
+                      <h2>
+                        <AccordionButton bg="gray.50" _hover={{ bg: 'gray.100' }}>
+                          <HStack flex="1" justify="space-between" align="center" spacing={4}>
+                            <Box textAlign="left">
+                              <Text fontWeight="semibold">Company Enrichment</Text>
+                              <Text fontSize="xs" color="gray.600">
+                                {enrichment?.fetchedAt ? `Last updated ${new Date(enrichment.fetchedAt).toLocaleString()}` : 'Draft-only suggestions'}
+                              </Text>
                             </Box>
-                          ))}
-                          <HStack justify="flex-end">
-                            <Button size="sm" variant="outline" onClick={handleApplyAllEmptyFields}>
-                              Apply all empty fields
-                            </Button>
-                            <Button size="sm" colorScheme="purple" onClick={handleApplyEnrichmentSelected}>
-                              Apply selected
+                            <Badge colorScheme={statusColor}>{statusLabel}</Badge>
+                          </HStack>
+                          <AccordionIcon />
+                        </AccordionButton>
+                      </h2>
+                      <AccordionPanel p={4} bg="white">
+                        <Stack spacing={3}>
+                          <HStack spacing={3} align="flex-end" flexWrap="wrap" justify="space-between">
+                            <HStack spacing={3} flexWrap="wrap">
+                              <FormControl>
+                                <FormLabel fontSize="xs" mb={1}>
+                                  Website URL
+                                </FormLabel>
+                                <Input
+                                  size="sm"
+                                  value={enrichmentWebsiteInput}
+                                  onChange={(e) => setEnrichmentWebsiteInput(e.target.value)}
+                                  placeholder="https://example.com"
+                                />
+                              </FormControl>
+                              <FormControl>
+                                <FormLabel fontSize="xs" mb={1}>
+                                  Domain (optional)
+                                </FormLabel>
+                                <Input
+                                  size="sm"
+                                  value={enrichmentDomainInput}
+                                  onChange={(e) => setEnrichmentDomainInput(e.target.value)}
+                                  placeholder="example.com"
+                                />
+                              </FormControl>
+                            </HStack>
+                            <Button
+                              size="sm"
+                              colorScheme="purple"
+                              variant="outline"
+                              onClick={() => void handleRunEnrichment()}
+                              isLoading={enrichmentLoading}
+                              isDisabled={!customer?.id || status === 'running'}
+                            >
+                              Fetch
                             </Button>
                           </HStack>
-                          <Text fontSize="xs" color="gray.500">
-                            Suggestions apply to the form only. Use the existing <strong>Save Onboarding</strong> button below to persist.
-                          </Text>
+
+                          {status === 'failed' && enrichment?.error ? (
+                            <Text fontSize="sm" color="red.600">
+                              {enrichment.error}
+                            </Text>
+                          ) : null}
+
+                          {draft && suggestions.length > 0 ? (
+                            <Stack spacing={3}>
+                              <Text fontSize="sm" color="gray.700">
+                                Review suggestions (nothing is applied automatically).
+                              </Text>
+                              <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                                <Table size="sm">
+                                  <Thead bg="gray.50">
+                                    <Tr>
+                                      <Th>Field</Th>
+                                      <Th>Current</Th>
+                                      <Th>Suggested</Th>
+                                      <Th textAlign="center">Apply</Th>
+                                    </Tr>
+                                  </Thead>
+                                  <Tbody>
+                                    {suggestions.map((s) => {
+                                      const expanded = Boolean(enrichmentExpanded[s.id])
+                                      const suggestedPreview =
+                                        expanded || s.suggested.length <= 240
+                                          ? s.suggested
+                                          : `${sanitizeInline(s.suggested, 240)}…`
+                                      return (
+                                        <Tr key={s.id}>
+                                          <Td fontWeight="semibold" whiteSpace="nowrap">
+                                            {s.label}
+                                          </Td>
+                                          <Td color="gray.700">
+                                            {s.existing?.trim() ? sanitizeInline(s.existing, 220) : <Text color="gray.500">Not set</Text>}
+                                          </Td>
+                                          <Td>
+                                            <Text fontSize="sm" color="gray.800">
+                                              {suggestedPreview}
+                                            </Text>
+                                            {s.suggested.length > 240 ? (
+                                              <Button
+                                                size="xs"
+                                                variant="link"
+                                                colorScheme="purple"
+                                                onClick={() =>
+                                                  setEnrichmentExpanded((prev) => ({ ...prev, [s.id]: !expanded }))
+                                                }
+                                              >
+                                                {expanded ? 'Show less' : 'Show more'}
+                                              </Button>
+                                            ) : null}
+                                            {!s.supported ? (
+                                              <Text fontSize="xs" color="gray.500">
+                                                Draft only (copy/paste)
+                                              </Text>
+                                            ) : null}
+                                          </Td>
+                                          <Td textAlign="center">
+                                            {s.supported ? (
+                                              <Checkbox
+                                                isChecked={Boolean(enrichmentApply[s.id])}
+                                                onChange={(e) =>
+                                                  setEnrichmentApply((prev) => ({ ...prev, [s.id]: e.target.checked }))
+                                                }
+                                              />
+                                            ) : (
+                                              <Text fontSize="xs" color="gray.400">
+                                                —
+                                              </Text>
+                                            )}
+                                          </Td>
+                                        </Tr>
+                                      )
+                                    })}
+                                  </Tbody>
+                                </Table>
+                              </Box>
+
+                              <HStack justify="flex-end">
+                                <Button size="sm" variant="outline" onClick={handleApplyAllEmptyFields}>
+                                  Apply all empty fields
+                                </Button>
+                                <Button size="sm" colorScheme="purple" onClick={handleApplyEnrichmentSelected}>
+                                  Apply selected
+                                </Button>
+                              </HStack>
+                              <Text fontSize="xs" color="gray.500">
+                                Applied values only update the form. Use <strong>Save Onboarding</strong> to persist to the database.
+                              </Text>
+                            </Stack>
+                          ) : (
+                            <Text fontSize="sm" color="gray.500">
+                              {status === 'done' ? 'No suggestions found.' : 'Fetch to generate draft suggestions.'}
+                            </Text>
+                          )}
                         </Stack>
-                      ) : (
-                        <Text fontSize="xs" color="gray.500">
-                          {status === 'done' ? 'No suggestions found.' : 'Fetch to generate draft suggestions.'}
-                        </Text>
-                      )}
-                    </Stack>
-                  )
-                })()}
-              </Box>
+                      </AccordionPanel>
+                    </AccordionItem>
+                  </Accordion>
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Assigned Account Manager</FormLabel>
@@ -1904,6 +2033,28 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                               onClick={() => handleRemoveAccreditationFile(accreditation.id)}
                             />
                           </HStack>
+                        ) : (Array.isArray((clientProfile as any)?.accreditationsEvidence?.[accreditation.name]) &&
+                            (clientProfile as any).accreditationsEvidence[accreditation.name].length > 0) ? (
+                          <Stack spacing={1}>
+                            {(clientProfile as any).accreditationsEvidence[accreditation.name]
+                              .slice(-3)
+                              .map((ev: any, idx: number) => (
+                                <Link
+                                  key={`${ev?.attachmentId || idx}`}
+                                  href={String(ev?.fileUrl || '')}
+                                  isExternal
+                                  fontSize="sm"
+                                  color="teal.600"
+                                >
+                                  {String(ev?.fileName || 'View evidence')}
+                                </Link>
+                              ))}
+                            {(clientProfile as any).accreditationsEvidence[accreditation.name].length > 3 ? (
+                              <Text fontSize="xs" color="gray.500">
+                                Showing last 3 uploads
+                              </Text>
+                            ) : null}
+                          </Stack>
                         ) : (
                           <Text fontSize="sm" color="gray.500">
                             No evidence uploaded
