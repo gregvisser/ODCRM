@@ -2840,14 +2840,15 @@ function FieldRow({ label, children, editable, onEdit, isEditing }: FieldRowProp
 // Editable Field Component
 type EditableFieldProps = {
   value: string | number
-  onSave: (value: string | number) => void
+  onSave: (value: string | number) => void | Promise<void>
   onCancel: () => void
   isEditing: boolean
   onEdit: () => void
   label: string
-  type?: 'text' | 'number' | 'textarea' | 'date' | 'url'
+  type?: 'text' | 'number' | 'textarea' | 'date' | 'url' | 'select'
   placeholder?: string
   renderDisplay?: (value: string | number) => ReactNode
+  options?: Array<{ value: string; label: string }>
 }
 
 function EditableField({
@@ -2860,18 +2861,26 @@ function EditableField({
   type = 'text',
   placeholder,
   renderDisplay,
+  options,
 }: EditableFieldProps) {
   const [editValue, setEditValue] = useState<string>(String(value))
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     setEditValue(String(value))
   }, [value, isEditing])
 
-  const handleSave = () => {
-    if (type === 'number') {
-      onSave(Number(editValue) || 0)
-    } else {
-      onSave(editValue)
+  const handleSave = async () => {
+    try {
+      setIsSaving(true)
+      if (type === 'number') {
+        const n = Number(editValue)
+        await onSave(Number.isFinite(n) ? n : 0)
+      } else {
+        await onSave(editValue)
+      }
+    } finally {
+      setIsSaving(false)
     }
   }
 
@@ -2924,6 +2933,18 @@ function EditableField({
             placeholder={placeholder}
             size="sm"
           />
+        ) : type === 'select' ? (
+          <Select
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            size="sm"
+          >
+            {(options || []).map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
         ) : (
           <Input
             type={type}
@@ -2938,7 +2959,8 @@ function EditableField({
             size="xs"
             colorScheme="gray"
             leftIcon={<CheckIcon />}
-            onClick={handleSave}
+            onClick={() => void handleSave()}
+            isLoading={isSaving}
           >
             Save
           </Button>
@@ -2947,6 +2969,7 @@ function EditableField({
             variant="ghost"
             leftIcon={<CloseIcon />}
             onClick={handleCancel}
+            isDisabled={isSaving}
           >
             Cancel
           </Button>
@@ -3747,11 +3770,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const [editingCell, setEditingCell] = useState<{ accountName: string; field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>('')
   const [isSavingInlineEdit, setIsSavingInlineEdit] = useState(false)
-
-  // Account Details (drawer) edit mode - supports multi-field save (single audit event)
-  const [isEditingAccountDetails, setIsEditingAccountDetails] = useState(false)
-  const [accountDetailsDraft, setAccountDetailsDraft] = useState<any | null>(null)
-  const [isSavingAccountDetails, setIsSavingAccountDetails] = useState(false)
   
   // Sorting state
   const [sortColumn, setSortColumn] = useState<string | null>('spend')
@@ -3982,12 +4000,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   
   // Stable customer ID for email identity fetching (prevents render loops)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
-  
-  // Reset drawer edit mode when customer changes
-  useEffect(() => {
-    setIsEditingAccountDetails(false)
-    setAccountDetailsDraft(null)
-  }, [selectedCustomerId])
 
   const patchCustomerAccount = useCallback(
     async (customerId: string, patch: any) => {
@@ -4539,6 +4551,49 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       setSelectedAccount((prev) => (prev ? { ...prev, ...updates } : null))
     }
   }, [selectedAccount?.name])
+
+  const applyCustomerPatchAndRefresh = useCallback(
+    async (opts: {
+      customerId: string
+      patch: any
+      /** Optional local updates to keep list UI responsive */
+      localAccountUpdates?: Partial<Account>
+      /** Optionally refresh the drawer detail after save (default true) */
+      refreshDetail?: boolean
+    }) => {
+      const { customerId, patch, localAccountUpdates, refreshDetail = true } = opts
+
+      const result = await patchCustomerAccount(customerId, patch)
+      if (!result.ok) return { ok: false as const }
+
+      // Keep Notes tab in sync with the auto audit note
+      const notesFromPatch = result.data?.customer?.accountData?.notes
+
+      // Handle name changes (rename the account in local state)
+      const oldName = selectedAccount?.name || ''
+      const newName = typeof patch?.name === 'string' && patch.name.trim() ? patch.name.trim() : ''
+      if (newName && oldName && newName !== oldName) {
+        updateAccountSilent(oldName, { name: newName })
+        setSelectedAccount((prev) => (prev ? { ...prev, name: newName } : prev))
+      }
+
+      const targetName = newName || oldName
+      if (notesFromPatch && targetName) {
+        updateAccountSilent(targetName, { notes: notesFromPatch })
+      }
+      if (localAccountUpdates && targetName) {
+        updateAccountSilent(targetName, localAccountUpdates)
+      }
+
+      if (refreshDetail) {
+        const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${customerId}`)
+        if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+      }
+
+      return { ok: true as const }
+    },
+    [patchCustomerAccount, selectedAccount?.name, updateAccountSilent],
+  )
 
   // Auto-enrich existing accounts with verified web data (no AI).
   useEffect(() => {
@@ -6138,279 +6193,162 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                               : typeof ad?.days === 'number'
                                 ? ad.days
                                 : null
-                            const emailAccountsArr = Array.isArray(details?.emailAccounts) ? details.emailAccounts : []
-                            const activeUsers = (dbUsers || []).filter((u) => u.accountStatus === 'Active')
+                          const emailAccountsArr = Array.isArray(details?.emailAccounts) ? details.emailAccounts : []
+                          const activeUsers = (dbUsers || []).filter((u) => u.accountStatus === 'Active')
+                          const accountName = selectedAccount.name
+                          const customerId = selectedCustomerId
 
-                            const startEdit = () => {
-                              if (!selectedCustomerId) return
-                              setAccountDetailsDraft({
-                                name: c?.name || selectedAccount.name || '',
-                                domain: c?.domain || '',
-                                website: website || '',
-                                sector: c?.sector || '',
-                                leadsReportingUrl: leadsUrl || '',
-                                leadsGoogleSheetLabel: leadsLabel || '',
-                                weeklyLeadTarget: typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : '',
-                                monthlyLeadTarget: typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : '',
-                                assignedAccountManagerId:
-                                  (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
-                                  (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
-                                  '',
-                                assignedClientDdiNumber:
-                                  (typeof details?.assignedClientDdiNumber === 'string' ? details.assignedClientDdiNumber : '') ||
-                                  (typeof ad?.assignedClientDdiNumber === 'string' ? ad.assignedClientDdiNumber : '') ||
-                                  '',
-                                daysPerWeek: daysPerWeek ?? '',
-                                emailAccountsCsv: Array.isArray(emailAccountsArr)
-                                  ? emailAccountsArr.map((v: any) => String(v || '').trim()).filter(Boolean).join(', ')
-                                  : '',
-                              })
-                              setIsEditingAccountDetails(true)
-                            }
-
-                            const cancelEdit = () => {
-                              setIsEditingAccountDetails(false)
-                              setAccountDetailsDraft(null)
-                            }
-
-                            const saveEdit = async () => {
-                              if (!selectedCustomerId) return
-                              const d = accountDetailsDraft || {}
-                              const patch: any = {}
-
-                              const nextName = String(d.name || '').trim()
-                              if (nextName && nextName !== (c?.name || selectedAccount.name)) patch.name = nextName
-
-                              const nextDomain = String(d.domain || '').trim()
-                              const nextWebsite = String(d.website || '').trim()
-                              const nextSector = String(d.sector || '').trim()
-                              const nextLeadsUrl = String(d.leadsReportingUrl || '').trim()
-                              const nextLeadsLabel = String(d.leadsGoogleSheetLabel || '').trim()
-
-                              if (nextDomain !== String(c?.domain || '').trim()) patch.domain = nextDomain ? nextDomain : null
-                              if (nextWebsite !== website) patch.website = nextWebsite ? nextWebsite : null
-                              if (nextSector !== String(c?.sector || '').trim()) patch.sector = nextSector ? nextSector : null
-
-                              // Leads URL+label: if URL set, label must be set
-                              if (nextLeadsUrl && !nextLeadsLabel) {
-                                toast({
-                                  title: 'Leads label required',
-                                  description: 'Please set a Google Sheet label when a Leads URL is provided.',
-                                  status: 'warning',
-                                  duration: 4000,
-                                  isClosable: true,
-                                })
-                                return
-                              }
-                              if (nextLeadsUrl !== leadsUrl) patch.leadsReportingUrl = nextLeadsUrl ? nextLeadsUrl : null
-                              if (nextLeadsLabel !== leadsLabel) patch.leadsGoogleSheetLabel = nextLeadsLabel ? nextLeadsLabel : null
-
-                              const accountDetailsPatch: any = {}
-                              const nextManagerId = String(d.assignedAccountManagerId || '').trim()
-                              const currentManagerId =
-                                (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
-                                (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
-                                ''
-                              if (nextManagerId !== String(currentManagerId || '').trim()) {
-                                accountDetailsPatch.assignedAccountManagerId = nextManagerId ? nextManagerId : null
-                              }
-
-                              const nextDdi = String(d.assignedClientDdiNumber || '').trim()
-                              const currentDdi =
-                                (typeof details?.assignedClientDdiNumber === 'string' ? details.assignedClientDdiNumber : '') ||
-                                (typeof ad?.assignedClientDdiNumber === 'string' ? ad.assignedClientDdiNumber : '') ||
-                                ''
-                              if (nextDdi !== String(currentDdi || '').trim()) {
-                                accountDetailsPatch.assignedClientDdiNumber = nextDdi ? nextDdi : null
-                              }
-
-                              const nextDays = d.daysPerWeek === '' ? null : Number(d.daysPerWeek)
-                              if ((daysPerWeek ?? null) !== (nextDays ?? null)) {
-                                accountDetailsPatch.daysPerWeek = nextDays
-                              }
-
-                              const nextEmailAccounts = String(d.emailAccountsCsv || '')
-                                .split(',')
-                                .map((s: string) => s.trim())
-                                .filter(Boolean)
-                              const currentEmailAccounts = Array.isArray(emailAccountsArr)
-                                ? emailAccountsArr.map((v: any) => String(v || '').trim()).filter(Boolean)
-                                : []
-                              if (JSON.stringify(nextEmailAccounts) !== JSON.stringify(currentEmailAccounts)) {
-                                accountDetailsPatch.emailAccounts = nextEmailAccounts
-                              }
-
-                              // Lead targets (DB scalars - source of truth)
-                              const nextWeeklyTarget = d.weeklyLeadTarget === '' ? null : Number(d.weeklyLeadTarget)
-                              const currentWeeklyTarget = typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : null
-                              if ((currentWeeklyTarget ?? null) !== (Number.isFinite(nextWeeklyTarget as any) ? nextWeeklyTarget : null)) {
-                                patch.weeklyLeadTarget = Number.isFinite(nextWeeklyTarget as any) ? Math.max(0, Math.round(nextWeeklyTarget as any)) : null
-                              }
-
-                              const nextMonthlyTarget = d.monthlyLeadTarget === '' ? null : Number(d.monthlyLeadTarget)
-                              const currentMonthlyTarget = typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : null
-                              if ((currentMonthlyTarget ?? null) !== (Number.isFinite(nextMonthlyTarget as any) ? nextMonthlyTarget : null)) {
-                                patch.monthlyLeadTarget = Number.isFinite(nextMonthlyTarget as any) ? Math.max(0, Math.round(nextMonthlyTarget as any)) : null
-                              }
-
-                              if (Object.keys(accountDetailsPatch).length) {
-                                patch.accountData = { accountDetails: accountDetailsPatch }
-                              }
-
-                              if (!Object.keys(patch).length) {
-                                toast({ title: 'No changes to save', status: 'info', duration: 2000, isClosable: true })
-                                cancelEdit()
-                                return
-                              }
-
-                              setIsSavingAccountDetails(true)
-                              const result = await patchCustomerAccount(selectedCustomerId, patch)
-                              setIsSavingAccountDetails(false)
-                              if (!result.ok) return
-
-                              // Refresh detail view (computed manager user, etc.)
-                              const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${selectedCustomerId}`)
-                              if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
-
-                              // Keep Notes tab in sync with the auto audit note
-                              const notesFromPatch = result.data?.customer?.accountData?.notes
-                              const oldName = selectedAccount?.name || ''
-                              const newName = typeof patch.name === 'string' && patch.name.trim() ? patch.name.trim() : ''
-                              if (newName && oldName && newName !== oldName) {
-                                updateAccountSilent(oldName, { name: newName })
-                                setSelectedAccount((prev) => (prev ? { ...prev, name: newName } : prev))
-                              }
-                              const targetName = newName || oldName
-                              if (notesFromPatch && targetName) {
-                                updateAccountSilent(targetName, { notes: notesFromPatch })
-                              }
-                              if (targetName) {
-                                if (patch.weeklyLeadTarget !== undefined) {
-                                  // Preserve null when user clears the field (null means "not set", not 0).
-                                  updateAccountSilent(targetName, { weeklyTarget: patch.weeklyLeadTarget as any })
-                                }
-                                if (patch.monthlyLeadTarget !== undefined) {
-                                  // Preserve null when user clears the field (null means "not set", not 0).
-                                  updateAccountSilent(targetName, { monthlyTarget: patch.monthlyLeadTarget as any })
-                                }
-                              }
-
-                              toast({ title: 'Saved', status: 'success', duration: 2000, isClosable: true })
-                              cancelEdit()
-                            }
+                          const managerIdCurrent =
+                            (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
+                            (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
+                            ''
+                          const managerSelectOptions = [
+                            { value: '', label: 'Not set' },
+                            ...activeUsers.map((u) => ({
+                              value: u.id,
+                              label: `${`${u.firstName} ${u.lastName}`.trim()} (${u.email})`,
+                            })),
+                          ]
 
                           return (
-                              <Stack spacing={4}>
-                                <HStack justify="flex-end">
-                                  {!isEditingAccountDetails ? (
-                                    <Button size="sm" variant="outline" onClick={startEdit} isDisabled={!selectedCustomerId}>
-                                      Edit
-                                    </Button>
-                                  ) : (
-                                    <HStack spacing={2}>
-                                      <Button size="sm" variant="ghost" onClick={cancelEdit} isDisabled={isSavingAccountDetails}>
-                                        Cancel
-                                      </Button>
-                                      <Button size="sm" colorScheme="gray" onClick={() => void saveEdit()} isLoading={isSavingAccountDetails}>
-                                        Save changes
-                                      </Button>
-                                    </HStack>
-                                  )}
-                                </HStack>
+                            <Stack spacing={6}>
+                              <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                <EditableField
+                                  label="Customer Name"
+                                  value={c?.name || selectedAccount.name}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.name')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.name')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.name')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    if (!next) return
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { name: next } })
+                                    stopEditing(accountName, 'drawer.details.name')
+                                  }}
+                                  placeholder="Customer name"
+                                />
 
-                                <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-                                  <FieldRow label="Customer Name">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        value={accountDetailsDraft?.name ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), name: e.target.value }))}
-                                      />
-                                    ) : (
-                                      <Text fontWeight="medium">{c?.name || selectedAccount.name}</Text>
-                                    )}
-                                  </FieldRow>
-                                  <FieldRow label="Domain">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        value={accountDetailsDraft?.domain ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), domain: e.target.value }))}
-                                      />
-                                    ) : (
-                                      <Text color={c?.domain ? 'gray.800' : 'gray.500'}>{c?.domain || 'Not set'}</Text>
-                                    )}
-                                  </FieldRow>
+                                <EditableField
+                                  label="Domain"
+                                  value={c?.domain || ''}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.domain')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.domain')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.domain')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { domain: next ? next : null } })
+                                    stopEditing(accountName, 'drawer.details.domain')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                  <FieldRow label="Web Address">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        value={accountDetailsDraft?.website ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), website: e.target.value }))}
-                                      />
-                                    ) : website ? (
-                                      <Link href={website} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
-                                        {website}
+                                <EditableField
+                                  label="Web Address"
+                                  value={website || ''}
+                                  type="url"
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.website')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.website')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.website')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { website: next ? next : null } })
+                                    stopEditing(accountName, 'drawer.details.website')
+                                  }}
+                                  renderDisplay={(val) => {
+                                    const url = String(val || '').trim()
+                                    return url ? (
+                                      <Link href={url} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                        {url}
                                       </Link>
                                     ) : (
                                       <Text color="gray.500">Not set</Text>
-                                    )}
-                                  </FieldRow>
+                                    )
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                  <FieldRow label="Sector">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        value={accountDetailsDraft?.sector ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), sector: e.target.value }))}
-                                      />
-                                    ) : (
-                                      <Text color={c?.sector ? 'gray.800' : 'gray.500'}>{c?.sector || 'Not set'}</Text>
-                                    )}
-                                  </FieldRow>
+                                <EditableField
+                                  label="Sector"
+                                  value={c?.sector || ''}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.sector')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.sector')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.sector')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { sector: next ? next : null } })
+                                    stopEditing(accountName, 'drawer.details.sector')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                  <FieldRow label="Leads Google Sheet">
-                                    {isEditingAccountDetails ? (
-                                      <Stack spacing={2}>
-                                        <Input
-                                          size="sm"
-                                          placeholder="Label"
-                                          value={accountDetailsDraft?.leadsGoogleSheetLabel ?? ''}
-                                          onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), leadsGoogleSheetLabel: e.target.value }))}
-                                        />
-                                        <Input
-                                          size="sm"
-                                          placeholder="URL"
-                                          value={accountDetailsDraft?.leadsReportingUrl ?? ''}
-                                          onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), leadsReportingUrl: e.target.value }))}
-                                        />
-                                      </Stack>
-                                    ) : (
-                                      <GoogleSheetLink
-                                        url={leadsUrl}
-                                        label={leadsLabel}
-                                        fallbackLabel="Leads Google Sheet"
-                                        fontSize="sm"
-                                      />
-                                    )}
-                                  </FieldRow>
+                                <EditableField
+                                  label="Leads Google Sheet Label"
+                                  value={leadsLabel || ''}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.leadsLabel')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.leadsLabel')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.leadsLabel')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { leadsGoogleSheetLabel: next ? next : null } })
+                                    stopEditing(accountName, 'drawer.details.leadsLabel')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                  <FieldRow label="Assigned Account Manager">
-                                    {isEditingAccountDetails ? (
-                                      <Select
-                                        size="sm"
-                                        value={accountDetailsDraft?.assignedAccountManagerId ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), assignedAccountManagerId: e.target.value }))}
-                                      >
-                                        <option value="">Not set</option>
-                                        {activeUsers.map((u) => (
-                                          <option key={u.id} value={u.id}>
-                                            {`${u.firstName} ${u.lastName}`.trim()} ({u.email})
-                                          </option>
-                                        ))}
-                                      </Select>
-                                    ) : manager ? (
+                                <EditableField
+                                  label="Leads Google Sheet URL"
+                                  value={leadsUrl || ''}
+                                  type="url"
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.leadsUrl')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.leadsUrl')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.leadsUrl')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    const currentLabel = String(c?.leadsGoogleSheetLabel || '').trim()
+                                    if (next && !currentLabel) {
+                                      toast({
+                                        title: 'Leads label required',
+                                        description: 'Set a Google Sheet label before adding a Leads URL.',
+                                        status: 'warning',
+                                        duration: 4000,
+                                        isClosable: true,
+                                      })
+                                      return
+                                    }
+                                    await applyCustomerPatchAndRefresh({ customerId, patch: { leadsReportingUrl: next ? next : null } })
+                                    stopEditing(accountName, 'drawer.details.leadsUrl')
+                                  }}
+                                  renderDisplay={() => (
+                                    <GoogleSheetLink url={leadsUrl} label={leadsLabel} fallbackLabel="Leads Google Sheet" fontSize="sm" />
+                                  )}
+                                  placeholder="Not set"
+                                />
+
+                                <EditableField
+                                  label="Assigned Account Manager"
+                                  value={managerIdCurrent}
+                                  type="select"
+                                  options={managerSelectOptions}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.manager')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.manager')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.manager')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { accountDetails: { assignedAccountManagerId: next ? next : null } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.manager')
+                                  }}
+                                  renderDisplay={() =>
+                                    manager ? (
                                       <Stack spacing={1}>
                                         <Text fontWeight="medium">
                                           {`${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email}
@@ -6422,121 +6360,160 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                       </Stack>
                                     ) : (
                                       <Text color="gray.500">Not set</Text>
-                                    )}
-                                  </FieldRow>
+                                    )
+                                  }
+                                />
 
-                                  <FieldRow label="Assigned Client DDI & Number">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        value={accountDetailsDraft?.assignedClientDdiNumber ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), assignedClientDdiNumber: e.target.value }))}
-                                      />
-                                    ) : (
-                                      <Text color={details?.assignedClientDdiNumber ? 'gray.800' : 'gray.500'}>
-                                        {details?.assignedClientDdiNumber || 'Not set'}
-                                      </Text>
-                                    )}
-                                  </FieldRow>
+                                <EditableField
+                                  label="Assigned Client DDI & Number"
+                                  value={String(details?.assignedClientDdiNumber || '')}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.ddi')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.ddi')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.ddi')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { accountDetails: { assignedClientDdiNumber: next ? next : null } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.ddi')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                  <FieldRow label="Days a week">
-                                    {isEditingAccountDetails ? (
-                                      <NumberInput
-                                        size="sm"
-                                        value={accountDetailsDraft?.daysPerWeek ?? ''}
-                                        onChange={(_, v) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), daysPerWeek: Number.isFinite(v) ? v : '' }))}
-                                        min={0}
-                                        max={7}
-                                      >
-                                        <NumberInputField />
-                                      </NumberInput>
-                                    ) : (
-                                      <Text color={daysPerWeek ? 'gray.800' : 'gray.500'}>{daysPerWeek ?? 'Not set'}</Text>
-                                    )}
-                                  </FieldRow>
+                                <EditableField
+                                  label="Days a week"
+                                  value={typeof daysPerWeek === 'number' ? String(daysPerWeek) : ''}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.days')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.days')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.days')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const raw = String(v ?? '').trim()
+                                    if (raw !== '' && !Number.isFinite(Number(raw))) {
+                                      toast({ title: 'Invalid number', status: 'error', duration: 2500, isClosable: true })
+                                      return
+                                    }
+                                    const next = raw === '' ? null : Math.max(0, Math.min(7, Math.round(Number(raw))))
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { accountDetails: { daysPerWeek: next } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.days')
+                                  }}
+                                  placeholder="Not set"
+                                  renderDisplay={() => (
+                                    <Text color={typeof daysPerWeek === 'number' ? 'gray.800' : 'gray.500'}>
+                                      {typeof daysPerWeek === 'number' ? daysPerWeek : 'Not set'}
+                                    </Text>
+                                  )}
+                                />
 
-                                  <FieldRow label="Email accounts (slots)">
-                                    {isEditingAccountDetails ? (
-                                      <Input
-                                        size="sm"
-                                        placeholder="Comma-separated"
-                                        value={accountDetailsDraft?.emailAccountsCsv ?? ''}
-                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), emailAccountsCsv: e.target.value }))}
-                                      />
-                                    ) : Array.isArray(details?.emailAccounts) && details.emailAccounts.some((v: any) => String(v || '').trim()) ? (
+                                <EditableField
+                                  label="Email accounts (slots)"
+                                  value={Array.isArray(emailAccountsArr) ? emailAccountsArr.map((x: any) => String(x || '').trim()).filter(Boolean).join(', ') : ''}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.emailSlots')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.emailSlots')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.emailSlots')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const list = String(v || '')
+                                      .split(',')
+                                      .map((s) => s.trim())
+                                      .filter(Boolean)
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { accountDetails: { emailAccounts: list } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.emailSlots')
+                                  }}
+                                  placeholder="Comma-separated"
+                                  renderDisplay={() =>
+                                    Array.isArray(emailAccountsArr) && emailAccountsArr.some((x: any) => String(x || '').trim()) ? (
                                       <Stack spacing={1}>
-                                        {details.emailAccounts
-                                          .map((v: any) => String(v || '').trim())
+                                        {emailAccountsArr
+                                          .map((x: any) => String(x || '').trim())
                                           .filter(Boolean)
-                                          .map((v: string) => (
-                                            <Text key={v} fontSize="sm">
-                                              {v}
+                                          .map((x: string) => (
+                                            <Text key={x} fontSize="sm">
+                                              {x}
                                             </Text>
                                           ))}
                                       </Stack>
                                     ) : (
                                       <Text color="gray.500">Not set</Text>
-                                    )}
+                                    )
+                                  }
+                                />
+                              </SimpleGrid>
+
+                              <Divider />
+
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                  Leads Targets & Actuals
+                                </Text>
+                                <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                  <EditableField
+                                    label="Weekly Target"
+                                    value={typeof c?.weeklyLeadTarget === 'number' ? String(c.weeklyLeadTarget) : ''}
+                                    isEditing={isFieldEditing(accountName, 'drawer.details.weeklyTarget')}
+                                    onEdit={() => startEditing(accountName, 'drawer.details.weeklyTarget')}
+                                    onCancel={() => stopEditing(accountName, 'drawer.details.weeklyTarget')}
+                                    onSave={async (v) => {
+                                      if (!customerId) return
+                                      const raw = String(v ?? '').trim()
+                                      if (raw !== '' && !Number.isFinite(Number(raw))) {
+                                        toast({ title: 'Invalid number', status: 'error', duration: 2500, isClosable: true })
+                                        return
+                                      }
+                                      const next = raw === '' ? null : Math.max(0, Math.round(Number(raw)))
+                                      await applyCustomerPatchAndRefresh({
+                                        customerId,
+                                        patch: { weeklyLeadTarget: next },
+                                        localAccountUpdates: { weeklyTarget: next as any },
+                                      })
+                                      stopEditing(accountName, 'drawer.details.weeklyTarget')
+                                    }}
+                                    placeholder="Not set"
+                                  />
+
+                                  <EditableField
+                                    label="Monthly Target"
+                                    value={typeof c?.monthlyLeadTarget === 'number' ? String(c.monthlyLeadTarget) : ''}
+                                    isEditing={isFieldEditing(accountName, 'drawer.details.monthlyTarget')}
+                                    onEdit={() => startEditing(accountName, 'drawer.details.monthlyTarget')}
+                                    onCancel={() => stopEditing(accountName, 'drawer.details.monthlyTarget')}
+                                    onSave={async (v) => {
+                                      if (!customerId) return
+                                      const raw = String(v ?? '').trim()
+                                      if (raw !== '' && !Number.isFinite(Number(raw))) {
+                                        toast({ title: 'Invalid number', status: 'error', duration: 2500, isClosable: true })
+                                        return
+                                      }
+                                      const next = raw === '' ? null : Math.max(0, Math.round(Number(raw)))
+                                      await applyCustomerPatchAndRefresh({
+                                        customerId,
+                                        patch: { monthlyLeadTarget: next },
+                                        localAccountUpdates: { monthlyTarget: next as any },
+                                      })
+                                      stopEditing(accountName, 'drawer.details.monthlyTarget')
+                                    }}
+                                    placeholder="Not set"
+                                  />
+
+                                  <FieldRow label="Weekly Actual (sync)">
+                                    <Text color="gray.700">{typeof c?.weeklyLeadActual === 'number' ? c.weeklyLeadActual : 0}</Text>
+                                  </FieldRow>
+
+                                  <FieldRow label="Monthly Actual (sync)">
+                                    <Text color="gray.700">{typeof c?.monthlyLeadActual === 'number' ? c.monthlyLeadActual : 0}</Text>
                                   </FieldRow>
                                 </SimpleGrid>
-
-                                <Divider />
-
-                                <Box>
-                                  <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
-                                    Leads Targets & Actuals
-                                  </Text>
-                                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-                                    <FieldRow label="Weekly Target">
-                                      {isEditingAccountDetails ? (
-                                        <NumberInput
-                                          size="sm"
-                                          value={accountDetailsDraft?.weeklyLeadTarget ?? ''}
-                                          onChange={(_, v) =>
-                                            setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), weeklyLeadTarget: Number.isFinite(v) ? v : '' }))
-                                          }
-                                          min={0}
-                                          precision={0}
-                                        >
-                                          <NumberInputField />
-                                        </NumberInput>
-                                      ) : (
-                                        <Text fontWeight="medium" color={typeof c?.weeklyLeadTarget === 'number' ? 'gray.800' : 'gray.500'}>
-                                          {typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : 'Not set'}
-                                        </Text>
-                                      )}
-                                    </FieldRow>
-
-                                    <FieldRow label="Monthly Target">
-                                      {isEditingAccountDetails ? (
-                                        <NumberInput
-                                          size="sm"
-                                          value={accountDetailsDraft?.monthlyLeadTarget ?? ''}
-                                          onChange={(_, v) =>
-                                            setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), monthlyLeadTarget: Number.isFinite(v) ? v : '' }))
-                                          }
-                                          min={0}
-                                          precision={0}
-                                        >
-                                          <NumberInputField />
-                                        </NumberInput>
-                                      ) : (
-                                        <Text fontWeight="medium" color={typeof c?.monthlyLeadTarget === 'number' ? 'gray.800' : 'gray.500'}>
-                                          {typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : 'Not set'}
-                                        </Text>
-                                      )}
-                                    </FieldRow>
-
-                                    <FieldRow label="Weekly Actual (sync)">
-                                      <Text color="gray.700">{typeof c?.weeklyLeadActual === 'number' ? c.weeklyLeadActual : 0}</Text>
-                                    </FieldRow>
-
-                                    <FieldRow label="Monthly Actual (sync)">
-                                      <Text color="gray.700">{typeof c?.monthlyLeadActual === 'number' ? c.monthlyLeadActual : 0}</Text>
-                                    </FieldRow>
-                                  </SimpleGrid>
-                                </Box>
-                              </Stack>
+                              </Box>
+                            </Stack>
                           )
                         })()}
                       </TabPanel>
@@ -6551,89 +6528,222 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           const sectorIds = Array.isArray(profile?.targetJobSectorIds) ? profile.targetJobSectorIds : []
                           const roleIds = Array.isArray(profile?.targetJobRoleIds) ? profile.targetJobRoleIds : []
                           const social = profile?.socialMediaPresence && typeof profile.socialMediaPresence === 'object' ? profile.socialMediaPresence : {}
+                          const accountName = selectedAccount.name
+                          const customerId = selectedCustomerId
+
+                          const sectorLabelToId: Record<string, string> = {}
+                          Object.entries(jobSectorsById || {}).forEach(([id, label]) => {
+                            const k = String(label || '').toLowerCase().trim()
+                            if (k) sectorLabelToId[k] = String(id)
+                          })
+                          const roleLabelToId: Record<string, string> = {}
+                          Object.entries(jobRolesById || {}).forEach(([id, label]) => {
+                            const k = String(label || '').toLowerCase().trim()
+                            if (k) roleLabelToId[k] = String(id)
+                          })
+
+                          const parseIdsFromText = (raw: string, labelToId: Record<string, string>) => {
+                            const items = raw
+                              .split(/[\n,]+/g)
+                              .map((s) => s.trim())
+                              .filter(Boolean)
+                            const ids = items.map((item) => labelToId[item.toLowerCase().trim()] || item)
+                            return Array.from(new Set(ids))
+                          }
 
                           return (
                             <Stack spacing={6}>
                               <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-                                <FieldRow label="Client History">
-                                  <Text whiteSpace="pre-wrap" color={profile?.clientHistory ? 'gray.800' : 'gray.500'}>
-                                    {profile?.clientHistory || 'Not set'}
-                                  </Text>
-                                </FieldRow>
+                                <EditableField
+                                  label="Client History"
+                                  value={String(profile?.clientHistory || '')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.clientHistory')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.clientHistory')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.clientHistory')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { clientHistory: String(v ?? '') } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.clientHistory')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                <FieldRow label="Key Business Objectives">
-                                  <Text whiteSpace="pre-wrap" color={profile?.keyBusinessObjectives ? 'gray.800' : 'gray.500'}>
-                                    {profile?.keyBusinessObjectives || 'Not set'}
-                                  </Text>
-                                </FieldRow>
+                                <EditableField
+                                  label="Key Business Objectives"
+                                  value={String(profile?.keyBusinessObjectives || '')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.keyBusinessObjectives')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.keyBusinessObjectives')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.keyBusinessObjectives')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { keyBusinessObjectives: String(v ?? '') } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.keyBusinessObjectives')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                <FieldRow label="Client USPs">
-                                  <Text whiteSpace="pre-wrap" color={profile?.clientUSPs ? 'gray.800' : 'gray.500'}>
-                                    {profile?.clientUSPs || 'Not set'}
-                                  </Text>
-                                </FieldRow>
+                                <EditableField
+                                  label="Client USPs"
+                                  value={String(profile?.clientUSPs || '')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.clientUSPs')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.clientUSPs')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.clientUSPs')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { clientUSPs: String(v ?? '') } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.clientUSPs')
+                                  }}
+                                  placeholder="Not set"
+                                />
 
-                                <FieldRow label="Qualifying Questions">
-                                  <Text whiteSpace="pre-wrap" color={profile?.qualifyingQuestions ? 'gray.800' : 'gray.500'}>
-                                    {profile?.qualifyingQuestions || 'Not set'}
-                                  </Text>
-                                </FieldRow>
+                                <EditableField
+                                  label="Qualifying Questions"
+                                  value={String(profile?.qualifyingQuestions || '')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.qualifyingQuestions')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.qualifyingQuestions')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.qualifyingQuestions')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { qualifyingQuestions: String(v ?? '') } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.qualifyingQuestions')
+                                  }}
+                                  placeholder="Not set"
+                                />
                               </SimpleGrid>
 
-                              <Box>
-                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
-                                  Target Geographical Areas
-                                </Text>
-                                {targetAreas.length > 0 ? (
-                                  <HStack spacing={2} flexWrap="wrap">
-                                    {targetAreas.map((a: any) => {
-                                      const key = String(a?.placeId || a?.label || '').toLowerCase().trim() || Math.random().toString(36)
-                                      return (
-                                        <Tag key={key} size="sm" variant="subtle" colorScheme="gray">
-                                          <TagLabel>{String(a?.label || 'Unknown')}</TagLabel>
-                                        </Tag>
-                                      )
-                                    })}
-                                  </HStack>
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
-                              </Box>
+                              <EditableField
+                                label="Target Geographical Areas"
+                                value={targetAreas.map((a: any) => String(a?.label || '').trim()).filter(Boolean).join('\n')}
+                                type="textarea"
+                                isEditing={isFieldEditing(accountName, 'drawer.profile.targetGeographicalAreas')}
+                                onEdit={() => startEditing(accountName, 'drawer.profile.targetGeographicalAreas')}
+                                onCancel={() => stopEditing(accountName, 'drawer.profile.targetGeographicalAreas')}
+                                onSave={async (v) => {
+                                  if (!customerId) return
+                                  const raw = String(v || '')
+                                  const labels = raw
+                                    .split(/\n+/g)
+                                    .map((s) => s.trim())
+                                    .filter(Boolean)
+                                  const existingByLabel = new Map(
+                                    ((targetAreas as any[]) || []).map((a: any) => [String(a?.label || '').toLowerCase().trim(), a]),
+                                  )
+                                  const nextAreas = labels.map((label) => {
+                                    const existing: any = existingByLabel.get(label.toLowerCase().trim())
+                                    return existing?.placeId ? { label, placeId: String(existing.placeId) } : { label }
+                                  })
+
+                                  await applyCustomerPatchAndRefresh({
+                                    customerId,
+                                    patch: { accountData: { targetGeographicalAreas: nextAreas } },
+                                  })
+                                  stopEditing(accountName, 'drawer.profile.targetGeographicalAreas')
+                                }}
+                                placeholder="One area per line"
+                                renderDisplay={() =>
+                                  targetAreas.length > 0 ? (
+                                    <HStack spacing={2} flexWrap="wrap">
+                                      {targetAreas.map((a: any) => {
+                                        const key = String(a?.placeId || a?.label || '').toLowerCase().trim() || Math.random().toString(36)
+                                        return (
+                                          <Tag key={key} size="sm" variant="subtle" colorScheme="gray">
+                                            <TagLabel>{String(a?.label || 'Unknown')}</TagLabel>
+                                          </Tag>
+                                        )
+                                      })}
+                                    </HStack>
+                                  ) : (
+                                    <Text color="gray.500">Not set</Text>
+                                  )
+                                }
+                              />
 
                               <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-                                <FieldRow label="Target Job Sectors">
-                                  {sectorIds.length ? (
-                                    <Stack spacing={1}>
-                                      {sectorIds.map((id: any) => {
-                                        const key = String(id || '')
-                                        return (
-                                          <Text key={key} fontSize="sm">
-                                            {jobSectorsById[key] || key}
-                                          </Text>
-                                        )
-                                      })}
-                                    </Stack>
-                                  ) : (
-                                    <Text color="gray.500">Not set</Text>
-                                  )}
-                                </FieldRow>
+                                <EditableField
+                                  label="Target Job Sectors"
+                                  value={sectorIds.map((id: any) => jobSectorsById[String(id || '')] || String(id || '')).join('\n')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.targetJobSectorIds')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.targetJobSectorIds')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.targetJobSectorIds')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const nextIds = parseIdsFromText(String(v || ''), sectorLabelToId)
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { targetJobSectorIds: nextIds } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.targetJobSectorIds')
+                                  }}
+                                  placeholder="One sector per line (label or id)"
+                                  renderDisplay={() =>
+                                    sectorIds.length ? (
+                                      <Stack spacing={1}>
+                                        {sectorIds.map((id: any) => {
+                                          const key = String(id || '')
+                                          return (
+                                            <Text key={key} fontSize="sm">
+                                              {jobSectorsById[key] || key}
+                                            </Text>
+                                          )
+                                        })}
+                                      </Stack>
+                                    ) : (
+                                      <Text color="gray.500">Not set</Text>
+                                    )
+                                  }
+                                />
 
-                                <FieldRow label="Target Job Roles">
-                                  {roleIds.length ? (
-                                    <Stack spacing={1}>
-                                      {roleIds.map((id: any) => {
-                                        const key = String(id || '')
-                                        return (
-                                          <Text key={key} fontSize="sm">
-                                            {jobRolesById[key] || key}
-                                          </Text>
-                                        )
-                                      })}
-                                    </Stack>
-                                  ) : (
-                                    <Text color="gray.500">Not set</Text>
-                                  )}
-                                </FieldRow>
+                                <EditableField
+                                  label="Target Job Roles"
+                                  value={roleIds.map((id: any) => jobRolesById[String(id || '')] || String(id || '')).join('\n')}
+                                  type="textarea"
+                                  isEditing={isFieldEditing(accountName, 'drawer.profile.targetJobRoleIds')}
+                                  onEdit={() => startEditing(accountName, 'drawer.profile.targetJobRoleIds')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.profile.targetJobRoleIds')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const nextIds = parseIdsFromText(String(v || ''), roleLabelToId)
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { clientProfile: { targetJobRoleIds: nextIds } } },
+                                    })
+                                    stopEditing(accountName, 'drawer.profile.targetJobRoleIds')
+                                  }}
+                                  placeholder="One role per line (label or id)"
+                                  renderDisplay={() =>
+                                    roleIds.length ? (
+                                      <Stack spacing={1}>
+                                        {roleIds.map((id: any) => {
+                                          const key = String(id || '')
+                                          return (
+                                            <Text key={key} fontSize="sm">
+                                              {jobRolesById[key] || key}
+                                            </Text>
+                                          )
+                                        })}
+                                      </Stack>
+                                    ) : (
+                                      <Text color="gray.500">Not set</Text>
+                                    )
+                                  }
+                                />
                               </SimpleGrid>
 
                               <Box>
@@ -6675,51 +6785,86 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 </Text>
                                 <SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
                                   {[
-                                    ['LinkedIn', social.linkedinUrl],
-                                    ['Facebook', social.facebookUrl],
-                                    ['X', social.xUrl],
-                                    ['Instagram', social.instagramUrl],
-                                    ['TikTok', social.tiktokUrl],
-                                    ['YouTube', social.youtubeUrl],
-                                    ['Website', social.websiteUrl],
-                                  ].map(([label, url]) => {
-                                    const v = typeof url === 'string' ? url.trim() : ''
+                                    { label: 'LinkedIn', key: 'linkedinUrl', value: social.linkedinUrl },
+                                    { label: 'Facebook', key: 'facebookUrl', value: social.facebookUrl },
+                                    { label: 'X', key: 'xUrl', value: social.xUrl },
+                                    { label: 'Instagram', key: 'instagramUrl', value: social.instagramUrl },
+                                    { label: 'TikTok', key: 'tiktokUrl', value: social.tiktokUrl },
+                                    { label: 'YouTube', key: 'youtubeUrl', value: social.youtubeUrl },
+                                    { label: 'Website', key: 'websiteUrl', value: social.websiteUrl },
+                                  ].map(({ label, key, value }) => {
+                                    const v = typeof value === 'string' ? value.trim() : ''
                                     return (
-                                      <FieldRow key={label} label={label}>
-                                        {v ? (
-                                          <Link href={v} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
-                                            {v}
-                                          </Link>
-                                        ) : (
-                                          <Text color="gray.500">Not set</Text>
-                                        )}
-                                      </FieldRow>
+                                      <EditableField
+                                        key={label}
+                                        label={label}
+                                        value={v}
+                                        type="url"
+                                        isEditing={isFieldEditing(accountName, `drawer.profile.social.${key}`)}
+                                        onEdit={() => startEditing(accountName, `drawer.profile.social.${key}`)}
+                                        onCancel={() => stopEditing(accountName, `drawer.profile.social.${key}`)}
+                                        onSave={async (next) => {
+                                          if (!customerId) return
+                                          const nextUrl = String(next || '').trim()
+                                          await applyCustomerPatchAndRefresh({
+                                            customerId,
+                                            patch: { accountData: { clientProfile: { socialMediaPresence: { [key]: nextUrl } } } },
+                                          })
+                                          stopEditing(accountName, `drawer.profile.social.${key}`)
+                                        }}
+                                        renderDisplay={() =>
+                                          v ? (
+                                            <Link href={v} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                              {v}
+                                            </Link>
+                                          ) : (
+                                            <Text color="gray.500">Not set</Text>
+                                          )
+                                        }
+                                        placeholder="Not set"
+                                      />
                                     )
                                   })}
                                 </SimpleGrid>
                               </Box>
 
-                              <Box>
-                                <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
-                                  Case Studies / Testimonials
-                                </Text>
-                                <Text whiteSpace="pre-wrap" color={profile?.caseStudiesOrTestimonials ? 'gray.800' : 'gray.500'}>
-                                  {profile?.caseStudiesOrTestimonials || 'Not set'}
-                                </Text>
-                                {profile?.caseStudiesFileUrl ? (
-                                  <Box mt={2}>
-                                    <Link
-                                      href={String(profile.caseStudiesFileUrl)}
-                                      isExternal
-                                      fontSize="sm"
-                                      color="blue.600"
-                                      rel="noopener noreferrer"
-                                    >
-                                      {String(profile.caseStudiesFileName || 'View attachment')}
-                                    </Link>
+                              <EditableField
+                                label="Case Studies / Testimonials"
+                                value={String(profile?.caseStudiesOrTestimonials || '')}
+                                type="textarea"
+                                isEditing={isFieldEditing(accountName, 'drawer.profile.caseStudiesOrTestimonials')}
+                                onEdit={() => startEditing(accountName, 'drawer.profile.caseStudiesOrTestimonials')}
+                                onCancel={() => stopEditing(accountName, 'drawer.profile.caseStudiesOrTestimonials')}
+                                onSave={async (v) => {
+                                  if (!customerId) return
+                                  await applyCustomerPatchAndRefresh({
+                                    customerId,
+                                    patch: { accountData: { clientProfile: { caseStudiesOrTestimonials: String(v ?? '') } } },
+                                  })
+                                  stopEditing(accountName, 'drawer.profile.caseStudiesOrTestimonials')
+                                }}
+                                placeholder="Not set"
+                                renderDisplay={() => (
+                                  <Box>
+                                    <Text whiteSpace="pre-wrap" color={profile?.caseStudiesOrTestimonials ? 'gray.800' : 'gray.500'}>
+                                      {profile?.caseStudiesOrTestimonials || 'Not set'}
+                                    </Text>
+                                    {profile?.caseStudiesFileUrl ? (
+                                      <Box mt={2}>
+                                        <Link
+                                          href={String(profile.caseStudiesFileUrl)}
+                                          isExternal
+                                          fontSize="sm"
+                                          color="blue.600"
+                                          rel="noopener noreferrer"
+                                        >
+                                          {String(profile.caseStudiesFileName || 'View attachment')}
+                                        </Link>
+                                      </Box>
+                                    ) : null}
                                   </Box>
-                                ) : null}
-                              </Box>
+                                )}
+                              />
                             </Stack>
                           )
                         })()}

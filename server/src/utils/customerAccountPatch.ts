@@ -30,6 +30,24 @@ export const ACCOUNT_EDITABLE_ACCOUNTDATA_PATHS = [
   'accountDetails.emailAccounts',
   // Keep the AccountsTab snapshot in sync for a few fields the UI reads directly from accountData.
   'monthlySpendGBP',
+  // Account Card drawer (Client Profile + targeting)
+  'clientProfile.clientHistory',
+  'clientProfile.keyBusinessObjectives',
+  'clientProfile.clientUSPs',
+  'clientProfile.qualifyingQuestions',
+  'clientProfile.caseStudiesOrTestimonials',
+  'clientProfile.caseStudiesFileName',
+  'clientProfile.caseStudiesFileUrl',
+  'clientProfile.socialMediaPresence.linkedinUrl',
+  'clientProfile.socialMediaPresence.facebookUrl',
+  'clientProfile.socialMediaPresence.xUrl',
+  'clientProfile.socialMediaPresence.instagramUrl',
+  'clientProfile.socialMediaPresence.tiktokUrl',
+  'clientProfile.socialMediaPresence.youtubeUrl',
+  'clientProfile.socialMediaPresence.websiteUrl',
+  'clientProfile.targetJobSectorIds',
+  'clientProfile.targetJobRoleIds',
+  'targetGeographicalAreas',
 ] as const
 
 export type AccountEditableAccountDataPath = (typeof ACCOUNT_EDITABLE_ACCOUNTDATA_PATHS)[number]
@@ -44,6 +62,40 @@ const accountDetailsPatchSchema = z
     assignedClientDdiNumber: z.string().min(1).optional().nullable(),
     daysPerWeek: z.number().int().min(0).max(7).optional().nullable(),
     emailAccounts: z.array(z.string()).optional().nullable(),
+  })
+  .partial()
+
+const targetGeographicalAreaSchema = z
+  .object({
+    label: z.string().min(1),
+    placeId: z.string().optional().nullable(),
+  })
+  .passthrough()
+
+const socialMediaPresencePatchSchema = z
+  .object({
+    linkedinUrl: z.string().optional().nullable(),
+    facebookUrl: z.string().optional().nullable(),
+    xUrl: z.string().optional().nullable(),
+    instagramUrl: z.string().optional().nullable(),
+    tiktokUrl: z.string().optional().nullable(),
+    youtubeUrl: z.string().optional().nullable(),
+    websiteUrl: z.string().optional().nullable(),
+  })
+  .partial()
+
+const clientProfilePatchSchema = z
+  .object({
+    clientHistory: z.string().optional().nullable(),
+    keyBusinessObjectives: z.string().optional().nullable(),
+    clientUSPs: z.string().optional().nullable(),
+    qualifyingQuestions: z.string().optional().nullable(),
+    caseStudiesOrTestimonials: z.string().optional().nullable(),
+    caseStudiesFileName: z.string().optional().nullable(),
+    caseStudiesFileUrl: z.string().optional().nullable(),
+    socialMediaPresence: socialMediaPresencePatchSchema.optional(),
+    targetJobSectorIds: z.array(z.string()).optional().nullable(),
+    targetJobRoleIds: z.array(z.string()).optional().nullable(),
   })
   .partial()
 
@@ -66,6 +118,8 @@ export const patchCustomerAccountSchema = z
       .object({
         accountDetails: accountDetailsPatchSchema.optional(),
         monthlySpendGBP: z.number().min(0).optional().nullable(),
+        clientProfile: clientProfilePatchSchema.optional(),
+        targetGeographicalAreas: z.array(targetGeographicalAreaSchema).optional().nullable(),
       })
       .partial()
       .optional(),
@@ -84,6 +138,16 @@ function normalizeString(v: unknown): string | null {
   if (v === null || v === undefined) return null
   const s = String(v).trim()
   return s ? s : null
+}
+
+function normalizeStringKeepEmpty(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  return String(v)
+}
+
+function normalizeStringTrimKeepEmpty(v: unknown): string {
+  if (v === null || v === undefined) return ''
+  return String(v).trim()
 }
 
 function getAccountDataObject(value: unknown): Record<string, any> {
@@ -278,6 +342,106 @@ export function computeCustomerAccountPatch(params: {
       })
     }
     incomingAccountData = setDeep(incomingAccountData, 'monthlySpendGBP', nextMonthlySpend)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Client Profile + targeting (accountData.clientProfile + accountData.targetGeographicalAreas)
+  // ---------------------------------------------------------------------------
+  const cpPatch = patch.accountData?.clientProfile
+  if (cpPatch && typeof cpPatch === 'object') {
+    const stringFields: Array<{ key: string; path: string }> = [
+      { key: 'clientHistory', path: 'clientProfile.clientHistory' },
+      { key: 'keyBusinessObjectives', path: 'clientProfile.keyBusinessObjectives' },
+      { key: 'clientUSPs', path: 'clientProfile.clientUSPs' },
+      { key: 'qualifyingQuestions', path: 'clientProfile.qualifyingQuestions' },
+      { key: 'caseStudiesOrTestimonials', path: 'clientProfile.caseStudiesOrTestimonials' },
+      { key: 'caseStudiesFileName', path: 'clientProfile.caseStudiesFileName' },
+      { key: 'caseStudiesFileUrl', path: 'clientProfile.caseStudiesFileUrl' },
+    ]
+
+    for (const f of stringFields) {
+      if ((cpPatch as any)[f.key] === undefined) continue
+      const old = getDeep(existingAccountData, f.path)
+      const next = normalizeStringKeepEmpty((cpPatch as any)[f.key])
+      if (String(old ?? '') !== String(next ?? '')) {
+        changes.push({
+          field: `accountData.${f.path}`,
+          oldValue: old ?? '',
+          newValue: next,
+        })
+      }
+      incomingAccountData = setDeep(incomingAccountData, f.path, next)
+    }
+
+    if ((cpPatch as any).targetJobSectorIds !== undefined) {
+      const old = getDeep(existingAccountData, 'clientProfile.targetJobSectorIds')
+      const next = Array.isArray((cpPatch as any).targetJobSectorIds)
+        ? (cpPatch as any).targetJobSectorIds.map((v: any) => String(v || '').trim()).filter(Boolean)
+        : []
+      if (JSON.stringify(old ?? []) !== JSON.stringify(next)) {
+        changes.push({
+          field: 'accountData.clientProfile.targetJobSectorIds',
+          oldValue: Array.isArray(old) ? old : [],
+          newValue: next,
+        })
+      }
+      incomingAccountData = setDeep(incomingAccountData, 'clientProfile.targetJobSectorIds', next)
+    }
+
+    if ((cpPatch as any).targetJobRoleIds !== undefined) {
+      const old = getDeep(existingAccountData, 'clientProfile.targetJobRoleIds')
+      const next = Array.isArray((cpPatch as any).targetJobRoleIds)
+        ? (cpPatch as any).targetJobRoleIds.map((v: any) => String(v || '').trim()).filter(Boolean)
+        : []
+      if (JSON.stringify(old ?? []) !== JSON.stringify(next)) {
+        changes.push({
+          field: 'accountData.clientProfile.targetJobRoleIds',
+          oldValue: Array.isArray(old) ? old : [],
+          newValue: next,
+        })
+      }
+      incomingAccountData = setDeep(incomingAccountData, 'clientProfile.targetJobRoleIds', next)
+    }
+
+    const smPatch = (cpPatch as any).socialMediaPresence
+    if (smPatch && typeof smPatch === 'object') {
+      const smKeys = ['linkedinUrl', 'facebookUrl', 'xUrl', 'instagramUrl', 'tiktokUrl', 'youtubeUrl', 'websiteUrl'] as const
+      for (const k of smKeys) {
+        if ((smPatch as any)[k] === undefined) continue
+        const path = `clientProfile.socialMediaPresence.${k}`
+        const old = getDeep(existingAccountData, path)
+        const next = normalizeStringTrimKeepEmpty((smPatch as any)[k])
+        if (String(old ?? '') !== String(next ?? '')) {
+          changes.push({
+            field: `accountData.${path}`,
+            oldValue: old ?? '',
+            newValue: next,
+          })
+        }
+        incomingAccountData = setDeep(incomingAccountData, path, next)
+      }
+    }
+  }
+
+  if (patch.accountData?.targetGeographicalAreas !== undefined) {
+    const old = getDeep(existingAccountData, 'targetGeographicalAreas')
+    const nextRaw = patch.accountData?.targetGeographicalAreas
+    const next = Array.isArray(nextRaw)
+      ? nextRaw
+          .map((a: any) => ({
+            label: String(a?.label || '').trim(),
+            ...(a?.placeId ? { placeId: String(a.placeId).trim() } : {}),
+          }))
+          .filter((a: any) => a.label)
+      : []
+    if (JSON.stringify(old ?? []) !== JSON.stringify(next)) {
+      changes.push({
+        field: 'accountData.targetGeographicalAreas',
+        oldValue: Array.isArray(old) ? old : [],
+        newValue: next,
+      })
+    }
+    incomingAccountData = setDeep(incomingAccountData, 'targetGeographicalAreas', next)
   }
 
   // Allow explicit null overwrites only for these paths (clearing a value is intentional in UI).
