@@ -188,6 +188,8 @@ const corsOptions = {
     'pragma',
     'If-None-Match',
     'if-none-match',
+    'If-Match-Updated-At',
+    'if-match-updated-at',
   ],
   optionsSuccessStatus: 204,
 }

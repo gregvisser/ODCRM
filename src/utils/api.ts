@@ -54,13 +54,10 @@ async function apiRequest<T>(
         headers.set('Content-Type', 'application/json')
       }
 
-      // Only send Cache-Control/Pragma on GETs (anti-cache for list endpoints).
-      // Sending these on POST/PUT/etc adds extra requested headers in preflight and
-      // can cause "Failed to fetch" if the server/proxy doesn't allow them.
-      if (method === 'GET') {
-        headers.set('Cache-Control', 'no-cache')
-        headers.set('Pragma', 'no-cache')
-      }
+      // Always request fresh responses (API should never be cached).
+      // Server CORS explicitly allows these headers.
+      if (!headers.has('Cache-Control')) headers.set('Cache-Control', 'no-cache')
+      if (!headers.has('Pragma')) headers.set('Pragma', 'no-cache')
 
       if (customerId) headers.set('X-Customer-Id', customerId)
 
@@ -171,12 +168,13 @@ async function apiRequest<T>(
 }
 
 export const api = {
-  get: <T>(endpoint: string) => apiRequest<T>(endpoint, { method: 'GET' }),
-  post: <T>(endpoint: string, body: any) => 
-    apiRequest<T>(endpoint, { method: 'POST', body: JSON.stringify(body) }),
-  put: <T>(endpoint: string, body: any) =>
-    apiRequest<T>(endpoint, { method: 'PUT', body: JSON.stringify(body) }),
-  patch: <T>(endpoint: string, body: any) =>
-    apiRequest<T>(endpoint, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: <T>(endpoint: string) => apiRequest<T>(endpoint, { method: 'DELETE' })
+  get: <T>(endpoint: string, options?: RequestInit) => apiRequest<T>(endpoint, { ...(options || {}), method: 'GET' }),
+  post: <T>(endpoint: string, body: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...(options || {}), method: 'POST', body: JSON.stringify(body) }),
+  put: <T>(endpoint: string, body: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...(options || {}), method: 'PUT', body: JSON.stringify(body) }),
+  patch: <T>(endpoint: string, body: any, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...(options || {}), method: 'PATCH', body: JSON.stringify(body) }),
+  delete: <T>(endpoint: string, options?: RequestInit) =>
+    apiRequest<T>(endpoint, { ...(options || {}), method: 'DELETE' }),
 }

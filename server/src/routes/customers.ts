@@ -13,6 +13,7 @@ import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
 import { runUkEnrichmentPipeline } from '../lib/enrichment/pipeline.js'
+import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 
 const router = Router()
 
@@ -825,8 +826,11 @@ router.post('/', async (req, res) => {
 //
 // NOTE: This reuses the existing customer + customer_contacts models only (no new tables).
 router.put('/:id/onboarding', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   try {
     const { id } = req.params
+    const ifMatchUpdatedAtRaw =
+      (req.header('If-Match-Updated-At') || req.header('if-match-updated-at') || '').trim() || null
 
     const normalizeEmail = (value: unknown): string | null => {
       if (typeof value !== 'string') return null
@@ -865,6 +869,16 @@ router.put('/:id/onboarding', async (req, res) => {
     const validated = parsed.data.customer
     const contacts = parsed.data.contacts || []
 
+    // Optimistic concurrency control (multi-user safety)
+    // Require the frontend to send the DB-updatedAt it last read, so partial/stale saves never overwrite silently.
+    if (!ifMatchUpdatedAtRaw) {
+      return res.status(428).json({
+        error: 'precondition_required',
+        message: 'Missing If-Match-Updated-At header',
+        requestId,
+      })
+    }
+
     // Strict-ish validation for contacts: require name, and at least one of email/phone.
     for (const contact of contacts) {
       if (!contact.name || !String(contact.name).trim()) {
@@ -880,36 +894,57 @@ router.put('/:id/onboarding', async (req, res) => {
       }
     }
 
-    const shouldClearLeads = validated.leadsReportingUrl === null
+    const hasOwn = (obj: any, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
+    const allowNullScalar = new Set([
+      // Explicitly allowed clears from the onboarding UI
+      'website',
+      'whatTheyDo',
+      'companyProfile',
+      'leadsReportingUrl',
+      'leadsGoogleSheetLabel',
+    ])
+
+    const shouldClearLeads = hasOwn(validated, 'leadsReportingUrl') && validated.leadsReportingUrl === null
+
+    // Build non-destructive update payload: only apply fields that are present in the request.
+    // Never set scalars to undefined; never wipe accountData on partial payloads.
     const updateData: any = {
-      name: validated.name,
-      domain: validated.domain,
-      accountData: validated.accountData ?? null,
-      website: validated.website,
-      whatTheyDo: validated.whatTheyDo,
-      accreditations: validated.accreditations,
-      keyLeaders: validated.keyLeaders,
-      companyProfile: validated.companyProfile,
-      recentNews: validated.recentNews,
-      companySize: validated.companySize,
-      headquarters: validated.headquarters,
-      foundingYear: validated.foundingYear,
-      socialPresence: validated.socialPresence ?? undefined,
-      leadsReportingUrl: validated.leadsReportingUrl,
-      leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
-      sector: validated.sector,
-      clientStatus: validated.clientStatus,
-      targetJobTitle: validated.targetJobTitle,
-      prospectingLocation: validated.prospectingLocation,
-      monthlyIntakeGBP: validated.monthlyIntakeGBP,
-      monthlyRevenueFromCustomer: validated.monthlyRevenueFromCustomer,
-      defcon: validated.defcon,
-      weeklyLeadTarget: validated.weeklyLeadTarget,
-      weeklyLeadActual: validated.weeklyLeadActual,
-      monthlyLeadTarget: validated.monthlyLeadTarget,
-      monthlyLeadActual: validated.monthlyLeadActual,
+      name: validated.name, // required
       updatedAt: new Date(),
     }
+
+    const maybeSet = (key: string, value: any) => {
+      if (!hasOwn(validated, key)) return
+      if (value === undefined) return
+      if (value === null && !allowNullScalar.has(key)) return
+      updateData[key] = value
+    }
+
+    maybeSet('domain', validated.domain)
+    maybeSet('website', validated.website)
+    maybeSet('whatTheyDo', validated.whatTheyDo)
+    maybeSet('accreditations', validated.accreditations)
+    maybeSet('keyLeaders', validated.keyLeaders)
+    maybeSet('companyProfile', validated.companyProfile)
+    maybeSet('recentNews', validated.recentNews)
+    maybeSet('companySize', validated.companySize)
+    maybeSet('headquarters', validated.headquarters)
+    maybeSet('foundingYear', validated.foundingYear)
+    maybeSet('socialPresence', validated.socialPresence)
+    maybeSet('leadsReportingUrl', validated.leadsReportingUrl)
+    maybeSet('leadsGoogleSheetLabel', validated.leadsGoogleSheetLabel)
+    maybeSet('sector', validated.sector)
+    maybeSet('clientStatus', validated.clientStatus)
+    maybeSet('targetJobTitle', validated.targetJobTitle)
+    maybeSet('prospectingLocation', validated.prospectingLocation)
+    maybeSet('monthlyIntakeGBP', validated.monthlyIntakeGBP)
+    maybeSet('monthlyRevenueFromCustomer', validated.monthlyRevenueFromCustomer)
+    maybeSet('defcon', validated.defcon)
+    maybeSet('weeklyLeadTarget', validated.weeklyLeadTarget)
+    maybeSet('weeklyLeadActual', validated.weeklyLeadActual)
+    maybeSet('monthlyLeadTarget', validated.monthlyLeadTarget)
+    maybeSet('monthlyLeadActual', validated.monthlyLeadActual)
+
     if (shouldClearLeads) {
       updateData.weeklyLeadActual = 0
       updateData.monthlyLeadActual = 0
@@ -921,7 +956,7 @@ router.put('/:id/onboarding', async (req, res) => {
 
       const existing = await tx.customer.findUnique({
         where: { id },
-        select: { id: true, accountData: true },
+        select: { id: true, accountData: true, updatedAt: true },
       })
       if (!existing) {
         const err: any = new Error('not_found')
@@ -929,19 +964,23 @@ router.put('/:id/onboarding', async (req, res) => {
         throw err
       }
 
-      // Merge accountData safely to avoid overwriting notes (append-only via /api/customers/:id/notes).
-      const existingAccountData =
-        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
-      const incomingAccountData =
-        validated.accountData && typeof validated.accountData === 'object' ? (validated.accountData as any) : {}
-      const mergedAccountData: any = {
-        ...existingAccountData,
-        ...incomingAccountData,
-      }
-      if (incomingAccountData.notes === undefined && existingAccountData.notes !== undefined) {
-        mergedAccountData.notes = existingAccountData.notes
+      const currentUpdatedAtIso = existing.updatedAt.toISOString()
+      if (ifMatchUpdatedAtRaw !== currentUpdatedAtIso) {
+        const err: any = new Error('conflict')
+        err.statusCode = 409
+        err.currentUpdatedAt = currentUpdatedAtIso
+        throw err
       }
 
+      // Non-destructive deep merge for accountData (JSON blob).
+      const existingAccountData =
+        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+      const incomingAccountDataRaw =
+        validated.accountData && typeof validated.accountData === 'object' ? (validated.accountData as any) : {}
+      const incomingAccountData = stripUndefinedDeep(incomingAccountDataRaw)
+      const mergedAccountData = deepMergePreserve(existingAccountData, incomingAccountData)
+
+      // Always persist merged accountData (safe, non-destructive)
       updateData.accountData = mergedAccountData
 
       const updatedCustomer = await tx.customer.update({
@@ -1071,13 +1110,27 @@ router.put('/:id/onboarding', async (req, res) => {
     if (saved.assignedAccountManagerUser) {
       responseCustomer.assignedAccountManagerUser = saved.assignedAccountManagerUser
     }
-    return res.json({ success: true, customer: responseCustomer })
+    return res.json({
+      success: true,
+      requestId,
+      updatedAt: responseCustomer?.updatedAt ? new Date(responseCustomer.updatedAt).toISOString() : new Date().toISOString(),
+      customer: responseCustomer,
+    })
   } catch (error: any) {
     console.error('Error saving onboarding payload:', error)
     if (error?.statusCode === 404 || error?.message === 'not_found') {
-      return res.status(404).json({ error: 'not_found', message: 'Customer not found' })
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
     }
-    return res.status(500).json({ error: 'Failed to save onboarding', message: error.message })
+    if (error?.statusCode === 409 || error?.message === 'conflict') {
+      return res.status(409).json({
+        error: 'conflict',
+        message: 'Customer was updated by another user',
+        currentUpdatedAt: error?.currentUpdatedAt || null,
+        details: { currentUpdatedAt: error?.currentUpdatedAt || null },
+        requestId,
+      })
+    }
+    return res.status(500).json({ error: 'Failed to save onboarding', message: error.message, requestId })
   }
 })
 

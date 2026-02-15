@@ -72,6 +72,7 @@ type CustomerApi = {
   monthlyRevenueFromCustomer?: string | null
   leadsReportingUrl?: string | null
   leadsGoogleSheetLabel?: string | null
+  updatedAt?: string | null
 }
 
 type JobTaxonomyItem = {
@@ -207,6 +208,19 @@ const normalizeWebAddress = (raw: unknown): string | null => {
   return hasScheme ? trimmed : `https://${trimmed}`
 }
 
+// Remove undefined keys deeply so partial payloads never wipe stored DB fields.
+// (null is preserved intentionally so explicit clears can be expressed as null)
+const stripUndefinedDeep = (input: any): any => {
+  if (Array.isArray(input)) return input.map((v) => (v === undefined ? null : stripUndefinedDeep(v)))
+  if (!input || typeof input !== 'object') return input
+  const out: any = {}
+  for (const [k, v] of Object.entries(input)) {
+    if (v === undefined) continue
+    out[k] = stripUndefinedDeep(v)
+  }
+  return out
+}
+
 const areaKey = (area: any): string => {
   const raw = String(area?.id || area?.placeId || area?.label || '')
   return raw.toLowerCase().trim()
@@ -249,7 +263,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [isDirty, setIsDirty] = useState(false)
   const dirtyConnectDisclosure = useDisclosure()
   const pendingConnectResolver = useRef<((proceed: boolean) => void) | null>(null)
+  const [dirtyPromptBody, setDirtyPromptBody] = useState<string>(
+    'You have unsaved onboarding changes. This action may temporarily leave or refresh parts of this page.',
+  )
   const [customer, setCustomer] = useState<CustomerApi | null>(null)
+  const [customerUpdatedAt, setCustomerUpdatedAt] = useState<string | null>(null)
+  const conflictDisclosure = useDisclosure()
+  const [conflictCurrentUpdatedAt, setConflictCurrentUpdatedAt] = useState<string | null>(null)
   const [clientProfile, setClientProfile] = useState<ClientProfile>(EMPTY_PROFILE)
   const [accountDetails, setAccountDetails] = useState<AccountDetails>(EMPTY_ACCOUNT_DETAILS)
   const [isLoading, setIsLoading] = useState(true)
@@ -326,6 +346,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         hasAccountData: !!data.accountData,
       })
       setCustomer(data)
+      setCustomerUpdatedAt(typeof (data as any).updatedAt === 'string' ? ((data as any).updatedAt as string) : null)
       // Initialize additional contacts from DB (exclude primary; primary lives in accountDetails.primaryContact)
       const rows = Array.isArray((data as any).customerContacts) ? (data as any).customerContacts : []
       setAdditionalContacts(rows.filter((c: any) => !c?.isPrimary))
@@ -347,6 +368,31 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
     setIsLoading(false)
   }, [customerId])
+
+  // Protect against accidental refresh/close while dirty
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (!isDirty) return
+      e.preventDefault()
+      // Most browsers ignore the custom message, but returning a value triggers the prompt.
+      e.returnValue = ''
+      return ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
+
+  const confirmProceedIfDirty = useCallback(
+    async (promptBody: string): Promise<boolean> => {
+      if (!isDirty) return true
+      return await new Promise<boolean>((resolve) => {
+        pendingConnectResolver.current = resolve
+        setDirtyPromptBody(promptBody)
+        dirtyConnectDisclosure.onOpen()
+      })
+    },
+    [isDirty, dirtyConnectDisclosure],
+  )
 
   const fetchTaxonomy = useCallback(async () => {
     const [sectorsResponse, rolesResponse] = await Promise.all([
@@ -599,8 +645,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
   }
 
-  const handleAccreditationFileChange = (id: string, file: File | null) => {
+  const handleAccreditationFileChange = async (id: string, file: File | null) => {
     if (!file) return
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading accreditation evidence will refresh this customer from the database.',
+    )
+    if (!proceed) return
 
     const allowedDocTypes = [
       'application/pdf',
@@ -700,8 +750,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
   }
 
-  const handleCaseStudiesFileChange = (file: File | null) => {
+  const handleCaseStudiesFileChange = async (file: File | null) => {
     if (!file) return
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading case studies will refresh this customer from the database.',
+    )
+    if (!proceed) return
 
     const allowedDocTypes = [
       'application/pdf',
@@ -787,8 +841,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   // Phase 2 Item 4: Agreement upload handler
-  const handleAgreementFileChange = (file: File | null) => {
+  const handleAgreementFileChange = async (file: File | null) => {
     if (!file || !customer) return
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading an agreement will refresh this customer from the database.',
+    )
+    if (!proceed) return
 
     // Validate file type
     const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
@@ -849,6 +907,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const handleSuppressionFileChange = async (file: File | null) => {
     if (!file || !customer?.id) return
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading a suppression list will refresh this customer from the database.',
+    )
+    if (!proceed) return
     setUploadingSuppression(true)
     try {
       const form = new FormData()
@@ -1295,6 +1357,18 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
     onboardingDebug('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
     setIsSaving(true)
+
+    if (!customerUpdatedAt) {
+      toast({
+        title: 'Cannot save yet',
+        description: 'Please reload the customer data and try again (missing updatedAt).',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      setIsSaving(false)
+      return false
+    }
     
     const currentAccountData =
       customer.accountData && typeof customer.accountData === 'object'
@@ -1343,6 +1417,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       emailAccountsSetUp: accountDetails.emailAccounts.some((value) => value.trim()),
       days: accountDetails.daysPerWeek,
     })
+
+    const outgoingAccountData = stripUndefinedDeep(nextAccountData)
     
     // Prepare top-level customer fields (including monthly revenue and Google Sheet)
     const revenueNumber = monthlyRevenueFromCustomer.trim() 
@@ -1384,25 +1460,44 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
 
     // Save onboarding payload (single transaction backend route)
-    const { data: saveResult, error } = await api.put(`/api/customers/${customerId}/onboarding`, {
-      customer: {
-        name: customer.name,
-        website: normalizeWebAddress(customer.website),
-        whatTheyDo: customer.whatTheyDo && customer.whatTheyDo.trim() ? customer.whatTheyDo.trim() : null,
-        companyProfile:
-          customer.companyProfile && customer.companyProfile.trim() ? customer.companyProfile.trim() : null,
-        accountData: nextAccountData,
-        monthlyRevenueFromCustomer: revenueNumber,
-        // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
-        // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
-        monthlyIntakeGBP: revenueNumber,
-        leadsReportingUrl: sheetUrl,
-        leadsGoogleSheetLabel: sheetLabel,
+    const { data: saveResult, error, errorDetails } = await api.put<{
+      success: boolean
+      requestId: string
+      updatedAt: string
+      customer: CustomerApi & { customerContacts?: any[] }
+    }>(
+      `/api/customers/${customerId}/onboarding`,
+      {
+        customer: {
+          name: customer.name,
+          website: normalizeWebAddress(customer.website),
+          whatTheyDo: customer.whatTheyDo && customer.whatTheyDo.trim() ? customer.whatTheyDo.trim() : null,
+          companyProfile: customer.companyProfile && customer.companyProfile.trim() ? customer.companyProfile.trim() : null,
+          accountData: outgoingAccountData,
+          monthlyRevenueFromCustomer: revenueNumber,
+          // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
+          // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
+          monthlyIntakeGBP: revenueNumber,
+          leadsReportingUrl: sheetUrl,
+          leadsGoogleSheetLabel: sheetLabel,
+        },
+        contacts: validContacts,
       },
-      contacts: validContacts,
-    })
+      {
+        headers: {
+          'If-Match-Updated-At': customerUpdatedAt,
+        },
+      },
+    )
     
     if (error) {
+      if (errorDetails?.status === 409) {
+        const current = (errorDetails.details as any)?.currentUpdatedAt || null
+        setConflictCurrentUpdatedAt(typeof current === 'string' ? current : null)
+        conflictDisclosure.onOpen()
+        setIsSaving(false)
+        return false
+      }
       // Show error toast with detailed information
       onboardingError('❌ Customer Onboarding save failed:', {
         customerId,
@@ -1422,18 +1517,18 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     
     onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
 
-    toast({
-      title: 'Onboarding details saved',
-      description: 'Rehydrating from database…',
-      status: 'success',
-      duration: 2500,
-    })
-
-    // DB rehydration is mandatory: always refetch after save
+    // DB rehydration is mandatory: always refetch after save BEFORE showing success.
     await fetchCustomer()
 
     // Notify listeners (DB is source of truth; this is a signal only)
     emit('customerUpdated', { id: customerId })
+
+    toast({
+      title: 'Onboarding details saved',
+      description: 'Saved to database.',
+      status: 'success',
+      duration: 2500,
+    })
 
     setIsSaving(false)
     setIsDirty(false)
@@ -2171,11 +2266,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         <EmailAccountsEnhancedTab
           customerId={customerId}
           onBeforeConnectOutlook={async () => {
-            if (!isDirty) return true
-            return await new Promise<boolean>((resolve) => {
-              pendingConnectResolver.current = resolve
-              dirtyConnectDisclosure.onOpen()
-            })
+            return await confirmProceedIfDirty(
+              'You have unsaved onboarding changes. Connecting an Outlook account will temporarily leave this page.',
+            )
           }}
         />
       </Box>
@@ -2258,7 +2351,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                         display="none"
                         id={`accreditation-upload-${accreditation.id}`}
                         onChange={(e) =>
-                          handleAccreditationFileChange(accreditation.id, e.target.files?.[0] || null)
+                          void handleAccreditationFileChange(accreditation.id, e.target.files?.[0] || null)
                         }
                       />
                       <HStack spacing={3}>
@@ -2593,7 +2686,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
                   display="none"
                   id="case-studies-upload"
-                  onChange={(e) => handleCaseStudiesFileChange(e.target.files?.[0] || null)}
+                  onChange={(e) => void handleCaseStudiesFileChange(e.target.files?.[0] || null)}
                 />
                 <HStack spacing={3}>
                   <Button
@@ -2645,7 +2738,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   accept=".pdf,.doc,.docx"
                   display="none"
                   id="agreement-upload"
-                  onChange={(e) => handleAgreementFileChange(e.target.files?.[0] || null)}
+                  onChange={(e) => void handleAgreementFileChange(e.target.files?.[0] || null)}
                 />
                 <HStack spacing={3}>
                   <Button
@@ -2718,7 +2811,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <ModalCloseButton />
           <ModalBody>
             <Text fontSize="sm" color="gray.700">
-              You have unsaved onboarding changes. Connecting an Outlook account will temporarily leave this page.
+              {dirtyPromptBody}
             </Text>
             <Text fontSize="sm" color="gray.700" mt={2}>
               Would you like to save your onboarding changes first?
@@ -2764,6 +2857,60 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 }}
               >
                 Save &amp; continue
+              </Button>
+            </HStack>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* Optimistic concurrency conflict (multi-user safety) */}
+      <Modal
+        isOpen={conflictDisclosure.isOpen}
+        onClose={() => {
+          conflictDisclosure.onClose()
+        }}
+        isCentered
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Someone else updated this customer</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text fontSize="sm" color="gray.700">
+              This customer was updated by another user while you were editing. To prevent data loss, your save was
+              blocked.
+            </Text>
+            <Text fontSize="sm" color="gray.700" mt={2}>
+              Click Reload to fetch the latest data from the database, then re-apply your changes.
+            </Text>
+            {conflictCurrentUpdatedAt ? (
+              <Text fontSize="xs" color="gray.500" mt={3}>
+                Current updatedAt: {conflictCurrentUpdatedAt}
+              </Text>
+            ) : null}
+          </ModalBody>
+          <ModalFooter>
+            <HStack spacing={3}>
+              <Button variant="ghost" onClick={conflictDisclosure.onClose}>
+                Cancel
+              </Button>
+              <Button
+                colorScheme="teal"
+                onClick={() => {
+                  void (async () => {
+                    await fetchCustomer()
+                    conflictDisclosure.onClose()
+                    toast({
+                      title: 'Reloaded latest data',
+                      description: 'You are now viewing the latest saved data from the database.',
+                      status: 'info',
+                      duration: 4000,
+                      isClosable: true,
+                    })
+                  })()
+                }}
+              >
+                Reload
               </Button>
             </HStack>
           </ModalFooter>
