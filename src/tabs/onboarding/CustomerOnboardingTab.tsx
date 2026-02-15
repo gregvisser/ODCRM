@@ -1456,14 +1456,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormControl>
               <FormLabel>Days a Week</FormLabel>
               <Select
-                value={accountDetails.daysPerWeek}
-                onChange={(e) => updateAccountDetails({ daysPerWeek: Number(e.target.value) })}
+                value={String(accountDetails.daysPerWeek)}
+                onChange={(e) => {
+                  const next = Number.parseInt(e.target.value, 10)
+                  updateAccountDetails({ daysPerWeek: Number.isFinite(next) ? next : 1 })
+                }}
               >
-                <option value={1}>1 day</option>
-                <option value={2}>2 days</option>
-                <option value={3}>3 days</option>
-                <option value={4}>4 days</option>
-                <option value={5}>5 days</option>
+                <option value="1">1 day</option>
+                <option value="2">2 days</option>
+                <option value="3">3 days</option>
+                <option value="4">4 days</option>
+                <option value="5">5 days</option>
               </Select>
             </FormControl>
             <FormControl>
