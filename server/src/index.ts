@@ -361,15 +361,7 @@ app.listen(PORT, async () => {
     console.log('⏸️ Leads sync disabled (set ENABLE_LEADS_SYNC=true to enable)')
   }
 
-  // About/Company enrichment worker - refreshes company data quarterly
-  const aboutEnrichmentEnabled = process.env.ENABLE_ABOUT_ENRICHMENT === 'true'
-  if (aboutEnrichmentEnabled) {
-    console.log('🤖 Starting About enrichment worker...')
-    const { startAboutEnrichmentWorker } = await import('./workers/aboutEnrichment.js')
-    startAboutEnrichmentWorker(prisma)
-  } else {
-    console.log('⏸️ About enrichment disabled (set ENABLE_ABOUT_ENRICHMENT=true to enable)')
-  }
+  // Company enrichment removed (no worker)
 })
 
 // Graceful shutdown

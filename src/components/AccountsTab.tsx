@@ -6855,50 +6855,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         const normalized = normalizeCustomerWebsite(newWebsite)
                         updateAccount(selectedAccount.name, { website: normalized })
                         stopEditing(selectedAccount.name, 'website')
-                        
-                        // Auto-trigger AI enrichment when website is updated
-                        if (normalized && isServerSourceOfTruth) {
-                          try {
-                            const customersResponse = await api.get('/api/customers')
-                            if (!customersResponse.error && customersResponse.data) {
-                              const customersData = normalizeCustomersListResponse(customersResponse.data) as CustomerApi[]
-                              const customerApi = customersData.find((c) => c.name === selectedAccount.name)
-                              if (customerApi) {
-                                // Trigger enrichment in background
-                                await api.post(`/api/customers/${customerApi.id}/enrich-about`, {})
-                                
-                                // Reload account data
-                                const updatedResponse = await api.get('/api/customers')
-                                if (!updatedResponse.error && updatedResponse.data) {
-                                  const updatedCustomersData = normalizeCustomersListResponse(updatedResponse.data) as CustomerApi[]
-                                  const updatedCustomer = updatedCustomersData.find((c) => c.id === customerApi.id)
-                                  if (updatedCustomer) {
-                                    const updatedAccount = buildAccountFromCustomer(updatedCustomer)
-                                    updateAccountSilent(selectedAccount.name, updatedAccount)
-                                    setSelectedAccount(updatedAccount)
-                                  }
-                                }
-                                
-                                toast({
-                                  title: 'Company data updated',
-                                  description: 'Enriched company information from website',
-                                  status: 'success',
-                                  duration: 3000,
-                                  isClosable: true,
-                                })
-                              }
-                            }
-                          } catch (error) {
-                            // Silent fail - enrichment is optional
-                            console.log('Background enrichment failed:', error)
-                          }
-                        } else if (normalized && !isServerSourceOfTruth) {
-                          void populateAccountData({ ...selectedAccount, website: normalized }).then((populated) => {
-                            if (populated.aboutSource === 'web') {
-                              updateAccountSilent(selectedAccount.name, populated)
-                            }
-                          })
-                        }
                       },
                       isFieldEditing(selectedAccount.name, 'website'),
                       () => startEditing(selectedAccount.name, 'website'),
