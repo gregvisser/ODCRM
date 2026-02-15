@@ -6286,10 +6286,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                               }
                               if (targetName) {
                                 if (patch.weeklyLeadTarget !== undefined) {
-                                  updateAccountSilent(targetName, { weeklyTarget: (patch.weeklyLeadTarget ?? 0) as any })
+                                  // Preserve null when user clears the field (null means "not set", not 0).
+                                  updateAccountSilent(targetName, { weeklyTarget: patch.weeklyLeadTarget as any })
                                 }
                                 if (patch.monthlyLeadTarget !== undefined) {
-                                  updateAccountSilent(targetName, { monthlyTarget: (patch.monthlyLeadTarget ?? 0) as any })
+                                  // Preserve null when user clears the field (null means "not set", not 0).
+                                  updateAccountSilent(targetName, { monthlyTarget: patch.monthlyLeadTarget as any })
                                 }
                               }
 
@@ -6499,7 +6501,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                           <NumberInputField />
                                         </NumberInput>
                                       ) : (
-                                        <Text fontWeight="medium">{typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : 0}</Text>
+                                        <Text fontWeight="medium" color={typeof c?.weeklyLeadTarget === 'number' ? 'gray.800' : 'gray.500'}>
+                                          {typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : 'Not set'}
+                                        </Text>
                                       )}
                                     </FieldRow>
 
@@ -6517,7 +6521,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                           <NumberInputField />
                                         </NumberInput>
                                       ) : (
-                                        <Text fontWeight="medium">{typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : 0}</Text>
+                                        <Text fontWeight="medium" color={typeof c?.monthlyLeadTarget === 'number' ? 'gray.800' : 'gray.500'}>
+                                          {typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : 'Not set'}
+                                        </Text>
                                       )}
                                     </FieldRow>
 
