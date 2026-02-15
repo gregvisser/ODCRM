@@ -5,11 +5,6 @@
 
 import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
 import type { Account } from '../components/AccountsTab'
-import {
-  getFieldEnrichmentEntry,
-  readFieldEnrichmentStoreFromAccountData,
-  resolveEnrichedValue,
-} from './fieldEnrichment'
 
 function mapClientStatusToAccountStatus(
   clientStatus: unknown
@@ -48,34 +43,6 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
   // Onboarding writes onboarding-specific fields into accountData.accountDetails/clientProfile as well.
   const raw = coerceObject(customer.accountData) || {}
   const accountDetails = coerceObject(raw.accountDetails) || {}
-  const fieldEnrichmentStore = readFieldEnrichmentStoreFromAccountData(raw)
-
-  const resolvedWebsite = resolveEnrichedValue({
-    entry: getFieldEnrichmentEntry<string>({
-      store: fieldEnrichmentStore,
-      fieldKey: 'customer.website',
-      fallbackOriginal: String((raw.website ?? customer.website ?? customer.domain ?? '') || ''),
-    }),
-    fallback: String((raw.website ?? customer.website ?? customer.domain ?? '') || ''),
-  })
-
-  const resolvedSector = resolveEnrichedValue({
-    entry: getFieldEnrichmentEntry<string>({
-      store: fieldEnrichmentStore,
-      fieldKey: 'customer.sector',
-      fallbackOriginal: String((raw.sector ?? customer.sector ?? '') || ''),
-    }),
-    fallback: String((raw.sector ?? customer.sector ?? '') || ''),
-  })
-
-  const resolvedHeadOffice = resolveEnrichedValue({
-    entry: getFieldEnrichmentEntry<{ address?: string; placeId?: string; postcode?: string }>({
-      store: fieldEnrichmentStore,
-      fieldKey: 'accountDetails.headOffice',
-      fallbackOriginal: (coerceObject((accountDetails as any).headOffice) as any) ?? undefined,
-    }),
-    fallback: (coerceObject((accountDetails as any).headOffice) as any) ?? undefined,
-  })
 
   const targetLocationFromDb = splitCommaList(customer.prospectingLocation)
 
@@ -111,7 +78,7 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
 
     // Core
     name: customer.name,
-    website: String(resolvedWebsite ?? ''),
+    website: String((raw.website ?? customer.website ?? customer.domain ?? '') || ''),
 
     // AccountData-first fields (if present)
     aboutSections: (raw.aboutSections as any) ?? {
@@ -124,7 +91,7 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
       headquarters: customer.headquarters || '',
       foundingYear: customer.foundingYear || '',
     },
-    sector: String(resolvedSector ?? ''),
+    sector: String((raw.sector ?? customer.sector ?? '') || ''),
     socialMedia: (raw.socialMedia as any) ?? (Array.isArray(customer.socialPresence) ? customer.socialPresence : []),
 
     // Onboarding/contact convenience fields (stored in accountData by onboarding)
@@ -136,12 +103,9 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
     contactRoleLabel: raw.contactRoleLabel as any,
     contactActive: raw.contactActive as any,
 
-    headOfficeAddress:
-      (resolvedHeadOffice as any)?.address ?? (raw.headOfficeAddress as any) ?? (accountDetails.headOfficeAddress as any),
-    headOfficePlaceId:
-      (resolvedHeadOffice as any)?.placeId ?? (raw.headOfficePlaceId as any) ?? (accountDetails.headOfficePlaceId as any),
-    headOfficePostcode:
-      (resolvedHeadOffice as any)?.postcode ?? (raw.headOfficePostcode as any) ?? (accountDetails.headOfficePostcode as any),
+    headOfficeAddress: (raw.headOfficeAddress as any) ?? (accountDetails.headOfficeAddress as any),
+    headOfficePlaceId: (raw.headOfficePlaceId as any) ?? (accountDetails.headOfficePlaceId as any),
+    headOfficePostcode: (raw.headOfficePostcode as any) ?? (accountDetails.headOfficePostcode as any),
 
     assignedAccountManager: (raw.assignedAccountManager as any) ?? (accountDetails.assignedAccountManagerName as any),
     assignedAccountManagerId: (raw.assignedAccountManagerId as any) ?? (accountDetails.assignedAccountManagerId as any),
