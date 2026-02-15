@@ -51,6 +51,16 @@ import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
 import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
+import { fetchCompanyData, type CompanyData } from '../../services/companyDataService'
+import { EnrichedFieldWrapper } from './components/EnrichedFieldWrapper'
+import {
+  ACCOUNTDATA_FIELD_ENRICHMENT_KEY,
+  type FieldEnrichmentEntry,
+  type FieldEnrichmentStore,
+  getFieldEnrichmentEntry,
+  readFieldEnrichmentStoreFromAccountData,
+  upsertFieldEnrichmentEntry,
+} from '../../utils/fieldEnrichment'
 import type {
   Account,
   Accreditation,
@@ -59,6 +69,8 @@ import type {
   SocialMediaPresence,
   TargetGeographicalArea,
 } from '../../components/AccountsTab'
+
+type OnboardingFieldKey = string
 
 // Type definitions
 type CustomerApi = {
@@ -335,6 +347,35 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [weeklyLeadTarget, setWeeklyLeadTarget] = useState<string>('')
   const [monthlyLeadTarget, setMonthlyLeadTarget] = useState<string>('')
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
+  const [fieldEnrichmentStore, setFieldEnrichmentStore] = useState<FieldEnrichmentStore>({ version: 1, fields: {} })
+
+  const companyDataCacheRef = useRef<{ key: string; data: CompanyData } | null>(null)
+
+  const fetchCompanyDataCached = useCallback(async (): Promise<CompanyData | null> => {
+    const name = String(customer?.name || '').trim()
+    const website = normalizeWebAddress(String(customer?.website || '').trim()) || ''
+    const key = `${name}::${website}`
+    if (!name || !website) return null
+    if (companyDataCacheRef.current?.key === key) return companyDataCacheRef.current.data
+    const data = await fetchCompanyData(name, website)
+    if (data) companyDataCacheRef.current = { key, data }
+    return data
+  }, [customer?.name, customer?.website])
+
+  const getEnrichment = useCallback(
+    <T,>(fieldKey: OnboardingFieldKey, fallbackOriginal: T): FieldEnrichmentEntry<T> => {
+      return getFieldEnrichmentEntry<T>({ store: fieldEnrichmentStore, fieldKey, fallbackOriginal })
+    },
+    [fieldEnrichmentStore],
+  )
+
+  const setEnrichment = useCallback(
+    <T,>(fieldKey: OnboardingFieldKey, next: FieldEnrichmentEntry<T>) => {
+      setFieldEnrichmentStore((prev) => upsertFieldEnrichmentEntry<T>({ store: prev, fieldKey, next }))
+      setIsDirty(true)
+    },
+    [],
+  )
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -530,6 +571,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       customer.accountData && typeof customer.accountData === 'object'
         ? customer.accountData
         : {}
+    setFieldEnrichmentStore(readFieldEnrichmentStoreFromAccountData(rawAccountData) ?? { version: 1, fields: {} })
     const nextProfile = normalizeClientProfile((rawAccountData as { clientProfile?: ClientProfile }).clientProfile)
     setClientProfile(nextProfile)
 
@@ -1102,6 +1144,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       clientProfile: { ...(clientProfile as any), targetGeographicalArea: null },
       accountDetails: nextAccountDetails,
       targetGeographicalAreas: normalizedTargetAreas,
+      [ACCOUNTDATA_FIELD_ENRICHMENT_KEY]: fieldEnrichmentStore,
       // Also update top-level convenience fields for backward compatibility
       contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
       contactEmail: accountDetails.primaryContact.email,
@@ -1401,125 +1444,371 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
               <FormLabel>Web Address</FormLabel>
-              <Input
-                type="url"
-                value={customer.website || ''}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setCustomer((prev) => (prev ? { ...prev, website: next } : prev))
-                  setIsDirty(true)
-                }}
-                placeholder="https://example.com"
-              />
+              {(() => {
+                const fieldKey = 'customer.website'
+                const current = customer.website || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setCustomer((prev) => (prev ? { ...prev, website: String(next || '') } : prev))
+                      setIsDirty(true)
+                    }}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        type="url"
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="https://example.com"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Sector</FormLabel>
-              <Input
-                value={customer.sector || ''}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setCustomer((prev) => (prev ? { ...prev, sector: next } : prev))
-                  setIsDirty(true)
-                }}
-                placeholder="e.g. Facilities Management"
-              />
+              {(() => {
+                const fieldKey = 'customer.sector'
+                const current = customer.sector || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setCustomer((prev) => (prev ? { ...prev, sector: String(next || '') } : prev))
+                      setIsDirty(true)
+                    }}
+                    onRequestEnhanced={async () => {
+                      const data = await fetchCompanyDataCached()
+                      const next = String(data?.sector || '').trim()
+                      return next ? next : null
+                    }}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="e.g. Facilities Management"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Assigned Account Manager</FormLabel>
-              <Select
-                placeholder={assignedUsers.length ? 'Select user' : 'No users found'}
-                value={accountDetails.assignedAccountManagerId || ''}
-                onChange={(e) => {
-                  const nextId = e.target.value
-                  const user = assignedUsers.find((u) => u.id === nextId) || null
-                  updateAccountDetails({
-                    assignedAccountManagerId: nextId,
-                    assignedAccountManagerName: user ? `${user.firstName} ${user.lastName}`.trim() : '',
-                  })
-                }}
-              >
-                {assignedUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {`${user.firstName} ${user.lastName}`.trim()} ({user.email})
-                  </option>
-                ))}
-              </Select>
+              {(() => {
+                const fieldKey = 'accountDetails.assignedAccountManager'
+                const current = {
+                  id: String(accountDetails.assignedAccountManagerId || ''),
+                  name: String(accountDetails.assignedAccountManagerName || ''),
+                }
+                const entry = getEnrichment<{ id: string; name: string }>(fieldKey, current)
+                const originalValue = (entry.original ?? current) as { id: string; name: string }
+                const enhancedValue = (entry.enhanced ?? null) as { id: string; name: string } | null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) =>
+                      updateAccountDetails({
+                        assignedAccountManagerId: String((next as any)?.id || ''),
+                        assignedAccountManagerName: String((next as any)?.name || ''),
+                      })
+                    }
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced manager.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => {
+                      const v = value as any as { id: string; name: string }
+                      return (
+                        <Select
+                          placeholder={assignedUsers.length ? 'Select user' : 'No users found'}
+                          value={v.id || ''}
+                          isDisabled={isReadOnly}
+                          onChange={(e) => {
+                            const nextId = e.target.value
+                            const user = assignedUsers.find((u) => u.id === nextId) || null
+                            onChange({ id: nextId, name: user ? `${user.firstName} ${user.lastName}`.trim() : '' } as any)
+                          }}
+                        >
+                          {assignedUsers.map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {`${user.firstName} ${user.lastName}`.trim()} ({user.email})
+                            </option>
+                          ))}
+                        </Select>
+                      )
+                    }}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Assigned Client DDI & Number</FormLabel>
-              <Input
-                value={accountDetails.assignedClientDdiNumber}
-                onChange={(e) => updateAccountDetails({ assignedClientDdiNumber: e.target.value })}
-                placeholder="DDI / Number"
-              />
+              {(() => {
+                const fieldKey = 'accountDetails.assignedClientDdiNumber'
+                const current = accountDetails.assignedClientDdiNumber || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => updateAccountDetails({ assignedClientDdiNumber: String(next || '') })}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced number.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="DDI / Number"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Days a Week</FormLabel>
-              <Select
-                value={accountDetails.daysPerWeek}
-                onChange={(e) => updateAccountDetails({ daysPerWeek: Number(e.target.value) })}
-              >
-                <option value={1}>1 day</option>
-                <option value={2}>2 days</option>
-                <option value={3}>3 days</option>
-                <option value={4}>4 days</option>
-                <option value={5}>5 days</option>
-              </Select>
+              {(() => {
+                const fieldKey = 'accountDetails.daysPerWeek'
+                const current = typeof accountDetails.daysPerWeek === 'number' ? accountDetails.daysPerWeek : 1
+                const entry = getEnrichment<number>(fieldKey, current)
+                const originalValue = typeof (entry.original ?? current) === 'number' ? (entry.original ?? current) : current
+                const enhancedValue = typeof entry.enhanced === 'number' ? entry.enhanced : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue as any}
+                    enhancedValue={enhancedValue as any}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => updateAccountDetails({ daysPerWeek: Number(next) })}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced days.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Select
+                        value={String(value)}
+                        isDisabled={isReadOnly}
+                        onChange={(e) => onChange(Number(e.target.value) as any)}
+                      >
+                        <option value={1}>1 day</option>
+                        <option value={2}>2 days</option>
+                        <option value={3}>3 days</option>
+                        <option value={4}>4 days</option>
+                        <option value={5}>5 days</option>
+                      </Select>
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Monthly Revenue from Customer (£)</FormLabel>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={monthlyRevenueFromCustomer}
-                onChange={(e) => setMonthlyRevenueFromCustomer(e.target.value)}
-                placeholder="e.g. 5000.00"
-              />
+              {(() => {
+                const fieldKey = 'customer.monthlyRevenueFromCustomer'
+                const current = monthlyRevenueFromCustomer || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setMonthlyRevenueFromCustomer(String(next || ''))
+                      setIsDirty(true)
+                    }}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced revenue.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="e.g. 5000.00"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Weekly Lead Target</FormLabel>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={weeklyLeadTarget}
-                onChange={(e) => {
-                  setWeeklyLeadTarget(e.target.value)
-                  setIsDirty(true)
-                }}
-                placeholder="Manual weekly target (e.g. 25)"
-              />
+              {(() => {
+                const fieldKey = 'customer.weeklyLeadTarget'
+                const current = weeklyLeadTarget || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setWeeklyLeadTarget(String(next || ''))
+                      setIsDirty(true)
+                    }}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced weekly target.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="Manual weekly target (e.g. 25)"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Monthly Lead Target</FormLabel>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={monthlyLeadTarget}
-                onChange={(e) => {
-                  setMonthlyLeadTarget(e.target.value)
-                  setIsDirty(true)
-                }}
-                placeholder="Manual monthly target (e.g. 100)"
-              />
+              {(() => {
+                const fieldKey = 'customer.monthlyLeadTarget'
+                const current = monthlyLeadTarget || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setMonthlyLeadTarget(String(next || ''))
+                      setIsDirty(true)
+                    }}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced monthly target.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="Manual monthly target (e.g. 100)"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Weekly Lead Actual (this week)</FormLabel>
-              <Input
-                value={typeof (customer as any)?.weeklyLeadActual === 'number' ? String((customer as any).weeklyLeadActual) : ''}
-                isReadOnly
-                placeholder="Synced from Google Sheets"
-              />
+              {(() => {
+                const fieldKey = 'customer.weeklyLeadActual'
+                const current =
+                  typeof (customer as any)?.weeklyLeadActual === 'number' ? String((customer as any).weeklyLeadActual) : ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    isReadOnly
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={() => {}}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced actual (synced).
+                      </Text>
+                    )}
+                    renderInput={({ value, isReadOnly }) => (
+                      <Input
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        placeholder="Synced from Google Sheets"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Monthly Lead Actual (this month)</FormLabel>
-              <Input
-                value={typeof (customer as any)?.monthlyLeadActual === 'number' ? String((customer as any).monthlyLeadActual) : ''}
-                isReadOnly
-                placeholder="Synced from Google Sheets"
-              />
+              {(() => {
+                const fieldKey = 'customer.monthlyLeadActual'
+                const current =
+                  typeof (customer as any)?.monthlyLeadActual === 'number' ? String((customer as any).monthlyLeadActual) : ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    isReadOnly
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={() => {}}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced actual (synced).
+                      </Text>
+                    )}
+                    renderInput={({ value, isReadOnly }) => (
+                      <Input
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        placeholder="Synced from Google Sheets"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
           </SimpleGrid>
 
@@ -1528,75 +1817,176 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
               <FormLabel>Leads Google Sheet URL</FormLabel>
-              <Input
-                type="url"
-                value={leadsGoogleSheetUrl}
-                onChange={(e) => setLeadsGoogleSheetUrl(e.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/d/..."
-              />
+              {(() => {
+                const fieldKey = 'customer.leadsGoogleSheetUrl'
+                const current = leadsGoogleSheetUrl || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setLeadsGoogleSheetUrl(String(next || ''))
+                      setIsDirty(true)
+                    }}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced URL.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        type="url"
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="https://docs.google.com/spreadsheets/d/..."
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
             <FormControl>
               <FormLabel>Leads Google Sheet Label</FormLabel>
-              <Input
-                value={leadsGoogleSheetLabel}
-                onChange={(e) => setLeadsGoogleSheetLabel(e.target.value)}
-                placeholder="e.g. Customer Lead Sheet"
-              />
+              {(() => {
+                const fieldKey = 'customer.leadsGoogleSheetLabel'
+                const current = leadsGoogleSheetLabel || ''
+                const entry = getEnrichment<string>(fieldKey, current)
+                const originalValue = String(entry.original ?? current)
+                const enhancedValue = entry.enhanced != null ? String(entry.enhanced) : null
+                return (
+                  <EnrichedFieldWrapper
+                    originalValue={originalValue}
+                    enhancedValue={enhancedValue}
+                    entry={entry}
+                    onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                    onApplyActiveValue={(next) => {
+                      setLeadsGoogleSheetLabel(String(next || ''))
+                      setIsDirty(true)
+                    }}
+                    renderEnhancedFallback={() => (
+                      <Text fontSize="sm" color="gray.500">
+                        No enhanced label.
+                      </Text>
+                    )}
+                    renderInput={({ value, onChange, isReadOnly }) => (
+                      <Input
+                        value={String(value || '')}
+                        isReadOnly={isReadOnly}
+                        onChange={(e) => onChange(e.target.value as any)}
+                        placeholder="e.g. Customer Lead Sheet"
+                      />
+                    )}
+                  />
+                )
+              })()}
             </FormControl>
           </SimpleGrid>
 
           <FormControl>
             <FormLabel>Head Office Address</FormLabel>
-            <Stack spacing={2}>
-              <Input
-                value={headOfficeQuery}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setHeadOfficeQuery(next)
-                  // If user edits the text after selecting an autocomplete entry, clear placeId (selection no longer valid).
-                  updateAccountDetails({
-                    headOfficeAddress: next,
-                    headOfficePlaceId:
-                      accountDetails.headOfficePlaceId && next.trim() !== String(accountDetails.headOfficeAddress || '').trim()
-                        ? ''
-                        : accountDetails.headOfficePlaceId,
-                  })
-                }}
-                placeholder="Search by company name or postcode"
-              />
-              {headOfficeLoading ? (
-                <HStack spacing={2}>
-                  <Spinner size="xs" />
-                  <Text fontSize="xs" color="gray.500">
-                    Searching addresses...
-                  </Text>
-                </HStack>
-              ) : null}
-              {headOfficeOptions.length > 0 ? (
-                <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
-                  <VStack align="stretch" spacing={0}>
-                    {headOfficeOptions.map((option) => (
-                      <Button
-                        key={option.placeId || option.label}
-                        variant="ghost"
-                        justifyContent="flex-start"
-                        fontWeight="normal"
-                        onClick={() => {
-                          updateAccountDetails({
-                            headOfficeAddress: option.label,
-                            headOfficePlaceId: option.placeId,
-                          })
-                          setHeadOfficeQuery(option.label)
-                          setHeadOfficeOptions([])
-                        }}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </VStack>
-                </Box>
-              ) : null}
-            </Stack>
+            {(() => {
+              const fieldKey = 'accountDetails.headOffice'
+              const current = {
+                address: String(accountDetails.headOfficeAddress || ''),
+                placeId: String(accountDetails.headOfficePlaceId || ''),
+                postcode: String(accountDetails.headOfficePostcode || ''),
+              }
+              const entry = getEnrichment<{ address: string; placeId: string; postcode: string }>(fieldKey, current)
+              const originalValue = (entry.original ?? current) as { address: string; placeId: string; postcode: string }
+              const enhancedValue = (entry.enhanced ?? null) as { address: string; placeId: string; postcode: string } | null
+              return (
+                <EnrichedFieldWrapper
+                  originalValue={originalValue}
+                  enhancedValue={enhancedValue}
+                  entry={entry}
+                  onChangeEntry={(next) => setEnrichment(fieldKey, next)}
+                  onApplyActiveValue={(next) => {
+                    const v = next as any as { address: string; placeId?: string; postcode?: string }
+                    updateAccountDetails({
+                      headOfficeAddress: String(v.address || ''),
+                      headOfficePlaceId: String(v.placeId || ''),
+                      headOfficePostcode: String(v.postcode || ''),
+                    })
+                    setHeadOfficeQuery(String(v.address || ''))
+                    setHeadOfficeOptions([])
+                  }}
+                  onRequestEnhanced={async () => {
+                    const data = await fetchCompanyDataCached()
+                    const hq = String(data?.headquarters || '').trim()
+                    return hq ? ({ address: hq, placeId: '', postcode: '' } as any) : null
+                  }}
+                  renderEnhancedFallback={() => (
+                    <Text fontSize="sm" color="gray.500">
+                      No enhanced address yet.
+                    </Text>
+                  )}
+                  renderInput={({ value, onChange, isReadOnly }) => {
+                    const v = value as any as { address: string; placeId: string; postcode: string }
+                    if (isReadOnly) {
+                      return <Input value={String(v?.address || '')} isReadOnly placeholder="No enhanced address" />
+                    }
+                    return (
+                      <Stack spacing={2}>
+                        <Input
+                          value={headOfficeQuery}
+                          onChange={(e) => {
+                            const nextText = e.target.value
+                            setHeadOfficeQuery(nextText)
+                            const nextObj = {
+                              address: nextText,
+                              placeId: v.placeId && nextText.trim() !== String(v.address || '').trim() ? '' : v.placeId,
+                              postcode: v.postcode,
+                            }
+                            onChange(nextObj as any)
+                          }}
+                          placeholder="Search by company name or postcode"
+                        />
+                        {headOfficeLoading ? (
+                          <HStack spacing={2}>
+                            <Spinner size="xs" />
+                            <Text fontSize="xs" color="gray.500">
+                              Searching addresses...
+                            </Text>
+                          </HStack>
+                        ) : null}
+                        {headOfficeOptions.length > 0 ? (
+                          <Box border="1px solid" borderColor="gray.200" borderRadius="md" overflow="hidden">
+                            <VStack align="stretch" spacing={0}>
+                              {headOfficeOptions.map((option) => (
+                                <Button
+                                  key={option.placeId || option.label}
+                                  variant="ghost"
+                                  justifyContent="flex-start"
+                                  fontWeight="normal"
+                                  onClick={() => {
+                                    const nextObj = {
+                                      address: option.label,
+                                      placeId: option.placeId || '',
+                                      postcode: String((option as any)?.postcode || ''),
+                                    }
+                                    onChange(nextObj as any)
+                                    setHeadOfficeQuery(option.label)
+                                    setHeadOfficeOptions([])
+                                  }}
+                                >
+                                  {option.label}
+                                </Button>
+                              ))}
+                            </VStack>
+                          </Box>
+                        ) : null}
+                      </Stack>
+                    )
+                  }}
+                />
+              )
+            })()}
           </FormControl>
 
           <Divider />
