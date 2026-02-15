@@ -237,6 +237,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         dbAccounts={dbAccounts}
         dbCustomers={customers}
         dataSource="DB"
+        refetchCustomers={refetch}
       />
     </Box>
   )

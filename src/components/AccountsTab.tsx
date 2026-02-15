@@ -3564,6 +3564,7 @@ function NotesSection({ account, customerId, updateAccount, toast, users, curren
                   <Text>•</Text>
                   <Text>
                     {new Date(note.timestamp).toLocaleString('en-GB', {
+                      timeZone: 'Europe/London',
                       day: 'numeric',
                       month: 'short',
                       year: 'numeric',
@@ -3589,6 +3590,8 @@ type AccountsTabProps = {
   dbCustomers: CustomerApi[]
   /** Data source indicator for debug display */
   dataSource?: 'DB' | 'CACHE'
+  /** Ask the DB hook to refetch customers after saves */
+  refetchCustomers?: () => void
 }
 
 /**
@@ -3662,7 +3665,7 @@ function deriveCustomerId(
   return { customerId: null, source: 'dbLookupName_invalidId' }
 }
 
-function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = 'CACHE' }: AccountsTabProps) {
+function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = 'CACHE', refetchCustomers }: AccountsTabProps) {
   const toast = useToast()
   // Notes and manager wiring must use the same user source as Settings → User Authorization
   const { users: dbUsers } = useUsersFromDatabase()
@@ -3743,6 +3746,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{ accountName: string; field: string } | null>(null)
   const [editValue, setEditValue] = useState<string>('')
+  const [isSavingInlineEdit, setIsSavingInlineEdit] = useState(false)
+
+  // Account Details (drawer) edit mode - supports multi-field save (single audit event)
+  const [isEditingAccountDetails, setIsEditingAccountDetails] = useState(false)
+  const [accountDetailsDraft, setAccountDetailsDraft] = useState<any | null>(null)
+  const [isSavingAccountDetails, setIsSavingAccountDetails] = useState(false)
   
   // Sorting state
   const [sortColumn, setSortColumn] = useState<string | null>('spend')
@@ -3973,6 +3982,46 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   
   // Stable customer ID for email identity fetching (prevents render loops)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  
+  // Reset drawer edit mode when customer changes
+  useEffect(() => {
+    setIsEditingAccountDetails(false)
+    setAccountDetailsDraft(null)
+  }, [selectedCustomerId])
+
+  const patchCustomerAccount = useCallback(
+    async (customerId: string, patch: any) => {
+      const { data, error } = await api.patch<{
+        success: boolean
+        customerId: string
+        changes: Array<{ field: string; oldValue: unknown; newValue: unknown }>
+        note?: any
+        customer?: any
+        requestId?: string
+      }>(`/api/customers/${customerId}/account`, patch)
+
+      if (error || !data?.success) {
+        toast({
+          title: 'Save failed',
+          description: error || 'Failed to save changes',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return { ok: false as const, data: null }
+      }
+
+      // Ask the DB hook to refetch, so list/table stays in sync.
+      try {
+        refetchCustomers?.()
+      } catch {
+        // ignore
+      }
+
+      return { ok: true as const, data }
+    },
+    [refetchCustomers, toast],
+  )
 
   // Customer detail used by the Account Card (DB source of truth: GET /api/customers/:id)
   const [selectedCustomerDetail, setSelectedCustomerDetail] = useState<CustomerDetailApi | null>(null)
@@ -4529,7 +4578,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   }, [accountsData, isServerSourceOfTruth, updateAccountSilent])
   
   // Handle inline edit save (defined after updateAccount)
-  const handleCellSave = () => {
+  const handleCellSave = async () => {
     if (!editingCell) return
     
     const account = accountsData.find(a => a.name === editingCell.accountName)
@@ -4550,18 +4599,54 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
     
     const updates: Partial<Account> = {}
+    const patch: any = {}
     
     if (editingCell.field === 'spend') {
       updates.monthlySpendGBP = numValue
+      patch.monthlyIntakeGBP = numValue
+      patch.accountData = { monthlySpendGBP: numValue }
     } else if (editingCell.field === 'weeklyTarget') {
       updates.weeklyTarget = numValue
+      patch.weeklyLeadTarget = numValue
     } else if (editingCell.field === 'monthlyTarget') {
       updates.monthlyTarget = numValue
+      patch.monthlyLeadTarget = numValue
     } else if (editingCell.field === 'defcon') {
       updates.defcon = Math.max(1, Math.min(5, Math.round(numValue))) // Clamp between 1 and 5
+      patch.defcon = updates.defcon
     }
-    
-    updateAccount(editingCell.accountName, updates)
+
+    const { customerId } = deriveCustomerId(account, account.name, dbAccounts)
+    if (!customerId) {
+      toast({
+        title: 'Cannot save',
+        description: 'This account is not linked to a database customer yet.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setIsSavingInlineEdit(true)
+    const result = await patchCustomerAccount(customerId, patch)
+    setIsSavingInlineEdit(false)
+
+    if (!result.ok) return
+
+    // Update local state immediately so UI feels responsive (DB is source of truth; we also refetch)
+    updateAccountSilent(editingCell.accountName, {
+      ...updates,
+      // keep notes refreshed for Notes tab (auto audit note)
+      ...(result.data?.customer?.accountData?.notes ? { notes: result.data.customer.accountData.notes } : {}),
+    })
+
+    // If drawer is open for this customer, refresh the detail view so computed fields update.
+    if (selectedCustomerId && selectedCustomerId === customerId) {
+      const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${customerId}`)
+      if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+    }
+
     setEditingCell(null)
     setEditValue('')
   }
@@ -5670,7 +5755,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           min={0}
                           precision={0}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCellSave()
+                            if (e.key === 'Enter') void handleCellSave()
                             if (e.key === 'Escape') handleCellCancel()
                           }}
                           autoFocus
@@ -5681,7 +5766,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           aria-label="Save"
                           icon={<CheckIcon />}
                           size="xs"
-                          onClick={handleCellSave}
+                          onClick={() => void handleCellSave()}
+                          isLoading={isSavingInlineEdit}
                         />
                         <IconButton
                           aria-label="Cancel"
@@ -5717,7 +5803,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           min={0}
                           precision={0}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCellSave()
+                            if (e.key === 'Enter') void handleCellSave()
                             if (e.key === 'Escape') handleCellCancel()
                           }}
                           autoFocus
@@ -5728,7 +5814,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           aria-label="Save"
                           icon={<CheckIcon />}
                           size="xs"
-                          onClick={handleCellSave}
+                          onClick={() => void handleCellSave()}
+                          isLoading={isSavingInlineEdit}
                         />
                         <IconButton
                           aria-label="Cancel"
@@ -5764,7 +5851,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           min={0}
                           precision={0}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCellSave()
+                            if (e.key === 'Enter') void handleCellSave()
                             if (e.key === 'Escape') handleCellCancel()
                           }}
                           autoFocus
@@ -5775,7 +5862,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           aria-label="Save"
                           icon={<CheckIcon />}
                           size="xs"
-                          onClick={handleCellSave}
+                          onClick={() => void handleCellSave()}
+                          isLoading={isSavingInlineEdit}
                         />
                         <IconButton
                           aria-label="Cancel"
@@ -5814,7 +5902,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           max={5}
                           precision={0}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') handleCellSave()
+                            if (e.key === 'Enter') void handleCellSave()
                             if (e.key === 'Escape') handleCellCancel()
                           }}
                           autoFocus
@@ -5825,7 +5913,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           aria-label="Save"
                           icon={<CheckIcon />}
                           size="xs"
-                          onClick={handleCellSave}
+                          onClick={() => void handleCellSave()}
+                          isLoading={isSavingInlineEdit}
                         />
                         <IconButton
                           aria-label="Cancel"
@@ -6049,82 +6138,323 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                               : typeof ad?.days === 'number'
                                 ? ad.days
                                 : null
+                            const emailAccountsArr = Array.isArray(details?.emailAccounts) ? details.emailAccounts : []
+                            const activeUsers = (dbUsers || []).filter((u) => u.accountStatus === 'Active')
+
+                            const startEdit = () => {
+                              if (!selectedCustomerId) return
+                              setAccountDetailsDraft({
+                                name: c?.name || selectedAccount.name || '',
+                                domain: c?.domain || '',
+                                website: website || '',
+                                sector: c?.sector || '',
+                                leadsReportingUrl: leadsUrl || '',
+                                leadsGoogleSheetLabel: leadsLabel || '',
+                                assignedAccountManagerId:
+                                  (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
+                                  (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
+                                  '',
+                                assignedClientDdiNumber:
+                                  (typeof details?.assignedClientDdiNumber === 'string' ? details.assignedClientDdiNumber : '') ||
+                                  (typeof ad?.assignedClientDdiNumber === 'string' ? ad.assignedClientDdiNumber : '') ||
+                                  '',
+                                daysPerWeek: daysPerWeek ?? '',
+                                emailAccountsCsv: Array.isArray(emailAccountsArr)
+                                  ? emailAccountsArr.map((v: any) => String(v || '').trim()).filter(Boolean).join(', ')
+                                  : '',
+                              })
+                              setIsEditingAccountDetails(true)
+                            }
+
+                            const cancelEdit = () => {
+                              setIsEditingAccountDetails(false)
+                              setAccountDetailsDraft(null)
+                            }
+
+                            const saveEdit = async () => {
+                              if (!selectedCustomerId) return
+                              const d = accountDetailsDraft || {}
+                              const patch: any = {}
+
+                              const nextName = String(d.name || '').trim()
+                              if (nextName && nextName !== (c?.name || selectedAccount.name)) patch.name = nextName
+
+                              const nextDomain = String(d.domain || '').trim()
+                              const nextWebsite = String(d.website || '').trim()
+                              const nextSector = String(d.sector || '').trim()
+                              const nextLeadsUrl = String(d.leadsReportingUrl || '').trim()
+                              const nextLeadsLabel = String(d.leadsGoogleSheetLabel || '').trim()
+
+                              if (nextDomain !== String(c?.domain || '').trim()) patch.domain = nextDomain ? nextDomain : null
+                              if (nextWebsite !== website) patch.website = nextWebsite ? nextWebsite : null
+                              if (nextSector !== String(c?.sector || '').trim()) patch.sector = nextSector ? nextSector : null
+
+                              // Leads URL+label: if URL set, label must be set
+                              if (nextLeadsUrl && !nextLeadsLabel) {
+                                toast({
+                                  title: 'Leads label required',
+                                  description: 'Please set a Google Sheet label when a Leads URL is provided.',
+                                  status: 'warning',
+                                  duration: 4000,
+                                  isClosable: true,
+                                })
+                                return
+                              }
+                              if (nextLeadsUrl !== leadsUrl) patch.leadsReportingUrl = nextLeadsUrl ? nextLeadsUrl : null
+                              if (nextLeadsLabel !== leadsLabel) patch.leadsGoogleSheetLabel = nextLeadsLabel ? nextLeadsLabel : null
+
+                              const accountDetailsPatch: any = {}
+                              const nextManagerId = String(d.assignedAccountManagerId || '').trim()
+                              const currentManagerId =
+                                (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
+                                (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
+                                ''
+                              if (nextManagerId !== String(currentManagerId || '').trim()) {
+                                accountDetailsPatch.assignedAccountManagerId = nextManagerId ? nextManagerId : null
+                              }
+
+                              const nextDdi = String(d.assignedClientDdiNumber || '').trim()
+                              const currentDdi =
+                                (typeof details?.assignedClientDdiNumber === 'string' ? details.assignedClientDdiNumber : '') ||
+                                (typeof ad?.assignedClientDdiNumber === 'string' ? ad.assignedClientDdiNumber : '') ||
+                                ''
+                              if (nextDdi !== String(currentDdi || '').trim()) {
+                                accountDetailsPatch.assignedClientDdiNumber = nextDdi ? nextDdi : null
+                              }
+
+                              const nextDays = d.daysPerWeek === '' ? null : Number(d.daysPerWeek)
+                              if ((daysPerWeek ?? null) !== (nextDays ?? null)) {
+                                accountDetailsPatch.daysPerWeek = nextDays
+                              }
+
+                              const nextEmailAccounts = String(d.emailAccountsCsv || '')
+                                .split(',')
+                                .map((s: string) => s.trim())
+                                .filter(Boolean)
+                              const currentEmailAccounts = Array.isArray(emailAccountsArr)
+                                ? emailAccountsArr.map((v: any) => String(v || '').trim()).filter(Boolean)
+                                : []
+                              if (JSON.stringify(nextEmailAccounts) !== JSON.stringify(currentEmailAccounts)) {
+                                accountDetailsPatch.emailAccounts = nextEmailAccounts
+                              }
+
+                              if (Object.keys(accountDetailsPatch).length) {
+                                patch.accountData = { accountDetails: accountDetailsPatch }
+                              }
+
+                              if (!Object.keys(patch).length) {
+                                toast({ title: 'No changes to save', status: 'info', duration: 2000, isClosable: true })
+                                cancelEdit()
+                                return
+                              }
+
+                              setIsSavingAccountDetails(true)
+                              const result = await patchCustomerAccount(selectedCustomerId, patch)
+                              setIsSavingAccountDetails(false)
+                              if (!result.ok) return
+
+                              // Refresh detail view (computed manager user, etc.)
+                              const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${selectedCustomerId}`)
+                              if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+
+                              // Keep Notes tab in sync with the auto audit note
+                              const notesFromPatch = result.data?.customer?.accountData?.notes
+                              const oldName = selectedAccount?.name || ''
+                              const newName = typeof patch.name === 'string' && patch.name.trim() ? patch.name.trim() : ''
+                              if (newName && oldName && newName !== oldName) {
+                                updateAccountSilent(oldName, { name: newName })
+                                setSelectedAccount((prev) => (prev ? { ...prev, name: newName } : prev))
+                              }
+                              const targetName = newName || oldName
+                              if (notesFromPatch && targetName) {
+                                updateAccountSilent(targetName, { notes: notesFromPatch })
+                              }
+
+                              toast({ title: 'Saved', status: 'success', duration: 2000, isClosable: true })
+                              cancelEdit()
+                            }
 
                           return (
-                            <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
-                              <FieldRow label="Customer Name">
-                                <Text fontWeight="medium">{c?.name || selectedAccount.name}</Text>
-                              </FieldRow>
-                              <FieldRow label="Domain">
-                                <Text color={c?.domain ? 'gray.800' : 'gray.500'}>{c?.domain || 'Not set'}</Text>
-                              </FieldRow>
-
-                              <FieldRow label="Web Address">
-                                {website ? (
-                                  <Link href={website} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
-                                    {website}
-                                  </Link>
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
-                              </FieldRow>
-
-                              <FieldRow label="Sector">
-                                <Text color={c?.sector ? 'gray.800' : 'gray.500'}>{c?.sector || 'Not set'}</Text>
-                              </FieldRow>
-
-                              <FieldRow label="Leads Google Sheet Label">
-                                <GoogleSheetLink
-                                  url={leadsUrl}
-                                  label={leadsLabel}
-                                  fallbackLabel="Leads Google Sheet"
-                                  fontSize="sm"
-                                />
-                              </FieldRow>
-
-                              <FieldRow label="Assigned Account Manager">
-                                {manager ? (
-                                  <Stack spacing={1}>
-                                    <Text fontWeight="medium">
-                                      {`${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email}
-                                    </Text>
+                              <Stack spacing={4}>
+                                <HStack justify="flex-end">
+                                  {!isEditingAccountDetails ? (
+                                    <Button size="sm" variant="outline" onClick={startEdit} isDisabled={!selectedCustomerId}>
+                                      Edit
+                                    </Button>
+                                  ) : (
                                     <HStack spacing={2}>
-                                      {manager.role ? <Badge variant="subtle">{manager.role}</Badge> : null}
-                                      {manager.department ? <Badge variant="outline">{manager.department}</Badge> : null}
+                                      <Button size="sm" variant="ghost" onClick={cancelEdit} isDisabled={isSavingAccountDetails}>
+                                        Cancel
+                                      </Button>
+                                      <Button size="sm" colorScheme="gray" onClick={() => void saveEdit()} isLoading={isSavingAccountDetails}>
+                                        Save changes
+                                      </Button>
                                     </HStack>
-                                  </Stack>
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
-                              </FieldRow>
+                                  )}
+                                </HStack>
 
-                              <FieldRow label="Assigned Client DDI & Number">
-                                <Text color={details?.assignedClientDdiNumber ? 'gray.800' : 'gray.500'}>
-                                  {details?.assignedClientDdiNumber || 'Not set'}
-                                </Text>
-                              </FieldRow>
+                                <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                  <FieldRow label="Customer Name">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        value={accountDetailsDraft?.name ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), name: e.target.value }))}
+                                      />
+                                    ) : (
+                                      <Text fontWeight="medium">{c?.name || selectedAccount.name}</Text>
+                                    )}
+                                  </FieldRow>
+                                  <FieldRow label="Domain">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        value={accountDetailsDraft?.domain ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), domain: e.target.value }))}
+                                      />
+                                    ) : (
+                                      <Text color={c?.domain ? 'gray.800' : 'gray.500'}>{c?.domain || 'Not set'}</Text>
+                                    )}
+                                  </FieldRow>
 
-                              <FieldRow label="Days a week">
-                                <Text color={daysPerWeek ? 'gray.800' : 'gray.500'}>{daysPerWeek ?? 'Not set'}</Text>
-                              </FieldRow>
+                                  <FieldRow label="Web Address">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        value={accountDetailsDraft?.website ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), website: e.target.value }))}
+                                      />
+                                    ) : website ? (
+                                      <Link href={website} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
+                                        {website}
+                                      </Link>
+                                    ) : (
+                                      <Text color="gray.500">Not set</Text>
+                                    )}
+                                  </FieldRow>
 
-                              <FieldRow label="Email accounts (slots)">
-                                {Array.isArray(details?.emailAccounts) && details.emailAccounts.some((v: any) => String(v || '').trim()) ? (
-                                  <Stack spacing={1}>
-                                    {details.emailAccounts
-                                      .map((v: any) => String(v || '').trim())
-                                      .filter(Boolean)
-                                      .map((v: string) => (
-                                        <Text key={v} fontSize="sm">
-                                          {v}
+                                  <FieldRow label="Sector">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        value={accountDetailsDraft?.sector ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), sector: e.target.value }))}
+                                      />
+                                    ) : (
+                                      <Text color={c?.sector ? 'gray.800' : 'gray.500'}>{c?.sector || 'Not set'}</Text>
+                                    )}
+                                  </FieldRow>
+
+                                  <FieldRow label="Leads Google Sheet">
+                                    {isEditingAccountDetails ? (
+                                      <Stack spacing={2}>
+                                        <Input
+                                          size="sm"
+                                          placeholder="Label"
+                                          value={accountDetailsDraft?.leadsGoogleSheetLabel ?? ''}
+                                          onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), leadsGoogleSheetLabel: e.target.value }))}
+                                        />
+                                        <Input
+                                          size="sm"
+                                          placeholder="URL"
+                                          value={accountDetailsDraft?.leadsReportingUrl ?? ''}
+                                          onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), leadsReportingUrl: e.target.value }))}
+                                        />
+                                      </Stack>
+                                    ) : (
+                                      <GoogleSheetLink
+                                        url={leadsUrl}
+                                        label={leadsLabel}
+                                        fallbackLabel="Leads Google Sheet"
+                                        fontSize="sm"
+                                      />
+                                    )}
+                                  </FieldRow>
+
+                                  <FieldRow label="Assigned Account Manager">
+                                    {isEditingAccountDetails ? (
+                                      <Select
+                                        size="sm"
+                                        value={accountDetailsDraft?.assignedAccountManagerId ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), assignedAccountManagerId: e.target.value }))}
+                                      >
+                                        <option value="">Not set</option>
+                                        {activeUsers.map((u) => (
+                                          <option key={u.id} value={u.id}>
+                                            {`${u.firstName} ${u.lastName}`.trim()} ({u.email})
+                                          </option>
+                                        ))}
+                                      </Select>
+                                    ) : manager ? (
+                                      <Stack spacing={1}>
+                                        <Text fontWeight="medium">
+                                          {`${manager.firstName || ''} ${manager.lastName || ''}`.trim() || manager.email}
                                         </Text>
-                                      ))}
-                                  </Stack>
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
-                              </FieldRow>
-                            </SimpleGrid>
+                                        <HStack spacing={2}>
+                                          {manager.role ? <Badge variant="subtle">{manager.role}</Badge> : null}
+                                          {manager.department ? <Badge variant="outline">{manager.department}</Badge> : null}
+                                        </HStack>
+                                      </Stack>
+                                    ) : (
+                                      <Text color="gray.500">Not set</Text>
+                                    )}
+                                  </FieldRow>
+
+                                  <FieldRow label="Assigned Client DDI & Number">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        value={accountDetailsDraft?.assignedClientDdiNumber ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), assignedClientDdiNumber: e.target.value }))}
+                                      />
+                                    ) : (
+                                      <Text color={details?.assignedClientDdiNumber ? 'gray.800' : 'gray.500'}>
+                                        {details?.assignedClientDdiNumber || 'Not set'}
+                                      </Text>
+                                    )}
+                                  </FieldRow>
+
+                                  <FieldRow label="Days a week">
+                                    {isEditingAccountDetails ? (
+                                      <NumberInput
+                                        size="sm"
+                                        value={accountDetailsDraft?.daysPerWeek ?? ''}
+                                        onChange={(_, v) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), daysPerWeek: Number.isFinite(v) ? v : '' }))}
+                                        min={0}
+                                        max={7}
+                                      >
+                                        <NumberInputField />
+                                      </NumberInput>
+                                    ) : (
+                                      <Text color={daysPerWeek ? 'gray.800' : 'gray.500'}>{daysPerWeek ?? 'Not set'}</Text>
+                                    )}
+                                  </FieldRow>
+
+                                  <FieldRow label="Email accounts (slots)">
+                                    {isEditingAccountDetails ? (
+                                      <Input
+                                        size="sm"
+                                        placeholder="Comma-separated"
+                                        value={accountDetailsDraft?.emailAccountsCsv ?? ''}
+                                        onChange={(e) => setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), emailAccountsCsv: e.target.value }))}
+                                      />
+                                    ) : Array.isArray(details?.emailAccounts) && details.emailAccounts.some((v: any) => String(v || '').trim()) ? (
+                                      <Stack spacing={1}>
+                                        {details.emailAccounts
+                                          .map((v: any) => String(v || '').trim())
+                                          .filter(Boolean)
+                                          .map((v: string) => (
+                                            <Text key={v} fontSize="sm">
+                                              {v}
+                                            </Text>
+                                          ))}
+                                      </Stack>
+                                    ) : (
+                                      <Text color="gray.500">Not set</Text>
+                                    )}
+                                  </FieldRow>
+                                </SimpleGrid>
+                              </Stack>
                           )
                         })()}
                       </TabPanel>

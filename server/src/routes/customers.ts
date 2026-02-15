@@ -12,6 +12,8 @@ import { prisma } from '../lib/prisma.js'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
+import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
+import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
 
 const router = Router()
 
@@ -1234,6 +1236,230 @@ router.post('/:id/notes', async (req, res) => {
   }
 })
 
+// PATCH /api/customers/:id/account - Patch whitelisted account fields (server-side audit + note append)
+//
+// Requirements:
+// - Whitelisted fields only (validation)
+// - Compute diff server-side (old → new)
+// - Append a single note with all diffs per save
+// - Create a single CustomerAuditEvent per save (best-effort; never blocks)
+// - Tenant guard: if X-Customer-Id header is present, it MUST match :id
+router.patch('/:id/account', async (req, res) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { id } = req.params
+
+  try {
+    const headerCustomerId =
+      (req.headers['x-customer-id'] as string | undefined) ||
+      (req.headers['x-customerid'] as string | undefined) ||
+      ''
+    if (headerCustomerId && headerCustomerId !== id) {
+      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
+    }
+
+    const parsed = patchCustomerAccountSchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors, requestId })
+    }
+
+    // Auth: enforce that we can derive an authenticated actor for audit.
+    // This does NOT weaken auth; it ensures audit entries are attributable.
+    const actor = await getVerifiedActorIdentity(req)
+    if (!actor.email && !actor.userId) {
+      return res.status(401).json({ error: 'unauthenticated', message: 'Authenticated identity required', requestId })
+    }
+
+    const patch = parsed.data
+
+    // Enforce leads sheet label requirement when URL is set (reuse PUT semantics).
+    const incomingLeadsUrl = typeof patch.leadsReportingUrl === 'string' ? patch.leadsReportingUrl.trim() : ''
+    if (incomingLeadsUrl) {
+      const incomingLabel = typeof patch.leadsGoogleSheetLabel === 'string' ? patch.leadsGoogleSheetLabel.trim() : ''
+      if (!incomingLabel) {
+        // If label not provided in patch, we will accept existing label if already set in DB.
+        // That check happens after we load the customer below.
+      }
+    }
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      // Concurrency safety for read-modify-write on accountData.notes + diff computation.
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          domain: true,
+          website: true,
+          sector: true,
+          clientStatus: true,
+          leadsReportingUrl: true,
+          leadsGoogleSheetLabel: true,
+          targetJobTitle: true,
+          prospectingLocation: true,
+          weeklyLeadTarget: true,
+          monthlyLeadTarget: true,
+          defcon: true,
+          monthlyIntakeGBP: true,
+          accountData: true,
+          updatedAt: true,
+        },
+      })
+
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+
+      // Enforce: when leadsReportingUrl is set (incoming or existing), label must be present.
+      const nextLeadsUrl =
+        patch.leadsReportingUrl !== undefined
+          ? (typeof patch.leadsReportingUrl === 'string' ? patch.leadsReportingUrl.trim() : '')
+          : (typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim() : '')
+
+      if (nextLeadsUrl) {
+        const nextLabel =
+          patch.leadsGoogleSheetLabel !== undefined
+            ? (typeof patch.leadsGoogleSheetLabel === 'string' ? patch.leadsGoogleSheetLabel.trim() : '')
+            : (typeof existing.leadsGoogleSheetLabel === 'string' ? existing.leadsGoogleSheetLabel.trim() : '')
+        if (!nextLabel) {
+          return { status: 400 as const, body: { error: 'Invalid input', details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }], requestId } }
+        }
+      }
+
+      // Resolve actor display name from User Authorization table (best effort)
+      const actorEmail = actor.emailNormalized || actor.email
+      const user =
+        actorEmail
+          ? await tx.user.findFirst({
+              where: { email: { equals: actorEmail, mode: 'insensitive' } },
+              select: { firstName: true, lastName: true, email: true },
+            })
+          : null
+      const actorDisplay = user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email : actorEmail || actor.userId || 'unknown'
+
+      const { changes, updateScalars, nextAccountData } = computeCustomerAccountPatch({
+        existingCustomer: existing as any,
+        patch,
+      })
+
+      if (!changes.length) {
+        return {
+          status: 200 as const,
+          body: {
+            success: true,
+            requestId,
+            noChanges: true,
+            customerId: existing.id,
+            changes: [],
+            customer: {
+              ...existing,
+              updatedAt: existing.updatedAt.toISOString(),
+            },
+          },
+        }
+      }
+
+      // Append audit note (accountData.notes) in the same transaction so Notes UI updates.
+      const accountDataObj = existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+      const existingNotes = Array.isArray(accountDataObj.notes) ? accountDataObj.notes : []
+      const noteContent = formatCustomerAccountAuditNote({ customerId: id, actorDisplay, changes })
+      const note = {
+        id: `note_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        content: noteContent,
+        user: actorDisplay,
+        userEmail: actorEmail || null,
+        timestamp: new Date().toISOString(), // UTC storage
+        type: 'audit',
+        customerId: id,
+      }
+      const notes = [note, ...existingNotes]
+      const nextAccountDataWithNotes = { ...(nextAccountData || {}), notes }
+
+      const updated = await tx.customer.update({
+        where: { id },
+        data: {
+          ...updateScalars,
+          accountData: nextAccountDataWithNotes,
+          updatedAt: new Date(),
+        },
+        select: {
+          id: true,
+          name: true,
+          domain: true,
+          website: true,
+          sector: true,
+          clientStatus: true,
+          leadsReportingUrl: true,
+          leadsGoogleSheetLabel: true,
+          targetJobTitle: true,
+          prospectingLocation: true,
+          weeklyLeadTarget: true,
+          monthlyLeadTarget: true,
+          defcon: true,
+          monthlyIntakeGBP: true,
+          accountData: true,
+          updatedAt: true,
+        },
+      })
+
+      return {
+        status: 200 as const,
+        body: {
+          success: true,
+          requestId,
+          customerId: updated.id,
+          changes,
+          note,
+          customer: {
+            ...updated,
+            updatedAt: updated.updatedAt.toISOString(),
+          },
+        },
+        updatedCustomer: updated,
+        existingCustomer: existing,
+        actorDisplay,
+      }
+    })
+
+    // If transaction returned an immediate response (e.g. validation error), short-circuit.
+    if ((txResult as any)?.status && (txResult as any)?.body) {
+      const result = txResult as any
+
+      // Best-effort: create structured CustomerAuditEvent (never blocks).
+      if (result?.body?.success && Array.isArray(result?.body?.changes) && result?.body?.changes?.length) {
+        await safeCustomerAuditEvent({
+          prisma,
+          customerId: id,
+          action: 'account_edit',
+          actorUserId: actor.userId,
+          actorEmail: actor.emailNormalized || actor.email,
+          customerStatus: (result.updatedCustomer as any)?.clientStatus,
+          metadata: {
+            requestId,
+            actor: { email: actor.emailNormalized || actor.email, userId: actor.userId, source: actor.source, claimUsed: actor.claimUsed },
+            changes: result.body.changes,
+            noteId: result.body.note?.id || null,
+          },
+          requestId,
+        })
+      }
+
+      return res.status(result.status).json(result.body)
+    }
+
+    return res.status(500).json({ error: 'server_error', message: 'Unexpected patch result', requestId })
+  } catch (error: any) {
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
+    }
+    console.error(`[patch_customer_account_failed] requestId=${requestId} customerId=${id} prismaCode=${error.code || 'none'} message="${error.message}"`)
+    return res.status(500).json({ error: 'Failed to patch customer account', requestId })
+  }
+})
+
 // PUT /api/customers/:id - Update a customer
 router.put('/:id', async (req, res) => {
   try {
@@ -1267,6 +1493,29 @@ router.put('/:id', async (req, res) => {
       }
     }
     const shouldClearLeads = validated.leadsReportingUrl === null
+
+    // Best-effort snapshot for server-side audit diff (never blocks PUT success).
+    const existingForAudit = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        domain: true,
+        website: true,
+        sector: true,
+        clientStatus: true,
+        leadsReportingUrl: true,
+        leadsGoogleSheetLabel: true,
+        targetJobTitle: true,
+        prospectingLocation: true,
+        weeklyLeadTarget: true,
+        monthlyLeadTarget: true,
+        defcon: true,
+        monthlyIntakeGBP: true,
+        accountData: true,
+      },
+    })
+
     const updateData = {
       name: validated.name,
       domain: validated.domain,
@@ -1378,6 +1627,54 @@ router.put('/:id', async (req, res) => {
 
       return updatedCustomer
     })
+
+    // ----------------------------------------------------------------------
+    // Server-side audit: if any whitelisted account fields changed via PUT,
+    // write a CustomerAuditEvent (best-effort). This covers non-AccountsTab
+    // update paths that still modify these fields.
+    // ----------------------------------------------------------------------
+    try {
+      if (existingForAudit) {
+        const actor = await getVerifiedActorIdentity(req)
+        const patchLike = {
+          name: validated.name,
+          domain: validated.domain ?? null,
+          website: validated.website ?? null,
+          sector: validated.sector ?? null,
+          clientStatus: validated.clientStatus,
+          leadsReportingUrl: validated.leadsReportingUrl ?? null,
+          leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel ?? null,
+          targetJobTitle: validated.targetJobTitle ?? null,
+          prospectingLocation: validated.prospectingLocation ?? null,
+          weeklyLeadTarget: validated.weeklyLeadTarget ?? null,
+          monthlyLeadTarget: validated.monthlyLeadTarget ?? null,
+          defcon: validated.defcon ?? null,
+          monthlyIntakeGBP: validated.monthlyIntakeGBP ?? null,
+        }
+        const diff = computeCustomerAccountPatch({
+          existingCustomer: existingForAudit as any,
+          patch: patchLike as any,
+        })
+        if (diff?.changes?.length) {
+          await safeCustomerAuditEvent({
+            prisma,
+            customerId: id,
+            action: 'customer_put_update',
+            actorUserId: actor.userId,
+            actorEmail: actor.emailNormalized || actor.email,
+            customerStatus: existingForAudit.clientStatus,
+            metadata: {
+              route: 'PUT /api/customers/:id',
+              changes: diff.changes,
+              actor: { email: actor.emailNormalized || actor.email, userId: actor.userId, source: actor.source, claimUsed: actor.claimUsed },
+            },
+          })
+        }
+      }
+    } catch (e: any) {
+      // Never block PUT success.
+      console.warn('[AUDIT_FAILED] PUT /api/customers/:id', e?.message || String(e))
+    }
 
     return res.json({
       id: customer.id,
