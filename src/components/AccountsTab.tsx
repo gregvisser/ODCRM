@@ -6150,6 +6150,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 sector: c?.sector || '',
                                 leadsReportingUrl: leadsUrl || '',
                                 leadsGoogleSheetLabel: leadsLabel || '',
+                                weeklyLeadTarget: typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : '',
+                                monthlyLeadTarget: typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : '',
                                 assignedAccountManagerId:
                                   (typeof details?.assignedAccountManagerId === 'string' ? details.assignedAccountManagerId : '') ||
                                   (typeof ad?.assignedAccountManagerId === 'string' ? ad.assignedAccountManagerId : '') ||
@@ -6238,6 +6240,19 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 accountDetailsPatch.emailAccounts = nextEmailAccounts
                               }
 
+                              // Lead targets (DB scalars - source of truth)
+                              const nextWeeklyTarget = d.weeklyLeadTarget === '' ? null : Number(d.weeklyLeadTarget)
+                              const currentWeeklyTarget = typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : null
+                              if ((currentWeeklyTarget ?? null) !== (Number.isFinite(nextWeeklyTarget as any) ? nextWeeklyTarget : null)) {
+                                patch.weeklyLeadTarget = Number.isFinite(nextWeeklyTarget as any) ? Math.max(0, Math.round(nextWeeklyTarget as any)) : null
+                              }
+
+                              const nextMonthlyTarget = d.monthlyLeadTarget === '' ? null : Number(d.monthlyLeadTarget)
+                              const currentMonthlyTarget = typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : null
+                              if ((currentMonthlyTarget ?? null) !== (Number.isFinite(nextMonthlyTarget as any) ? nextMonthlyTarget : null)) {
+                                patch.monthlyLeadTarget = Number.isFinite(nextMonthlyTarget as any) ? Math.max(0, Math.round(nextMonthlyTarget as any)) : null
+                              }
+
                               if (Object.keys(accountDetailsPatch).length) {
                                 patch.accountData = { accountDetails: accountDetailsPatch }
                               }
@@ -6268,6 +6283,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                               const targetName = newName || oldName
                               if (notesFromPatch && targetName) {
                                 updateAccountSilent(targetName, { notes: notesFromPatch })
+                              }
+                              if (targetName) {
+                                if (patch.weeklyLeadTarget !== undefined) {
+                                  updateAccountSilent(targetName, { weeklyTarget: (patch.weeklyLeadTarget ?? 0) as any })
+                                }
+                                if (patch.monthlyLeadTarget !== undefined) {
+                                  updateAccountSilent(targetName, { monthlyTarget: (patch.monthlyLeadTarget ?? 0) as any })
+                                }
                               }
 
                               toast({ title: 'Saved', status: 'success', duration: 2000, isClosable: true })
@@ -6454,6 +6477,59 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                     )}
                                   </FieldRow>
                                 </SimpleGrid>
+
+                                <Divider />
+
+                                <Box>
+                                  <Text fontSize="sm" fontWeight="semibold" mb={2} color="gray.700">
+                                    Leads Targets & Actuals
+                                  </Text>
+                                  <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
+                                    <FieldRow label="Weekly Target">
+                                      {isEditingAccountDetails ? (
+                                        <NumberInput
+                                          size="sm"
+                                          value={accountDetailsDraft?.weeklyLeadTarget ?? ''}
+                                          onChange={(_, v) =>
+                                            setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), weeklyLeadTarget: Number.isFinite(v) ? v : '' }))
+                                          }
+                                          min={0}
+                                          precision={0}
+                                        >
+                                          <NumberInputField />
+                                        </NumberInput>
+                                      ) : (
+                                        <Text fontWeight="medium">{typeof c?.weeklyLeadTarget === 'number' ? c.weeklyLeadTarget : 0}</Text>
+                                      )}
+                                    </FieldRow>
+
+                                    <FieldRow label="Monthly Target">
+                                      {isEditingAccountDetails ? (
+                                        <NumberInput
+                                          size="sm"
+                                          value={accountDetailsDraft?.monthlyLeadTarget ?? ''}
+                                          onChange={(_, v) =>
+                                            setAccountDetailsDraft((prev: any) => ({ ...(prev || {}), monthlyLeadTarget: Number.isFinite(v) ? v : '' }))
+                                          }
+                                          min={0}
+                                          precision={0}
+                                        >
+                                          <NumberInputField />
+                                        </NumberInput>
+                                      ) : (
+                                        <Text fontWeight="medium">{typeof c?.monthlyLeadTarget === 'number' ? c.monthlyLeadTarget : 0}</Text>
+                                      )}
+                                    </FieldRow>
+
+                                    <FieldRow label="Weekly Actual (sync)">
+                                      <Text color="gray.700">{typeof c?.weeklyLeadActual === 'number' ? c.weeklyLeadActual : 0}</Text>
+                                    </FieldRow>
+
+                                    <FieldRow label="Monthly Actual (sync)">
+                                      <Text color="gray.700">{typeof c?.monthlyLeadActual === 'number' ? c.monthlyLeadActual : 0}</Text>
+                                    </FieldRow>
+                                  </SimpleGrid>
+                                </Box>
                               </Stack>
                           )
                         })()}
