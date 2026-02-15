@@ -131,10 +131,12 @@ export function databaseCustomerToAccount(customer: DatabaseCustomer): Account {
     days,
     contacts: (toNumber(raw.contacts) ?? contactCount ?? 0) as any,
     leads: (toNumber(raw.leads) ?? 0) as any,
-    weeklyTarget: (toNumber(raw.weeklyTarget) ?? customer.weeklyLeadTarget ?? 0) as any,
-    weeklyActual: (toNumber(raw.weeklyActual) ?? customer.weeklyLeadActual ?? 0) as any,
-    monthlyTarget: (toNumber(raw.monthlyTarget) ?? customer.monthlyLeadTarget ?? 0) as any,
-    monthlyActual: (toNumber(raw.monthlyActual) ?? customer.monthlyLeadActual ?? 0) as any,
+    // Targets/actuals must be database-first (leadsSync writes weekly/monthly actuals to Customer columns).
+    // Keep accountData fallbacks for legacy snapshots only.
+    weeklyTarget: (customer.weeklyLeadTarget ?? toNumber(raw.weeklyTarget) ?? 0) as any,
+    weeklyActual: (customer.weeklyLeadActual ?? toNumber(raw.weeklyActual) ?? 0) as any,
+    monthlyTarget: (customer.monthlyLeadTarget ?? toNumber(raw.monthlyTarget) ?? 0) as any,
+    monthlyActual: (customer.monthlyLeadActual ?? toNumber(raw.monthlyActual) ?? 0) as any,
     weeklyReport: String((raw.weeklyReport ?? '') || ''),
     users: (raw.users as any) ?? [],
 

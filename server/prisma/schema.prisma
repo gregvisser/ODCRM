@@ -783,6 +783,7 @@ model SheetSourceConfig {
   id              String          @id @default(cuid())
   customerId      String
   source          SheetSource     // cognism, apollo, blackbook
+  label           String?         // User-facing label (required by UI; nullable for backwards compatible migration)
   sheetUrl        String?         // Full Google Sheets URL
   sheetId         String?         // Extracted spreadsheet ID
   gid             String?         // Sheet tab GID (optional)

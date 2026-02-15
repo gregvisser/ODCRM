@@ -46,6 +46,8 @@ interface EmailIdentity {
   isActive: boolean
   dailySendLimit: number
   createdAt: string
+  provider?: string
+  delegatedReady?: boolean
 }
 
 export default function EmailSettingsTab() {
@@ -199,6 +201,11 @@ export default function EmailSettingsTab() {
                   <Badge colorScheme={identity.isActive ? 'green' : 'gray'}>
                     {identity.isActive ? 'Active' : 'Inactive'}
                   </Badge>
+                  {identity.provider === 'outlook' && identity.delegatedReady === false ? (
+                    <Badge ml={2} colorScheme="orange" variant="subtle">
+                      Needs reconnect
+                    </Badge>
+                  ) : null}
                 </Td>
                 <Td>{identity.dailySendLimit}</Td>
                 <Td>{new Date(identity.createdAt).toLocaleDateString()}</Td>

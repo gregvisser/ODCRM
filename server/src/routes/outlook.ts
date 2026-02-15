@@ -658,7 +658,8 @@ router.get('/identities', async (req, res, next) => {
     }
 
     const identities = await prisma.emailIdentity.findMany({
-      where: { customerId },
+      // Safety: ignore any legacy/invalid providers (e.g., "outlook_app_only").
+      where: { customerId, provider: { in: ['outlook', 'smtp'] } },
       select: {
         id: true,
         emailAddress: true,
@@ -670,6 +671,9 @@ router.get('/identities', async (req, res, next) => {
         sendWindowHoursEnd: true,
         sendWindowTimeZone: true,
         createdAt: true,
+        // Delegated OAuth health (do not return tokens; only booleans)
+        refreshToken: true,
+        tokenExpiresAt: true,
         smtpHost: true,
         smtpPort: true,
         smtpUsername: true,
@@ -678,7 +682,21 @@ router.get('/identities', async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     })
 
-    res.json(identities)
+    res.json(
+      identities.map((i: any) => {
+        const delegatedReady = i.provider === 'outlook' ? Boolean(i.refreshToken) : true
+        const tokenExpired =
+          i.provider === 'outlook' && i.tokenExpiresAt ? new Date(i.tokenExpiresAt) < new Date() : false
+        // Strip secrets
+        delete i.refreshToken
+        delete i.tokenExpiresAt
+        return {
+          ...i,
+          delegatedReady,
+          tokenExpired,
+        }
+      }),
+    )
   } catch (error) {
     next(error)
   }

@@ -53,12 +53,14 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { settingsStore } from '../../../platform'
+import { GoogleSheetLink } from '../../../components/links/GoogleSheetLink'
 
 // Types
 interface SheetSourceConfig {
   source: string
   defaultSheetUrl: string
   connected: boolean
+  label: string
   sheetUrl: string | null
   sheetId: string | null
   gid: string | null
@@ -148,6 +150,7 @@ const LeadSourcesTab: React.FC = () => {
   const [syncingSource, setSyncingSource] = useState<string | null>(null)
   const [previewingSource, setPreviewingSource] = useState<string | null>(null)
   const [sheetUrls, setSheetUrls] = useState<Record<string, string>>({})
+  const [sheetLabels, setSheetLabels] = useState<Record<string, string>>({})
   const [syncResults, setSyncResults] = useState<Record<string, SyncResult>>({})
   const [previewResults, setPreviewResults] = useState<Record<string, PreviewResult>>({})
   const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
@@ -250,10 +253,13 @@ const LeadSourcesTab: React.FC = () => {
       
       // Initialize sheet URLs from sources
       const urls: Record<string, string> = {}
+      const labels: Record<string, string> = {}
       res.data.sources.forEach(s => {
         urls[s.source] = s.sheetUrl || s.defaultSheetUrl
+        labels[s.source] = s.label || SOURCE_LABELS[s.source] || 'Google Sheet'
       })
       setSheetUrls(urls)
+      setSheetLabels(labels)
 
       await Promise.all(res.data.sources.map(s => loadSnapshotLists(s.source)))
     }
@@ -273,6 +279,7 @@ const LeadSourcesTab: React.FC = () => {
 
   const handleConnect = async (source: string) => {
     const sheetUrl = sheetUrls[source]
+    const label = (sheetLabels[source] || '').trim()
     if (!sheetUrl) {
       toast({
         title: 'Sheet URL required',
@@ -281,10 +288,19 @@ const LeadSourcesTab: React.FC = () => {
       })
       return
     }
+    if (!label) {
+      toast({
+        title: 'Label required',
+        description: 'Please set a label (we display label-only across the system).',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
 
     const res = await api.post<{ success: boolean; error?: string }>(
       `/api/sheets/sources/${source}/connect`,
-      { sheetUrl }
+      { sheetUrl, label }
     )
 
     if (res.error) {
@@ -544,14 +560,31 @@ const LeadSourcesTab: React.FC = () => {
                     Open default sheet <ExternalLinkIcon mx="2px" />
                   </Link>
                 </FormHelperText>
-                {source.sheetUrl && source.connected && (
+              </FormControl>
+
+              {/* Sheet Label (required) */}
+              <FormControl isRequired>
+                <FormLabel>Label</FormLabel>
+                <Input
+                  value={sheetLabels[source.source] || ''}
+                  onChange={(e) =>
+                    setSheetLabels((prev) => ({
+                      ...prev,
+                      [source.source]: e.target.value,
+                    }))
+                  }
+                  placeholder={SOURCE_LABELS[source.source] || 'e.g. Cognism Lead Sheet'}
+                />
+                {source.sheetUrl && source.connected ? (
                   <Text fontSize="sm" color="gray.600" mt={2}>
-                    Connected sheet:{" "}
-                    <Link href={source.sheetUrl} isExternal color="blue.500">
-                      {source.sheetUrl}
-                    </Link>
+                    Connected sheet:{' '}
+                    <GoogleSheetLink
+                      url={source.sheetUrl}
+                      label={sheetLabels[source.source] || source.label || SOURCE_LABELS[source.source]}
+                      fallbackLabel={SOURCE_LABELS[source.source] || 'Google Sheet'}
+                    />
                   </Text>
-                )}
+                ) : null}
               </FormControl>
 
               {!source.connected && (

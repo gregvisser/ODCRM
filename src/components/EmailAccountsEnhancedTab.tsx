@@ -58,6 +58,10 @@ interface EmailIdentity {
   isActive: boolean
   dailySendLimit: number
   createdAt: string
+
+  // Delegated OAuth health (Outlook only; provided by backend as booleans)
+  delegatedReady?: boolean
+  tokenExpired?: boolean
   
   // SMTP fields
   smtpHost?: string
@@ -438,14 +442,26 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                 </Td>
               </Tr>
             ) : (
-              identities.map((identity) => (
+              identities
+                .filter((identity) => identity.provider !== 'outlook_app_only')
+                .map((identity) => {
+                  const needsReconnect =
+                    identity.provider === 'outlook' && identity.delegatedReady === false
+                  return (
                 <Tr key={identity.id}>
                   <Td fontWeight="medium">{identity.emailAddress}</Td>
                   <Td fontSize="sm">{identity.displayName || '-'}</Td>
                   <Td>
-                    <Badge colorScheme={identity.provider === 'outlook' ? 'blue' : 'purple'}>
-                      {identity.provider.toUpperCase()}
-                    </Badge>
+                    <HStack spacing={2}>
+                      <Badge colorScheme={identity.provider === 'outlook' ? 'blue' : 'purple'}>
+                        {identity.provider.toUpperCase()}
+                      </Badge>
+                      {needsReconnect ? (
+                        <Badge colorScheme="orange" variant="subtle">
+                          Needs reconnect
+                        </Badge>
+                      ) : null}
+                    </HStack>
                   </Td>
                   <Td fontSize="sm">{identity.dailySendLimit}/day</Td>
                   <Td>
@@ -455,9 +471,15 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                   </Td>
                   <Td>
                     <HStack spacing={1}>
-                      <Button size="xs" variant="ghost" onClick={() => handleTestSend(identity)}>
+                      {needsReconnect ? (
+                        <Button size="xs" colorScheme="orange" variant="ghost" onClick={handleConnectOutlook}>
+                          Reconnect
+                        </Button>
+                      ) : (
+                        <Button size="xs" variant="ghost" onClick={() => handleTestSend(identity)}>
                         Test
-                      </Button>
+                        </Button>
+                      )}
                       <IconButton
                         aria-label="Delete"
                         icon={<DeleteIcon />}
@@ -469,7 +491,8 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                     </HStack>
                   </Td>
                 </Tr>
-              ))
+                  )
+                })
             )}
           </Tbody>
         </Table>

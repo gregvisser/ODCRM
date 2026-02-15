@@ -45,7 +45,10 @@ async function getGraphClient(identity: EmailIdentity): Promise<Client> {
 
   let accessToken = identity.accessToken
 
-  if (needsRefresh && identity.refreshToken) {
+  if (needsRefresh) {
+    if (!identity.refreshToken) {
+      throw new Error(`Outlook identity needs reconnect (missing refresh token): ${identity.id}`)
+    }
     accessToken = await refreshAccessToken(identity)
   }
 
@@ -141,7 +144,15 @@ export async function sendEmail(
       }
     }
 
-    // Get Graph client
+    // Delegated OAuth only
+    if (identity.provider !== 'outlook') {
+      return {
+        success: false,
+        error: `Unsupported email identity provider for Outlook sending: ${identity.provider}`,
+      }
+    }
+
+    // Get Graph client (delegated OAuth; token refresh via refresh token)
     const client = await getGraphClient(identity)
 
     // Build message

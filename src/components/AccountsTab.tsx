@@ -6073,28 +6073,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 <Text color={c?.sector ? 'gray.800' : 'gray.500'}>{c?.sector || 'Not set'}</Text>
                               </FieldRow>
 
-                              <FieldRow label="Leads Google Sheet URL">
-                                {leadsUrl ? (
-                                  <Link href={leadsUrl} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
-                                    {leadsUrl}
-                                  </Link>
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
-                              </FieldRow>
-
                               <FieldRow label="Leads Google Sheet Label">
-                                {leadsLabel ? (
-                                  leadsUrl ? (
-                                    <Link href={leadsUrl} isExternal color="blue.600" fontWeight="medium" rel="noopener noreferrer">
-                                      {leadsLabel}
-                                    </Link>
-                                  ) : (
-                                    <Text fontWeight="medium">{leadsLabel}</Text>
-                                  )
-                                ) : (
-                                  <Text color="gray.500">Not set</Text>
-                                )}
+                                <GoogleSheetLink
+                                  url={leadsUrl}
+                                  label={leadsLabel}
+                                  fallbackLabel="Leads Google Sheet"
+                                  fontSize="sm"
+                                />
                               </FieldRow>
 
                               <FieldRow label="Assigned Account Manager">

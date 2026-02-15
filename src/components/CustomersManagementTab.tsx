@@ -238,6 +238,16 @@ export default function CustomersManagementTab() {
       monthlyLeadActual: form.monthlyLeadActual ? parseInt(form.monthlyLeadActual, 10) : null,
     }
 
+    if (payload.leadsReportingUrl && !payload.leadsGoogleSheetLabel) {
+      toast({
+        title: 'Google Sheet label required',
+        description: 'Please set a label for the Google Sheet (we display labels, not raw URLs).',
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+
     const { error } = isEditing
       ? await api.put(`/api/customers/${form.id}`, payload)
       : await api.post('/api/customers', payload)

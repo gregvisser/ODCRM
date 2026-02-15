@@ -15,11 +15,21 @@ import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 
 const router = Router()
 
-// Shared attachment constraints (match Agreement upload)
-const ALLOWED_DOC_MIME_TYPES = [
+// Shared attachment constraints (Azure Blob-backed customer attachments)
+const ALLOWED_ATTACHMENT_MIME_TYPES = [
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  // Images (common onboarding evidence uploads)
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  // Text/CSV
+  'text/plain',
+  'text/csv',
+  // Spreadsheets
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]
 
 const MAX_ATTACHMENT_FILE_SIZE_MB = 10
@@ -893,6 +903,22 @@ router.put('/:id/onboarding', async (req, res) => {
     }
 
     const hasOwn = (obj: any, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
+
+    // Enforce: if a Google Sheet URL is set, a label must also be set (we display label-only in the UI).
+    // This applies to onboarding saves to prevent "URL shown / label missing" regressions.
+    if (hasOwn(validated, 'leadsReportingUrl')) {
+      const url = typeof validated.leadsReportingUrl === 'string' ? validated.leadsReportingUrl.trim() : ''
+      if (url) {
+        const label =
+          typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
+        if (!label) {
+          return res.status(400).json({
+            error: 'Invalid input',
+            details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
+          })
+        }
+      }
+    }
     const allowNullScalar = new Set([
       // Explicitly allowed clears from the onboarding UI
       'website',
@@ -900,6 +926,8 @@ router.put('/:id/onboarding', async (req, res) => {
       'companyProfile',
       'leadsReportingUrl',
       'leadsGoogleSheetLabel',
+      'weeklyLeadTarget',
+      'monthlyLeadTarget',
     ])
 
     const shouldClearLeads = hasOwn(validated, 'leadsReportingUrl') && validated.leadsReportingUrl === null
@@ -1226,6 +1254,18 @@ router.put('/:id', async (req, res) => {
     }
     
     const validated = validationResult.data
+
+    // Enforce: if a Google Sheet URL is set, a label must also be set (label-only display across UI).
+    const leadsUrl = typeof validated.leadsReportingUrl === 'string' ? validated.leadsReportingUrl.trim() : ''
+    if (leadsUrl) {
+      const leadsLabel = typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
+      if (!leadsLabel) {
+        return res.status(400).json({
+          error: 'Invalid input',
+          details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
+        })
+      }
+    }
     const shouldClearLeads = validated.leadsReportingUrl === null
     const updateData = {
       name: validated.name,
@@ -2740,9 +2780,9 @@ router.post('/:id/attachments', (req, res) => {
       }
 
       const mimeType = String(file.mimetype || '').trim()
-      if (!ALLOWED_DOC_MIME_TYPES.includes(mimeType)) {
+      if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(mimeType)) {
         return res.status(400).json({
-          error: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.',
+          error: 'Invalid file type. Allowed: PDF/DOC/DOCX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
           receivedMimeType: mimeType,
         })
       }

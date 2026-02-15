@@ -86,6 +86,8 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
         source,
         defaultSheetUrl: DEFAULT_SHEET_URLS[source],
         connected: !!config?.sheetId,
+        // Prisma client types may lag schema changes in some dev environments; read defensively.
+        label: ((config as any)?.label as string | undefined) || SOURCE_LABELS[source],
         sheetUrl: config?.sheetUrl || DEFAULT_SHEET_URLS[source],
         sheetId: config?.sheetId || null,
         gid: config?.gid || null,
@@ -118,6 +120,7 @@ router.get('/sources', async (req: Request, res: Response, next: NextFunction) =
  */
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
+  label: z.string().trim().min(1),
 })
 
 router.post('/sources/:source/connect', async (req: Request, res: Response, next: NextFunction) => {
@@ -129,7 +132,7 @@ router.post('/sources/:source/connect', async (req: Request, res: Response, next
       return res.status(400).json({ error: `Invalid source. Must be one of: ${validSources.join(', ')}` })
     }
 
-    const { sheetUrl } = connectSchema.parse(req.body)
+    const { sheetUrl, label } = connectSchema.parse(req.body)
 
     // Parse URL to extract spreadsheet ID and gid
     const { sheetId, gid } = parseSheetUrl(sheetUrl)
@@ -142,18 +145,20 @@ router.post('/sources/:source/connect', async (req: Request, res: Response, next
       create: {
         customerId,
         source: source as SheetSource,
+        label,
         sheetUrl,
         sheetId,
         gid,
         lastSyncStatus: 'pending',
-      },
+      } as any,
       update: {
+        label,
         sheetUrl,
         sheetId,
         gid,
         lastSyncStatus: 'pending',
         lastError: null,
-      },
+      } as any,
     })
 
     res.json({

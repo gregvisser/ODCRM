@@ -68,10 +68,15 @@ type CustomerApi = {
   website?: string | null
   whatTheyDo?: string | null
   companyProfile?: string | null
+  sector?: string | null
   accountData?: Record<string, unknown> | null
   monthlyRevenueFromCustomer?: string | null
   leadsReportingUrl?: string | null
   leadsGoogleSheetLabel?: string | null
+  weeklyLeadTarget?: number | null
+  weeklyLeadActual?: number | null
+  monthlyLeadTarget?: number | null
+  monthlyLeadActual?: number | null
   updatedAt?: string | null
 }
 
@@ -186,6 +191,29 @@ const normalizeAccountDetails = (raw?: Partial<AccountDetails> | null): AccountD
       : [...EMPTY_ACCOUNT_DETAILS.emailAccounts],
     daysPerWeek: typeof safe.daysPerWeek === 'number' ? safe.daysPerWeek : 1,
   }
+}
+
+const isPrimaryContactEmpty = (raw: PrimaryContact | null | undefined): boolean => {
+  const pc = raw && typeof raw === 'object' ? (raw as any) : {}
+  const fields = [
+    pc.firstName,
+    pc.lastName,
+    pc.email,
+    pc.phone,
+    pc.roleId,
+    pc.roleLabel,
+  ]
+  return fields.every((v) => !String(v || '').trim())
+}
+
+const ensurePrimaryContactId = (raw: PrimaryContact): PrimaryContact => {
+  const pc: any = raw && typeof raw === 'object' ? raw : {}
+  const existingId = typeof pc.id === 'string' ? pc.id.trim() : ''
+  if (existingId) return raw
+  // Generate a stable id for DB upsert + rehydrate matching (customer_contacts table uses this id).
+  // This id is persisted into accountData.accountDetails.primaryContact.id during onboarding save.
+  const nextId = `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  return { ...(raw as any), id: nextId }
 }
 
 const isValidUrl = (value: string): boolean => {
@@ -304,6 +332,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
   const [leadsGoogleSheetLabel, setLeadsGoogleSheetLabel] = useState<string>('')
+  const [weeklyLeadTarget, setWeeklyLeadTarget] = useState<string>('')
+  const [monthlyLeadTarget, setMonthlyLeadTarget] = useState<string>('')
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
 
   // Build account snapshot directly from database customer
@@ -523,7 +553,33 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       ...rawDetails,
       ...rawDetails.accountDetails,
     })
-    setAccountDetails(mergedDetails)
+    // Keep primary contact stable across save→refetch cycles:
+    // - If backend payload/rehydrate is missing primaryContact, do NOT blank the UI.
+    // - Preserve a stable primaryContact.id so DB upserts don't create "new" contacts every save.
+    setAccountDetails((prev) => {
+      const next = { ...mergedDetails }
+      const prevPc = prev?.primaryContact
+      const nextPc = next?.primaryContact
+
+      if (!isPrimaryContactEmpty(prevPc) && isPrimaryContactEmpty(nextPc)) {
+        next.primaryContact = prevPc
+        return next
+      }
+
+      // If we got a non-empty contact but lost its id, keep the previous id.
+      const prevId = typeof (prevPc as any)?.id === 'string' ? String((prevPc as any).id).trim() : ''
+      const nextId = typeof (nextPc as any)?.id === 'string' ? String((nextPc as any).id).trim() : ''
+      if (prevId && !nextId && !isPrimaryContactEmpty(nextPc)) {
+        next.primaryContact = { ...(nextPc as any), id: prevId }
+      }
+
+      // Always ensure the contact has an id once it has any meaningful content.
+      if (!isPrimaryContactEmpty(next.primaryContact)) {
+        next.primaryContact = ensurePrimaryContactId(next.primaryContact)
+      }
+
+      return next
+    })
     setHeadOfficeQuery(mergedDetails.headOfficeAddress || '')
     
     // Initialize monthly revenue from customer field
@@ -533,6 +589,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     // Initialize Google Sheet fields
     setLeadsGoogleSheetUrl(customer.leadsReportingUrl || '')
     setLeadsGoogleSheetLabel(customer.leadsGoogleSheetLabel || '')
+
+    // Targets are manual entry and stored on Customer columns (database-first).
+    setWeeklyLeadTarget(
+      typeof (customer as any).weeklyLeadTarget === 'number' ? String((customer as any).weeklyLeadTarget) : ''
+    )
+    setMonthlyLeadTarget(
+      typeof (customer as any).monthlyLeadTarget === 'number' ? String((customer as any).monthlyLeadTarget) : ''
+    )
     
     // Initialize agreement data from database (fix for disappearing agreement bug)
     const cust = customer as any
@@ -570,6 +634,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   // Head office address search
   useEffect(() => {
+    // If a selection is already made (placeId set) and the query matches the saved label,
+    // do not keep re-querying /api/places. This prevents the "keeps dropping / reselecting" UX.
+    const selectedLabel = String(accountDetails.headOfficeAddress || '').trim()
+    const query = String(headOfficeQuery || '').trim()
+    const hasSelection = Boolean(String(accountDetails.headOfficePlaceId || '').trim())
+    if (hasSelection && query && selectedLabel && query === selectedLabel) {
+      setHeadOfficeOptions([])
+      return
+    }
+
     if (!headOfficeQuery || headOfficeQuery.trim().length < 2) {
       setHeadOfficeOptions([])
       return
@@ -583,7 +657,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setHeadOfficeLoading(false)
     }, 350)
     return () => window.clearTimeout(handle)
-  }, [headOfficeQuery])
+  }, [headOfficeQuery, accountDetails.headOfficeAddress, accountDetails.headOfficePlaceId])
 
   const updateProfile = useCallback((updates: Partial<ClientProfile>) => {
     setClientProfile((prev) => ({ ...prev, ...updates }))
@@ -599,8 +673,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     setAccountDetails((prev) => ({
       ...prev,
       primaryContact: {
-        ...prev.primaryContact,
-        ...updates,
+        ...ensurePrimaryContactId({ ...prev.primaryContact, ...updates } as any),
       },
     }))
     setIsDirty(true)
@@ -643,94 +716,57 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     )
     if (!proceed) return
 
-    const allowedDocTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ]
-
-    // PDF/DOC/DOCX must use Azure Blob via /api/customers/:id/attachments
-    if (allowedDocTypes.includes(file.type)) {
-      const accreditationName =
-        clientProfile.accreditations.find((a) => a.id === id)?.name?.trim() || ''
-      if (!accreditationName) {
-        toast({
-          title: 'Accreditation name required',
-          description: 'Enter the accreditation name before uploading evidence.',
-          status: 'warning',
-          duration: 4000,
-          isClosable: true,
-        })
-        return
-      }
-      setUploadingAccreditations((prev) => ({ ...prev, [id]: true }))
-      void (async () => {
-        try {
-          const formData = new FormData()
-          formData.append('file', file, file.name)
-          formData.append('attachmentType', 'certification_evidence')
-          formData.append('accreditationName', accreditationName)
-
-          const response = await fetch(`/api/customers/${customerId}/attachments`, {
-            method: 'POST',
-            body: formData,
-          })
-
-          if (!response.ok) {
-            let message = `Upload failed (${response.status})`
-            try {
-              const errorData = await response.json()
-              message = errorData?.message || errorData?.error || message
-            } catch {
-              // ignore
-            }
-            throw new Error(message)
-          }
-
-          // DB rehydration is mandatory: refresh customer to reflect new attachment metadata + wired profile fields
-          await fetchCustomer()
-          emit('customerUpdated', { id: customerId })
-        } catch (e) {
-          toast({
-            title: 'Upload failed',
-            description: e instanceof Error ? e.message : 'Unable to upload file',
-            status: 'error',
-            duration: 5000,
-          })
-        } finally {
-          setUploadingAccreditations((prev) => ({ ...prev, [id]: false }))
-        }
-      })()
+    const accreditationName = clientProfile.accreditations.find((a) => a.id === id)?.name?.trim() || ''
+    if (!accreditationName) {
+      toast({
+        title: 'Accreditation name required',
+        description: 'Enter the accreditation name before uploading evidence.',
+        status: 'warning',
+        duration: 4000,
+        isClosable: true,
+      })
       return
     }
 
-    // Non-doc evidence (e.g. images) stays on the legacy uploader for now.
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
-      if (!dataUrl) return
-      setUploadingAccreditations((prev) => ({ ...prev, [id]: true }))
-      const { data, error } = await api.post<{ fileUrl: string; fileName: string }>(
-        '/api/uploads',
-        { fileName: file.name, dataUrl },
-      )
-      if (error || !data?.fileUrl) {
+    // Blob-only uploads: ALL evidence types go through /api/customers/:id/attachments.
+    // Backend wires `accreditation_evidence:<accreditationId>` back into clientProfile.accreditations[].
+    setUploadingAccreditations((prev) => ({ ...prev, [id]: true }))
+    void (async () => {
+      try {
+        const formData = new FormData()
+        formData.append('file', file, file.name)
+        formData.append('attachmentType', `accreditation_evidence:${id}`)
+
+        const response = await fetch(`/api/customers/${customerId}/attachments`, {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!response.ok) {
+          let message = `Upload failed (${response.status})`
+          try {
+            const errorData = await response.json()
+            message = errorData?.message || errorData?.error || message
+          } catch {
+            // ignore
+          }
+          throw new Error(message)
+        }
+
+        // DB rehydration is mandatory: refresh customer to reflect new attachment metadata + wired profile fields
+        await fetchCustomer()
+        emit('customerUpdated', { id: customerId })
+      } catch (e) {
         toast({
           title: 'Upload failed',
-          description: error || 'Unable to upload file',
+          description: e instanceof Error ? e.message : 'Unable to upload file',
           status: 'error',
-          duration: 4000,
+          duration: 5000,
         })
-      } else {
-        updateProfile({
-          accreditations: clientProfile.accreditations.map((acc) =>
-            acc.id === id ? { ...acc, fileName: data.fileName, fileUrl: data.fileUrl } : acc,
-          ),
-        })
+      } finally {
+        setUploadingAccreditations((prev) => ({ ...prev, [id]: false }))
       }
-      setUploadingAccreditations((prev) => ({ ...prev, [id]: false }))
-    }
-    reader.readAsDataURL(file)
+    })()
   }
 
   const handleRemoveAccreditationFile = (id: string) => {
@@ -748,80 +784,45 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     )
     if (!proceed) return
 
-    const allowedDocTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ]
+    // Blob-only uploads: ALL case study uploads go through /api/customers/:id/attachments.
+    // Backend wires `case_studies` into clientProfile.caseStudiesFile* fields.
+    setUploadingCaseStudies(true)
+    void (async () => {
+      try {
+        const formData = new FormData()
+        formData.append('file', file, file.name)
+        formData.append('attachmentType', 'case_studies')
 
-    // PDF/DOC/DOCX must use Azure Blob via /api/customers/:id/attachments
-    if (allowedDocTypes.includes(file.type)) {
-      setUploadingCaseStudies(true)
-      void (async () => {
-        try {
-          const formData = new FormData()
-          formData.append('file', file, file.name)
-          formData.append('attachmentType', 'case_studies')
+        const response = await fetch(`/api/customers/${customerId}/attachments`, {
+          method: 'POST',
+          body: formData,
+        })
 
-          const response = await fetch(`/api/customers/${customerId}/attachments`, {
-            method: 'POST',
-            body: formData,
-          })
-
-          if (!response.ok) {
-            let message = `Upload failed (${response.status})`
-            try {
-              const errorData = await response.json()
-              message = errorData?.message || errorData?.error || message
-            } catch {
-              // ignore
-            }
-            throw new Error(message)
+        if (!response.ok) {
+          let message = `Upload failed (${response.status})`
+          try {
+            const errorData = await response.json()
+            message = errorData?.message || errorData?.error || message
+          } catch {
+            // ignore
           }
-
-          // DB rehydration is mandatory
-          await fetchCustomer()
-          emit('customerUpdated', { id: customerId })
-        } catch (e) {
-          toast({
-            title: 'Upload failed',
-            description: e instanceof Error ? e.message : 'Unable to upload file',
-            status: 'error',
-            duration: 5000,
-          })
-        } finally {
-          setUploadingCaseStudies(false)
+          throw new Error(message)
         }
-      })()
-      return
-    }
 
-    // Non-doc evidence (e.g. images) stays on the legacy uploader for now.
-    const reader = new FileReader()
-    reader.onload = async () => {
-      const dataUrl = typeof reader.result === 'string' ? reader.result : ''
-      if (!dataUrl) return
-      setUploadingCaseStudies(true)
-      const { data, error } = await api.post<{ fileUrl: string; fileName: string }>(
-        '/api/uploads',
-        { fileName: file.name, dataUrl },
-      )
-      if (error || !data?.fileUrl) {
+        // DB rehydration is mandatory
+        await fetchCustomer()
+        emit('customerUpdated', { id: customerId })
+      } catch (e) {
         toast({
           title: 'Upload failed',
-          description: error || 'Unable to upload file',
+          description: e instanceof Error ? e.message : 'Unable to upload file',
           status: 'error',
-          duration: 4000,
+          duration: 5000,
         })
-      } else {
-        updateProfile({
-          caseStudiesFileName: data.fileName,
-          caseStudiesFileUrl: data.fileUrl,
-        })
+      } finally {
+        setUploadingCaseStudies(false)
       }
-      setUploadingCaseStudies(false)
-    }
-    reader.readAsDataURL(file)
+    })()
   }
 
   const handleRemoveCaseStudiesFile = () => {
@@ -1078,16 +1079,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         : {}
     
     // Generate contact ID locally (no localStorage dependency)
-    const nextContactId = accountDetails.primaryContact.id ||
-      `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    
+    const nextPrimary = ensurePrimaryContactId(accountDetails.primaryContact)
     const nextAccountDetails = {
       ...accountDetails,
       primaryContact: {
-        ...accountDetails.primaryContact,
-        id: nextContactId,
+        ...nextPrimary,
       },
     }
+
+    // Ensure UI stays stable while save→refetch happens (prevents "blink to empty" if any rehydrate path drops fields).
+    setAccountDetails(nextAccountDetails)
     
     // SAFE MERGE: Preserve other accountData fields (e.g., progressTracker)
     // Only update clientProfile and accountDetails sections
@@ -1126,10 +1127,44 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const revenueNumber = monthlyRevenueFromCustomer.trim() 
       ? parseFloat(monthlyRevenueFromCustomer)
       : undefined
+
+    const parseIntOrNull = (raw: string): number | null | undefined => {
+      const trimmed = String(raw || '').trim()
+      if (!trimmed) return null
+      const n = Number(trimmed)
+      if (!Number.isFinite(n) || !Number.isInteger(n)) return undefined
+      if (n < 0 || n > 1_000_000) return undefined
+      return n
+    }
+    const weeklyTargetNumber = parseIntOrNull(weeklyLeadTarget)
+    const monthlyTargetNumber = parseIntOrNull(monthlyLeadTarget)
+    if (weeklyTargetNumber === undefined || monthlyTargetNumber === undefined) {
+      toast({
+        title: 'Invalid targets',
+        description: 'Weekly/monthly targets must be whole numbers between 0 and 1,000,000.',
+        status: 'error',
+        duration: 6000,
+        isClosable: true,
+      })
+      setIsSaving(false)
+      return false
+    }
     
     // Google Sheet URL and label (validate URL format lightly)
     const sheetUrl = leadsGoogleSheetUrl.trim() || undefined
     const sheetLabel = leadsGoogleSheetLabel.trim() || undefined
+
+    if (sheetUrl && !sheetLabel) {
+      toast({
+        title: 'Google Sheet label required',
+        description: 'Please enter a label for the Google Sheet (we show labels, not raw URLs).',
+        status: 'error',
+        duration: 6000,
+        isClosable: true,
+      })
+      setIsSaving(false)
+      return false
+    }
     
     // Additional contacts are saved as part of onboarding payload.
     // IMPORTANT: Do not block saving partial progress for the rest of the form.
@@ -1175,6 +1210,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           website: normalizeWebAddress(customer.website),
           whatTheyDo: customer.whatTheyDo && customer.whatTheyDo.trim() ? customer.whatTheyDo.trim() : null,
           companyProfile: customer.companyProfile && customer.companyProfile.trim() ? customer.companyProfile.trim() : null,
+          sector: customer.sector && customer.sector.trim() ? customer.sector.trim() : null,
           accountData: outgoingAccountData,
           monthlyRevenueFromCustomer: revenueNumber,
           // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
@@ -1182,6 +1218,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           monthlyIntakeGBP: revenueNumber,
           leadsReportingUrl: sheetUrl,
           leadsGoogleSheetLabel: sheetLabel,
+          weeklyLeadTarget: weeklyTargetNumber,
+          monthlyLeadTarget: monthlyTargetNumber,
         },
         contacts: validContacts,
       },
@@ -1375,6 +1413,18 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
+              <FormLabel>Sector</FormLabel>
+              <Input
+                value={customer.sector || ''}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setCustomer((prev) => (prev ? { ...prev, sector: next } : prev))
+                  setIsDirty(true)
+                }}
+                placeholder="e.g. Facilities Management"
+              />
+            </FormControl>
+            <FormControl>
               <FormLabel>Assigned Account Manager</FormLabel>
               <Select
                 placeholder={assignedUsers.length ? 'Select user' : 'No users found'}
@@ -1430,13 +1480,45 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormControl>
               <FormLabel>Weekly Lead Target</FormLabel>
               <Input
-                value={
-                  typeof accountSnapshot?.weeklyTarget === 'number'
-                    ? String(accountSnapshot.weeklyTarget)
-                    : ''
-                }
+                type="number"
+                min="0"
+                step="1"
+                value={weeklyLeadTarget}
+                onChange={(e) => {
+                  setWeeklyLeadTarget(e.target.value)
+                  setIsDirty(true)
+                }}
+                placeholder="Manual weekly target (e.g. 25)"
+              />
+            </FormControl>
+            <FormControl>
+              <FormLabel>Monthly Lead Target</FormLabel>
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={monthlyLeadTarget}
+                onChange={(e) => {
+                  setMonthlyLeadTarget(e.target.value)
+                  setIsDirty(true)
+                }}
+                placeholder="Manual monthly target (e.g. 100)"
+              />
+            </FormControl>
+            <FormControl>
+              <FormLabel>Weekly Lead Actual (this week)</FormLabel>
+              <Input
+                value={typeof (customer as any)?.weeklyLeadActual === 'number' ? String((customer as any).weeklyLeadActual) : ''}
                 isReadOnly
-                placeholder="Pulled from linked Google Sheet"
+                placeholder="Synced from Google Sheets"
+              />
+            </FormControl>
+            <FormControl>
+              <FormLabel>Monthly Lead Actual (this month)</FormLabel>
+              <Input
+                value={typeof (customer as any)?.monthlyLeadActual === 'number' ? String((customer as any).monthlyLeadActual) : ''}
+                isReadOnly
+                placeholder="Synced from Google Sheets"
               />
             </FormControl>
           </SimpleGrid>
@@ -1469,8 +1551,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <Input
                 value={headOfficeQuery}
                 onChange={(e) => {
-                  setHeadOfficeQuery(e.target.value)
-                  updateAccountDetails({ headOfficeAddress: e.target.value })
+                  const next = e.target.value
+                  setHeadOfficeQuery(next)
+                  // If user edits the text after selecting an autocomplete entry, clear placeId (selection no longer valid).
+                  updateAccountDetails({
+                    headOfficeAddress: next,
+                    headOfficePlaceId:
+                      accountDetails.headOfficePlaceId && next.trim() !== String(accountDetails.headOfficeAddress || '').trim()
+                        ? ''
+                        : accountDetails.headOfficePlaceId,
+                  })
                 }}
                 placeholder="Search by company name or postcode"
               />

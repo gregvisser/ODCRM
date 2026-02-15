@@ -77,6 +77,8 @@ type EmailIdentity = {
   sendWindowHoursEnd: number
   sendWindowTimeZone: string
   createdAt: string
+  delegatedReady?: boolean
+  tokenExpired?: boolean
   smtpHost?: string | null
   smtpPort?: number | null
   smtpUsername?: string | null
@@ -157,7 +159,9 @@ const EmailAccountsTab: React.FC = () => {
   }
 
   const filteredIdentities = useMemo(() => {
-    return identities.filter(identity => {
+    return identities
+      .filter((identity) => identity.provider !== 'outlook_app_only')
+      .filter(identity => {
       const matchesSearch = searchQuery === '' ||
         identity.emailAddress.toLowerCase().includes(searchQuery.toLowerCase()) ||
         identity.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
