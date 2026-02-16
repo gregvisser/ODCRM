@@ -221,34 +221,13 @@ export async function runFreeEnrichmentPipeline(options: {
 
   const results: SourceResult[] = []
 
-  // Provider 1: Companies House (fast structured data; only if key exists)
-  if (remaining() > 1500) {
-    const ch = await companiesHouseProvider({
-      companyName,
-      timeoutMs: Math.min(6000, remaining()),
-      apiKey: options.companiesHouseApiKey,
-    })
-    results.push(ch)
-  }
-
-  // Provider 2: Wikidata SPARQL (fast public data)
-  if (remaining() > 1500) {
-    const wd = await wikidataSparqlProvider({
-      companyName,
-      timeoutMs: Math.min(6000, remaining()),
-    })
-    results.push(wd)
-  }
-
-  // Provider 3: Website (slowest / most variable; do it last with a capped budget)
+  // Provider 1: Website (if we have an address to fetch)
   const websiteUrl = String(options.websiteUrl || '').trim()
-  if (!websiteUrl) {
-    results.push({ provider: 'website', ok: false, confidence: 0, evidence: [], data: {}, error: 'missing websiteUrl' })
-  } else if (remaining() <= 1500) {
-    results.push({ provider: 'website', ok: false, confidence: 0, evidence: [], data: {}, error: 'budget_exhausted' })
-  } else {
+  if (websiteUrl && remaining() > 1500) {
     try {
       // Budgeting: never let website crawling consume the entire pipeline budget.
+      // If the website is slow/unfriendly (cookie walls, bot protection, many redirects),
+      // we still want time left for Companies House + Wikidata.
       const websiteTotalMs = Math.max(2000, Math.min(7000, remaining()))
       const perFetchTimeoutMs = Math.max(1200, Math.min(options.perFetchMs, 2500, websiteTotalMs))
       const website = await enrichFromWebsite({
@@ -291,6 +270,27 @@ export async function runFreeEnrichmentPipeline(options: {
         error: e instanceof Error ? e.message : 'website_failed',
       })
     }
+  } else {
+    results.push({ provider: 'website', ok: false, confidence: 0, evidence: [], data: {}, error: 'missing websiteUrl' })
+  }
+
+  // Provider 2: Companies House (free, only if key exists)
+  if (remaining() > 1500) {
+    const ch = await companiesHouseProvider({
+      companyName,
+      timeoutMs: Math.min(6000, remaining()),
+      apiKey: options.companiesHouseApiKey,
+    })
+    results.push(ch)
+  }
+
+  // Provider 3: Wikidata SPARQL (free)
+  if (remaining() > 1500) {
+    const wd = await wikidataSparqlProvider({
+      companyName,
+      timeoutMs: Math.min(6000, remaining()),
+    })
+    results.push(wd)
   }
 
   const merged = mergeSourcesForNormalized(results)
