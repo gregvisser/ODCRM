@@ -225,12 +225,17 @@ export async function runFreeEnrichmentPipeline(options: {
   const websiteUrl = String(options.websiteUrl || '').trim()
   if (websiteUrl && remaining() > 1500) {
     try {
+      // Budgeting: never let website crawling consume the entire pipeline budget.
+      // If the website is slow/unfriendly (cookie walls, bot protection, many redirects),
+      // we still want time left for Companies House + Wikidata.
+      const websiteTotalMs = Math.max(2000, Math.min(7000, remaining()))
+      const perFetchTimeoutMs = Math.max(1200, Math.min(options.perFetchMs, 2500, websiteTotalMs))
       const website = await enrichFromWebsite({
         websiteUrl,
         discoveredUrls: [],
         maxPages: Math.max(1, options.maxPages),
-        perFetchTimeoutMs: Math.max(1500, Math.min(options.perFetchMs, remaining())),
-        totalTimeoutMs: Math.max(2000, remaining()),
+        perFetchTimeoutMs,
+        totalTimeoutMs: websiteTotalMs,
       })
       const accText = Array.isArray((website as any)?.draft?.accreditations)
         ? Array.from(
