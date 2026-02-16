@@ -13,7 +13,6 @@ export type EnrichmentDraft = {
   companyNumber?: string
   registeredAddress?: string
   headquarters?: string
-  clientHistory?: string
   sicCodes?: string[]
   sector?: string
   foundingYear?: string

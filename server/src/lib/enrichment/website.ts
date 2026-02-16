@@ -27,43 +27,6 @@ function pickAboutUrl(baseUrl: string, html: string): string | null {
   }
 }
 
-function pickClientHistoryUrl(baseUrl: string, html: string): string | null {
-  try {
-    const $ = cheerio.load(html)
-    const candidates: string[] = []
-    $('a[href]').each((_, el) => {
-      const href = String($(el).attr('href') || '').trim()
-      if (!href) return
-      const lowerHref = href.toLowerCase()
-      const text = String($(el).text() || '').trim().toLowerCase()
-      const looksRelevant =
-        lowerHref.includes('case-stud') ||
-        lowerHref.includes('case_stud') ||
-        lowerHref.includes('portfolio') ||
-        lowerHref.includes('our-work') ||
-        lowerHref.includes('our_work') ||
-        lowerHref.includes('projects') ||
-        lowerHref.includes('clients') ||
-        lowerHref.includes('testimonials') ||
-        text.includes('case stud') ||
-        text.includes('portfolio') ||
-        text.includes('our work') ||
-        text.includes('projects') ||
-        text.includes('clients') ||
-        text.includes('testimonials')
-      if (!looksRelevant) return
-      candidates.push(href)
-    })
-    const first = candidates[0]
-    if (!first) return null
-    const absolute = new URL(first, baseUrl).toString()
-    if (new URL(absolute).host !== new URL(baseUrl).host) return null
-    return absolute
-  } catch {
-    return null
-  }
-}
-
 function extractSocialLinks(baseUrl: string, html: string): Record<string, string> {
   const out: Record<string, string> = {}
   try {
@@ -103,31 +66,6 @@ function extractWhatTheyDoAndProfile(html: string): { whatTheyDo?: string; compa
   return {
     whatTheyDo: whatTheyDo || undefined,
     companyProfile: companyProfile || undefined,
-  }
-}
-
-function extractClientHistory(html: string): string | undefined {
-  try {
-    const $ = cheerio.load(html)
-
-    // Prefer structured items first (often client logos/names are in list items).
-    const liItems = $('li')
-      .toArray()
-      .map((el) => sanitizeText($(el).text() || '', 120))
-      .map((s) => s.replace(/^[•\-\u2022]\s*/g, '').trim())
-      .filter((s) => s && s.length >= 2 && s.length <= 120)
-
-    const deduped = dedupeStrings(liItems)
-    const top = deduped.slice(0, 12)
-    if (top.length >= 4) {
-      return top.join('\n')
-    }
-
-    // Fallback: concise paragraph summary.
-    const pText = sanitizeText($('p').text() || '', 1200)
-    return pText ? pText : undefined
-  } catch {
-    return undefined
   }
 }
 
@@ -175,7 +113,6 @@ export async function enrichFromWebsite(options: {
 
   const homepageHtml = pages[0].html
   const aboutUrl = pickAboutUrl(websiteUrl, homepageHtml)
-  const clientHistoryUrl = pickClientHistoryUrl(websiteUrl, homepageHtml)
 
   // Optional sitemap discovery
   let sitemapUrls: string[] = []
@@ -187,7 +124,6 @@ export async function enrichFromWebsite(options: {
   const sitemapSameDomain = keepSameDomainUrls(domain, sitemapUrls)
 
   const candidates = dedupeStrings([
-    ...(clientHistoryUrl ? [clientHistoryUrl] : []),
     ...(aboutUrl ? [aboutUrl] : []),
     ...discoveredSameDomain,
     ...sitemapSameDomain,
@@ -208,10 +144,6 @@ export async function enrichFromWebsite(options: {
     accreditations = mergeAccreditations(accreditations, extractCertificationsFromHtml(p.html, p.url))
   }
 
-  const clientHistoryPage =
-    clientHistoryUrl ? pages.find((p) => p.url === clientHistoryUrl) : null
-  const clientHistory = clientHistoryPage ? extractClientHistory(clientHistoryPage.html) : undefined
-
   return {
     sourcesData: { fetchedUrls },
     draft: {
@@ -219,7 +151,6 @@ export async function enrichFromWebsite(options: {
       socialPresence: Object.keys(social).length ? social : undefined,
       whatTheyDo: primary.whatTheyDo,
       companyProfile: primary.companyProfile,
-      clientHistory,
       accreditations: accreditations.length ? accreditations : undefined,
     },
   }

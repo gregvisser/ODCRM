@@ -22,8 +22,6 @@ import {
   Spinner,
   Stack,
   Table,
-  Radio,
-  RadioGroup,
   Tag,
   TagCloseButton,
   TagLabel,
@@ -69,7 +67,6 @@ type CustomerApi = {
   domain?: string | null
   website?: string | null
   whatTheyDo?: string | null
-  accreditations?: string | null
   companyProfile?: string | null
   sector?: string | null
   accountData?: Record<string, unknown> | null
@@ -281,154 +278,6 @@ const buildAccreditation = (): Accreditation => ({
   name: '',
 })
 
-type OnboardingEnrichmentAction = 'KEEP' | 'REPLACE' | 'MERGE'
-type OnboardingEnrichmentEntry = {
-  suggestion?: any
-  fetchedAt?: string
-  fetchedByUserEmail?: string | null
-  sourcesData?: any
-  lastApplied?: {
-    action?: OnboardingEnrichmentAction
-    appliedAt?: string
-    appliedByUserEmail?: string | null
-    snapshot?: any
-    result?: any
-  } | null
-  lastUndoneAt?: string
-  lastUndoneByUserEmail?: string | null
-}
-
-const getOnboardingEnrichmentEntry = (
-  customer: CustomerApi | null | undefined,
-  field: string,
-): OnboardingEnrichmentEntry | null => {
-  const ad: any = customer?.accountData && typeof customer.accountData === 'object' ? customer.accountData : null
-  const store = ad?.onboardingFieldEnrichment
-  const fields = store && typeof store === 'object' ? (store as any).fields : null
-  const entry = fields && typeof fields === 'object' ? (fields as any)[field] : null
-  return entry && typeof entry === 'object' ? (entry as any) : null
-}
-
-const formatEnrichedPreview = (field: string, value: any): string => {
-  if (value === null || value === undefined) return ''
-  if (field === 'socialMediaPresence' && value && typeof value === 'object' && !Array.isArray(value)) {
-    const rows = [
-      ['LinkedIn', value.linkedinUrl],
-      ['Facebook', value.facebookUrl],
-      ['X', value.xUrl],
-      ['Instagram', value.instagramUrl],
-      ['TikTok', value.tiktokUrl],
-      ['YouTube', value.youtubeUrl],
-      ['Website', value.websiteUrl],
-    ]
-      .map(([label, url]) => {
-        const u = typeof url === 'string' ? url.trim() : ''
-        return u ? `${label}: ${u}` : ''
-      })
-      .filter(Boolean)
-    return rows.join('\n')
-  }
-  return String(value || '')
-}
-
-function FieldEnrichmentSelector(props: {
-  fieldKey: string
-  entry: OnboardingEnrichmentEntry | null
-  selectedAction: OnboardingEnrichmentAction
-  onSelectAction: (next: OnboardingEnrichmentAction) => void
-  onEnrich: () => void
-  onApply: () => void
-  onUndo: () => void
-  isBusy?: boolean
-}) {
-  const suggestion = props.entry?.suggestion
-  const hasSuggestion = !(suggestion === null || suggestion === undefined || suggestion === '')
-  const suggestionPreview = formatEnrichedPreview(props.fieldKey, suggestion).trim()
-  const canUndo = props.entry?.lastApplied && typeof props.entry.lastApplied === 'object'
-    ? props.entry.lastApplied.snapshot !== null && props.entry.lastApplied.snapshot !== undefined
-    : false
-
-  const lastAction =
-    props.entry?.lastApplied && typeof props.entry.lastApplied === 'object'
-      ? (props.entry.lastApplied.action as any)
-      : null
-
-  const disableApply = props.selectedAction !== 'KEEP' && !hasSuggestion
-
-  return (
-    <Stack spacing={2} mt={2}>
-      <HStack spacing={2} flexWrap="wrap">
-        <Button size="xs" variant="outline" onClick={props.onEnrich} isLoading={props.isBusy} isDisabled={props.isBusy}>
-          Enrich
-        </Button>
-        {props.entry?.fetchedAt ? (
-          <Text fontSize="xs" color="gray.500">
-            Last enriched: {new Date(props.entry.fetchedAt).toLocaleString()}
-          </Text>
-        ) : null}
-        {lastAction ? (
-          <Badge colorScheme="blue" variant="subtle">
-            Last applied: {String(lastAction)}
-          </Badge>
-        ) : null}
-      </HStack>
-
-      {hasSuggestion ? (
-        <Box borderWidth="1px" borderRadius="md" p={3} bg="gray.50">
-          <Text fontSize="xs" color="gray.600" mb={1}>
-            Enriched suggestion
-          </Text>
-          <Text fontSize="sm" whiteSpace="pre-wrap" color={suggestionPreview ? 'gray.800' : 'gray.500'}>
-            {suggestionPreview || 'No suggestion available.'}
-          </Text>
-
-          <RadioGroup
-            value={props.selectedAction}
-            onChange={(next) => props.onSelectAction(next as OnboardingEnrichmentAction)}
-            mt={3}
-          >
-            <HStack spacing={4} flexWrap="wrap">
-              <Radio value="KEEP">Keep my value</Radio>
-              <Radio value="REPLACE">Replace with enriched</Radio>
-              <Radio value="MERGE">Merge both</Radio>
-            </HStack>
-          </RadioGroup>
-
-          <HStack spacing={2} mt={3} flexWrap="wrap">
-            <Button
-              size="xs"
-              colorScheme="blue"
-              onClick={props.onApply}
-              isLoading={props.isBusy}
-              isDisabled={props.isBusy || disableApply}
-            >
-              Apply
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={props.onUndo}
-              isLoading={props.isBusy}
-              isDisabled={props.isBusy || !canUndo}
-            >
-              Undo
-            </Button>
-            {disableApply ? (
-              <Text fontSize="xs" color="gray.500">
-                Enrich first to enable Replace/Merge.
-              </Text>
-            ) : null}
-          </HStack>
-        </Box>
-      ) : (
-        <Text fontSize="xs" color="gray.500">
-          No enrichment suggestion saved yet. Click Enrich to fetch one.
-        </Text>
-      )}
-    </Stack>
-  )
-}
-
 // Component props
 interface CustomerOnboardingTabProps {
   customerId: string
@@ -487,9 +336,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [monthlyLeadTarget, setMonthlyLeadTarget] = useState<string>('')
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
 
-  const [enrichmentActionByField, setEnrichmentActionByField] = useState<Record<string, OnboardingEnrichmentAction>>({})
-  const [enrichmentBusyByField, setEnrichmentBusyByField] = useState<Record<string, boolean>>({})
-
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
     if (!customer) return null
@@ -547,91 +393,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
     setIsLoading(false)
   }, [customerId])
-
-  const setEnrichmentBusy = useCallback((field: string, busy: boolean) => {
-    setEnrichmentBusyByField((prev) => ({ ...prev, [field]: busy }))
-  }, [])
-
-  const getSelectedEnrichmentAction = useCallback(
-    (field: string): OnboardingEnrichmentAction => {
-      const current = enrichmentActionByField[field]
-      return current === 'REPLACE' || current === 'MERGE' || current === 'KEEP' ? current : 'KEEP'
-    },
-    [enrichmentActionByField],
-  )
-
-  const setSelectedEnrichmentAction = useCallback((field: string, action: OnboardingEnrichmentAction) => {
-    setEnrichmentActionByField((prev) => ({ ...prev, [field]: action }))
-  }, [])
-
-  const enrichOneField = useCallback(
-    async (field: string) => {
-      if (!customerId) return
-      setEnrichmentBusy(field, true)
-      const { data, error } = await api.get<{
-        field: string
-        enrichedValue: any
-        fetchedAt?: string
-      }>(`/api/customers/${customerId}/onboarding/enrichment?field=${encodeURIComponent(field)}`)
-
-      if (error) {
-        toast({ title: 'Enrichment failed', description: error, status: 'error', duration: 6000, isClosable: true })
-        setEnrichmentBusy(field, false)
-        return
-      }
-
-      const enriched = (data as any)?.enrichedValue
-      const preview = formatEnrichedPreview(field, enriched).trim()
-      toast({
-        title: preview ? 'Enrichment found' : 'No changes found',
-        description: preview ? 'Suggestion saved to database.' : 'No enriched value available yet.',
-        status: 'success',
-        duration: 2500,
-        isClosable: true,
-      })
-
-      await fetchCustomer()
-      setEnrichmentBusy(field, false)
-    },
-    [customerId, fetchCustomer, setEnrichmentBusy, toast],
-  )
-
-  const applyEnrichmentAction = useCallback(
-    async (field: string, action: OnboardingEnrichmentAction) => {
-      if (!customerId) return
-      setEnrichmentBusy(field, true)
-      const { error } = await api.post<{ success: boolean }>(`/api/customers/${customerId}/onboarding/enrichment/apply`, {
-        field,
-        action,
-      })
-      if (error) {
-        toast({ title: 'Apply failed', description: error, status: 'error', duration: 6000, isClosable: true })
-        setEnrichmentBusy(field, false)
-        return
-      }
-      await fetchCustomer()
-      toast({ title: 'Enrichment applied', description: 'Saved to database.', status: 'success', duration: 2000 })
-      setEnrichmentBusy(field, false)
-    },
-    [customerId, fetchCustomer, setEnrichmentBusy, toast],
-  )
-
-  const undoEnrichment = useCallback(
-    async (field: string) => {
-      if (!customerId) return
-      setEnrichmentBusy(field, true)
-      const { error } = await api.post<{ success: boolean }>(`/api/customers/${customerId}/onboarding/enrichment/undo`, { field })
-      if (error) {
-        toast({ title: 'Undo failed', description: error, status: 'error', duration: 6000, isClosable: true })
-        setEnrichmentBusy(field, false)
-        return
-      }
-      await fetchCustomer()
-      toast({ title: 'Undo complete', description: 'Reverted from database snapshot.', status: 'success', duration: 2000 })
-      setEnrichmentBusy(field, false)
-    },
-    [customerId, fetchCustomer, setEnrichmentBusy, toast],
-  )
 
   // Protect against accidental refresh/close while dirty
   useEffect(() => {
@@ -1396,7 +1157,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     if (sheetUrl && !sheetLabel) {
       toast({
         title: 'Google Sheet label required',
-        description: 'Please enter a label for the Google Sheet.',
+        description: 'Please enter a label for the Google Sheet (we show labels, not raw URLs).',
         status: 'error',
         duration: 6000,
         isClosable: true,
@@ -1448,7 +1209,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           name: customer.name,
           website: normalizeWebAddress(customer.website),
           whatTheyDo: customer.whatTheyDo && customer.whatTheyDo.trim() ? customer.whatTheyDo.trim() : null,
-          accreditations: customer.accreditations && customer.accreditations.trim() ? customer.accreditations.trim() : null,
           companyProfile: customer.companyProfile && customer.companyProfile.trim() ? customer.companyProfile.trim() : null,
           sector: customer.sector && customer.sector.trim() ? customer.sector.trim() : null,
           accountData: outgoingAccountData,
@@ -1651,16 +1411,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 }}
                 placeholder="https://example.com"
               />
-              <FieldEnrichmentSelector
-                fieldKey="webAddress"
-                entry={getOnboardingEnrichmentEntry(customer, 'webAddress')}
-                selectedAction={getSelectedEnrichmentAction('webAddress')}
-                onSelectAction={(next) => setSelectedEnrichmentAction('webAddress', next)}
-                onEnrich={() => void enrichOneField('webAddress')}
-                onApply={() => void applyEnrichmentAction('webAddress', getSelectedEnrichmentAction('webAddress'))}
-                onUndo={() => void undoEnrichment('webAddress')}
-                isBusy={!!enrichmentBusyByField.webAddress}
-              />
             </FormControl>
             <FormControl>
               <FormLabel>Sector</FormLabel>
@@ -1672,16 +1422,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   setIsDirty(true)
                 }}
                 placeholder="e.g. Facilities Management"
-              />
-              <FieldEnrichmentSelector
-                fieldKey="sector"
-                entry={getOnboardingEnrichmentEntry(customer, 'sector')}
-                selectedAction={getSelectedEnrichmentAction('sector')}
-                onSelectAction={(next) => setSelectedEnrichmentAction('sector', next)}
-                onEnrich={() => void enrichOneField('sector')}
-                onApply={() => void applyEnrichmentAction('sector', getSelectedEnrichmentAction('sector'))}
-                onUndo={() => void undoEnrichment('sector')}
-                isBusy={!!enrichmentBusyByField.sector}
               />
             </FormControl>
             <FormControl>
@@ -1860,16 +1600,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 </Box>
               ) : null}
             </Stack>
-            <FieldEnrichmentSelector
-              fieldKey="headOfficeAddress"
-              entry={getOnboardingEnrichmentEntry(customer, 'headOfficeAddress')}
-              selectedAction={getSelectedEnrichmentAction('headOfficeAddress')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('headOfficeAddress', next)}
-              onEnrich={() => void enrichOneField('headOfficeAddress')}
-              onApply={() => void applyEnrichmentAction('headOfficeAddress', getSelectedEnrichmentAction('headOfficeAddress'))}
-              onUndo={() => void undoEnrichment('headOfficeAddress')}
-              isBusy={!!enrichmentBusyByField.headOfficeAddress}
-            />
           </FormControl>
 
           <Divider />
@@ -1959,16 +1689,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               minH="120px"
               placeholder="Write a narrative history of the client..."
             />
-            <FieldEnrichmentSelector
-              fieldKey="clientHistory"
-              entry={getOnboardingEnrichmentEntry(customer, 'clientHistory')}
-              selectedAction={getSelectedEnrichmentAction('clientHistory')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('clientHistory', next)}
-              onEnrich={() => void enrichOneField('clientHistory')}
-              onApply={() => void applyEnrichmentAction('clientHistory', getSelectedEnrichmentAction('clientHistory'))}
-              onUndo={() => void undoEnrichment('clientHistory')}
-              isBusy={!!enrichmentBusyByField.clientHistory}
-            />
           </FormControl>
 
           <FormControl>
@@ -1981,16 +1701,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               }}
               minH="90px"
               placeholder="Short description of what the company does…"
-            />
-            <FieldEnrichmentSelector
-              fieldKey="whatTheyDo"
-              entry={getOnboardingEnrichmentEntry(customer, 'whatTheyDo')}
-              selectedAction={getSelectedEnrichmentAction('whatTheyDo')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('whatTheyDo', next)}
-              onEnrich={() => void enrichOneField('whatTheyDo')}
-              onApply={() => void applyEnrichmentAction('whatTheyDo', getSelectedEnrichmentAction('whatTheyDo'))}
-              onUndo={() => void undoEnrichment('whatTheyDo')}
-              isBusy={!!enrichmentBusyByField.whatTheyDo}
             />
           </FormControl>
 
@@ -2005,46 +1715,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               minH="140px"
               placeholder="Longer profile / overview…"
             />
-            <FieldEnrichmentSelector
-              fieldKey="companyProfile"
-              entry={getOnboardingEnrichmentEntry(customer, 'companyProfile')}
-              selectedAction={getSelectedEnrichmentAction('companyProfile')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('companyProfile', next)}
-              onEnrich={() => void enrichOneField('companyProfile')}
-              onApply={() => void applyEnrichmentAction('companyProfile', getSelectedEnrichmentAction('companyProfile'))}
-              onUndo={() => void undoEnrichment('companyProfile')}
-              isBusy={!!enrichmentBusyByField.companyProfile}
-            />
           </FormControl>
 
           <FormControl>
-            <FormLabel>Accreditation</FormLabel>
-            <Textarea
-              value={customer?.accreditations || ''}
-              onChange={(e) => {
-                setIsDirty(true)
-                setCustomer((prev) => (prev ? { ...prev, accreditations: e.target.value } : prev))
-              }}
-              minH="80px"
-              placeholder="e.g. ISO 9001, ISO 14001, CHAS…"
-            />
-            <Text mt={2} fontSize="sm" color="gray.600">
-              If accreditation is present, upload the supporting document below.
-            </Text>
-            <FieldEnrichmentSelector
-              fieldKey="accreditation"
-              entry={getOnboardingEnrichmentEntry(customer, 'accreditation')}
-              selectedAction={getSelectedEnrichmentAction('accreditation')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('accreditation', next)}
-              onEnrich={() => void enrichOneField('accreditation')}
-              onApply={() => void applyEnrichmentAction('accreditation', getSelectedEnrichmentAction('accreditation'))}
-              onUndo={() => void undoEnrichment('accreditation')}
-              isBusy={!!enrichmentBusyByField.accreditation}
-            />
-          </FormControl>
-
-          <FormControl>
-            <FormLabel>Accreditation documents</FormLabel>
+            <FormLabel>Accreditations</FormLabel>
             <Stack spacing={4}>
               {clientProfile.accreditations.map((accreditation) => (
                 <Box
@@ -2316,16 +1990,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <Text fontSize="md" fontWeight="semibold" mb={3}>
               Social Media Presence
             </Text>
-            <FieldEnrichmentSelector
-              fieldKey="socialMediaPresence"
-              entry={getOnboardingEnrichmentEntry(customer, 'socialMediaPresence')}
-              selectedAction={getSelectedEnrichmentAction('socialMediaPresence')}
-              onSelectAction={(next) => setSelectedEnrichmentAction('socialMediaPresence', next)}
-              onEnrich={() => void enrichOneField('socialMediaPresence')}
-              onApply={() => void applyEnrichmentAction('socialMediaPresence', getSelectedEnrichmentAction('socialMediaPresence'))}
-              onUndo={() => void undoEnrichment('socialMediaPresence')}
-              isBusy={!!enrichmentBusyByField.socialMediaPresence}
-            />
             <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
               <FormControl isInvalid={!isValidUrl(clientProfile.socialMediaPresence.facebookUrl || '')}>
                 <FormLabel>Facebook</FormLabel>
