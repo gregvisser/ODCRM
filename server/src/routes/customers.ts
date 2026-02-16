@@ -1369,15 +1369,6 @@ router.get('/:customerId/onboarding/enrichment', async (req, res) => {
       return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
     }
 
-    // Tenant guard: if X-Customer-Id header is present, it MUST match :customerId
-    const headerCustomerId =
-      (req.headers['x-customer-id'] as string | undefined) ||
-      (req.headers['x-customerid'] as string | undefined) ||
-      ''
-    if (headerCustomerId && headerCustomerId !== customerId) {
-      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
-    }
-
     const actor = await getVerifiedActorIdentity(req as any)
 
     const customer = await prisma.customer.findUnique({
@@ -1400,14 +1391,17 @@ router.get('/:customerId/onboarding/enrichment', async (req, res) => {
     }
 
     const websiteInput = String(customer.website || customer.domain || '').trim()
-    if (!websiteInput) {
-      return res.status(400).json({ error: 'missing_website', message: 'Customer has no website/domain to enrich from', requestId })
-    }
-
-    const normalizedWebsite = normalizeWebsiteUrl(websiteInput)
-    const domain = normalizeDomain(normalizedWebsite)
-    if (!domain || isPrivateOrLocalHost(domain)) {
-      return res.status(400).json({ error: 'invalid_website', message: 'Website/domain is not valid for enrichment', requestId })
+    // Website scraping is optional. We still allow Companies House + Wikidata enrichment even if
+    // website/domain is missing or invalid.
+    let normalizedWebsite: string | undefined
+    let domain: string | undefined
+    if (websiteInput) {
+      const candidateWebsite = normalizeWebsiteUrl(websiteInput)
+      const candidateDomain = normalizeDomain(candidateWebsite)
+      if (candidateDomain && !isPrivateOrLocalHost(candidateDomain)) {
+        normalizedWebsite = candidateWebsite
+        domain = candidateDomain
+      }
     }
 
     const companiesHouseKey = String(process.env.COMPANIES_HOUSE_API_KEY || '').trim()
@@ -1548,15 +1542,6 @@ router.post('/:customerId/onboarding/enrichment/apply', async (req, res) => {
     const action = parsed.data.action as EnrichmentAction
     if (!isSupportedOnboardingEnrichmentField(field)) {
       return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
-    }
-
-    // Tenant guard
-    const headerCustomerId =
-      (req.headers['x-customer-id'] as string | undefined) ||
-      (req.headers['x-customerid'] as string | undefined) ||
-      ''
-    if (headerCustomerId && headerCustomerId !== customerId) {
-      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
     }
 
     const actor = await getVerifiedActorIdentity(req as any)
@@ -1719,15 +1704,6 @@ router.post('/:customerId/onboarding/enrichment/undo', async (req, res) => {
     const field = parsed.data.field.trim()
     if (!isSupportedOnboardingEnrichmentField(field)) {
       return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
-    }
-
-    // Tenant guard
-    const headerCustomerId =
-      (req.headers['x-customer-id'] as string | undefined) ||
-      (req.headers['x-customerid'] as string | undefined) ||
-      ''
-    if (headerCustomerId && headerCustomerId !== customerId) {
-      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
     }
 
     const actor = await getVerifiedActorIdentity(req as any)
