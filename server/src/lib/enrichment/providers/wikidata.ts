@@ -81,7 +81,10 @@ LIMIT 10
   const url = `${endpoint}?format=json&query=${encodeURIComponent(sparql)}`
 
   try {
-    const res = await fetchJsonWithTimeout<SparqlResults>(url, Math.max(2500, options.timeoutMs), {
+    // IMPORTANT: Never exceed the provider timeout budget passed in by the pipeline.
+    // The pipeline may call this provider with a tight remaining budget (e.g. 1500-2500ms).
+    const timeoutMs = Math.max(1, Math.floor(options.timeoutMs))
+    const res = await fetchJsonWithTimeout<SparqlResults>(url, timeoutMs, {
       headers: { Accept: 'application/sparql-results+json' },
     })
 
