@@ -84,6 +84,20 @@ const AM_ITEMS = [
 
 type ChecklistState = Record<string, boolean>
 
+// Auto-ticked items (from Customer Onboarding actions). Everything else is manual-only.
+const AUTO_TICK_KEY_SET = new Set<string>([
+  'sales.sales_client_agreement',
+  'sales.sales_start_date',
+  'sales.sales_assign_am',
+  'ops.ops_added_crm',
+  'ops.ops_lead_tracker',
+  'am.am_send_dnc',
+])
+
+function withManualTickSuffix(group: 'sales' | 'ops' | 'am', itemKey: string, label: string): string {
+  return AUTO_TICK_KEY_SET.has(`${group}.${itemKey}`) ? label : `${label} (ManualTick)`
+}
+
 function isGroupComplete(items: { key: string }[], state: ChecklistState): boolean {
   return items.every((item) => state[item.key] === true)
 }
@@ -369,7 +383,7 @@ export default function ProgressTrackerTab() {
                         onChange={(e) => void saveChecklistState('sales', item.key, e.target.checked)}
                         size="md"
                       >
-                        <Text fontSize="sm">{item.label}</Text>
+                        <Text fontSize="sm">{withManualTickSuffix('sales', item.key, item.label)}</Text>
                       </Checkbox>
                       {(idx === 8 || idx === 10) && <Divider my={2} />}
                     </Box>
@@ -392,7 +406,7 @@ export default function ProgressTrackerTab() {
                         onChange={(e) => void saveChecklistState('ops', item.key, e.target.checked)}
                         size="md"
                       >
-                        <Text fontSize="sm">{item.label}</Text>
+                        <Text fontSize="sm">{withManualTickSuffix('ops', item.key, item.label)}</Text>
                       </Checkbox>
                       {(idx === 11 || idx === 12) && <Divider my={2} />}
                     </Box>
@@ -415,7 +429,7 @@ export default function ProgressTrackerTab() {
                         onChange={(e) => void saveChecklistState('am', item.key, e.target.checked)}
                         size="md"
                       >
-                        <Text fontSize="sm">{item.label}</Text>
+                        <Text fontSize="sm">{withManualTickSuffix('am', item.key, item.label)}</Text>
                       </Checkbox>
                       {(idx === 19 || idx === 21) && <Divider my={2} />}
                     </Box>

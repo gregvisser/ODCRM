@@ -14,6 +14,7 @@ import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/aud
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
+import { applyAutoTicksToAccountData, applyManualTickToAccountData } from '../services/progressAutoTick.js'
 
 const router = Router()
 
@@ -978,13 +979,26 @@ router.put('/:id/onboarding', async (req, res) => {
       updateData.monthlyLeadActual = 0
     }
 
+    // Best-effort actor identity for progress meta (server-derived).
+    const onboardingActor = getActorIdentity(req as any)
+    const onboardingActorUserId = (onboardingActor?.userId || onboardingActor?.email || null) as string | null
+
     const saved = await prisma.$transaction(async (tx) => {
       // Lock parent row to keep primary-contact demotion atomic in high concurrency cases.
       await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
 
       const existing = await tx.customer.findUnique({
         where: { id },
-        select: { id: true, accountData: true, updatedAt: true },
+        select: {
+          id: true,
+          accountData: true,
+          updatedAt: true,
+          // Needed for auto-tick evaluation without extra round trips
+          agreementBlobName: true,
+          agreementContainerName: true,
+          agreementFileUrl: true, // legacy
+          leadsReportingUrl: true,
+        },
       })
       if (!existing) {
         const err: any = new Error('not_found')
@@ -1006,7 +1020,23 @@ router.put('/:id/onboarding', async (req, res) => {
       const incomingAccountDataRaw =
         validated.accountData && typeof validated.accountData === 'object' ? (validated.accountData as any) : {}
       const incomingAccountData = stripUndefinedDeep(incomingAccountDataRaw)
-      const mergedAccountData = deepMergePreserve(existingAccountData, incomingAccountData)
+      const mergedAccountDataBase = deepMergePreserve(existingAccountData, incomingAccountData)
+
+      // AUTO-TICK (idempotent): apply progress tracker ticks based on DB truth.
+      // IMPORTANT: This must happen inside this transaction so the response updatedAt matches final DB updatedAt.
+      const hasAgreement =
+        Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl)
+      const nextLeadsReportingUrl =
+        Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl') ? updateData.leadsReportingUrl : existing.leadsReportingUrl
+      const hasLeadGoogleSheet = typeof nextLeadsReportingUrl === 'string' ? nextLeadsReportingUrl.trim().length > 0 : false
+
+      const autoTickResult = applyAutoTicksToAccountData({
+        accountData: mergedAccountDataBase,
+        hasAgreement,
+        hasLeadGoogleSheet,
+        actorUserId: onboardingActorUserId,
+      })
+      const mergedAccountData = autoTickResult.accountData
 
       // Always persist merged accountData (safe, non-destructive)
       updateData.accountData = mergedAccountData
@@ -2618,24 +2648,25 @@ router.put('/:id/progress-tracker', async (req, res) => {
       const currentAccountData =
         existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
 
-      const currentProgressTracker =
-        currentAccountData.progressTracker && typeof currentAccountData.progressTracker === 'object'
-          ? (currentAccountData.progressTracker as any)
-          : { sales: {}, ops: {}, am: {} }
+      const nowIso = new Date().toISOString()
+      const manualApplied = applyManualTickToAccountData({
+        accountData: currentAccountData,
+        group,
+        itemKey,
+        checked,
+        actorUserId: updatedByUserId,
+        nowIso,
+      })
 
+      // Preserve existing debug metadata style on progressTracker root (non-breaking)
       const nextProgressTracker = {
-        ...currentProgressTracker,
-        [group]: {
-          ...(currentProgressTracker[group] || {}),
-          [itemKey]: checked,
-        },
-        // Optional metadata (non-breaking): helps debugging without affecting UI contract
-        updatedAt: new Date().toISOString(),
+        ...(manualApplied.accountData.progressTracker || {}),
+        updatedAt: nowIso,
         updatedByUserId,
       }
 
       const nextAccountData = {
-        ...currentAccountData,
+        ...manualApplied.accountData,
         progressTracker: nextProgressTracker,
       }
 
@@ -2757,59 +2788,77 @@ router.post('/:id/agreement', async (req, res) => {
     // Log agreement upload details for verification
     console.log(`[agreement] customerId=${id} container=${containerName} blobName=${blobName} size=${buffer.length}`)
 
-    // Get actor email from auth context (server-derived only)
+    // Get actor identity from auth context (server-derived only)
     const actorIdentity = getActorIdentity(req)
     const actorEmail = actorIdentity?.email || null
+    const actorUserId = (actorIdentity?.userId || actorIdentity?.email || null) as string | null
+    const now = new Date()
 
-    // Update customer record with agreement metadata
-    // CRITICAL: Safely merge accountData.progressTracker.sales.sales_contract_signed = true
-    const currentAccountData = customer.accountData as Record<string, any> || {}
-    const currentProgressTracker = currentAccountData.progressTracker || { sales: {}, ops: {}, am: {} }
-    const currentSales = currentProgressTracker.sales || {}
-
-    const updatedAccountData = {
-      ...currentAccountData,
-      progressTracker: {
-        ...currentProgressTracker,
-        sales: {
-          ...currentSales,
-          sales_contract_signed: true  // Auto-tick "Contract Signed & Filed"
-        }
-      }
-    }
-
-    // CRITICAL: Update customer record with agreement metadata
+    // CRITICAL: Update customer record with agreement metadata AND auto-ticks in ONE transaction.
+    // This prevents optimistic concurrency "self-conflicts" where updatedAt changes twice.
     console.log(`[agreement] BEFORE UPDATE: customerId=${id}`)
     console.log(`[agreement] Writing: blobName=${blobName}, container=${containerName}, fileName=${fileName}`)
-    
-    const updatedCustomer = await prisma.customer.update({
-      where: { id },
-      data: {
-        // Store blob reference for SAS generation (NEW - REQUIRED)
-        agreementBlobName: blobName,
-        agreementContainerName: containerName,
-        // Legacy URL kept for backward compatibility (not used for access)
-        agreementFileUrl: null,
-        // Metadata
-        agreementFileName: fileName,
-        agreementFileMimeType: mimeType,
-        agreementUploadedAt: new Date(),
-        agreementUploadedByEmail: actorEmail,
-        // Progress tracker
-        accountData: updatedAccountData,
-        updatedAt: new Date()
-      },
-      select: {
-        id: true,
-        name: true,
-        agreementBlobName: true,
-        agreementContainerName: true,
-        agreementFileName: true,
-        agreementFileMimeType: true,
-        agreementUploadedAt: true,
-        agreementUploadedByEmail: true,
-        accountData: true
+
+    const updatedCustomer = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id },
+        select: { id: true, name: true, isArchived: true, accountData: true, leadsReportingUrl: true },
+      })
+      if (!existing) {
+        const e: any = new Error('not_found')
+        e.statusCode = 404
+        throw e
       }
+      if (existing.isArchived) {
+        const e: any = new Error('archived')
+        e.statusCode = 400
+        throw e
+      }
+
+      const hasLeadGoogleSheet = typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim().length > 0 : false
+      const currentAccountData =
+        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
+
+      // Auto-tick mapping requirement: agreement upload should tick "Client Agreement and Approval"
+      const autoTicked = applyAutoTicksToAccountData({
+        accountData: currentAccountData,
+        hasAgreement: true,
+        hasLeadGoogleSheet,
+        actorUserId,
+        nowIso: now.toISOString(),
+      })
+
+      return tx.customer.update({
+        where: { id },
+        data: {
+          // Store blob reference for SAS generation (REQUIRED)
+          agreementBlobName: blobName,
+          agreementContainerName: containerName,
+          // Legacy URL kept for backward compatibility (not used for access)
+          agreementFileUrl: null,
+          // Metadata
+          agreementFileName: fileName,
+          agreementFileMimeType: mimeType,
+          agreementUploadedAt: now,
+          agreementUploadedByEmail: actorEmail,
+          // Progress tracker (DB truth)
+          accountData: autoTicked.accountData,
+          updatedAt: now,
+        },
+        select: {
+          id: true,
+          name: true,
+          agreementBlobName: true,
+          agreementContainerName: true,
+          agreementFileName: true,
+          agreementFileMimeType: true,
+          agreementUploadedAt: true,
+          agreementUploadedByEmail: true,
+          accountData: true,
+        },
+      })
     })
 
     // CRITICAL: Verify update succeeded
@@ -2836,7 +2885,7 @@ router.post('/:id/agreement', async (req, res) => {
     console.log(`✅ Agreement uploaded for customer ${customer.name} (${id})`)
     console.log(`   File: ${fileName}`)
     console.log(`   Blob: ${containerName}/${blobName}`)
-    console.log(`   Progress tracker updated: sales_contract_signed = true`)
+    console.log(`   Progress tracker auto-ticked: sales_client_agreement = true`)
 
     return res.status(201).json({
       success: true,
@@ -2851,8 +2900,14 @@ router.post('/:id/agreement', async (req, res) => {
       progressUpdated: true,
       progressTracker: (updatedCustomer.accountData as any)?.progressTracker?.sales
     })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error uploading agreement:', error)
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+    if (error?.statusCode === 400 || error?.message === 'archived') {
+      return res.status(400).json({ error: 'Customer is archived' })
+    }
     return res.status(500).json({ 
       error: 'Failed to upload agreement',
       details: error instanceof Error ? error.message : 'Unknown error'
@@ -3134,6 +3189,7 @@ router.post('/:id/attachments', (req, res) => {
         mimeType,
         blobName: uploadResult.blobName,
         containerName: uploadResult.containerName,
+        size: file.size,
         uploadedAt: now.toISOString(),
         uploadedByEmail: actorEmail,
       }
@@ -3461,13 +3517,61 @@ router.post('/:id/suppression-import', (req, res) => {
       // Replace existing customer-scoped email suppressions
       const actor = getActorIdentity(req)
       const now = new Date()
+      const actorEmail = actor?.email || null
+      const actorUserId = (actor?.userId || actor?.email || null) as string | null
+      const nowIso = now.toISOString()
+
+      // Store the ORIGINAL DNC file in Azure Blob so it's viewable/clickable via SAS.
+      // This is append-only metadata under accountData.attachments[] and dncSuppression.
+      const suppressionMimeType = String((file as any).mimetype || '').trim() || 'application/octet-stream'
+      if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(suppressionMimeType)) {
+        return res.status(400).json({
+          error: 'Invalid file type. Allowed: PDF/DOC/DOCX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
+          receivedMimeType: suppressionMimeType,
+        })
+      }
+
+      const { uploadCustomerAttachment, generateCustomerAttachmentBlobName } = await import('../utils/blobUpload.js')
+      const dncBlobName = generateCustomerAttachmentBlobName(id, 'dnc', originalName)
+      const dncUpload = await uploadCustomerAttachment({
+        buffer: file.buffer,
+        contentType: suppressionMimeType,
+        blobName: dncBlobName,
+      })
+
+      const baseUrl =
+        process.env.API_PUBLIC_BASE_URL || `${(req as any).protocol}://${(req as any).get('host')}`
+      const dncAttachmentId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const dncFileUrl = `${baseUrl}/api/customers/${id}/attachments/${dncAttachmentId}/download`
+      const dncAttachment = {
+        id: dncAttachmentId,
+        type: 'dnc',
+        fileName: originalName,
+        fileUrl: dncFileUrl,
+        mimeType: suppressionMimeType,
+        blobName: dncUpload.blobName,
+        containerName: dncUpload.containerName,
+        size: (file as any).size ?? null,
+        uploadedAt: nowIso,
+        uploadedByEmail: actorEmail,
+      }
 
       const result = await prisma.$transaction(async (tx) => {
         // Lock customer row to serialize replace operations
         await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
         const customer = await tx.customer.findUnique({
           where: { id },
-          select: { id: true, name: true, isArchived: true, accountData: true },
+          select: {
+            id: true,
+            name: true,
+            isArchived: true,
+            accountData: true,
+            // Needed for auto-tick evaluation without extra round trips
+            agreementBlobName: true,
+            agreementContainerName: true,
+            agreementFileUrl: true,
+            leadsReportingUrl: true,
+          },
         })
         if (!customer) {
           const e: any = new Error('not_found')
@@ -3523,12 +3627,20 @@ router.post('/:id/suppression-import', (req, res) => {
         // Save upload metadata on accountData (DB truth for UI)
         const existingAccountData =
           customer.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+        const currentAttachments = Array.isArray(existingAccountData.attachments) ? existingAccountData.attachments : []
         const nextAccountData = {
           ...existingAccountData,
+          attachments: [...currentAttachments, dncAttachment],
           dncSuppression: {
             fileName: originalName,
-            uploadedAt: now.toISOString(),
-            uploadedByEmail: actor.email || null,
+            fileUrl: dncFileUrl,
+            attachmentId: dncAttachmentId,
+            mimeType: suppressionMimeType,
+            blobName: dncUpload.blobName,
+            containerName: dncUpload.containerName,
+            size: (file as any).size ?? null,
+            uploadedAt: nowIso,
+            uploadedByEmail: actorEmail,
             totalParsed: parsedRows.length,
             // IMPORTANT: totalImported must reflect rows actually inserted.
             // createMany(skipDuplicates) can skip rows if they already exist.
@@ -3539,10 +3651,22 @@ router.post('/:id/suppression-import', (req, res) => {
           },
         }
 
+        // Apply auto-ticks idempotently (e.g., DNC uploaded -> am_send_dnc)
+        const hasAgreement =
+          Boolean(customer.agreementBlobName && customer.agreementContainerName) || Boolean(customer.agreementFileUrl)
+        const hasLeadGoogleSheet = typeof customer.leadsReportingUrl === 'string' ? customer.leadsReportingUrl.trim().length > 0 : false
+        const autoTicked = applyAutoTicksToAccountData({
+          accountData: nextAccountData,
+          hasAgreement,
+          hasLeadGoogleSheet,
+          actorUserId,
+          nowIso,
+        })
+
         await tx.customer.update({
           where: { id },
           data: {
-            accountData: nextAccountData,
+            accountData: autoTicked.accountData,
             updatedAt: now,
           },
         })
@@ -3604,6 +3728,8 @@ router.get('/:id/suppression-summary', async (req, res) => {
       lastUpload: meta
         ? {
             fileName: meta.fileName || null,
+            fileUrl: meta.fileUrl || null,
+            attachmentId: meta.attachmentId || null,
             uploadedAt: meta.uploadedAt || null,
             uploadedByEmail: meta.uploadedByEmail || null,
             totalImported: meta.totalImported ?? null,

@@ -97,6 +97,10 @@ type AccountDetails = {
   headOfficePostcode?: string
   assignedAccountManagerId?: string
   assignedAccountManagerName?: string
+  /** Start date agreed with client (YYYY-MM-DD or ISO string; stored in DB under accountData.accountDetails) */
+  startDateAgreed?: string
+  /** Timestamp when client was created on CRM (ISO string). Presence drives auto-tick. */
+  clientCreatedOnCrmAt?: string
   assignedClientDdiNumber: string
   emailAccounts: string[]
   daysPerWeek: number
@@ -152,6 +156,8 @@ const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
   headOfficePostcode: '',
   assignedAccountManagerId: '',
   assignedAccountManagerName: '',
+  startDateAgreed: '',
+  clientCreatedOnCrmAt: '',
   assignedClientDdiNumber: '',
   emailAccounts: ['', '', '', '', ''],
   daysPerWeek: 1,
@@ -323,6 +329,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingSuppression, setUploadingSuppression] = useState(false)
   const [suppressionMeta, setSuppressionMeta] = useState<{
     fileName?: string | null
+    fileUrl?: string | null
+    attachmentId?: string | null
     uploadedAt?: string | null
     uploadedByEmail?: string | null
     totalImported?: number | null
@@ -485,6 +493,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           totalSuppressedEmails: number
           lastUpload: {
             fileName: string | null
+            fileUrl?: string | null
+            attachmentId?: string | null
             uploadedAt: string | null
             uploadedByEmail: string | null
             totalImported: number | null
@@ -493,6 +503,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         if (cancelled) return
         setSuppressionMeta({
           fileName: data?.lastUpload?.fileName ?? null,
+          fileUrl: (data?.lastUpload as any)?.fileUrl ?? null,
+          attachmentId: (data?.lastUpload as any)?.attachmentId ?? null,
           uploadedAt: data?.lastUpload?.uploadedAt ?? null,
           uploadedByEmail: data?.lastUpload?.uploadedByEmail ?? null,
           totalImported: data?.lastUpload?.totalImported ?? null,
@@ -882,7 +894,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         })
         toast({
           title: 'Agreement uploaded',
-          description: 'Contract signed & filed checkbox has been automatically ticked',
+          description: 'Progress Tracker has been automatically updated.',
           status: 'success',
           duration: 4000,
         })
@@ -1446,6 +1458,44 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               </Select>
             </FormControl>
             <FormControl>
+              <FormLabel>Start Date Agreed</FormLabel>
+              <Input
+                type="date"
+                value={String(accountDetails.startDateAgreed || '').slice(0, 10)}
+                onChange={(e) => {
+                  const next = e.target.value
+                  updateAccountDetails({ startDateAgreed: next })
+                }}
+                placeholder="YYYY-MM-DD"
+              />
+              <Text fontSize="xs" color="gray.500" mt={1}>
+                When this is set, the Progress Tracker will auto-tick “Start Date Agreed”.
+              </Text>
+            </FormControl>
+            <FormControl>
+              <FormLabel>Client Created on CRM</FormLabel>
+              <Checkbox
+                isChecked={Boolean(String(accountDetails.clientCreatedOnCrmAt || '').trim())}
+                onChange={(e) => {
+                  const checked = e.target.checked
+                  updateAccountDetails({
+                    clientCreatedOnCrmAt: checked ? new Date().toISOString() : '',
+                  })
+                }}
+              >
+                <Text fontSize="sm">Mark as created</Text>
+              </Checkbox>
+              {accountDetails.clientCreatedOnCrmAt ? (
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Set {new Date(accountDetails.clientCreatedOnCrmAt).toLocaleString()}
+                </Text>
+              ) : (
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  When this is set, the Progress Tracker will auto-tick “Client Added to CRM System & Back Up Folder”.
+                </Text>
+              )}
+            </FormControl>
+            <FormControl>
               <FormLabel>Assigned Client DDI & Number</FormLabel>
               <Input
                 value={accountDetails.assignedClientDdiNumber}
@@ -1636,6 +1686,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     <Text fontSize="sm" fontWeight="medium">
                       {suppressionMeta.fileName}
                     </Text>
+                    {suppressionMeta.fileUrl ? (
+                      <Link href={suppressionMeta.fileUrl} isExternal fontSize="sm" color="teal.600">
+                        View
+                      </Link>
+                    ) : null}
                     <Text fontSize="xs" color="gray.500">
                       {typeof suppressionMeta.totalSuppressedEmails === 'number'
                         ? `${suppressionMeta.totalSuppressedEmails} suppressed emails`
@@ -2133,7 +2188,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Customer Agreement (PDF/Word)</FormLabel>
             <Stack spacing={3}>
               <Text fontSize="sm" color="gray.600">
-                Upload the signed customer agreement. This will automatically tick the "Contract Signed & Filed" checkbox in the Progress Tracker.
+                Upload the signed customer agreement. This will automatically tick “Client Agreement and Approval” in the Progress Tracker.
               </Text>
               <Stack spacing={2}>
                 <Input
