@@ -14,6 +14,8 @@ import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/aud
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
+import { runUkEnrichmentPipeline } from '../lib/enrichment/pipeline.js'
+import { isPrivateOrLocalHost, normalizeDomain, normalizeWebsiteUrl } from '../lib/enrichment/utils.js'
 
 const router = Router()
 
@@ -915,8 +917,10 @@ router.put('/:id/onboarding', async (req, res) => {
           typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
         if (!label) {
           return res.status(400).json({
-            error: 'Invalid input',
+            error: 'missing_google_sheet_label',
+            message: 'Please enter a label for the Google Sheet.',
             details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
+            requestId,
           })
         }
       }
@@ -1162,6 +1166,636 @@ router.put('/:id/onboarding', async (req, res) => {
   }
 })
 
+// ============================================================================
+// Onboarding field-level enrichment (DB-cached suggestions + apply/undo)
+// ============================================================================
+
+const ONBOARDING_FIELD_ENRICHMENT_KEY = 'onboardingFieldEnrichment' as const
+
+const SUPPORTED_ONBOARDING_ENRICHMENT_FIELDS = [
+  'webAddress',
+  'sector',
+  'headOfficeAddress',
+  'clientHistory',
+  'whatTheyDo',
+  'companyProfile',
+  'accreditation',
+  'socialMediaPresence',
+] as const
+
+type SupportedOnboardingEnrichmentField = (typeof SUPPORTED_ONBOARDING_ENRICHMENT_FIELDS)[number]
+type EnrichmentAction = 'KEEP' | 'REPLACE' | 'MERGE'
+
+function isSupportedOnboardingEnrichmentField(value: unknown): value is SupportedOnboardingEnrichmentField {
+  return typeof value === 'string' && (SUPPORTED_ONBOARDING_ENRICHMENT_FIELDS as readonly string[]).includes(value)
+}
+
+function getAccountDataObject(value: unknown): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return value as any
+}
+
+function getDeep(obj: any, path: string): any {
+  const parts = path.split('.')
+  let cur = obj
+  for (const p of parts) {
+    if (!cur || typeof cur !== 'object') return undefined
+    cur = cur[p]
+  }
+  return cur
+}
+
+function setDeep(base: any, path: string, value: any): any {
+  const parts = path.split('.')
+  const out = { ...(base && typeof base === 'object' ? base : {}) }
+  let cur: any = out
+  for (let i = 0; i < parts.length; i++) {
+    const key = parts[i]
+    if (i === parts.length - 1) {
+      cur[key] = value
+    } else {
+      const next = cur[key]
+      cur[key] = next && typeof next === 'object' && !Array.isArray(next) ? { ...next } : {}
+      cur = cur[key]
+    }
+  }
+  return out
+}
+
+function normalizeText(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function mergeText(original: unknown, enriched: unknown): string {
+  const a = normalizeText(original).trim()
+  const b = normalizeText(enriched).trim()
+  if (!a && !b) return ''
+  if (!a) return b
+  if (!b) return a
+  if (a === b) return a
+  // Conservative merge: append enriched below original, line-deduped (exact match).
+  const lines = (a + '\n' + b)
+    .split('\n')
+    .map((s) => s.trimEnd())
+    .filter((s) => s.trim().length > 0)
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const line of lines) {
+    const key = line.trim().toLowerCase()
+    if (!key) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(line)
+  }
+  return out.join('\n')
+}
+
+function coerceEnrichmentStore(accountData: Record<string, any>): { version: 1; fields: Record<string, any> } {
+  const raw = accountData?.[ONBOARDING_FIELD_ENRICHMENT_KEY]
+  if (raw && typeof raw === 'object' && !Array.isArray(raw) && (raw as any).version === 1) {
+    const fields = (raw as any).fields
+    if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+      return { version: 1, fields }
+    }
+  }
+  return { version: 1, fields: {} }
+}
+
+function upsertEnrichmentFieldEntry(params: {
+  accountData: Record<string, any>
+  field: SupportedOnboardingEnrichmentField
+  patch: Record<string, any>
+}): Record<string, any> {
+  const store = coerceEnrichmentStore(params.accountData)
+  const existing = store.fields[params.field] && typeof store.fields[params.field] === 'object' ? store.fields[params.field] : {}
+  const nextStore = {
+    version: 1,
+    fields: {
+      ...store.fields,
+      [params.field]: {
+        ...existing,
+        ...params.patch,
+      },
+    },
+  }
+  return { ...params.accountData, [ONBOARDING_FIELD_ENRICHMENT_KEY]: nextStore }
+}
+
+function getCanonicalValue(params: { customer: any; accountData: Record<string, any>; field: SupportedOnboardingEnrichmentField }) {
+  const { customer, accountData, field } = params
+  if (field === 'webAddress') return customer.website ?? null
+  if (field === 'sector') return customer.sector ?? null
+  if (field === 'whatTheyDo') return customer.whatTheyDo ?? null
+  if (field === 'companyProfile') return customer.companyProfile ?? null
+  if (field === 'accreditation') return customer.accreditations ?? null
+  if (field === 'headOfficeAddress') {
+    // Onboarding canonical storage lives in accountData.accountDetails.headOfficeAddress (plus a top-level convenience mirror).
+    return getDeep(accountData, 'accountDetails.headOfficeAddress') ?? accountData.headOfficeAddress ?? ''
+  }
+  if (field === 'clientHistory') return getDeep(accountData, 'clientProfile.clientHistory') ?? ''
+  if (field === 'socialMediaPresence') return getDeep(accountData, 'clientProfile.socialMediaPresence') ?? {}
+  return null
+}
+
+function coerceSocialPresenceSuggestion(raw: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out
+  const map = (key: string, dest: string) => {
+    const v = typeof raw[key] === 'string' ? raw[key].trim() : ''
+    if (v) out[dest] = v
+  }
+  map('linkedin', 'linkedinUrl')
+  map('facebook', 'facebookUrl')
+  map('twitter', 'xUrl')
+  map('x', 'xUrl')
+  map('instagram', 'instagramUrl')
+  map('tiktok', 'tiktokUrl')
+  map('youtube', 'youtubeUrl')
+  map('website', 'websiteUrl')
+  return out
+}
+
+function computeAppliedValue(params: {
+  field: SupportedOnboardingEnrichmentField
+  action: EnrichmentAction
+  canonical: any
+  suggestion: any
+}) {
+  const { field, action, canonical, suggestion } = params
+
+  if (action === 'KEEP') return { nextCanonical: canonical, reversibleSnapshot: null }
+
+  // REPLACE
+  if (action === 'REPLACE') return { nextCanonical: suggestion, reversibleSnapshot: canonical }
+
+  // MERGE
+  if (field === 'webAddress' || field === 'sector') {
+    const a = normalizeText(canonical).trim()
+    const b = normalizeText(suggestion).trim()
+    const merged = a ? a : b
+    return { nextCanonical: merged, reversibleSnapshot: canonical }
+  }
+
+  if (field === 'socialMediaPresence') {
+    const existing = canonical && typeof canonical === 'object' && !Array.isArray(canonical) ? canonical : {}
+    const incoming = suggestion && typeof suggestion === 'object' && !Array.isArray(suggestion) ? suggestion : {}
+    // Conservative merge: keep user-entered URLs; only fill missing.
+    const keys = ['linkedinUrl', 'facebookUrl', 'xUrl', 'instagramUrl', 'tiktokUrl', 'youtubeUrl', 'websiteUrl']
+    const merged: Record<string, string> = { ...existing }
+    for (const k of keys) {
+      const cur = typeof merged[k] === 'string' ? merged[k].trim() : ''
+      if (cur) continue
+      const next = typeof incoming[k] === 'string' ? incoming[k].trim() : ''
+      if (next) merged[k] = next
+    }
+    return { nextCanonical: merged, reversibleSnapshot: canonical }
+  }
+
+  // Default text merge for narrative fields
+  const mergedText = mergeText(canonical, suggestion)
+  return { nextCanonical: mergedText, reversibleSnapshot: canonical }
+}
+
+// GET /api/customers/:customerId/onboarding/enrichment?field=webAddress
+router.get('/:customerId/onboarding/enrichment', async (req, res) => {
+  const requestId = `enrich_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { customerId } = req.params
+
+  try {
+    const fieldRaw = req.query.field
+    const field = typeof fieldRaw === 'string' ? fieldRaw.trim() : ''
+    if (!isSupportedOnboardingEnrichmentField(field)) {
+      return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
+    }
+
+    // Tenant guard: if X-Customer-Id header is present, it MUST match :customerId
+    const headerCustomerId =
+      (req.headers['x-customer-id'] as string | undefined) ||
+      (req.headers['x-customerid'] as string | undefined) ||
+      ''
+    if (headerCustomerId && headerCustomerId !== customerId) {
+      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
+    }
+
+    const actor = await getVerifiedActorIdentity(req as any)
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true,
+        name: true,
+        domain: true,
+        website: true,
+        sector: true,
+        whatTheyDo: true,
+        companyProfile: true,
+        accreditations: true,
+        accountData: true,
+      },
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
+    }
+
+    const websiteInput = String(customer.website || customer.domain || '').trim()
+    if (!websiteInput) {
+      return res.status(400).json({ error: 'missing_website', message: 'Customer has no website/domain to enrich from', requestId })
+    }
+
+    const normalizedWebsite = normalizeWebsiteUrl(websiteInput)
+    const domain = normalizeDomain(normalizedWebsite)
+    if (!domain || isPrivateOrLocalHost(domain)) {
+      return res.status(400).json({ error: 'invalid_website', message: 'Website/domain is not valid for enrichment', requestId })
+    }
+
+    // Run the existing enrichment pipeline (website scraping always; optional external sources disabled unless configured).
+    const enableCompaniesHouse = Boolean(process.env.ENRICHMENT_COMPANIES_HOUSE_API_KEY)
+    const enableBing = Boolean(process.env.ENRICHMENT_BING_KEY)
+    const enableWikidata = process.env.ENRICHMENT_WIKIDATA_ENABLED === 'true'
+
+    const { sourcesData, draft } = await runUkEnrichmentPipeline({
+      customer: { id: customer.id, name: customer.name, website: customer.website, domain: customer.domain },
+      input: { websiteUrl: normalizedWebsite, domain },
+      limits: {
+        totalMs: 12_000,
+        perFetchMs: 4_000,
+        maxPages: 4,
+        companiesHouseMs: 2_500,
+        bingMs: 2_500,
+        wikidataMs: 2_000,
+      },
+      flags: {
+        enableCompaniesHouse,
+        companiesHouseApiKey: String(process.env.ENRICHMENT_COMPANIES_HOUSE_API_KEY || ''),
+        enableBing,
+        bingKey: String(process.env.ENRICHMENT_BING_KEY || ''),
+        bingEndpoint: String(process.env.ENRICHMENT_BING_ENDPOINT || 'https://api.bing.microsoft.com/v7.0/search'),
+        bingMarket: String(process.env.ENRICHMENT_BING_MARKET || 'en-GB'),
+        bingCount: Number(process.env.ENRICHMENT_BING_COUNT || 5),
+        enableWikidata,
+      },
+    })
+
+    const accreditationsText = Array.isArray((draft as any)?.accreditations)
+      ? Array.from(
+          new Set(
+            (draft as any).accreditations
+              .map((a: any) => String(a?.name || '').trim())
+              .filter(Boolean)
+              .map((s: string) => s),
+          ),
+        ).join(', ')
+      : ''
+
+    const enrichedValueByField: Record<SupportedOnboardingEnrichmentField, any> = {
+      webAddress: (draft as any)?.website ?? null,
+      sector: (draft as any)?.sector ?? null,
+      headOfficeAddress: (draft as any)?.headquarters ?? (draft as any)?.registeredAddress ?? null,
+      clientHistory: (draft as any)?.clientHistory ?? null,
+      whatTheyDo: (draft as any)?.whatTheyDo ?? null,
+      companyProfile: (draft as any)?.companyProfile ?? null,
+      accreditation: accreditationsText || null,
+      socialMediaPresence: coerceSocialPresenceSuggestion((draft as any)?.socialPresence),
+    }
+
+    const enrichedValue = enrichedValueByField[field]
+    const fetchedAt = new Date().toISOString()
+    const fetchedBy = (actor?.emailNormalized || actor?.email || '').trim() || null
+
+    // Persist suggestion in DB (accountData JSON) so it survives refresh.
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} FOR UPDATE`
+      const existing = await tx.customer.findUnique({ where: { id: customerId }, select: { id: true, accountData: true } })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+      const ad = getAccountDataObject(existing.accountData)
+      const nextAccountData = upsertEnrichmentFieldEntry({
+        accountData: ad,
+        field,
+        patch: {
+          suggestion: enrichedValue,
+          fetchedAt,
+          fetchedByUserEmail: fetchedBy,
+          sourcesData,
+        },
+      })
+      await tx.customer.update({
+        where: { id: customerId },
+        data: { accountData: nextAccountData, updatedAt: new Date() },
+      })
+      return nextAccountData
+    })
+
+    return res.json({
+      field,
+      enrichedValue,
+      sourcesData,
+      fetchedAt,
+      requestId,
+      // DB truth for client UI: include the stored entry (not required, but helps with refresh-free UX).
+      stored: coerceEnrichmentStore(getAccountDataObject(result)).fields[field] ?? null,
+    })
+  } catch (error: any) {
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
+    }
+    console.error(`[onboarding_field_enrich_failed] requestId=${requestId} customerId=${customerId} message="${error?.message || 'unknown'}"`)
+    return res.status(500).json({ error: 'enrichment_failed', message: 'Failed to fetch enrichment', requestId })
+  }
+})
+
+// POST /api/customers/:customerId/onboarding/enrichment/apply
+router.post('/:customerId/onboarding/enrichment/apply', async (req, res) => {
+  const requestId = `apply_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { customerId } = req.params
+
+  try {
+    const bodySchema = z.object({
+      field: z.string().min(1),
+      action: z.enum(['KEEP', 'REPLACE', 'MERGE']),
+    })
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors, requestId })
+    }
+
+    const field = parsed.data.field.trim()
+    const action = parsed.data.action as EnrichmentAction
+    if (!isSupportedOnboardingEnrichmentField(field)) {
+      return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
+    }
+
+    // Tenant guard
+    const headerCustomerId =
+      (req.headers['x-customer-id'] as string | undefined) ||
+      (req.headers['x-customerid'] as string | undefined) ||
+      ''
+    if (headerCustomerId && headerCustomerId !== customerId) {
+      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
+    }
+
+    const actor = await getVerifiedActorIdentity(req as any)
+    const actorEmail = (actor?.emailNormalized || actor?.email || '').trim() || null
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id: customerId },
+        select: {
+          id: true,
+          website: true,
+          sector: true,
+          whatTheyDo: true,
+          companyProfile: true,
+          accreditations: true,
+          accountData: true,
+          updatedAt: true,
+        },
+      })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+
+      const ad = getAccountDataObject(existing.accountData)
+      const store = coerceEnrichmentStore(ad)
+      const entry = store.fields[field] && typeof store.fields[field] === 'object' ? store.fields[field] : {}
+      const suggestion = entry?.suggestion
+
+      if ((action === 'REPLACE' || action === 'MERGE') && (suggestion === null || suggestion === undefined || suggestion === '')) {
+        return { status: 400 as const, body: { error: 'missing_suggestion', message: 'No enrichment suggestion available for this field', requestId } }
+      }
+
+      const canonical = getCanonicalValue({ customer: existing, accountData: ad, field })
+      const normalizedSuggestion =
+        field === 'socialMediaPresence'
+          ? (suggestion && typeof suggestion === 'object' ? suggestion : {})
+          : suggestion
+
+      const { nextCanonical, reversibleSnapshot } = computeAppliedValue({
+        field,
+        action,
+        canonical,
+        suggestion: normalizedSuggestion,
+      })
+
+      // Idempotency: if canonical would not change AND lastApplied matches, do nothing.
+      const lastApplied = entry?.lastApplied && typeof entry.lastApplied === 'object' ? entry.lastApplied : null
+      const sameAction = lastApplied?.action === action
+      const sameResult = JSON.stringify(lastApplied?.result ?? null) === JSON.stringify(nextCanonical ?? null)
+      const canonicalSame = JSON.stringify(canonical ?? null) === JSON.stringify(nextCanonical ?? null)
+      if (canonicalSame && sameAction && sameResult) {
+        return {
+          status: 200 as const,
+          body: {
+            success: true,
+            requestId,
+            field,
+            action,
+            noChanges: true,
+            canUndo: Boolean(lastApplied?.snapshot !== undefined && lastApplied?.snapshot !== null),
+          },
+        }
+      }
+
+      const didChangeCanonical = !canonicalSame && action !== 'KEEP'
+      const snapshotToStore = didChangeCanonical ? reversibleSnapshot : null
+
+      // Update canonical storage
+      const updateCustomerScalars: any = {}
+      let nextAccountData = ad
+
+      if (field === 'webAddress') updateCustomerScalars.website = nextCanonical ? String(nextCanonical).trim() : null
+      if (field === 'sector') updateCustomerScalars.sector = nextCanonical ? String(nextCanonical).trim() : null
+      if (field === 'whatTheyDo') updateCustomerScalars.whatTheyDo = nextCanonical ? String(nextCanonical) : null
+      if (field === 'companyProfile') updateCustomerScalars.companyProfile = nextCanonical ? String(nextCanonical) : null
+      if (field === 'accreditation') updateCustomerScalars.accreditations = nextCanonical ? String(nextCanonical) : null
+
+      if (field === 'headOfficeAddress') {
+        const addr = String(nextCanonical || '')
+        nextAccountData = setDeep(nextAccountData, 'accountDetails.headOfficeAddress', addr)
+        nextAccountData = { ...nextAccountData, headOfficeAddress: addr }
+      }
+      if (field === 'clientHistory') {
+        nextAccountData = setDeep(nextAccountData, 'clientProfile.clientHistory', String(nextCanonical || ''))
+      }
+      if (field === 'socialMediaPresence') {
+        const mergedObj = nextCanonical && typeof nextCanonical === 'object' && !Array.isArray(nextCanonical) ? nextCanonical : {}
+        nextAccountData = setDeep(nextAccountData, 'clientProfile.socialMediaPresence', mergedObj)
+      }
+
+      // Store apply metadata in accountData
+      nextAccountData = upsertEnrichmentFieldEntry({
+        accountData: nextAccountData,
+        field,
+        patch: {
+          lastApplied: {
+            action,
+            appliedAt: new Date().toISOString(),
+            appliedByUserEmail: actorEmail,
+            snapshot: snapshotToStore,
+            result: nextCanonical ?? null,
+          },
+        },
+      })
+
+      await tx.customer.update({
+        where: { id: customerId },
+        data: { ...updateCustomerScalars, accountData: nextAccountData, updatedAt: new Date() },
+      })
+
+      return {
+        status: 200 as const,
+        body: {
+          success: true,
+          requestId,
+          field,
+          action,
+          canUndo: Boolean(snapshotToStore !== null && snapshotToStore !== undefined),
+        },
+      }
+    })
+
+    if ((txResult as any)?.status && (txResult as any)?.body) {
+      const result = txResult as any
+      return res.status(result.status).json(result.body)
+    }
+    return res.status(500).json({ error: 'server_error', message: 'Unexpected apply result', requestId })
+  } catch (error: any) {
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
+    }
+    console.error(`[onboarding_enrichment_apply_failed] requestId=${requestId} customerId=${customerId} message="${error?.message || 'unknown'}"`)
+    return res.status(500).json({ error: 'apply_failed', message: 'Failed to apply enrichment action', requestId })
+  }
+})
+
+// POST /api/customers/:customerId/onboarding/enrichment/undo
+router.post('/:customerId/onboarding/enrichment/undo', async (req, res) => {
+  const requestId = `undo_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+  const { customerId } = req.params
+
+  try {
+    const bodySchema = z.object({ field: z.string().min(1) })
+    const parsed = bodySchema.safeParse(req.body)
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors, requestId })
+    }
+
+    const field = parsed.data.field.trim()
+    if (!isSupportedOnboardingEnrichmentField(field)) {
+      return res.status(400).json({ error: 'invalid_field', message: 'Unsupported enrichment field', requestId })
+    }
+
+    // Tenant guard
+    const headerCustomerId =
+      (req.headers['x-customer-id'] as string | undefined) ||
+      (req.headers['x-customerid'] as string | undefined) ||
+      ''
+    if (headerCustomerId && headerCustomerId !== customerId) {
+      return res.status(403).json({ error: 'tenant_mismatch', message: 'X-Customer-Id does not match URL customer id', requestId })
+    }
+
+    const actor = await getVerifiedActorIdentity(req as any)
+    const actorEmail = (actor?.emailNormalized || actor?.email || '').trim() || null
+
+    const txResult = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${customerId} FOR UPDATE`
+
+      const existing = await tx.customer.findUnique({
+        where: { id: customerId },
+        select: {
+          id: true,
+          website: true,
+          sector: true,
+          whatTheyDo: true,
+          companyProfile: true,
+          accreditations: true,
+          accountData: true,
+        },
+      })
+      if (!existing) {
+        const err: any = new Error('not_found')
+        err.statusCode = 404
+        throw err
+      }
+
+      const ad = getAccountDataObject(existing.accountData)
+      const store = coerceEnrichmentStore(ad)
+      const entry = store.fields[field] && typeof store.fields[field] === 'object' ? store.fields[field] : {}
+      const lastApplied = entry?.lastApplied && typeof entry.lastApplied === 'object' ? entry.lastApplied : null
+      const snapshot = lastApplied?.snapshot
+
+      if (snapshot === null || snapshot === undefined) {
+        return { status: 400 as const, body: { error: 'nothing_to_undo', message: 'No undo snapshot available for this field', requestId } }
+      }
+
+      // Restore canonical storage
+      const updateCustomerScalars: any = {}
+      let nextAccountData = ad
+
+      if (field === 'webAddress') updateCustomerScalars.website = snapshot ? String(snapshot).trim() : null
+      if (field === 'sector') updateCustomerScalars.sector = snapshot ? String(snapshot).trim() : null
+      if (field === 'whatTheyDo') updateCustomerScalars.whatTheyDo = snapshot ? String(snapshot) : null
+      if (field === 'companyProfile') updateCustomerScalars.companyProfile = snapshot ? String(snapshot) : null
+      if (field === 'accreditation') updateCustomerScalars.accreditations = snapshot ? String(snapshot) : null
+
+      if (field === 'headOfficeAddress') {
+        const addr = String(snapshot || '')
+        nextAccountData = setDeep(nextAccountData, 'accountDetails.headOfficeAddress', addr)
+        nextAccountData = { ...nextAccountData, headOfficeAddress: addr }
+      }
+      if (field === 'clientHistory') {
+        nextAccountData = setDeep(nextAccountData, 'clientProfile.clientHistory', String(snapshot || ''))
+      }
+      if (field === 'socialMediaPresence') {
+        const obj = snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot) ? snapshot : {}
+        nextAccountData = setDeep(nextAccountData, 'clientProfile.socialMediaPresence', obj)
+      }
+
+      // Clear lastApplied metadata so undo is no longer available.
+      nextAccountData = upsertEnrichmentFieldEntry({
+        accountData: nextAccountData,
+        field,
+        patch: {
+          lastApplied: null,
+          lastUndoneAt: new Date().toISOString(),
+          lastUndoneByUserEmail: actorEmail,
+        },
+      })
+
+      await tx.customer.update({
+        where: { id: customerId },
+        data: { ...updateCustomerScalars, accountData: nextAccountData, updatedAt: new Date() },
+      })
+
+      return {
+        status: 200 as const,
+        body: { success: true, requestId, field, undone: true },
+      }
+    })
+
+    if ((txResult as any)?.status && (txResult as any)?.body) {
+      const result = txResult as any
+      return res.status(result.status).json(result.body)
+    }
+    return res.status(500).json({ error: 'server_error', message: 'Unexpected undo result', requestId })
+  } catch (error: any) {
+    if (error?.statusCode === 404 || error?.message === 'not_found') {
+      return res.status(404).json({ error: 'not_found', message: 'Customer not found', requestId })
+    }
+    console.error(`[onboarding_enrichment_undo_failed] requestId=${requestId} customerId=${customerId} message="${error?.message || 'unknown'}"`)
+    return res.status(500).json({ error: 'undo_failed', message: 'Failed to undo enrichment action', requestId })
+  }
+})
+
 // POST /api/customers/:id/notes - Append a note atomically without overwriting accountData
 router.post('/:id/notes', async (req, res) => {
   try {
@@ -1325,7 +1959,15 @@ router.patch('/:id/account', async (req, res) => {
             ? (typeof patch.leadsGoogleSheetLabel === 'string' ? patch.leadsGoogleSheetLabel.trim() : '')
             : (typeof existing.leadsGoogleSheetLabel === 'string' ? existing.leadsGoogleSheetLabel.trim() : '')
         if (!nextLabel) {
-          return { status: 400 as const, body: { error: 'Invalid input', details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }], requestId } }
+          return {
+            status: 400 as const,
+            body: {
+              error: 'missing_google_sheet_label',
+              message: 'Please enter a label for the Google Sheet.',
+              details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
+              requestId,
+            },
+          }
         }
       }
 
@@ -1487,8 +2129,10 @@ router.put('/:id', async (req, res) => {
       const leadsLabel = typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
       if (!leadsLabel) {
         return res.status(400).json({
-          error: 'Invalid input',
+          error: 'missing_google_sheet_label',
+          message: 'Please enter a label for the Google Sheet.',
           details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
+          requestId,
         })
       }
     }

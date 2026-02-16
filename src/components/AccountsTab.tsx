@@ -6285,6 +6285,26 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                   placeholder="Not set"
                                 />
 
+                                <FieldRow label="Head Office Address">
+                                  {(() => {
+                                    const addr =
+                                      (typeof (details as any)?.headOfficeAddress === 'string' ? String((details as any).headOfficeAddress).trim() : '') ||
+                                      (typeof (ad as any)?.headOfficeAddress === 'string' ? String((ad as any).headOfficeAddress).trim() : '') ||
+                                      (typeof (ad as any)?.accountDetails?.headOfficeAddress === 'string'
+                                        ? String((ad as any).accountDetails.headOfficeAddress).trim()
+                                        : '')
+                                    return addr ? (
+                                      <Text fontSize="sm" whiteSpace="pre-wrap">
+                                        {addr}
+                                      </Text>
+                                    ) : (
+                                      <Text fontSize="sm" color="gray.500">
+                                        Not set
+                                      </Text>
+                                    )
+                                  })()}
+                                </FieldRow>
+
                                 <EditableField
                                   label="Leads Google Sheet Label"
                                   value={leadsLabel || ''}
