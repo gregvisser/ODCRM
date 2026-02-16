@@ -422,7 +422,7 @@ function FieldEnrichmentSelector(props: {
         </Box>
       ) : (
         <Text fontSize="xs" color="gray.500">
-          No enrichment suggestion saved yet. Click Enrich to fetch one.
+          {props.entry?.fetchedAt ? 'No enrichment found from available sources.' : 'No enrichment suggestion saved yet. Click Enrich to fetch one.'}
         </Text>
       )}
     </Stack>
@@ -584,7 +584,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       const preview = formatEnrichedPreview(field, enriched).trim()
       toast({
         title: preview ? 'Enrichment found' : 'No changes found',
-        description: preview ? 'Suggestion saved to database.' : 'No enriched value available yet.',
+        description: preview ? 'Suggestion saved to database.' : 'No enrichment found from available sources.',
         status: 'success',
         duration: 2500,
         isClosable: true,

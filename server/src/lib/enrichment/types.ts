@@ -47,3 +47,37 @@ export type StoredEnrichment = {
   elapsedMs?: number
 }
 
+// -----------------------------------------------------------------------------
+// Production-ready FREE enrichment (multi-source) unified types
+// -----------------------------------------------------------------------------
+
+export type NormalizedSocialLinks = {
+  twitter?: string
+  linkedin?: string
+  facebook?: string
+  instagram?: string
+  youtube?: string
+  other?: string[]
+}
+
+export type NormalizedCompanyData = {
+  companyName?: string
+  webAddress?: string
+  sector?: string
+  headOfficeAddress?: string
+  whatTheyDo?: string
+  companyProfile?: string
+  clientHistory?: string
+  accreditation?: string
+  socialLinks?: NormalizedSocialLinks
+}
+
+export type SourceResult = {
+  provider: 'companies_house' | 'website' | 'wikidata'
+  ok: boolean
+  confidence: number
+  evidence: string[]
+  data: Partial<NormalizedCompanyData>
+  error?: string
+}
+

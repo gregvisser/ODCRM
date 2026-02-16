@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio'
 import { extractCertificationsFromHtml, mergeAccreditations } from './certifications.js'
 import type { EnrichmentDraft, EnrichmentSourcesData } from './types.js'
-import { dedupeStrings, fetchTextWithTimeout, keepSameDomainUrls, normalizeDomain, sanitizeText } from './utils.js'
+import { dedupeStrings, fetchTextWithTimeout, keepSameDomainUrls, normalizeDomain, normalizeWebsiteUrl, sanitizeText } from './utils.js'
 
 type Page = { url: string; html: string }
 
@@ -92,13 +92,78 @@ function extractSocialLinks(baseUrl: string, html: string): Record<string, strin
   }
 }
 
+function extractJsonLdObjects(html: string): any[] {
+  try {
+    const $ = cheerio.load(html)
+    const blocks: any[] = []
+    $('script[type="application/ld+json"]').each((_, el) => {
+      const raw = String($(el).text() || '').trim()
+      if (!raw) return
+      try {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) blocks.push(...parsed)
+        else blocks.push(parsed)
+      } catch {
+        // ignore invalid JSON-LD
+      }
+    })
+    return blocks
+  } catch {
+    return []
+  }
+}
+
+function pickOrganization(jsonLd: any[]): any | null {
+  const items = Array.isArray(jsonLd) ? jsonLd : []
+  const flat = items.flatMap((item: any) => (item?.['@graph'] ? item['@graph'] : item))
+  const org = flat.find((item: any) => {
+    const type = item?.['@type']
+    return type === 'Organization' || type === 'Corporation' || type === 'LocalBusiness'
+  })
+  return org || null
+}
+
+function extractSameAsSocial(org: any): Record<string, string> {
+  const out: Record<string, string> = {}
+  const sameAs = org?.sameAs
+  const urls = Array.isArray(sameAs) ? sameAs : typeof sameAs === 'string' ? [sameAs] : []
+  for (const raw of urls) {
+    const u = String(raw || '').trim()
+    if (!u) continue
+    const lower = u.toLowerCase()
+    if (lower.includes('linkedin.com') && !out.linkedin) out.linkedin = u
+    else if ((lower.includes('twitter.com') || lower.includes('x.com')) && !out.twitter) out.twitter = u
+    else if (lower.includes('facebook.com') && !out.facebook) out.facebook = u
+    else if (lower.includes('instagram.com') && !out.instagram) out.instagram = u
+    else if (lower.includes('youtube.com') && !out.youtube) out.youtube = u
+  }
+  return out
+}
+
+function extractOrgAddress(org: any): string | undefined {
+  const addr = org?.address
+  if (!addr || typeof addr !== 'object') return undefined
+  const parts = [
+    addr.streetAddress,
+    addr.addressLocality,
+    addr.addressRegion,
+    addr.postalCode,
+    addr.addressCountry,
+  ]
+    .map((p: any) => String(p || '').trim())
+    .filter(Boolean)
+  const text = parts.join(', ')
+  return text ? sanitizeText(text, 500) : undefined
+}
+
 function extractWhatTheyDoAndProfile(html: string): { whatTheyDo?: string; companyProfile?: string } {
   const $ = cheerio.load(html)
   const metaDescription = sanitizeText($('meta[name="description"]').attr('content') || '', 400)
+  const ogDescription = sanitizeText($('meta[property="og:description"]').attr('content') || '', 450)
   const firstP = sanitizeText($('p').first().text() || '', 1200)
   const h1 = sanitizeText($('h1').first().text() || '', 160)
   const bodyText = sanitizeText($('body').text() || '', 1600)
-  const whatTheyDo = sanitizeText(metaDescription || h1 || firstP || bodyText, 900)
+  const whatTheyDo = sanitizeText(metaDescription || ogDescription || h1 || firstP || bodyText, 900)
   const companyProfile = sanitizeText(firstP || bodyText, 2000)
   return {
     whatTheyDo: whatTheyDo || undefined,
@@ -152,7 +217,7 @@ export async function enrichFromWebsite(options: {
 }): Promise<{ sourcesData: EnrichmentSourcesData['website']; draft: Partial<EnrichmentDraft> } | null> {
   const started = Date.now()
   const remaining = () => Math.max(0, options.totalTimeoutMs - (Date.now() - started))
-  const websiteUrl = options.websiteUrl
+  const websiteUrl = normalizeWebsiteUrl(options.websiteUrl)
   const domain = normalizeDomain(websiteUrl)
   if (!websiteUrl || !domain) return null
 
@@ -174,8 +239,31 @@ export async function enrichFromWebsite(options: {
   if (!pages.length) return null
 
   const homepageHtml = pages[0].html
+  const homepageJsonLd = extractJsonLdObjects(homepageHtml)
+  const homepageOrg = pickOrganization(homepageJsonLd)
   const aboutUrl = pickAboutUrl(websiteUrl, homepageHtml)
   const clientHistoryUrl = pickClientHistoryUrl(websiteUrl, homepageHtml)
+
+  // Fixed path crawl (robust, limited; never assumes sitemap exists).
+  const fixedPaths = [
+    '/about',
+    '/contact',
+    '/services',
+    '/case-studies',
+    '/casestudies',
+    '/clients',
+    '/testimonials',
+    '/portfolio',
+  ]
+  const fixedUrls = fixedPaths
+    .map((p) => {
+      try {
+        return new URL(p, websiteUrl).toString()
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean) as string[]
 
   // Optional sitemap discovery
   let sitemapUrls: string[] = []
@@ -189,6 +277,7 @@ export async function enrichFromWebsite(options: {
   const candidates = dedupeStrings([
     ...(clientHistoryUrl ? [clientHistoryUrl] : []),
     ...(aboutUrl ? [aboutUrl] : []),
+    ...fixedUrls,
     ...discoveredSameDomain,
     ...sitemapSameDomain,
   ]).filter((u) => u !== websiteUrl)
@@ -201,7 +290,11 @@ export async function enrichFromWebsite(options: {
 
   // Extract draft fields from homepage primarily; use additional pages for cert signals.
   const primary = extractWhatTheyDoAndProfile(homepageHtml)
-  const social = extractSocialLinks(websiteUrl, homepageHtml)
+  const social = {
+    ...extractSocialLinks(websiteUrl, homepageHtml),
+    ...(homepageOrg ? extractSameAsSocial(homepageOrg) : {}),
+  }
+  const headquarters = homepageOrg ? extractOrgAddress(homepageOrg) : undefined
 
   let accreditations = mergeAccreditations(undefined, extractCertificationsFromHtml(homepageHtml, websiteUrl))
   for (const p of pages.slice(1)) {
@@ -220,6 +313,7 @@ export async function enrichFromWebsite(options: {
       whatTheyDo: primary.whatTheyDo,
       companyProfile: primary.companyProfile,
       clientHistory,
+      headquarters,
       accreditations: accreditations.length ? accreditations : undefined,
     },
   }
