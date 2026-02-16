@@ -10,6 +10,34 @@ type AuthGateProps = {
 }
 
 const POST_LOGIN_REDIRECT_KEY = 'odcrm_post_login_redirect_v1'
+const AUTHZ_TOKEN_TIMEOUT_MS = 8000
+const AUTHZ_FETCH_TIMEOUT_MS = 8000
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  const ms = Math.max(1, Math.floor(timeoutMs))
+  return await Promise.race([
+    promise,
+    (async () => {
+      await sleep(ms)
+      throw new Error(`${label}_timeout`)
+    })(),
+  ])
+}
+
+async function fetchJsonWithClientTimeout(url: string, opts: RequestInit, timeoutMs: number) {
+  const controller = new AbortController()
+  const ms = Math.max(1, Math.floor(timeoutMs))
+  const t = setTimeout(() => controller.abort(), ms)
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
 
 function isSafeInternalRedirect(value: string): boolean {
   const v = value.trim()
@@ -69,13 +97,22 @@ export default function AuthGate({ children }: AuthGateProps) {
       setAuthz({ status: 'checking' })
       let token: string | null = null
       try {
-        const result = await instance.acquireTokenSilent({
-          ...loginRequest,
-          account: activeAccount,
-        })
+        const result = await withTimeout(
+          instance.acquireTokenSilent({
+            ...loginRequest,
+            account: activeAccount,
+          }),
+          AUTHZ_TOKEN_TIMEOUT_MS,
+          'acquire_token_silent',
+        )
         token = (result as any)?.idToken || (result as any)?.accessToken || null
-      } catch {
+      } catch (e: any) {
         // If silent token acquisition fails, MSAL will handle prompting on the next interaction.
+        // IMPORTANT: If this hangs (third-party cookie restrictions, iframe issues), we still
+        // proceed to show a deterministic error state rather than spinning forever.
+        if (e?.message === 'acquire_token_silent_timeout') {
+          console.warn('[AuthGate] acquireTokenSilent timed out')
+        }
         token = null
       }
 
@@ -89,11 +126,15 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       for (const url of urlsToTry) {
         try {
-          const res = await fetch(url, {
-            method: 'GET',
-            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-            cache: 'no-store',
-          })
+          const res = await fetchJsonWithClientTimeout(
+            url,
+            {
+              method: 'GET',
+              headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+              cache: 'no-store',
+            },
+            AUTHZ_FETCH_TIMEOUT_MS,
+          )
 
           if (res.status === 404) {
             // Try next URL (e.g., SWA proxy not configured)
@@ -120,7 +161,8 @@ export default function AuthGate({ children }: AuthGateProps) {
           lastError = null
           break
         } catch (e: any) {
-          lastError = { message: e?.message || 'Network error' }
+          const msg = e?.name === 'AbortError' ? 'Request timed out' : e?.message || 'Network error'
+          lastError = { message: msg }
         }
       }
 
