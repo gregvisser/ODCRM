@@ -1,10 +1,5 @@
 import { setTimeout as sleep } from 'timers/promises'
 
-export function getEnrichmentUserAgent(): string {
-  const raw = String(process.env.ENRICHMENT_USER_AGENT || '').trim()
-  return raw || 'ODCRM-EnrichmentBot/1.0'
-}
-
 export function sanitizeText(value: unknown, maxLen: number): string {
   const v = String(value || '')
     .replace(/\s+/g, ' ')
@@ -67,7 +62,7 @@ export async function fetchTextWithTimeout(
       redirect: 'follow',
       signal: controller.signal,
       headers: {
-        'User-Agent': getEnrichmentUserAgent(),
+        'User-Agent': 'ODCRM Enrichment (UK pipeline)',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         ...(options.headers || {}),
       },
@@ -93,7 +88,7 @@ export async function fetchJsonWithTimeout<T>(
       redirect: 'follow',
       signal: controller.signal,
       headers: {
-        'User-Agent': getEnrichmentUserAgent(),
+        'User-Agent': 'ODCRM Enrichment (UK pipeline)',
         Accept: 'application/json',
         ...(options.headers || {}),
       },

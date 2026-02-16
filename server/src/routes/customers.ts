@@ -14,7 +14,7 @@ import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/aud
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
-import { runFreeEnrichmentPipeline } from '../lib/enrichment/pipeline.js'
+import { runUkEnrichmentPipeline } from '../lib/enrichment/pipeline.js'
 import { isPrivateOrLocalHost, normalizeDomain, normalizeWebsiteUrl } from '../lib/enrichment/utils.js'
 
 const router = Router()
@@ -1410,75 +1410,57 @@ router.get('/:customerId/onboarding/enrichment', async (req, res) => {
       return res.status(400).json({ error: 'invalid_website', message: 'Website/domain is not valid for enrichment', requestId })
     }
 
-    const companiesHouseKey = String(process.env.COMPANIES_HOUSE_API_KEY || '').trim()
-    const maxPagesEnv = Number(String(process.env.ENRICHMENT_MAX_PAGES || '').trim() || 6)
-    const maxPages = Number.isFinite(maxPagesEnv) && maxPagesEnv > 0 ? Math.min(12, Math.max(1, Math.floor(maxPagesEnv))) : 6
+    // Run the existing enrichment pipeline (website scraping always; optional external sources disabled unless configured).
+    const enableCompaniesHouse = Boolean(process.env.ENRICHMENT_COMPANIES_HOUSE_API_KEY)
+    const enableBing = Boolean(process.env.ENRICHMENT_BING_KEY)
+    const enableWikidata = process.env.ENRICHMENT_WIKIDATA_ENABLED === 'true'
 
-    const pipeline = await runFreeEnrichmentPipeline({
-      companyName: customer.name,
-      websiteUrl: normalizedWebsite,
-      domain,
-      totalMs: 15_000,
-      perFetchMs: 4_000,
-      maxPages,
-      companiesHouseApiKey: companiesHouseKey || undefined,
+    const { sourcesData, draft } = await runUkEnrichmentPipeline({
+      customer: { id: customer.id, name: customer.name, website: customer.website, domain: customer.domain },
+      input: { websiteUrl: normalizedWebsite, domain },
+      limits: {
+        totalMs: 12_000,
+        perFetchMs: 4_000,
+        maxPages: 4,
+        companiesHouseMs: 2_500,
+        bingMs: 2_500,
+        wikidataMs: 2_000,
+      },
+      flags: {
+        enableCompaniesHouse,
+        companiesHouseApiKey: String(process.env.ENRICHMENT_COMPANIES_HOUSE_API_KEY || ''),
+        enableBing,
+        bingKey: String(process.env.ENRICHMENT_BING_KEY || ''),
+        bingEndpoint: String(process.env.ENRICHMENT_BING_ENDPOINT || 'https://api.bing.microsoft.com/v7.0/search'),
+        bingMarket: String(process.env.ENRICHMENT_BING_MARKET || 'en-GB'),
+        bingCount: Number(process.env.ENRICHMENT_BING_COUNT || 5),
+        enableWikidata,
+      },
     })
 
-    // Structured logs (never log secrets)
-    console.log(`[${requestId}] enrichment providers (free):`, {
-      customerId,
-      field,
-      maxPages,
-      providers: pipeline.results.map((r) => ({
-        provider: r.provider,
-        ok: r.ok,
-        confidence: r.confidence,
-        evidenceCount: Array.isArray(r.evidence) ? r.evidence.length : 0,
-        hasDataKeys: r.data ? Object.keys(r.data).length : 0,
-        error: r.ok ? undefined : r.error,
-      })),
-    })
-
-    const merged = pipeline.merged || {}
-
-    const socialPresenceSuggestion = (() => {
-      const raw = (merged as any)?.socialLinks
-      const base = coerceSocialPresenceSuggestion(raw)
-      const youtube = raw && typeof raw === 'object' && typeof raw.youtube === 'string' ? raw.youtube : ''
-      if (youtube && !base.youtubeUrl) base.youtubeUrl = String(youtube).trim()
-      const other = raw && typeof raw === 'object' && Array.isArray(raw.other) ? raw.other : []
-      if (other.length > 0 && !base.websiteUrl) {
-        const first = String(other[0] || '').trim()
-        if (first) base.websiteUrl = first
-      }
-      const hasAny = Object.values(base).some((v) => typeof v === 'string' && String(v).trim())
-      return hasAny ? base : null
-    })()
+    const accreditationsText = Array.isArray((draft as any)?.accreditations)
+      ? Array.from(
+          new Set(
+            (draft as any).accreditations
+              .map((a: any) => String(a?.name || '').trim())
+              .filter(Boolean)
+              .map((s: string) => s),
+          ),
+        ).join(', ')
+      : ''
 
     const enrichedValueByField: Record<SupportedOnboardingEnrichmentField, any> = {
-      webAddress: (merged as any)?.webAddress ?? null,
-      sector: (merged as any)?.sector ?? null,
-      headOfficeAddress: (merged as any)?.headOfficeAddress ?? null,
-      clientHistory: (merged as any)?.clientHistory ?? null,
-      whatTheyDo: (merged as any)?.whatTheyDo ?? null,
-      companyProfile: (merged as any)?.companyProfile ?? null,
-      accreditation: (merged as any)?.accreditation ?? null,
-      socialMediaPresence: socialPresenceSuggestion ?? null,
+      webAddress: (draft as any)?.website ?? null,
+      sector: (draft as any)?.sector ?? null,
+      headOfficeAddress: (draft as any)?.headquarters ?? (draft as any)?.registeredAddress ?? null,
+      clientHistory: (draft as any)?.clientHistory ?? null,
+      whatTheyDo: (draft as any)?.whatTheyDo ?? null,
+      companyProfile: (draft as any)?.companyProfile ?? null,
+      accreditation: accreditationsText || null,
+      socialMediaPresence: coerceSocialPresenceSuggestion((draft as any)?.socialPresence),
     }
 
-    const enrichedValue = enrichedValueByField[field] ?? null
-    const confidence = (pipeline.fieldConfidence as any)?.[
-      field === 'webAddress'
-        ? 'webAddress'
-        : field === 'headOfficeAddress'
-          ? 'headOfficeAddress'
-          : field === 'socialMediaPresence'
-            ? 'socialLinks'
-            : field === 'accreditation'
-              ? 'accreditation'
-              : field
-    ] ?? 0
-    const sources = pipeline.results
+    const enrichedValue = enrichedValueByField[field]
     const fetchedAt = new Date().toISOString()
     const fetchedBy = (actor?.emailNormalized || actor?.email || '').trim() || null
 
@@ -1497,10 +1479,9 @@ router.get('/:customerId/onboarding/enrichment', async (req, res) => {
         field,
         patch: {
           suggestion: enrichedValue,
-          confidence,
           fetchedAt,
           fetchedByUserEmail: fetchedBy,
-          sources,
+          sourcesData,
         },
       })
       await tx.customer.update({
@@ -1513,8 +1494,7 @@ router.get('/:customerId/onboarding/enrichment', async (req, res) => {
     return res.json({
       field,
       enrichedValue,
-      confidence,
-      sources,
+      sourcesData,
       fetchedAt,
       requestId,
       // DB truth for client UI: include the stored entry (not required, but helps with refresh-free UX).
@@ -1589,14 +1569,7 @@ router.post('/:customerId/onboarding/enrichment/apply', async (req, res) => {
       const entry = store.fields[field] && typeof store.fields[field] === 'object' ? store.fields[field] : {}
       const suggestion = entry?.suggestion
 
-      const isMissingSuggestion =
-        suggestion === null ||
-        suggestion === undefined ||
-        suggestion === '' ||
-        (field === 'socialMediaPresence' &&
-          (!suggestion || typeof suggestion !== 'object' || Array.isArray(suggestion) || Object.keys(suggestion as any).length === 0))
-
-      if ((action === 'REPLACE' || action === 'MERGE') && isMissingSuggestion) {
+      if ((action === 'REPLACE' || action === 'MERGE') && (suggestion === null || suggestion === undefined || suggestion === '')) {
         return { status: 400 as const, body: { error: 'missing_suggestion', message: 'No enrichment suggestion available for this field', requestId } }
       }
 

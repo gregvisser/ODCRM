@@ -15,9 +15,6 @@ const CERT_DEFS: Array<{ name: string; patterns: RegExp[] }> = [
   { name: 'CHAS', patterns: [/\bCHAS\b/i] },
   { name: 'Constructionline', patterns: [/\bConstructionline\b/i] },
   { name: 'SafeContractor', patterns: [/\bSafe\s*Contractor\b/i, /\bSafeContractor\b/i] },
-  { name: 'NICEIC', patterns: [/\bNICEIC\b/i] },
-  { name: 'Gas Safe', patterns: [/\bGas\s*Safe\b/i] },
-  { name: 'FCA regulated', patterns: [/\bFCA\s*regulated\b/i, /\bFinancial\s+Conduct\s+Authority\b/i] },
   { name: 'Investors in People', patterns: [/\bInvestors\s+in\s+People\b/i] },
   { name: 'B Corp', patterns: [/\bB\s*Corp\b/i, /\bB\s*Corporation\b/i] },
 ]
