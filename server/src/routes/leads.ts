@@ -420,6 +420,28 @@ function leadDateInRange (customerId: string, start: Date, end: Date) {
   } as const
 }
 
+/** True if the error is Prisma complaining that occurredAt is unknown (e.g. prod schema without occurredAt). */
+function isUnknownOccurredAtError (err: any): boolean {
+  const msg = String(err?.message || '')
+  return msg.includes('Unknown argument occurredAt') || msg.includes('Unknown argument `occurredAt`')
+}
+
+/** Where clause for "lead date in [start, end)" using occurredAt when present. Throws in prod if occurredAt missing (use fallback). */
+function buildWhereWithOccurredAt (customerId: string, start: Date, end: Date) {
+  return {
+    customerId,
+    OR: [
+      { occurredAt: { gte: start, lt: end } },
+      { AND: [{ occurredAt: { equals: null } }, { createdAt: { gte: start, lt: end } }] },
+    ],
+  } as const
+}
+
+/** Where clause for "lead createdAt in [start, end)" only. Used when occurredAt is missing in schema. */
+function buildWhereCreatedAtOnly (customerId: string, start: Date, end: Date) {
+  return { customerId, createdAt: { gte: start, lt: end } } as const
+}
+
 /**
  * GET /api/leads/metrics
  * Customer: prefer x-customer-id header; use query customerId only when header absent. Always verify customer exists.
@@ -435,38 +457,98 @@ router.get('/metrics', async (req, res) => {
   const headerCustomerId = (req.header('x-customer-id') || '').trim()
   const queryCustomerId = typeof req.query.customerId === 'string' ? req.query.customerId.trim() : undefined
   const customerId = headerCustomerId || queryCustomerId
+  const reqId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
 
   if (!customerId) {
     return res.status(400).json({ error: 'Customer ID required (query customerId or header x-customer-id)' })
   }
 
+  function logErr (stage: string, err: unknown): void {
+    const e = err && typeof err === 'object' && err instanceof Error ? err : new Error(String(err))
+    const payload: Record<string, unknown> = {
+      tag: 'leadsMetricsError',
+      stage,
+      reqId,
+      customerId,
+      tz: METRICS_TIMEZONE,
+      errName: e.name,
+      errMessage: e.message,
+      errStack: e.stack,
+    }
+    if (e && typeof e === 'object' && 'code' in e && (e as { code?: unknown }).code !== undefined) {
+      payload.errCode = (e as { code: unknown }).code
+    }
+    if (e && typeof e === 'object' && 'meta' in e && (e as { meta?: unknown }).meta !== undefined) {
+      payload.errMeta = (e as { meta: unknown }).meta
+    }
+    console.error(JSON.stringify(payload))
+  }
+
   try {
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      select: { id: true },
-    })
+    let customer: { id: string } | null = null
+    try {
+      customer = await prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { id: true },
+      })
+    } catch (err) {
+      logErr('customer.exists', err)
+      throw err
+    }
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
     }
 
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtcSafe()
 
+    async function countWithDateFallback (op: 'counts.today' | 'counts.week' | 'counts.month', start: Date, end: Date): Promise<number> {
+      try {
+        return await prisma.leadRecord.count({
+          where: buildWhereWithOccurredAt(customerId, start, end),
+        })
+      } catch (err) {
+        if (isUnknownOccurredAtError(err)) {
+          console.warn(JSON.stringify({ tag: 'leadsMetricsFallback', reqId, reason: 'occurredAtMissing', op }))
+          return await prisma.leadRecord.count({
+            where: buildWhereCreatedAtOnly(customerId, start, end),
+          })
+        }
+        logErr(op, err)
+        throw err
+      }
+    }
+
+    async function groupByWithFallback (op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy', by: 'source' | 'owner') {
+      try {
+        return await prisma.leadRecord.groupBy({
+          by: [by],
+          where: { customerId },
+          _count: { id: true },
+        })
+      } catch (err) {
+        if (isUnknownOccurredAtError(err)) {
+          console.warn(JSON.stringify({ tag: 'leadsMetricsFallback', reqId, reason: 'occurredAtMissing', op }))
+          return await prisma.leadRecord.groupBy({
+            by: [by],
+            where: { customerId },
+            _count: { id: true },
+          })
+        }
+        logErr(op, err)
+        throw err
+      }
+    }
+
     const [countToday, countWeek, countMonth, total, bySourceRows, byOwnerRows, syncState] = await Promise.all([
-      prisma.leadRecord.count({ where: leadDateInRange(customerId, todayStart, todayEnd) }),
-      prisma.leadRecord.count({ where: leadDateInRange(customerId, weekStart, weekEnd) }),
-      prisma.leadRecord.count({ where: leadDateInRange(customerId, monthStart, monthEnd) }),
-      prisma.leadRecord.count({ where: { customerId } }),
-      prisma.leadRecord.groupBy({
-        by: ['source'],
-        where: { customerId },
-        _count: { id: true },
-      }),
-      prisma.leadRecord.groupBy({
-        by: ['owner'],
-        where: { customerId },
-        _count: { id: true },
-      }),
-      prisma.leadSyncState.findUnique({ where: { customerId } }),
+      countWithDateFallback('counts.today', todayStart, todayEnd),
+      countWithDateFallback('counts.week', weekStart, weekEnd),
+      countWithDateFallback('counts.month', monthStart, monthEnd),
+      prisma.leadRecord.count({ where: { customerId } })
+        .catch(err => { logErr('counts.total', err); throw err }),
+      groupByWithFallback('breakdown.source.groupBy', 'source'),
+      groupByWithFallback('breakdown.owner.groupBy', 'owner'),
+      prisma.leadSyncState.findUnique({ where: { customerId } })
+        .catch(err => { logErr('lastSyncState', err); throw err }),
     ])
 
     const breakdownBySource: Record<string, number> = {}
@@ -491,6 +573,8 @@ router.get('/metrics', async (req, res) => {
         }
       : null
 
+    console.log(JSON.stringify({ tag: 'leadsMetricsOk', reqId, customerId, total }))
+
     res.json({
       customerId,
       timezone: METRICS_TIMEZONE,
@@ -505,16 +589,9 @@ router.get('/metrics', async (req, res) => {
       breakdownByOwner,
       lastSync,
     })
-  } catch (error: any) {
-    const err = error && typeof error === 'object' ? error : new Error(String(error))
-    console.error('[leads/metrics] Failed to fetch lead metrics', {
-      customerId,
-      code: err.code,
-      meta: err.meta,
-      message: err.message,
-      stack: err.stack,
-      fullError: err,
-    })
+  } catch (error: unknown) {
+    const err = error && typeof error === 'object' && error instanceof Error ? error : new Error(String(error))
+    logErr('handler', err)
     res.status(500).json({ error: 'Failed to fetch lead metrics' })
   }
 })
