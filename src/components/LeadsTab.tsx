@@ -48,8 +48,10 @@ import {
   exportLeadsToCSV,
   getSequences,
   getSyncStatus,
+  getValidateSheetResult,
   type LeadRecord,
-  type SyncStatus
+  type SyncStatus,
+  type ValidateSheetResult
 } from '../utils/leadsApi'
 
 type Lead = LeadRecord & {
@@ -104,15 +106,21 @@ function LeadsTab() {
   const [bulkConverting, setBulkConverting] = useState(false)
   const [sequences, setSequences] = useState<Array<{ id: string; name: string; description?: string }>>([])
   const [syncStatusForEmpty, setSyncStatusForEmpty] = useState<SyncStatus | null>(null)
+  const [sheetValidateForEmpty, setSheetValidateForEmpty] = useState<ValidateSheetResult | null>(null)
 
   const toast = useToast()
 
-  // When leads are empty, fetch sync status to show lastError / lastSyncAt
+  // When leads are empty, fetch sync status and validator to show why 0 leads
   useEffect(() => {
-    if (leads.length > 0) { setSyncStatusForEmpty(null); return }
+    if (leads.length > 0) {
+      setSyncStatusForEmpty(null)
+      setSheetValidateForEmpty(null)
+      return
+    }
     const customerId = localStorage.getItem('currentCustomerId') || ''
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
+    getValidateSheetResult(customerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
   }, [leads.length])
 
   // Load sequences on mount
@@ -393,6 +401,15 @@ function LeadsTab() {
   }
 
   if (leads.length === 0) {
+    const whyZeroMessage = sheetValidateForEmpty
+      ? sheetValidateForEmpty.ok
+        ? (sheetValidateForEmpty.rowCount === 0
+          ? 'The sheet returned 0 data rows. Publish the sheet to web (File → Share → Publish to web) as CSV and ensure it has a header row and at least one data row.'
+          : null)
+        : sheetValidateForEmpty.error?.toLowerCase().includes('no leads reporting url')
+          ? 'This account has no Leads reporting URL configured. Add a Google Sheet URL in Settings → Accounts.'
+          : sheetValidateForEmpty.error
+      : null
     return (
       <Stack spacing={4} py={12}>
         <Box textAlign="center">
@@ -400,8 +417,11 @@ function LeadsTab() {
             No leads data available
           </Text>
           <Text fontSize="sm" color="gray.500" mt={2}>
-            Configure Client Leads sheets in account settings to view leads data
+            {whyZeroMessage ?? 'Configure Client Leads sheets in account settings to view leads data'}
           </Text>
+          {sheetValidateForEmpty?.hint && !sheetValidateForEmpty.ok && (
+            <Text fontSize="sm" color="gray.500" mt={1} fontStyle="italic">{sheetValidateForEmpty.hint}</Text>
+          )}
         </Box>
         {syncStatusForEmpty && (
           <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg" maxW="2xl" mx="auto">

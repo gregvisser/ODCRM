@@ -4002,6 +4002,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Stable customer ID for email identity fetching (prevents render loops)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
 
+  // Leads sheet validation (Test sheet button result)
+  const [sheetValidateResult, setSheetValidateResult] = useState<{
+    ok: boolean
+    error?: string
+    hint?: string
+    rowCount?: number
+    headerKeys?: string[]
+    detected?: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
+    sampleRow?: Record<string, string>
+  } | null>(null)
+  const [sheetValidateLoading, setSheetValidateLoading] = useState(false)
+
   const patchCustomerAccount = useCallback(
     async (customerId: string, patch: any) => {
       const { data, error } = await api.patch<{
@@ -5019,7 +5031,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       }
     : null
 
-  const handleCloseDrawer = () => setSelectedAccount(null)
+  const handleCloseDrawer = () => {
+    setSelectedAccount(null)
+    setSheetValidateResult(null)
+  }
 
   const handleCreateAccount = async () => {
     if (!newAccountForm.name || !newAccountForm.name.trim()) {
@@ -7457,35 +7472,100 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           </datalist>
                     </FieldRow>
 
-                    <FieldRow label="Google Sheets Link">
-                      <EditableField
-                        value={selectedAccount.clientLeadsSheetUrl || ''}
-                        onSave={(value) => {
-                          const nextValue = typeof value === 'string' ? value.trim() : ''
-                          updateAccount(selectedAccount.name, {
-                            clientLeadsSheetUrl: nextValue,
-                          })
-                          stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')
-                        }}
-                        onCancel={() => stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
-                        isEditing={isFieldEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
-                        onEdit={() => startEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
-                        label=""
-                        type="url"
-                        placeholder="https://docs.google.com/spreadsheets/d/..."
-                        renderDisplay={(value) => {
-                          // Get customer data to access label
-                          const customer = customers.find((c) => c.id === selectedAccount._databaseId)
-                          return (
-                            <GoogleSheetLink
-                              url={String(value || '')}
-                              label={customer?.leadsGoogleSheetLabel}
-                              fallbackLabel="Open Google Sheets"
-                              fontSize="md"
-                            />
-                          )
-                        }}
-                      />
+                    <FieldRow label="Leads reporting URL (Google Sheet CSV)">
+                      <Stack spacing={2} width="100%">
+                        <HStack spacing={2} align="flex-start">
+                          <EditableField
+                            value={selectedAccount.clientLeadsSheetUrl || ''}
+                            onSave={(value) => {
+                              const nextValue = typeof value === 'string' ? value.trim() : ''
+                              updateAccount(selectedAccount.name, {
+                                clientLeadsSheetUrl: nextValue,
+                              })
+                              stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')
+                            }}
+                            onCancel={() => stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
+                            isEditing={isFieldEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
+                            onEdit={() => startEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
+                            label=""
+                            type="url"
+                            placeholder="https://docs.google.com/spreadsheets/d/..."
+                            renderDisplay={(value) => {
+                              const customer = customers.find((c) => c.id === selectedAccount._databaseId)
+                              return (
+                                <GoogleSheetLink
+                                  url={String(value || '')}
+                                  label={customer?.leadsGoogleSheetLabel}
+                                  fallbackLabel="Open Google Sheets"
+                                  fontSize="md"
+                                />
+                              )
+                            }}
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            leftIcon={sheetValidateLoading ? <Spinner size="sm" /> : undefined}
+                            isDisabled={sheetValidateLoading || !selectedAccount._databaseId}
+                            onClick={async () => {
+                              const customerId = selectedAccount._databaseId
+                              if (!customerId) return
+                              setSheetValidateLoading(true)
+                              setSheetValidateResult(null)
+                              const { data, error } = await api.get<{
+                                ok: boolean
+                                error?: string
+                                hint?: string
+                                rowCount?: number
+                                headerKeys?: string[]
+                                detected?: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
+                                sampleRow?: Record<string, string>
+                              }>(`/api/leads/sync/validate?customerId=${encodeURIComponent(customerId)}`)
+                              setSheetValidateLoading(false)
+                              if (error) {
+                                setSheetValidateResult({ ok: false, error })
+                                return
+                              }
+                              if (data) setSheetValidateResult(data)
+                            }}
+                          >
+                            Test sheet
+                          </Button>
+                        </HStack>
+                        {sheetValidateResult && (
+                          <Box mt={1}>
+                            {sheetValidateResult.ok ? (
+                              <Alert status="success" borderRadius="md" flexDirection="column" alignItems="stretch">
+                                <AlertTitle>Sheet OK</AlertTitle>
+                                <AlertDescription as="div">
+                                  <Text>Row count: {sheetValidateResult.rowCount ?? 0}</Text>
+                                  {sheetValidateResult.detected && (
+                                    <Text fontSize="sm" mt={1}>
+                                      Detected: Date → {sheetValidateResult.detected.occurredAtKey ?? '—'}, Source → {sheetValidateResult.detected.sourceKey ?? '—'}, Owner → {sheetValidateResult.detected.ownerKey ?? '—'}
+                                    </Text>
+                                  )}
+                                  {sheetValidateResult.headerKeys && sheetValidateResult.headerKeys.length > 0 && (
+                                    <Text fontSize="xs" mt={1} color="gray.600">Headers: {sheetValidateResult.headerKeys.join(', ')}</Text>
+                                  )}
+                                </AlertDescription>
+                              </Alert>
+                            ) : (
+                              <Alert status="error" borderRadius="md">
+                                <AlertIcon />
+                                <Box>
+                                  <AlertTitle>Validation failed</AlertTitle>
+                                  <AlertDescription>
+                                    {sheetValidateResult.error}
+                                    {sheetValidateResult.hint && (
+                                      <Text mt={1} fontSize="sm">{sheetValidateResult.hint}</Text>
+                                    )}
+                                  </AlertDescription>
+                                </Box>
+                              </Alert>
+                            )}
+                          </Box>
+                        )}
+                      </Stack>
                     </FieldRow>
                   </SimpleGrid>
                 </Box>

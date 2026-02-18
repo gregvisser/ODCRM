@@ -47,6 +47,7 @@ import {
   ModalCloseButton,
   FormControl,
   FormLabel,
+  Collapse,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, SettingsIcon, StarIcon } from '@chakra-ui/icons'
 import { type Account } from './AccountsTab'
@@ -56,7 +57,7 @@ import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { fetchLeadsFromApi, persistLeadsToStorage, getSyncStatus, type SyncStatus } from '../utils/leadsApi'
-import { fetchAllCustomers, fetchMetricsForCustomers, type AggregateMetricsResult } from '../utils/leadsAggregate'
+import { fetchAllCustomers, fetchMetricsForCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -187,6 +188,8 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
   const [aggregateLoading, setAggregateLoading] = useState(false)
+  const [aggregateCustomersList, setAggregateCustomersList] = useState<CustomerForAggregate[] | null>(null)
+  const [showUnconfiguredList, setShowUnconfiguredList] = useState(false)
   const [syncStatusForEmpty, setSyncStatusForEmpty] = useState<SyncStatus | null>(null)
 
   // Advanced filtering state
@@ -403,6 +406,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     setAggregateLoading(true)
     try {
       const customers = await fetchAllCustomers()
+      setAggregateCustomersList(customers)
       const result = await fetchMetricsForCustomers(customers)
       setAggregateMetrics(result)
     } catch (e) {
@@ -1403,6 +1407,48 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             })}
           </Text>
         </Stack>
+        {aggregateCustomersList && (() => {
+          const configured = aggregateCustomersList.filter((c) => c.leadsReportingUrl != null && String(c.leadsReportingUrl).trim() !== '')
+          const unconfigured = aggregateCustomersList.filter((c) => !c.leadsReportingUrl || String(c.leadsReportingUrl).trim() === '')
+          return (
+            <Box mb={4} fontSize="sm">
+              <HStack spacing={4} flexWrap="wrap">
+                <Text color="gray.600">
+                  <strong>{configured.length}</strong> customer{configured.length !== 1 ? 's' : ''} configured for leads
+                </Text>
+                {unconfigured.length > 0 && (
+                  <Box>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      colorScheme="gray"
+                      rightIcon={showUnconfiguredList ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                      onClick={() => setShowUnconfiguredList((v) => !v)}
+                    >
+                      <strong>{unconfigured.length}</strong> NOT configured
+                    </Button>
+                    <Collapse in={showUnconfiguredList}>
+                      <Stack as="ul" pl={4} mt={1} spacing={0.5} listStyleType="disc">
+                        {unconfigured.map((c) => (
+                          <Text key={c.id} as="li" fontSize="xs" color="gray.600">{c.name}</Text>
+                        ))}
+                      </Stack>
+                    </Collapse>
+                  </Box>
+                )}
+              </HStack>
+              {configured.length === 0 && (
+                <Alert status="info" mt={2} borderRadius="md">
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>No customers have a Leads reporting URL configured</AlertTitle>
+                    <AlertDescription>Add a Google Sheet URL in Settings → Accounts to see combined metrics here.</AlertDescription>
+                  </Box>
+                </Alert>
+              )}
+            </Box>
+          )
+        })()}
         {aggregateLoading && (
           <HStack mb={4} fontSize="sm" color="gray.500">
             <Spinner size="sm" />

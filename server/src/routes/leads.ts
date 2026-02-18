@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { triggerManualSync } from '../workers/leadsSync.js'
+import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
 
 const router = Router()
 
@@ -1284,6 +1284,64 @@ router.get('/analytics/sequence-performance', async (req, res) => {
 })
 
 // Sync management endpoints
+
+// Validate a customer's sheet URL (no DB writes). Returns headers + row count + sample row.
+router.get('/sync/validate', async (req, res) => {
+  try {
+    const queryCustomerId = req.query.customerId as string | undefined
+    const headerCustomerId = req.header('x-customer-id') || undefined
+    const customerId = queryCustomerId || headerCustomerId
+
+    if (!customerId) {
+      return res.status(400).json({ ok: false, error: 'Customer ID required (query customerId or header x-customer-id)' })
+    }
+
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true, leadsReportingUrl: true },
+    })
+
+    if (!customer) {
+      return res.status(404).json({ ok: false, error: 'Customer not found' })
+    }
+
+    const url = (customer.leadsReportingUrl || '').trim()
+    if (!url) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Customer has no leads reporting URL configured',
+      })
+    }
+
+    const result = await validateSheetUrl(url)
+    const payload: Record<string, unknown> = {
+      ok: result.ok,
+      customerId,
+      urlConfigured: true,
+    }
+    if (result.ok) {
+      payload.httpStatus = result.httpStatus
+      payload.contentType = result.contentType
+      payload.rowCount = result.rowCount
+      payload.headerKeys = result.headerKeys
+      payload.detected = result.detected
+      payload.sampleRow = result.sampleRow
+      if (result.sheetGid) payload.sheetGid = result.sheetGid
+    } else {
+      payload.httpStatus = result.httpStatus
+      payload.error = result.error
+      payload.hint = result.hint
+    }
+    return res.json(payload)
+  } catch (error) {
+    console.error('Error in sync/validate:', error)
+    return res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Validation failed',
+      hint: 'Use a published-to-web CSV URL or ensure access is public.',
+    })
+  }
+})
 
 // Get sync status for a customer
 router.get('/sync/status', async (req, res) => {

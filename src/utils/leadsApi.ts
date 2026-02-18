@@ -330,6 +330,35 @@ export async function getSyncStatus(customerId?: string): Promise<{ data?: SyncS
   }
 }
 
+export type ValidateSheetResult = {
+  ok: boolean
+  error?: string
+  hint?: string
+  rowCount?: number
+  headerKeys?: string[]
+  detected?: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
+  sampleRow?: Record<string, string>
+}
+
+/** Validate customer's leads sheet URL (no DB writes). Used to explain "why 0 leads". */
+export async function getValidateSheetResult(customerId?: string): Promise<{ data?: ValidateSheetResult; error?: string }> {
+  const API_BASE_URL = import.meta.env.VITE_API_URL || ''
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) return { error: 'Missing customerId' }
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/leads/sync/validate?customerId=${encodeURIComponent(id)}`, {
+      headers: getCustomerHeaders(id),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      return { data: { ok: false, error: data.error || response.statusText, hint: data.hint }, error: data.error }
+    }
+    return { data: data as ValidateSheetResult }
+  } catch (error: any) {
+    return { error: error.message || 'Network error' }
+  }
+}
+
 // Get all sync statuses
 export async function getAllSyncStatuses(): Promise<{ data?: { total: number; statuses: SyncStatus[] }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''

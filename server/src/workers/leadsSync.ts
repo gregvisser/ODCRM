@@ -428,6 +428,108 @@ async function fetchLeadsFromSheetUrl(
   throw lastError || new Error('Failed to fetch leads from Google Sheet')
 }
 
+/** Result of validating a sheet URL (no DB writes). Used by GET /api/leads/sync/validate. */
+export type ValidateSheetResult =
+  | {
+      ok: true
+      httpStatus: number
+      contentType: string
+      rowCount: number
+      headerKeys: string[]
+      detected: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
+      sampleRow: Record<string, string>
+    }
+  | { ok: false; httpStatus?: number; error: string; hint?: string }
+
+/**
+ * Fetch and parse a sheet URL exactly like sync does; return headers + row count + one sample row.
+ * No DB writes. Used for "Test sheet" validation.
+ */
+export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetResult & { sheetGid?: string }> {
+  const sheetId = extractSheetId(sheetUrl)
+  if (!sheetId) {
+    return { ok: false, error: 'Invalid Google Sheets URL format', hint: 'Use a full URL like https://docs.google.com/spreadsheets/d/...' }
+  }
+  const gid = extractGid(sheetUrl) || '0'
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+
+  let response: Response
+  try {
+    response = await fetch(csvUrl, {
+      headers: { Accept: 'text/csv, text/plain, */*', 'User-Agent': 'ODCRM-LeadsSync/2.0' },
+      signal: AbortSignal.timeout(15000),
+    })
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Sheet fetch failed', hint: 'Use a published-to-web CSV URL or ensure access is public.' }
+  }
+
+  const httpStatus = response.status
+  const contentType = response.headers.get('content-type') || ''
+
+  if (!response.ok) {
+    const hint =
+      httpStatus === 403
+        ? 'Use a published-to-web CSV URL or ensure access is public.'
+        : httpStatus === 404
+          ? 'Check the sheet ID and gid in the URL.'
+          : 'Use a published-to-web CSV URL or ensure access is public.'
+    return { ok: false, httpStatus, error: `Sheet fetch failed: ${response.status} ${response.statusText}`, hint }
+  }
+
+  const csvText = await response.text()
+  if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
+    return { ok: false, httpStatus: 200, error: 'Received HTML instead of CSV', hint: 'Publish the sheet to web (File → Share → Publish to web) as CSV.' }
+  }
+
+  const rows = parseCsv(csvText)
+  if (rows.length < 2) {
+    return {
+      ok: false,
+      httpStatus: 200,
+      error: `Sheet returned ${rows.length} row(s) (need at least 2: headers + data)`,
+      hint: 'Ensure the sheet has a header row and at least one data row.',
+    }
+  }
+
+  const headerKeywords = ['date', 'name', 'company', 'email', 'phone', 'week', 'status', 'lead', 'contact']
+  let headerRowIndex = 0
+  for (let i = 0; i < Math.min(rows.length, 5); i++) {
+    const cellsLowercase = rows[i].map((cell: string) => (cell || '').toLowerCase().trim())
+    const keywordMatches = headerKeywords.filter((kw) => cellsLowercase.some((c: string) => c.includes(kw))).length
+    if (keywordMatches >= 3) {
+      headerRowIndex = i
+      break
+    }
+  }
+
+  const headers = rows[headerRowIndex].map((h: string) => h.trim()).filter(Boolean)
+  const dataRows = rows.slice(headerRowIndex + 1)
+
+  const occurredAtKey = headers.find((h) => toCanonicalHeader(h) === 'occurredAt') ?? null
+  const sourceKey = headers.find((h) => toCanonicalHeader(h) === 'source') ?? null
+  const ownerKey = headers.find((h) => toCanonicalHeader(h) === 'owner') ?? null
+  const externalIdKey = headers.find((h) => toCanonicalHeader(h) === 'externalId') ?? null
+
+  const sampleRow: Record<string, string> = {}
+  if (dataRows.length > 0 && headers.length > 0) {
+    const first = dataRows[0]
+    headers.forEach((h, i) => {
+      sampleRow[h] = (first[i] ?? '').trim()
+    })
+  }
+
+  return {
+    ok: true,
+    sheetGid: gid,
+    httpStatus: 200,
+    contentType: contentType || 'text/csv',
+    rowCount: dataRows.length,
+    headerKeys: headers,
+    detected: { occurredAtKey, sourceKey, ownerKey, externalIdKey },
+    sampleRow,
+  }
+}
+
 function parseDate(value: string): Date | null {
   if (!value || !value.trim()) return null
   const trimmed = value.trim()
@@ -821,6 +923,22 @@ async function syncCustomerLeads(
         }).catch(() => {}) // Don't block on progress updates
       }
     )
+
+    if (leads.length === 0) {
+      const zeroRowError = 'Sheet returned 0 rows (check publish-to-web CSV and that the sheet has data)'
+      await prisma.leadSyncState.update({
+        where: { customerId: customer.id },
+        data: {
+          isRunning: false,
+          lastError: zeroRowError,
+          lastSyncAt: syncStartedAt,
+        },
+      })
+      const headerKeys = (diagnostics.validHeaders || []).join(', ')
+      console.log(`   [leadsSync] customerId=${customer.id} sheetGid=${gidUsed} rowCount=0 detectedHeaders=${headerKeys || 'n/a'}`)
+      onProgress?.({ percent: 100, message: zeroRowError })
+      return
+    }
 
     onProgress?.({ percent: 50, message: 'Calculating aggregations...' })
 
