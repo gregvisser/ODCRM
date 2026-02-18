@@ -1,5 +1,6 @@
 import express from 'express'
 import path from 'node:path'
+import fs from 'node:fs'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { prisma } from './lib/prisma.js'
@@ -29,7 +30,37 @@ import sheetsRoutes from './routes/sheets.js'
 import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
 
-dotenv.config()
+// Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
+// process.env.DATABASE_URL is not overridden after this block.
+const serverDir = process.cwd()
+const envPath = path.join(serverDir, '.env')
+const envLocalPath = path.join(serverDir, '.env.local')
+
+dotenv.config({ path: envPath })
+
+let dbSource: string = '.env'
+if (fs.existsSync(envLocalPath)) {
+  if (process.env.ALLOW_ENV_LOCAL === 'true') {
+    dotenv.config({ path: envLocalPath, override: true })
+    dbSource = '.env.local'
+  } else {
+    console.warn('========================================')
+    console.warn('⚠️  .env.local IGNORED (use Azure DB from .env)')
+    console.warn('   Set ALLOW_ENV_LOCAL=true to load server/.env.local')
+    console.warn('========================================')
+  }
+}
+
+/** Parse DATABASE_URL and return hostname only (no credentials). */
+function getDbHost (): string | null {
+  const u = process.env.DATABASE_URL
+  if (!u || typeof u !== 'string') return null
+  try {
+    return new URL(u).hostname
+  } catch {
+    return null
+  }
+}
 
 // ============================================================================
 // STARTUP DIAGNOSTICS - Environment Truth
@@ -38,7 +69,7 @@ const startupDiagnostics = () => {
   const timestamp = new Date().toISOString()
   const nodeEnv = process.env.NODE_ENV || 'development'
   
-  // Extract and mask DATABASE_URL host
+  // Extract and mask DATABASE_URL host (no credentials logged)
   let maskedDbHost = 'NOT_SET'
   let hasConnectionLimit = 'UNKNOWN'
   let hasPoolTimeout = 'UNKNOWN'
@@ -61,12 +92,18 @@ const startupDiagnostics = () => {
   console.log(`  Timestamp:    ${timestamp}`)
   console.log(`  NODE_ENV:     ${nodeEnv}`)
   console.log(`  DB Host:      ${maskedDbHost}`)
+  console.log(`  DB Source:    ${dbSource}`)
   console.log(`  DB conn limit param: ${hasConnectionLimit}`)
   console.log(`  DB pool timeout param: ${hasPoolTimeout}`)
   console.log(`  ADMIN_SECRET: ${process.env.ADMIN_SECRET ? 'SET' : 'NOT_SET'}`)
   console.log('========================================')
 }
 startupDiagnostics()
+
+const dbHost = getDbHost()
+if (dbHost === 'localhost' || dbHost === '127.0.0.1') {
+  console.warn('⚠️ DB Host is localhost (local dev database)')
+}
 
 const app = express()
 
@@ -351,14 +388,21 @@ app.listen(PORT, async () => {
     console.log('⏸️ Reply detection disabled (set ENABLE_REPLY_DETECTOR=true to enable)')
   }
 
-  // Leads sync worker - syncs marketing leads from Google Sheets
-  const leadsSyncEnabled = process.env.ENABLE_LEADS_SYNC === 'true'
-  if (leadsSyncEnabled) {
-    console.log('📊 Starting leads sync worker...')
+  // Leads sync worker - only when connected to Azure/Neon (source of truth)
+  const wantLeadsSync = process.env.ENABLE_LEADS_SYNC === 'true'
+  const cronValue = process.env.LEADS_SYNC_CRON || '*/10 * * * *'
+  const isAzureLike = dbHost != null && (
+    dbHost.includes('.postgres.database.azure.com') ||
+    dbHost.includes('neon.tech')
+  )
+  if (wantLeadsSync && !isAzureLike) {
+    console.warn('⛔ Leads sync BLOCKED: non-Azure DB host ' + (dbHost ?? 'unknown'))
+  } else if (wantLeadsSync && isAzureLike) {
+    console.log(`✅ Leads sync ENABLED (cron=${cronValue})`)
     const { startLeadsSyncWorker } = await import('./workers/leadsSync.js')
     startLeadsSyncWorker(prisma)
   } else {
-    console.log('⏸️ Leads sync disabled (set ENABLE_LEADS_SYNC=true to enable)')
+    console.log('⏸️ Leads sync disabled')
   }
 
   // Company enrichment removed (no worker)

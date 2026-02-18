@@ -5,6 +5,81 @@ import { triggerManualSync } from '../workers/leadsSync.js'
 
 const router = Router()
 
+/**
+ * Timezone for lead metrics. Week is Monday–Sunday in this timezone.
+ * Set LEADS_METRICS_TIMEZONE to override (e.g. "Europe/London").
+ */
+const METRICS_TIMEZONE = process.env.LEADS_METRICS_TIMEZONE || 'Europe/London'
+
+/** Format a UTC Date as YYYY-MM-DD in the metrics timezone. */
+function formatDateInMetricsTz (date: Date): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: METRICS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+  const parts = fmt.formatToParts(date)
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '0'
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+/** Hour (0–23) of the given date in the metrics timezone. */
+function getHourInMetricsTz (date: Date): number {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: METRICS_TIMEZONE, hour: '2-digit', hour12: false })
+  return parseInt(fmt.format(date), 10)
+}
+
+/**
+ * Return UTC Date for midnight (00:00) on the given calendar date (y, m, d) in the metrics timezone.
+ * y,m,d are the calendar date in that timezone (m 0-based).
+ */
+function midnightInMetricsTzUtc (y: number, m: number, d: number): Date {
+  for (let hourUtc = -2; hourUtc <= 2; hourUtc++) {
+    const t = new Date(Date.UTC(y, m, d, hourUtc, 0, 0, 0))
+    if (formatDateInMetricsTz(t) === `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}` && getHourInMetricsTz(t) === 0) {
+      return t
+    }
+  }
+  const t = new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
+  const inLondon = formatDateInMetricsTz(t)
+  const [ly, lm, ld] = inLondon.split('-').map(Number)
+  if (ly === y && lm === m + 1 && ld === d && getHourInMetricsTz(t) === 1) {
+    return new Date(Date.UTC(y, m, d, -1, 0, 0, 0))
+  }
+  if (ly === y && lm === m + 1 && ld === d - 1 && getHourInMetricsTz(t) === 23) {
+    return new Date(Date.UTC(y, m, d, 1, 0, 0, 0))
+  }
+  return t
+}
+
+/**
+ * Return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } as UTC Dates for the current moment in METRICS_TIMEZONE.
+ * Week is Monday–Sunday.
+ */
+function getMetricsTimeRangesUtc (): { todayStart: Date, todayEnd: Date, weekStart: Date, weekEnd: Date, monthStart: Date, monthEnd: Date } {
+  const now = new Date()
+  const dateFmt = new Intl.DateTimeFormat('en-CA', { timeZone: METRICS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
+  const weekdayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: METRICS_TIMEZONE, weekday: 'short' })
+  const parts = dateFmt.formatToParts(now)
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '0'
+  const y = parseInt(get('year'), 10)
+  const m = parseInt(get('month'), 10) - 1
+  const d = parseInt(get('day'), 10)
+
+  const todayStart = midnightInMetricsTzUtc(y, m, d)
+  const todayEnd = midnightInMetricsTzUtc(y, m, d + 1)
+
+  const weekdayShort = weekdayFmt.format(now)
+  const WEEKDAY_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
+  const dow = WEEKDAY_ORDER.indexOf(weekdayShort as any)
+  const mondayOffset = dow < 0 ? 0 : -dow
+  const mondayD = d + mondayOffset
+  const weekStart = midnightInMetricsTzUtc(y, m, mondayD)
+  const nextMonday = new Date(Date.UTC(y, m, mondayD + 7, 12, 0, 0))
+  const weekEnd = midnightInMetricsTzUtc(nextMonday.getUTCFullYear(), nextMonday.getUTCMonth(), nextMonday.getUTCDate())
+
+  const monthStart = midnightInMetricsTzUtc(y, m, 1)
+  const monthEnd = midnightInMetricsTzUtc(y, m + 1, 1)
+
+  return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd }
+}
+
 // Health check endpoint
 router.get('/health', async (req, res) => {
   try {
@@ -287,6 +362,160 @@ router.get('/diagnostics', async (req, res) => {
   } catch (error) {
     console.error('Error in leads diagnostics:', error)
     res.status(500).json({ error: 'Failed to get diagnostics' })
+  }
+})
+
+/** True if d is a valid Date (not Invalid Date). */
+function isValidDate (d: unknown): d is Date {
+  return d instanceof Date && !isNaN(d.getTime())
+}
+
+/**
+ * Return UTC date ranges for metrics. If timezone-based computation yields any invalid date, fall back to UTC boundaries and log a warning.
+ */
+function getMetricsTimeRangesUtcSafe (): { todayStart: Date, todayEnd: Date, weekStart: Date, weekEnd: Date, monthStart: Date, monthEnd: Date } {
+  let ranges: ReturnType<typeof getMetricsTimeRangesUtc> | null = null
+  try {
+    ranges = getMetricsTimeRangesUtc()
+  } catch (e) {
+    console.warn('[leads/metrics] getMetricsTimeRangesUtc threw, using UTC fallback:', e)
+  }
+  const ok =
+    ranges != null &&
+    isValidDate(ranges.todayStart) &&
+    isValidDate(ranges.todayEnd) &&
+    isValidDate(ranges.weekStart) &&
+    isValidDate(ranges.weekEnd) &&
+    isValidDate(ranges.monthStart) &&
+    isValidDate(ranges.monthEnd)
+  if (ok) return ranges
+
+  console.warn('[leads/metrics] Invalid date(s) from getMetricsTimeRangesUtc, using UTC fallback (week = Mon–Sun UTC)')
+  const now = new Date()
+  const y = now.getUTCFullYear()
+  const m = now.getUTCMonth()
+  const d = now.getUTCDate()
+  const utcDow = now.getUTCDay()
+  const daysToMonday = utcDow === 0 ? 6 : utcDow - 1
+  const todayStart = new Date(Date.UTC(y, m, d, 0, 0, 0, 0))
+  const todayEnd = new Date(Date.UTC(y, m, d + 1, 0, 0, 0, 0))
+  const weekStart = new Date(Date.UTC(y, m, d - daysToMonday, 0, 0, 0, 0))
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+  const monthStart = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0))
+  const monthEnd = new Date(Date.UTC(y, m + 1, 1, 0, 0, 0, 0))
+  return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd }
+}
+
+/**
+ * Build a Prisma where clause for "lead date in [start, end)": (occurredAt in range) OR (occurredAt is null AND createdAt in range).
+ * Uses equals: null for Prisma compatibility. Dates must be valid (use getMetricsTimeRangesUtcSafe).
+ */
+function leadDateInRange (customerId: string, start: Date, end: Date) {
+  return {
+    customerId,
+    OR: [
+      { occurredAt: { gte: start, lt: end } },
+      { AND: [{ occurredAt: { equals: null } }, { createdAt: { gte: start, lt: end } }] },
+    ],
+  } as const
+}
+
+/**
+ * GET /api/leads/metrics
+ * Customer: prefer x-customer-id header; use query customerId only when header absent. Always verify customer exists.
+ * Counts: DB-native (occurredAt in range OR occurredAt is null AND createdAt in range). Week = Monday–Sunday in LEADS_METRICS_TIMEZONE.
+ *
+ * Self-test (commented; run manually or in test):
+ *   curl -s "http://localhost:3001/api/leads/metrics?customerId=cust_XXX"   -> 200 + JSON (customerId, counts, breakdownBySource, breakdownByOwner, lastSync)
+ *   curl -s -H "x-customer-id: cust_XXX" "http://localhost:3001/api/leads/metrics" -> 200 + same shape (header wins when both set)
+ *   Missing customerId -> 400 { error: "Customer ID required (...)" }
+ *   Unknown customerId -> 404 { error: "Customer not found" }
+ */
+router.get('/metrics', async (req, res) => {
+  const headerCustomerId = (req.header('x-customer-id') || '').trim()
+  const queryCustomerId = typeof req.query.customerId === 'string' ? req.query.customerId.trim() : undefined
+  const customerId = headerCustomerId || queryCustomerId
+
+  if (!customerId) {
+    return res.status(400).json({ error: 'Customer ID required (query customerId or header x-customer-id)' })
+  }
+
+  try {
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true },
+    })
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtcSafe()
+
+    const [countToday, countWeek, countMonth, total, bySourceRows, byOwnerRows, syncState] = await Promise.all([
+      prisma.leadRecord.count({ where: leadDateInRange(customerId, todayStart, todayEnd) }),
+      prisma.leadRecord.count({ where: leadDateInRange(customerId, weekStart, weekEnd) }),
+      prisma.leadRecord.count({ where: leadDateInRange(customerId, monthStart, monthEnd) }),
+      prisma.leadRecord.count({ where: { customerId } }),
+      prisma.leadRecord.groupBy({
+        by: ['source'],
+        where: { customerId },
+        _count: { id: true },
+      }),
+      prisma.leadRecord.groupBy({
+        by: ['owner'],
+        where: { customerId },
+        _count: { id: true },
+      }),
+      prisma.leadSyncState.findUnique({ where: { customerId } }),
+    ])
+
+    const breakdownBySource: Record<string, number> = {}
+    for (const row of bySourceRows) {
+      const key = row.source != null && String(row.source).trim() !== '' ? String(row.source).trim() : '(none)'
+      breakdownBySource[key] = row._count.id
+    }
+    const breakdownByOwner: Record<string, number> = {}
+    for (const row of byOwnerRows) {
+      const key = row.owner != null && String(row.owner).trim() !== '' ? String(row.owner).trim() : '(none)'
+      breakdownByOwner[key] = row._count.id
+    }
+
+    const lastSync = syncState
+      ? {
+          lastSyncAt: syncState.lastSyncAt?.toISOString() ?? null,
+          lastSuccessAt: syncState.lastSuccessAt?.toISOString() ?? null,
+          lastError: syncState.lastError ?? null,
+          isPaused: syncState.isPaused ?? false,
+          isRunning: syncState.isRunning ?? false,
+          rowCount: syncState.rowCount ?? null,
+        }
+      : null
+
+    res.json({
+      customerId,
+      timezone: METRICS_TIMEZONE,
+      weekDefinition: 'Monday–Sunday (week boundaries in the timezone above)',
+      counts: {
+        today: countToday,
+        week: countWeek,
+        month: countMonth,
+        total,
+      },
+      breakdownBySource,
+      breakdownByOwner,
+      lastSync,
+    })
+  } catch (error: any) {
+    const err = error && typeof error === 'object' ? error : new Error(String(error))
+    console.error('[leads/metrics] Failed to fetch lead metrics', {
+      customerId,
+      code: err.code,
+      meta: err.meta,
+      message: err.message,
+      stack: err.stack,
+      fullError: err,
+    })
+    res.status(500).json({ error: 'Failed to fetch lead metrics' })
   }
 })
 

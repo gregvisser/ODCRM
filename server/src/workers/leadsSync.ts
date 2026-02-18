@@ -471,6 +471,54 @@ function generateStableLeadId(lead: LeadRow, customerId: string): string {
   return `lead_${hash.substring(0, 16)}`
 }
 
+/** Prefer sheet row id column if present; else null (caller uses hash). */
+function getSheetRowId(lead: LeadRow): string | null {
+  const keys = ['id', 'Id', 'ID', 'Row ID', 'row id', 'row_id', 'RowId']
+  for (const k of keys) {
+    const v = lead[k]
+    if (v != null && String(v).trim() !== '') return String(v).trim()
+  }
+  return null
+}
+
+/** Stable external id for idempotent upsert: sheet row id or deterministic hash. */
+function getExternalId(lead: LeadRow, customerId: string): string {
+  return getSheetRowId(lead) || generateStableLeadId(lead, customerId)
+}
+
+/** Lead date from sheet for occurredAt; null if missing or unparseable. */
+function getOccurredAt(lead: LeadRow): Date | null {
+  const keys = ['Date', 'date', 'Created At', 'createdAt', 'First Meeting Date', 'Lead Date', 'lead date']
+  for (const k of keys) {
+    const v = lead[k]
+    if (v != null && String(v).trim() !== '') {
+      const d = parseDate(String(v).trim())
+      if (d) return d
+    }
+  }
+  return null
+}
+
+/** Source from sheet (e.g. telesales/email/crm). */
+function getSource(lead: LeadRow): string | null {
+  const keys = ['source', 'Source', 'channel', 'Channel', 'platform', 'Platform', 'type', 'Type']
+  for (const k of keys) {
+    const v = lead[k]
+    if (v != null && String(v).trim() !== '') return String(v).trim()
+  }
+  return null
+}
+
+/** Owner/user from sheet. */
+function getOwner(lead: LeadRow): string | null {
+  const keys = ['user', 'User', 'owner', 'Owner', 'team member', 'Team Member', 'TeamMember', 'Assigned To', 'assigned to']
+  for (const k of keys) {
+    const v = lead[k]
+    if (v != null && String(v).trim() !== '') return String(v).trim()
+  }
+  return null
+}
+
 /**
  * Normalize and validate lead data
  */
@@ -797,16 +845,19 @@ async function syncCustomerLeads(
     console.log(`   Records before sync: ${beforeCount}`)
 
     await prisma.$transaction(async (tx) => {
-      const existingIds = new Set(
-        (await tx.leadRecord.findMany({
-          where: { customerId: customer.id },
-          select: { id: true }
-        })).map(r => r.id)
-      )
-
       if (leads.length > 0) {
+        const existingByExternalId = new Set(
+          (await tx.leadRecord.findMany({
+            where: { customerId: customer.id, externalId: { not: null } },
+            select: { externalId: true },
+          }))
+            .map((r) => r.externalId)
+            .filter((id): id is string => id != null)
+        )
+
         const recordsToProcess = leads.map((lead) => {
           const stableId = generateStableLeadId(lead, customer.id)
+          const externalId = getExternalId(lead, customer.id)
           return {
             id: stableId,
             customerId: customer.id,
@@ -814,65 +865,97 @@ async function syncCustomerLeads(
             data: lead,
             sourceUrl: sheetUrl,
             sheetGid: gidUsed,
+            externalId,
+            occurredAt: getOccurredAt(lead),
+            source: getSource(lead),
+            owner: getOwner(lead),
           }
         })
 
-        const processedIds = new Set<string>()
-
-        // Process in batches for better performance
+        const processedExternalIds = new Set<string>()
         const batchSize = 50
+
         for (let i = 0; i < recordsToProcess.length; i += batchSize) {
           const batch = recordsToProcess.slice(i, i + batchSize)
-          
+
           for (const record of batch) {
-            processedIds.add(record.id)
-
+            processedExternalIds.add(record.externalId)
             try {
-              const existing = await tx.leadRecord.findUnique({
-                where: { id: record.id },
-                select: { id: true, updatedAt: true }
-              })
-
-              if (existing) {
-                await tx.leadRecord.update({
-                  where: { id: record.id },
-                  data: {
-                    data: record.data,
-                    sourceUrl: record.sourceUrl,
-                    sheetGid: record.sheetGid,
-                    updatedAt: new Date(),
+              await tx.leadRecord.upsert({
+                where: {
+                  customerId_externalId: {
+                    customerId: customer.id,
+                    externalId: record.externalId,
                   },
-                })
-                rowsUpdated++
+                },
+                create: {
+                  id: record.id,
+                  customerId: record.customerId,
+                  accountName: record.accountName,
+                  data: record.data,
+                  sourceUrl: record.sourceUrl,
+                  sheetGid: record.sheetGid,
+                  externalId: record.externalId,
+                  occurredAt: record.occurredAt,
+                  source: record.source,
+                  owner: record.owner,
+                },
+                update: {
+                  data: record.data,
+                  sourceUrl: record.sourceUrl,
+                  sheetGid: record.sheetGid,
+                  occurredAt: record.occurredAt,
+                  source: record.source,
+                  owner: record.owner,
+                  updatedAt: new Date(),
+                },
+              })
+              if (existingByExternalId.has(record.externalId)) rowsUpdated++
+              else rowsInserted++
+            } catch (err: any) {
+              if (err?.code === 'P2002') {
+                try {
+                  await tx.leadRecord.update({
+                    where: { id: record.id },
+                    data: {
+                      data: record.data,
+                      sourceUrl: record.sourceUrl,
+                      sheetGid: record.sheetGid,
+                      externalId: record.externalId,
+                      occurredAt: record.occurredAt,
+                      source: record.source,
+                      owner: record.owner,
+                      updatedAt: new Date(),
+                    },
+                  })
+                  rowsUpdated++
+                  existingByExternalId.add(record.externalId)
+                } catch (_) {
+                  console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
+                  errorCount++
+                }
               } else {
-                await tx.leadRecord.create({ data: record })
-                rowsInserted++
+                console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
+                errorCount++
               }
-            } catch (error) {
-              console.warn(`   Failed to process lead ${record.id}:`, error)
-              errorCount++
             }
           }
-          
-          // Update progress
+
           const progress = 70 + Math.floor((i / recordsToProcess.length) * 20)
           onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, recordsToProcess.length)}/${recordsToProcess.length} leads...` })
         }
 
-        // Remove leads that are no longer in the sheet
-        const idsToRemove = Array.from(existingIds).filter(id => !processedIds.has(id))
-        if (idsToRemove.length > 0) {
-          await tx.leadRecord.deleteMany({
-            where: {
-              customerId: customer.id,
-              id: { in: idsToRemove }
-            }
-          })
-          rowsDeleted = idsToRemove.length
-          console.log(`   Removed ${rowsDeleted} stale leads`)
-        }
+        const toRemove = Array.from(processedExternalIds)
+        const deleteResult = await tx.leadRecord.deleteMany({
+          where: {
+            customerId: customer.id,
+            AND: [{ externalId: { not: null } }, { externalId: { notIn: toRemove } }],
+          },
+        })
+        rowsDeleted = deleteResult.count
+        if (rowsDeleted > 0) console.log(`   Removed ${rowsDeleted} stale leads (externalId not in sheet)`)
 
-        console.log(`   Records processed: ${rowsInserted} inserted, ${rowsUpdated} updated, ${rowsDeleted} removed`)
+        console.log(`   [leadsSync] customerId=${customer.id} rowsProcessed=${recordsToProcess.length} upserts=${rowsInserted + rowsUpdated} (inserted=${rowsInserted} updated=${rowsUpdated}) deleted=${rowsDeleted} errors=${errorCount}`)
       }
 
       // Update customer with aggregated data
@@ -1007,19 +1090,54 @@ export async function syncAllCustomerLeads(prisma: PrismaClient) {
 }
 
 /**
- * Manual sync trigger for a specific customer
+ * Manual sync trigger for a specific customer.
+ * Always upserts LeadSyncState (lastSyncAt) so metrics show lastSync even when 0 rows or no sheet.
  */
 export async function triggerManualSync(prisma: PrismaClient, customerId: string) {
+  const now = new Date()
+
+  // Ensure LeadSyncState exists and mark sync started (tenant-safe, so metrics can show lastSync)
+  await prisma.leadSyncState.upsert({
+    where: { customerId },
+    create: {
+      id: `lead_sync_${customerId}`,
+      customerId,
+      lastSyncAt: now,
+      isRunning: true,
+      lastError: null,
+      progressPercent: 0,
+      progressMessage: 'Starting sync...',
+    },
+    update: {
+      lastSyncAt: now,
+      isRunning: true,
+      lastError: null,
+      progressPercent: 0,
+      progressMessage: 'Starting sync...',
+    },
+  })
+
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
     select: { id: true, name: true, leadsReportingUrl: true },
   })
 
   if (!customer) {
+    await prisma.leadSyncState.update({
+      where: { customerId },
+      data: { isRunning: false, lastError: 'Customer not found' },
+    })
     throw new Error('Customer not found')
   }
 
   if (!customer.leadsReportingUrl) {
+    await prisma.leadSyncState.update({
+      where: { customerId },
+      data: {
+        isRunning: false,
+        lastError: 'Customer has no leads reporting URL configured',
+      },
+    })
     throw new Error('Customer has no leads reporting URL configured')
   }
 
