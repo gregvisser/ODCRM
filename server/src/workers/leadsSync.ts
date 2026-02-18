@@ -519,6 +519,13 @@ function getOwner(lead: LeadRow): string | null {
   return null
 }
 
+function isUnknownFieldError (err: unknown, field: string): boolean {
+  const msg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
+    ? (err as any).message
+    : ''
+  return msg.includes('Unknown argument') && msg.includes(field)
+}
+
 /**
  * Normalize and validate lead data
  */
@@ -844,118 +851,198 @@ async function syncCustomerLeads(
     const beforeCount = await prisma.leadRecord.count({ where: { customerId: customer.id } })
     console.log(`   Records before sync: ${beforeCount}`)
 
+    let useExternalId = true
+
     await prisma.$transaction(async (tx) => {
       if (leads.length > 0) {
-        const existingByExternalId = new Set(
-          (await tx.leadRecord.findMany({
-            where: { customerId: customer.id, externalId: { not: null } },
-            select: { externalId: true },
-          }))
-            .map((r) => r.externalId)
-            .filter((id): id is string => id != null)
-        )
-
-        const recordsToProcess = leads.map((lead) => {
-          const stableId = generateStableLeadId(lead, customer.id)
-          const externalId = getExternalId(lead, customer.id)
-          return {
-            id: stableId,
-            customerId: customer.id,
-            accountName: customer.name,
-            data: lead,
-            sourceUrl: sheetUrl,
-            sheetGid: gidUsed,
-            externalId,
-            occurredAt: getOccurredAt(lead),
-            source: getSource(lead),
-            owner: getOwner(lead),
+        let existingByExternalId = new Set<string>()
+        try {
+          existingByExternalId = new Set(
+            (await tx.leadRecord.findMany({
+              where: { customerId: customer.id, externalId: { not: null } },
+              select: { externalId: true },
+            }))
+              .map((r) => r.externalId)
+              .filter((id): id is string => id != null)
+          )
+        } catch (err) {
+          if (isUnknownFieldError(err, 'externalId')) {
+            console.warn(JSON.stringify({ tag: 'leadsSyncFallback', reason: 'externalIdMissing', customerId: customer.id, op: 'findManyExternalId' }))
+            useExternalId = false
+          } else {
+            throw err
           }
-        })
+        }
 
-        const processedExternalIds = new Set<string>()
-        const batchSize = 50
+        if (useExternalId) {
+          const recordsToProcess = leads.map((lead) => {
+            const stableId = generateStableLeadId(lead, customer.id)
+            const externalId = getExternalId(lead, customer.id)
+            return {
+              id: stableId,
+              customerId: customer.id,
+              accountName: customer.name,
+              data: lead,
+              sourceUrl: sheetUrl,
+              sheetGid: gidUsed,
+              externalId,
+              occurredAt: getOccurredAt(lead),
+              source: getSource(lead),
+              owner: getOwner(lead),
+            }
+          })
 
-        for (let i = 0; i < recordsToProcess.length; i += batchSize) {
-          const batch = recordsToProcess.slice(i, i + batchSize)
+          const processedExternalIds = new Set<string>()
+          const batchSize = 50
 
-          for (const record of batch) {
-            processedExternalIds.add(record.externalId)
-            try {
-              await tx.leadRecord.upsert({
-                where: {
-                  customerId_externalId: {
-                    customerId: customer.id,
-                    externalId: record.externalId,
-                  },
-                },
-                create: {
-                  id: record.id,
-                  customerId: record.customerId,
-                  accountName: record.accountName,
-                  data: record.data,
-                  sourceUrl: record.sourceUrl,
-                  sheetGid: record.sheetGid,
-                  externalId: record.externalId,
-                  occurredAt: record.occurredAt,
-                  source: record.source,
-                  owner: record.owner,
-                },
-                update: {
-                  data: record.data,
-                  sourceUrl: record.sourceUrl,
-                  sheetGid: record.sheetGid,
-                  occurredAt: record.occurredAt,
-                  source: record.source,
-                  owner: record.owner,
-                  updatedAt: new Date(),
-                },
-              })
-              if (existingByExternalId.has(record.externalId)) rowsUpdated++
-              else rowsInserted++
-            } catch (err: any) {
-              if (err?.code === 'P2002') {
-                try {
-                  await tx.leadRecord.update({
-                    where: { id: record.id },
-                    data: {
-                      data: record.data,
-                      sourceUrl: record.sourceUrl,
-                      sheetGid: record.sheetGid,
+          for (let i = 0; i < recordsToProcess.length; i += batchSize) {
+            const batch = recordsToProcess.slice(i, i + batchSize)
+
+            for (const record of batch) {
+              processedExternalIds.add(record.externalId)
+              try {
+                await tx.leadRecord.upsert({
+                  where: {
+                    customerId_externalId: {
+                      customerId: customer.id,
                       externalId: record.externalId,
-                      occurredAt: record.occurredAt,
-                      source: record.source,
-                      owner: record.owner,
-                      updatedAt: new Date(),
                     },
-                  })
-                  rowsUpdated++
-                  existingByExternalId.add(record.externalId)
-                } catch (_) {
+                  },
+                  create: {
+                    id: record.id,
+                    customerId: record.customerId,
+                    accountName: record.accountName,
+                    data: record.data,
+                    sourceUrl: record.sourceUrl,
+                    sheetGid: record.sheetGid,
+                    externalId: record.externalId,
+                    occurredAt: record.occurredAt,
+                    source: record.source,
+                    owner: record.owner,
+                  },
+                  update: {
+                    data: record.data,
+                    sourceUrl: record.sourceUrl,
+                    sheetGid: record.sheetGid,
+                    occurredAt: record.occurredAt,
+                    source: record.source,
+                    owner: record.owner,
+                    updatedAt: new Date(),
+                  },
+                })
+                if (existingByExternalId.has(record.externalId)) rowsUpdated++
+                else rowsInserted++
+              } catch (err: any) {
+                if (err?.code === 'P2002') {
+                  try {
+                    await tx.leadRecord.update({
+                      where: { id: record.id },
+                      data: {
+                        data: record.data,
+                        sourceUrl: record.sourceUrl,
+                        sheetGid: record.sheetGid,
+                        externalId: record.externalId,
+                        occurredAt: record.occurredAt,
+                        source: record.source,
+                        owner: record.owner,
+                        updatedAt: new Date(),
+                      },
+                    })
+                    rowsUpdated++
+                    existingByExternalId.add(record.externalId)
+                  } catch (_) {
+                    console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
+                    errorCount++
+                  }
+                } else {
                   console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
                   errorCount++
                 }
-              } else {
-                console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
+              }
+            }
+
+            const progress = 70 + Math.floor((i / recordsToProcess.length) * 20)
+            onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, recordsToProcess.length)}/${recordsToProcess.length} leads...` })
+          }
+
+          const toRemove = Array.from(processedExternalIds)
+          const deleteResult = await tx.leadRecord.deleteMany({
+            where: {
+              customerId: customer.id,
+              AND: [{ externalId: { not: null } }, { externalId: { notIn: toRemove } }],
+            },
+          })
+          rowsDeleted = deleteResult.count
+          if (rowsDeleted > 0) console.log(`   Removed ${rowsDeleted} stale leads (externalId not in sheet)`)
+
+          console.log(`   [leadsSync] customerId=${customer.id} rowsProcessed=${recordsToProcess.length} upserts=${rowsInserted + rowsUpdated} (inserted=${rowsInserted} updated=${rowsUpdated}) deleted=${rowsDeleted} errors=${errorCount}`)
+        } else {
+          const recordsToProcess = leads.map((lead) => {
+            const stableId = generateStableLeadId(lead, customer.id)
+            return {
+              id: stableId,
+              customerId: customer.id,
+              accountName: customer.name,
+              data: lead,
+              sourceUrl: sheetUrl,
+              sheetGid: gidUsed,
+            }
+          })
+
+          const existingIds = new Set(
+            (await tx.leadRecord.findMany({
+              where: { customerId: customer.id },
+              select: { id: true },
+            })).map((r) => r.id)
+          )
+
+          const batchSize = 50
+          for (let i = 0; i < recordsToProcess.length; i += batchSize) {
+            const batch = recordsToProcess.slice(i, i + batchSize)
+
+            for (const record of batch) {
+              try {
+                await tx.leadRecord.upsert({
+                  where: { id: record.id },
+                  create: {
+                    id: record.id,
+                    customerId: record.customerId,
+                    accountName: record.accountName,
+                    data: record.data,
+                    sourceUrl: record.sourceUrl,
+                    sheetGid: record.sheetGid,
+                  },
+                  update: {
+                    data: record.data,
+                    sourceUrl: record.sourceUrl,
+                    sheetGid: record.sheetGid,
+                    updatedAt: new Date(),
+                  },
+                })
+                if (existingIds.has(record.id)) rowsUpdated++
+                else rowsInserted++
+              } catch (err: any) {
+                console.warn(`   [leadsSync] customerId=${customer.id} id=${record.id} error:`, err?.message || err)
                 errorCount++
               }
             }
+
+            const progress = 70 + Math.floor((i / recordsToProcess.length) * 20)
+            onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, recordsToProcess.length)}/${recordsToProcess.length} leads...` })
           }
 
-          const progress = 70 + Math.floor((i / recordsToProcess.length) * 20)
-          onProgress?.({ percent: progress, message: `Processed ${Math.min(i + batchSize, recordsToProcess.length)}/${recordsToProcess.length} leads...` })
+          const currentIds = new Set(recordsToProcess.map((r) => r.id))
+          const deleteResult = await tx.leadRecord.deleteMany({
+            where: {
+              customerId: customer.id,
+              id: { notIn: Array.from(currentIds) },
+            },
+          })
+          rowsDeleted = deleteResult.count
+          if (rowsDeleted > 0) console.log(`   Removed ${rowsDeleted} stale leads (id not in sheet)`)
+
+          console.log(`   [leadsSync] customerId=${customer.id} (id-only) rowsProcessed=${recordsToProcess.length} upserts=${rowsInserted + rowsUpdated} (inserted=${rowsInserted} updated=${rowsUpdated}) deleted=${rowsDeleted} errors=${errorCount}`)
         }
-
-        const toRemove = Array.from(processedExternalIds)
-        const deleteResult = await tx.leadRecord.deleteMany({
-          where: {
-            customerId: customer.id,
-            AND: [{ externalId: { not: null } }, { externalId: { notIn: toRemove } }],
-          },
-        })
-        rowsDeleted = deleteResult.count
-        if (rowsDeleted > 0) console.log(`   Removed ${rowsDeleted} stale leads (externalId not in sheet)`)
-
-        console.log(`   [leadsSync] customerId=${customer.id} rowsProcessed=${recordsToProcess.length} upserts=${rowsInserted + rowsUpdated} (inserted=${rowsInserted} updated=${rowsUpdated}) deleted=${rowsDeleted} errors=${errorCount}`)
       }
 
       // Update customer with aggregated data
@@ -966,6 +1053,8 @@ async function syncCustomerLeads(
           monthlyLeadActual: monthlyActual,
         },
       })
+
+      const fallbackMessage = useExternalId ? null : 'Synced by id (externalId not in schema).'
 
       // Update sync state with metrics
       const syncDuration = Date.now() - syncStartedAt.getTime()
@@ -978,7 +1067,7 @@ async function syncCustomerLeads(
           lastSuccessAt: syncStartedAt,
           rowCount: leads.length,
           lastChecksum: checksum,
-          lastError: null,
+          lastError: fallbackMessage,
           isRunning: false,
           progressPercent: 100,
           progressMessage: 'Complete',
@@ -995,7 +1084,7 @@ async function syncCustomerLeads(
           lastSuccessAt: syncStartedAt,
           rowCount: leads.length,
           lastChecksum: checksum,
-          lastError: null,
+          lastError: fallbackMessage,
           isRunning: false,
           progressPercent: 100,
           progressMessage: 'Complete',
