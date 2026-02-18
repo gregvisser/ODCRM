@@ -105,6 +105,35 @@ router.get('/health', async (req, res) => {
   }
 })
 
+// Schema check: confirm LeadRecord has occurredAt/source/owner/externalId (no secrets, dev-only diagnostic)
+router.get('/schema-check', async (req, res) => {
+  const customerId = (req.query.customerId as string)?.trim()
+  if (!customerId) {
+    return res.status(400).json({ error: 'customerId is required' })
+  }
+  try {
+    await prisma.leadRecord.findFirst({
+      where: { customerId },
+      select: { id: true, occurredAt: true, source: true, owner: true, externalId: true },
+    })
+    return res.json({
+      ok: true,
+      hasOccurredAt: true,
+      hasSource: true,
+      hasOwner: true,
+      hasExternalId: true,
+    })
+  } catch {
+    return res.json({
+      ok: false,
+      hasOccurredAt: false,
+      hasSource: false,
+      hasOwner: false,
+      hasExternalId: false,
+    })
+  }
+})
+
 router.get('/', async (req, res) => {
   const queryCustomerId = (req.query.customerId as string)?.trim()
   const headerCustomerId = (req.header('x-customer-id') || '').trim()
@@ -140,7 +169,7 @@ router.get('/', async (req, res) => {
 
     const leadRows = await prisma.leadRecord.findMany({
       where,
-      orderBy: { updatedAt: 'desc' },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
     })
 
     const state = await prisma.leadSyncState.findUnique({ where: { customerId } })

@@ -65,6 +65,35 @@ function extractGid(url: string): string | null {
   }
 }
 
+/** Normalize header: trim, lowercase, collapse spaces. Map common sheet column names to canonical keys so getters find values. */
+function toCanonicalHeader(header: string): string | null {
+  const normalized = header.trim().toLowerCase().replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  const aliases: Record<string, string> = {
+    'channel of lead': 'source',
+    'lead source': 'source',
+    'channel': 'source',
+    'source': 'source',
+    'campaign': 'source',
+    'od team member': 'owner',
+    'team member': 'owner',
+    'rep': 'owner',
+    'owner': 'owner',
+    'user': 'owner',
+    'assigned to': 'owner',
+    'agent': 'owner',
+    'created': 'occurredAt',
+    'timestamp': 'occurredAt',
+    'created at': 'occurredAt',
+    'date': 'occurredAt',
+    'added': 'occurredAt',
+    'lead id': 'externalId',
+    'external id': 'externalId',
+    'id': 'externalId',
+  }
+  return aliases[normalized] ?? null
+}
+
 /**
  * Optimized CSV parser with chunking support for large files
  * Processes CSV in chunks to avoid memory issues with 1000+ row sheets
@@ -318,7 +347,10 @@ async function fetchLeadsFromSheetUrl(
           headers.forEach((header, index) => {
             const value = row[index] || ''
             if (header && header.trim()) {
-              lead[header.trim()] = value
+              const key = header.trim()
+              lead[key] = value
+              const canon = toCanonicalHeader(header)
+              if (canon) lead[canon] = value
             }
           })
 
