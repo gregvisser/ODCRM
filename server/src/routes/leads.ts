@@ -518,11 +518,16 @@ router.get('/metrics', async (req, res) => {
       }
     }
 
-    async function groupByWithFallback (op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy', by: 'source' | 'owner') {
+    async function groupByDateFallback (
+      op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy',
+      by: 'source' | 'owner',
+      start: Date,
+      end: Date,
+    ) {
       try {
         return await prisma.leadRecord.groupBy({
           by: [by],
-          where: { customerId },
+          where: buildWhereWithOccurredAt(customerId, start, end),
           _count: { id: true },
         })
       } catch (err) {
@@ -530,7 +535,7 @@ router.get('/metrics', async (req, res) => {
           console.warn(JSON.stringify({ tag: 'leadsMetricsFallback', reqId, reason: 'occurredAtMissing', op }))
           return await prisma.leadRecord.groupBy({
             by: [by],
-            where: { customerId },
+            where: buildWhereCreatedAtOnly(customerId, start, end),
             _count: { id: true },
           })
         }
@@ -545,8 +550,8 @@ router.get('/metrics', async (req, res) => {
       countWithDateFallback('counts.month', monthStart, monthEnd),
       prisma.leadRecord.count({ where: { customerId } })
         .catch(err => { logErr('counts.total', err); throw err }),
-      groupByWithFallback('breakdown.source.groupBy', 'source'),
-      groupByWithFallback('breakdown.owner.groupBy', 'owner'),
+      groupByDateFallback('breakdown.source.groupBy', 'source', weekStart, weekEnd),
+      groupByDateFallback('breakdown.owner.groupBy', 'owner', weekStart, weekEnd),
       prisma.leadSyncState.findUnique({ where: { customerId } })
         .catch(err => { logErr('lastSyncState', err); throw err }),
     ])
