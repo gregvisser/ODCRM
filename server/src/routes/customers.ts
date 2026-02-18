@@ -1030,11 +1030,15 @@ router.put('/:id/onboarding', async (req, res) => {
         Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl') ? updateData.leadsReportingUrl : existing.leadsReportingUrl
       const hasLeadGoogleSheet = typeof nextLeadsReportingUrl === 'string' ? nextLeadsReportingUrl.trim().length > 0 : false
 
+      // Keep progressTracker.updatedAt consistent with Customer.updatedAt for this save.
+      const nowIso = updateData.updatedAt instanceof Date ? updateData.updatedAt.toISOString() : new Date().toISOString()
+
       const autoTickResult = applyAutoTicksToAccountData({
         accountData: mergedAccountDataBase,
         hasAgreement,
         hasLeadGoogleSheet,
         actorUserId: onboardingActorUserId,
+        nowIso,
       })
       const mergedAccountData = autoTickResult.accountData
 
