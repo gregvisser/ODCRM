@@ -301,14 +301,16 @@ async function fetchLeadsFromSheetUrl(
       let filteredNoNameCompany = 0
       let filteredTooFewFields = 0
 
-      // Process rows in batches for better performance
+      // Process rows in batches for better performance; set __rowIndex for deterministic externalId
       const batchSize = 100
+      let dataRowIndex = 0
       for (let i = 0; i < dataRows.length; i += batchSize) {
         const batch = dataRows.slice(i, i + batchSize)
         
         for (const row of batch) {
           if (row.length === 0 || row.every((cell) => !cell || cell.trim() === '')) {
             filteredEmpty++
+            dataRowIndex++
             continue
           }
 
@@ -329,6 +331,7 @@ async function fetchLeadsFromSheetUrl(
           const isWeekMarker = weekValue.startsWith('w/c') || weekValue.startsWith('w/v')
           if (isWeekMarker) {
             filteredWcWv++
+            dataRowIndex++
             continue
           }
 
@@ -339,6 +342,7 @@ async function fetchLeadsFromSheetUrl(
           const hasCompany = companyValue && companyValue.trim() !== ''
           if (!hasName && !hasCompany) {
             filteredNoNameCompany++
+            dataRowIndex++
             continue
           }
 
@@ -348,10 +352,13 @@ async function fetchLeadsFromSheetUrl(
           )
           if (nonEmptyFields.length < 2) {
             filteredTooFewFields++
+            dataRowIndex++
             continue
           }
 
+          ;(normalizedLead as { __rowIndex?: number }).__rowIndex = headerRowIndex + 1 + dataRowIndex
           leads.push(normalizedLead)
+          dataRowIndex++
         }
         
         // Update progress during batch processing
@@ -471,9 +478,9 @@ function generateStableLeadId(lead: LeadRow, customerId: string): string {
   return `lead_${hash.substring(0, 16)}`
 }
 
-/** Prefer sheet row id column if present; else null (caller uses hash). */
+/** Prefer sheet row id column if present; else null (caller uses sheetGid:rowNumber or hash). */
 function getSheetRowId(lead: LeadRow): string | null {
-  const keys = ['id', 'Id', 'ID', 'Row ID', 'row id', 'row_id', 'RowId']
+  const keys = ['id', 'Id', 'ID', 'Row ID', 'row id', 'row_id', 'RowId', 'Lead ID', 'External ID', 'external id']
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') return String(v).trim()
@@ -481,14 +488,20 @@ function getSheetRowId(lead: LeadRow): string | null {
   return null
 }
 
-/** Stable external id for idempotent upsert: sheet row id or deterministic hash. */
-function getExternalId(lead: LeadRow, customerId: string): string {
-  return getSheetRowId(lead) || generateStableLeadId(lead, customerId)
+/** Stable external id: sheet row id, or "sheetGid:rowNumber", or deterministic hash. */
+function getExternalId(lead: LeadRow, customerId: string, sheetGid?: string | null): string {
+  const sheetRowId = getSheetRowId(lead)
+  if (sheetRowId) return sheetRowId
+  const rowIndex = (lead as { __rowIndex?: number }).__rowIndex
+  if (sheetGid != null && sheetGid !== '' && typeof rowIndex === 'number') {
+    return `${sheetGid}:${rowIndex}`
+  }
+  return generateStableLeadId(lead, customerId)
 }
 
 /** Lead date from sheet for occurredAt; null if missing or unparseable. */
 function getOccurredAt(lead: LeadRow): Date | null {
-  const keys = ['Date', 'date', 'Created At', 'createdAt', 'First Meeting Date', 'Lead Date', 'lead date']
+  const keys = ['Date', 'date', 'Created', 'Created At', 'createdAt', 'Added', 'Timestamp', 'First Meeting Date', 'Lead Date', 'lead date']
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') {
@@ -499,9 +512,9 @@ function getOccurredAt(lead: LeadRow): Date | null {
   return null
 }
 
-/** Source from sheet (e.g. telesales/email/crm). */
+/** Source from sheet (Channel/Source/Campaign). */
 function getSource(lead: LeadRow): string | null {
-  const keys = ['source', 'Source', 'channel', 'Channel', 'platform', 'Platform', 'type', 'Type']
+  const keys = ['source', 'Source', 'channel', 'Channel', 'Lead Source', 'Campaign', 'platform', 'Platform', 'type', 'Type']
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') return String(v).trim()
@@ -509,9 +522,9 @@ function getSource(lead: LeadRow): string | null {
   return null
 }
 
-/** Owner/user from sheet. */
+/** Owner/user from sheet (Team member/Rep/Agent). */
 function getOwner(lead: LeadRow): string | null {
-  const keys = ['user', 'User', 'owner', 'Owner', 'team member', 'Team Member', 'TeamMember', 'Assigned To', 'assigned to']
+  const keys = ['user', 'User', 'owner', 'Owner', 'Rep', 'Agent', 'team member', 'Team Member', 'TeamMember', 'Assigned To', 'assigned to']
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') return String(v).trim()
@@ -877,7 +890,7 @@ async function syncCustomerLeads(
         if (useExternalId) {
           const recordsToProcess = leads.map((lead) => {
             const stableId = generateStableLeadId(lead, customer.id)
-            const externalId = getExternalId(lead, customer.id)
+            const externalId = getExternalId(lead, customer.id, gidUsed)
             return {
               id: stableId,
               customerId: customer.id,

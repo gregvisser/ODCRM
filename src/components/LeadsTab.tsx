@@ -94,8 +94,8 @@ function LeadsTab() {
     channelOfLead: '',
   })
   
-  // Default visible columns as requested by user
-  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'OD Team Member', 'Channel of Lead', 'Status', 'Score']
+  // Default visible columns: Channel/Owner from API (source/owner) or sheet data
+  const defaultVisibleColumns = ['Account', 'Date', 'Company', 'Channel', 'Owner', 'Status', 'Score']
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(defaultVisibleColumns))
   const [selectedLeads, setSelectedLeads] = useState<Set<string>>(new Set())
   const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
@@ -285,25 +285,7 @@ function LeadsTab() {
     }
   }
 
-  // Check if 6 hours have passed since last refresh
-  const shouldRefresh = useCallback((): boolean => {
-    const lastRefreshTime = loadLastRefreshFromStorage()
-    if (!lastRefreshTime) return true // No previous refresh, allow refresh
-    
-    const now = new Date()
-    const sixHoursInMs = 6 * 60 * 60 * 1000
-    const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime()
-    
-    return timeSinceLastRefresh >= sixHoursInMs
-  }, [])
-
   const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
-    // Check if we should refresh (unless forced)
-    if (!forceRefresh && !shouldRefresh()) {
-      console.log('Skipping refresh - less than 6 hours since last refresh')
-      return
-    }
-
     setLoading(true)
     setError(null)
 
@@ -325,19 +307,28 @@ function LeadsTab() {
     } finally {
       setLoading(false)
     }
-  }, [shouldRefresh])
+  }, [])
 
   useEffect(() => {
-    // Only load fresh data on mount if 6 hours have passed since last refresh
-    // Otherwise, use cached data
-    loadLeads(false)
+    loadLeads(true)
 
-    // Auto-refresh every 6 hours
+    const pollInterval = 60 * 1000 // 60 seconds
     const refreshInterval = setInterval(() => {
-      loadLeads(false)
-    }, 6 * 60 * 60 * 1000) // 6 hours in milliseconds
+      const customerId = localStorage.getItem('currentCustomerId')
+      if (customerId) {
+        console.log('[LeadsTab] Polling leads (60s)')
+        loadLeads(true)
+      }
+    }, pollInterval)
 
-    // Listen for navigation events (but only refresh if 6 hours have passed)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        const customerId = localStorage.getItem('currentCustomerId')
+        if (customerId) loadLeads(true)
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
     const handleNavigate = (event: { accountName?: string } | undefined) => {
       const accountName = event?.accountName
       if (accountName) {
@@ -351,7 +342,6 @@ function LeadsTab() {
       }
     }
 
-    // When accounts (or their sheet URLs) change, force refresh so dependent views stay in sync.
     const handleAccountsUpdated = () => {
       console.log('Accounts updated, refreshing leads...')
       loadLeads(true)
@@ -362,10 +352,11 @@ function LeadsTab() {
 
     return () => {
       clearInterval(refreshInterval)
+      document.removeEventListener('visibilitychange', handleVisibility)
       offNavigate()
       offAccountsUpdated()
     }
-  }, [lastRefresh, loadLeads, toast])
+  }, [loadLeads, toast])
 
   if (loading) {
     return (
@@ -403,7 +394,7 @@ function LeadsTab() {
     )
   }
 
-  // Define the specific column order - minimized to essential columns
+  // Define the specific column order. Channel = source, Owner = owner (from API or sheet data).
   const columnOrder = [
     'Account',
     'Week',
@@ -413,6 +404,8 @@ function LeadsTab() {
     'Job Title',
     'Industry',
     'Contact Info',
+    'Channel',
+    'Owner',
     'OD Team Member',
     'OD Call Recording Available',
     'Channel of Lead',
@@ -420,14 +413,14 @@ function LeadsTab() {
     'Score',
   ]
 
-  // Get all unique column headers from all leads (excluding accountName)
+  // Get all unique column headers; ensure Channel/Owner from API (source/owner) are included
   const allColumns = new Set<string>()
   leads.forEach((lead) => {
     Object.keys(lead).forEach((key) => {
-      if (key !== 'accountName') {
-        allColumns.add(key)
-      }
+      if (key !== 'accountName') allColumns.add(key)
     })
+    if (lead.source != null || lead['Channel of Lead'] != null || lead['Channel'] != null) allColumns.add('Channel')
+    if (lead.owner != null || lead['OD Team Member'] != null || lead['Owner'] != null) allColumns.add('Owner')
   })
 
   // Build columns array: specified order first, then any remaining columns
@@ -462,14 +455,17 @@ function LeadsTab() {
     setVisibleColumns(newVisible)
   }
 
+  const getChannelValue = (lead: Lead) =>
+    lead.source ?? lead['Channel of Lead'] ?? lead['Channel'] ?? ''
+  const getOwnerValue = (lead: Lead) =>
+    lead.owner ?? lead['OD Team Member'] ?? lead['Owner'] ?? ''
+
   // Filter leads based on filter criteria
   const filteredLeads = leads
     .filter((lead) => {
       if (filters.account && lead.accountName !== filters.account) return false
-      if (
-        filters.channelOfLead &&
-        lead['Channel of Lead']?.toLowerCase().includes(filters.channelOfLead.toLowerCase()) === false
-      )
+      const channel = getChannelValue(lead)
+      if (filters.channelOfLead && !channel?.toLowerCase().includes(filters.channelOfLead.toLowerCase()))
         return false
       return true
     })
@@ -510,9 +506,7 @@ function LeadsTab() {
   // Get unique values for filter dropdowns
   const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
   const uniqueChannels = Array.from(
-    new Set(
-      leads.map((lead) => lead['Channel of Lead']).filter((c) => c && c.trim() !== ''),
-    ),
+    new Set(leads.map((lead) => getChannelValue(lead)).filter((c) => c && c.trim() !== '')),
   ).sort()
 
   // Helper to check if a value is a URL
@@ -563,9 +557,13 @@ function LeadsTab() {
           <Text color="gray.600">
             Live data from the database ({filteredLeads.length} of {leads.length} leads)
           </Text>
-          <Text fontSize="xs" color="gray.500" mt={1}>
-            Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 6 hours
-          </Text>
+          <HStack spacing={2} mt={1} fontSize="xs" color="gray.500">
+            <Text>Last synced: {formatLastRefresh(lastRefresh)}</Text>
+            {Date.now() - lastRefresh.getTime() > 2 * 60 * 1000 && (
+              <Badge size="sm" colorScheme="yellow">Stale</Badge>
+            )}
+            <Text>• Polls every 60s</Text>
+          </HStack>
         </Box>
         <HStack spacing={2}>
           {selectedLeads.size > 0 && (
@@ -828,8 +826,13 @@ function LeadsTab() {
                           </Td>
                         )
                       }
-                      // Get value from lead object using the column name
-                      const value = String(lead[col] || '')
+                      // Channel/Owner from API (source/owner) or sheet data
+                      const value =
+                        col === 'Channel'
+                          ? getChannelValue(lead)
+                          : col === 'Owner'
+                            ? getOwnerValue(lead)
+                            : String(lead[col] || '')
                       return (
                         <Td key={col} px={3} py={2} whiteSpace="normal" maxW="300px" bg={isSelected ? 'blue.50' : 'white'}>
                           {formatCell(value, col)}

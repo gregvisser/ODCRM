@@ -617,6 +617,12 @@ model LeadRecord {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // Sheet-derived fields for display and filtering
+  externalId String?  // Sheet row id or "sheetGid:rowNumber"
+  occurredAt DateTime? // Lead date from sheet (Date, Created At, etc.)
+  source     String?  // Channel/Source from sheet
+  owner      String?  // Owner/Team member from sheet
+
   // Lead status and conversion tracking
   status     LeadStatus @default(new)
   score      Int?       // Lead score based on channel/outcome (0-100)
@@ -629,7 +635,11 @@ model LeadRecord {
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   convertedContact Contact? @relation("LeadToContact", fields: [convertedToContactId], references: [id])
 
+  @@unique([customerId, externalId])
   @@index([customerId])
+  @@index([customerId, occurredAt])
+  @@index([customerId, source])
+  @@index([customerId, owner])
   @@index([accountName])
   @@index([updatedAt])
   @@index([status])

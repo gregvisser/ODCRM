@@ -132,7 +132,10 @@ router.get('/', async (req, res) => {
       },
     }
     if (since && !isNaN(since.getTime())) {
-      where.updatedAt = { gte: since }
+      where.OR = [
+        { occurredAt: { gte: since } },
+        { occurredAt: null, createdAt: { gte: since } },
+      ]
     }
 
     const leadRows = await prisma.leadRecord.findMany({
@@ -151,6 +154,9 @@ router.get('/', async (req, res) => {
           id: lead.id,
           accountName: lead.accountName,
           customerId: lead.customerId,
+          occurredAt: lead.occurredAt?.toISOString() ?? null,
+          source: lead.source ?? null,
+          owner: lead.owner ?? null,
           status: lead.status,
           score: lead.score,
           convertedToContactId: lead.convertedToContactId,
@@ -164,6 +170,9 @@ router.get('/', async (req, res) => {
           id: lead.id,
           accountName: lead.accountName,
           customerId: lead.customerId,
+          occurredAt: lead.occurredAt?.toISOString() ?? null,
+          source: lead.source ?? null,
+          owner: lead.owner ?? null,
           status: lead.status,
           error: 'Failed to map lead data',
         }
