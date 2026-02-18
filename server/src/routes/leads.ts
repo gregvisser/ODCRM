@@ -442,6 +442,13 @@ function buildWhereCreatedAtOnly (customerId: string, start: Date, end: Date) {
   return { customerId, createdAt: { gte: start, lt: end } } as const
 }
 
+function isInvalidGroupByFieldError (err: unknown): boolean {
+  const msg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
+    ? (err as any).message
+    : ''
+  return msg.includes('Invalid value for argument `by`') && msg.includes('Expected LeadRecordScalarFieldEnum')
+}
+
 /**
  * GET /api/leads/metrics
  * Customer: prefer x-customer-id header; use query customerId only when header absent. Always verify customer exists.
@@ -544,14 +551,32 @@ router.get('/metrics', async (req, res) => {
       }
     }
 
+    async function safeBreakdown (
+      op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy',
+      by: 'source' | 'owner',
+      start: Date,
+      end: Date,
+    ) {
+      try {
+        return await groupByDateFallback(op, by, start, end)
+      } catch (err) {
+        if (isInvalidGroupByFieldError(err)) {
+          console.warn(JSON.stringify({ tag: 'leadsMetricsBreakdownUnsupported', reqId, customerId, op, by }))
+          return [] as Array<any>
+        }
+        logErr(op, err)
+        throw err
+      }
+    }
+
     const [countToday, countWeek, countMonth, total, bySourceRows, byOwnerRows, syncState] = await Promise.all([
       countWithDateFallback('counts.today', todayStart, todayEnd),
       countWithDateFallback('counts.week', weekStart, weekEnd),
       countWithDateFallback('counts.month', monthStart, monthEnd),
       prisma.leadRecord.count({ where: { customerId } })
         .catch(err => { logErr('counts.total', err); throw err }),
-      groupByDateFallback('breakdown.source.groupBy', 'source', weekStart, weekEnd),
-      groupByDateFallback('breakdown.owner.groupBy', 'owner', weekStart, weekEnd),
+      safeBreakdown('breakdown.source.groupBy', 'source', weekStart, weekEnd),
+      safeBreakdown('breakdown.owner.groupBy', 'owner', weekStart, weekEnd),
       prisma.leadSyncState.findUnique({ where: { customerId } })
         .catch(err => { logErr('lastSyncState', err); throw err }),
     ])
