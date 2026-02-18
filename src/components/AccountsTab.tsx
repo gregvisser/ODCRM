@@ -7477,11 +7477,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         <HStack spacing={2} align="flex-start">
                           <EditableField
                             value={selectedAccount.clientLeadsSheetUrl || ''}
-                            onSave={(value) => {
+                            onSave={async (value) => {
                               const nextValue = typeof value === 'string' ? value.trim() : ''
-                              updateAccount(selectedAccount.name, {
-                                clientLeadsSheetUrl: nextValue,
-                              })
+                              const customerId = selectedAccount._databaseId
+                              if (customerId) {
+                                await applyCustomerPatchAndRefresh({
+                                  customerId,
+                                  patch: { leadsReportingUrl: nextValue || null },
+                                  localAccountUpdates: { clientLeadsSheetUrl: nextValue },
+                                })
+                              } else {
+                                updateAccount(selectedAccount.name, { clientLeadsSheetUrl: nextValue })
+                              }
                               stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')
                             }}
                             onCancel={() => stopEditing(selectedAccount.name, 'clientLeadsSheetUrl')}
