@@ -6093,12 +6093,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                             DEFCON {selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
                           </Badge>
                         )}
-                        {/* Debug: Show customerId in dev mode */}
-                        {process.env.NODE_ENV === 'development' && (
-                          <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono">
-                            ID: {selectedCustomerId || 'none'}
-                          </Badge>
-                        )}
+                        <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono" title="Customer ID">
+                          ID: {selectedCustomerId || '—'}
+                        </Badge>
                       </HStack>
                     </Stack>
                   </HStack>
