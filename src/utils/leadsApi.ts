@@ -3,6 +3,18 @@ import { OdcrmStorageKeys } from '../platform/keys'
 import { setItem, setJson } from '../platform/storage'
 import { api } from './api'
 
+/** Headers for leads API requests. customerId is required – no "ALL" mode. */
+export function getCustomerHeaders (customerId?: string | null): Record<string, string> {
+  if (!customerId || String(customerId).trim() === '') {
+    console.warn('Missing customerId – leads request blocked')
+    throw new Error('Missing customerId')
+  }
+  return {
+    'Content-Type': 'application/json',
+    'x-customer-id': String(customerId).trim(),
+  }
+}
+
 export type LeadRecord = {
   [key: string]: string
   id?: string
@@ -44,23 +56,15 @@ export type ScoreLeadResponse = {
   status: string
 }
 
-export async function fetchLeadsFromApi(customerId?: string): Promise<LeadsApiResponse> {
-  // For leads, we want to fetch from all customers with reporting URLs
-  // So we make a direct fetch without the customer ID header unless specified
+export async function fetchLeadsFromApi(customerId: string): Promise<LeadsApiResponse> {
+  if (!customerId || String(customerId).trim() === '') {
+    console.warn('Missing customerId – leads fetch blocked')
+    throw new Error('Missing customerId')
+  }
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const url = customerId 
-    ? `${API_BASE_URL}/api/leads?customerId=${customerId}`
-    : `${API_BASE_URL}/api/leads`
-  
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  }
-  
-  if (customerId) {
-    headers['X-Customer-Id'] = customerId
-  }
-  
-  const response = await fetch(url, { headers })
+  const id = String(customerId).trim()
+  const url = `${API_BASE_URL}/api/leads?customerId=${encodeURIComponent(id)}`
+  const response = await fetch(url, { headers: getCustomerHeaders(id) })
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: response.statusText }))
@@ -87,18 +91,16 @@ export function persistLeadsToStorage(leads: LeadRecord[], lastSyncAt?: string |
 // Convert a lead to a contact
 export async function convertLeadToContact(
   leadId: string,
-  sequenceId?: string
+  sequenceId?: string,
+  customerId?: string
 ): Promise<{ data?: ConvertLeadResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
-  
+  const id = customerId || localStorage.getItem('currentCustomerId') || ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/convert?customerId=${customerId}`, {
+    const headers = getCustomerHeaders(id)
+    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/convert?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
-      },
+      headers,
       body: JSON.stringify({ sequenceId }),
     })
 
@@ -117,18 +119,16 @@ export async function convertLeadToContact(
 // Bulk convert leads to contacts
 export async function bulkConvertLeads(
   leadIds: string[],
-  sequenceId?: string
+  sequenceId?: string,
+  customerId?: string
 ): Promise<{ data?: BulkConvertResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
-  
+  const id = customerId || localStorage.getItem('currentCustomerId') || ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/bulk-convert?customerId=${customerId}`, {
+    const headers = getCustomerHeaders(id)
+    const response = await fetch(`${API_BASE_URL}/api/leads/bulk-convert?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
-      },
+      headers,
       body: JSON.stringify({ leadIds, sequenceId }),
     })
 
@@ -145,17 +145,14 @@ export async function bulkConvertLeads(
 }
 
 // Score a lead
-export async function scoreLead(leadId: string): Promise<{ data?: ScoreLeadResponse; error?: string }> {
+export async function scoreLead(leadId: string, customerId?: string): Promise<{ data?: ScoreLeadResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
-  
+  const id = customerId || localStorage.getItem('currentCustomerId') || ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/score?customerId=${customerId}`, {
+    const headers = getCustomerHeaders(id)
+    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/score?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
-      },
+      headers,
     })
 
     if (!response.ok) {
@@ -173,18 +170,16 @@ export async function scoreLead(leadId: string): Promise<{ data?: ScoreLeadRespo
 // Update lead status
 export async function updateLeadStatus(
   leadId: string,
-  status: 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted'
+  status: 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted',
+  customerId?: string
 ): Promise<{ data?: LeadRecord; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
-  
+  const id = customerId || localStorage.getItem('currentCustomerId') || ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/status?customerId=${customerId}`, {
+    const headers = getCustomerHeaders(id)
+    const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/status?customerId=${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
-      },
+      headers,
       body: JSON.stringify({ status }),
     })
 
@@ -201,15 +196,13 @@ export async function updateLeadStatus(
 }
 
 // Export leads to CSV
-export async function exportLeadsToCSV(): Promise<{ data?: Blob; error?: string }> {
+export async function exportLeadsToCSV(customerId?: string): Promise<{ data?: Blob; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
-  
+  const id = customerId || localStorage.getItem('currentCustomerId') || ''
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/export/csv?customerId=${customerId}`, {
-      headers: {
-        'X-Customer-Id': customerId,
-      },
+    const headers = getCustomerHeaders(id)
+    const response = await fetch(`${API_BASE_URL}/api/leads/export/csv?customerId=${encodeURIComponent(id)}`, {
+      headers,
     })
 
     if (!response.ok) {
@@ -315,14 +308,14 @@ export type SyncMetrics = {
 // Get sync status
 export async function getSyncStatus(customerId?: string): Promise<{ data?: SyncStatus; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
-  
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) {
+    console.warn('Missing customerId – getSyncStatus blocked')
+    return { error: 'Missing customerId' }
+  }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/sync/status?customerId=${id}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': id,
-      },
+    const response = await fetch(`${API_BASE_URL}/api/leads/sync/status?customerId=${encodeURIComponent(id)}`, {
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -363,15 +356,15 @@ export async function getAllSyncStatuses(): Promise<{ data?: { total: number; st
 // Trigger manual sync
 export async function triggerSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
-  
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) {
+    console.warn('Missing customerId – triggerSync blocked')
+    return { error: 'Missing customerId' }
+  }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/sync/trigger?customerId=${id}`, {
+    const response = await fetch(`${API_BASE_URL}/api/leads/sync/trigger?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': id,
-      },
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -389,15 +382,15 @@ export async function triggerSync(customerId?: string): Promise<{ data?: { succe
 // Pause sync
 export async function pauseSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
-  
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) {
+    console.warn('Missing customerId – pauseSync blocked')
+    return { error: 'Missing customerId' }
+  }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/sync/pause?customerId=${id}`, {
+    const response = await fetch(`${API_BASE_URL}/api/leads/sync/pause?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': id,
-      },
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -415,15 +408,15 @@ export async function pauseSync(customerId?: string): Promise<{ data?: { success
 // Resume sync
 export async function resumeSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
-  
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) {
+    console.warn('Missing customerId – resumeSync blocked')
+    return { error: 'Missing customerId' }
+  }
   try {
-    const response = await fetch(`${API_BASE_URL}/api/leads/sync/resume?customerId=${id}`, {
+    const response = await fetch(`${API_BASE_URL}/api/leads/sync/resume?customerId=${encodeURIComponent(id)}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': id,
-      },
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -441,18 +434,15 @@ export async function resumeSync(customerId?: string): Promise<{ data?: { succes
 // Get sync metrics
 export async function getSyncMetrics(customerId?: string): Promise<{ data?: SyncMetrics; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
-  
+  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  if (!id) {
+    console.warn('Missing customerId – getSyncMetrics blocked')
+    return { error: 'Missing customerId' }
+  }
   try {
-    const url = id 
-      ? `${API_BASE_URL}/api/leads/sync/metrics?customerId=${id}`
-      : `${API_BASE_URL}/api/leads/sync/metrics`
-    
+    const url = `${API_BASE_URL}/api/leads/sync/metrics?customerId=${encodeURIComponent(id)}`
     const response = await fetch(url, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': id,
-      },
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -487,10 +477,15 @@ function setCached<T>(key: string, data: T): void {
   })
 }
 
-// Cached lead count fetch
-export async function fetchLeadsFromApiCached(customerId?: string, forceRefresh: boolean = false): Promise<LeadsApiResponse> {
-  const cacheKey = `leads_${customerId || 'all'}`
-  
+// Cached lead count fetch (requires customerId)
+export async function fetchLeadsFromApiCached(customerId: string, forceRefresh: boolean = false): Promise<LeadsApiResponse> {
+  if (!customerId || String(customerId).trim() === '') {
+    console.warn('Missing customerId – fetchLeadsFromApiCached blocked')
+    throw new Error('Missing customerId')
+  }
+  const id = String(customerId).trim()
+  const cacheKey = `leads_${id}`
+
   if (!forceRefresh) {
     const cached = getCached<LeadsApiResponse>(cacheKey)
     if (cached) {
@@ -498,10 +493,10 @@ export async function fetchLeadsFromApiCached(customerId?: string, forceRefresh:
     }
   }
 
-  const result = await fetchLeadsFromApi(customerId)
+  const result = await fetchLeadsFromApi(id)
   if (result.leads) {
     setCached(cacheKey, result)
   }
-  
+
   return result
 }

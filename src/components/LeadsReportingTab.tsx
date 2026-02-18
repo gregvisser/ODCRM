@@ -32,6 +32,7 @@ import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson } from '../platform/storage'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
 type Lead = {
@@ -107,8 +108,14 @@ function LeadsReportingTab() {
     setError(null)
 
     try {
+      const customerId = getCurrentCustomerId('')
+      if (!customerId) {
+        console.warn('Missing customerId – leads fetch skipped')
+        setLoading(false)
+        return
+      }
       console.log('Fetching leads from server (source of truth)...')
-      const { leads: serverLeads, lastSyncAt } = await fetchLeadsFromApi()
+      const { leads: serverLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
 
       // Server succeeded - this is our source of truth
       setLeads(serverLeads)

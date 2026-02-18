@@ -106,29 +106,30 @@ router.get('/health', async (req, res) => {
 })
 
 router.get('/', async (req, res) => {
-  try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    let customerId = queryCustomerId
+  const queryCustomerId = (req.query.customerId as string)?.trim()
+  const headerCustomerId = (req.header('x-customer-id') || '').trim()
+  const customerId = headerCustomerId || queryCustomerId
 
-    if (!customerId && headerCustomerId) {
-      const exists = await prisma.customer.findUnique({
-        where: { id: headerCustomerId },
-        select: { id: true },
-      })
-      if (exists) {
-        customerId = headerCustomerId
-      }
+  if (!customerId) {
+    return res.status(400).json({ error: 'customerId is required' })
+  }
+
+  const since = req.query.since ? new Date(String(req.query.since)) : null
+
+  try {
+    const exists = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { id: true },
+    })
+    if (!exists) {
+      return res.status(404).json({ error: 'Customer not found' })
     }
-    const since = req.query.since ? new Date(String(req.query.since)) : null
 
     const where: any = {
+      customerId,
       customer: {
         leadsReportingUrl: { not: null },
       },
-    }
-    if (customerId) {
-      where.customerId = customerId
     }
     if (since && !isNaN(since.getTime())) {
       where.updatedAt = { gte: since }
@@ -139,16 +140,8 @@ router.get('/', async (req, res) => {
       orderBy: { updatedAt: 'desc' },
     })
 
-    let lastSyncAt: Date | null = null
-    if (customerId) {
-      const state = await prisma.leadSyncState.findUnique({ where: { customerId } })
-      lastSyncAt = state?.lastSuccessAt || state?.lastSyncAt || null
-    } else {
-      const latest = await prisma.leadSyncState.findFirst({
-        orderBy: { lastSuccessAt: 'desc' },
-      })
-      lastSyncAt = latest?.lastSuccessAt || latest?.lastSyncAt || null
-    }
+    const state = await prisma.leadSyncState.findUnique({ where: { customerId } })
+    const lastSyncAt = state?.lastSuccessAt || state?.lastSyncAt || null
 
     const leads = leadRows.map((lead) => {
       try {
@@ -179,7 +172,7 @@ router.get('/', async (req, res) => {
 
     // Add comprehensive diagnostics logging
     console.log(`📊 LEADS API RESPONSE - ${new Date().toISOString()}`)
-    console.log(`   Customer ID: ${customerId || 'ALL'}`)
+    console.log(`   Customer ID: ${customerId}`)
     console.log(`   Since filter: ${since?.toISOString() || 'NONE'}`)
     console.log(`   Total leads in DB: ${leadRows.length}`)
     console.log(`   Last sync at: ${lastSyncAt?.toISOString() || 'NEVER'}`)

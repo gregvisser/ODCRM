@@ -309,6 +309,11 @@ function LeadsTab() {
 
     try {
       const customerId = localStorage.getItem('currentCustomerId') || undefined
+      if (!customerId) {
+        console.warn('Missing customerId – leads fetch skipped')
+        setLoading(false)
+        return
+      }
       const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
       setLeads(allLeads as Lead[])
       const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)

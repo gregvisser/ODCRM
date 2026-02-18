@@ -28,6 +28,7 @@ import { type Account } from '../../components/AccountsTab'
 import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
+import { getCurrentCustomerId } from '../../platform/stores/settings'
 import { fetchLeadsFromApi } from '../../utils/leadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 
@@ -218,11 +219,15 @@ export default function DashboardsHomePage() {
   }, [leads])
 
   const refreshLeads = useCallback(async (forceRefresh: boolean) => {
-    // ALWAYS fetch from API (database is source of truth)
+    const customerId = getCurrentCustomerId('')
+    if (!customerId) {
+      console.warn('Missing customerId – dashboard leads fetch skipped')
+      return
+    }
     setLoading(true)
     try {
       console.log('🔄 Dashboard: Fetching fresh leads from API...')
-      const response = await fetchLeadsFromApi()
+      const response = await fetchLeadsFromApi(customerId)
       const allLeads = response.leads || []
       const lastSyncAt = response.lastSyncAt
       

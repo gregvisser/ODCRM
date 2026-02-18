@@ -54,6 +54,7 @@ import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 
 // Load accounts from storage (includes any edits made through the UI)
@@ -315,9 +316,13 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     setError(null)
 
     try {
-      // Fetch leads from API - it already filters for accounts with Google Sheets URLs
-      // No need to filter again based on localStorage (database is single source of truth)
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+      const customerId = getCurrentCustomerId('')
+      if (!customerId) {
+        console.warn('Missing customerId – leads fetch skipped')
+        setLoading(false)
+        return
+      }
+      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
       setLeads(allLeads)
       const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
       setLastRefresh(refreshTime)

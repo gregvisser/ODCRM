@@ -71,6 +71,7 @@ import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { api } from '../utils/api'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import MigrateAccountsPanel from './MigrateAccountsPanel'
@@ -5465,7 +5466,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     setLeadsError(null)
 
     try {
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi()
+      const customerId = getCurrentCustomerId('')
+      if (!customerId) {
+        console.warn('Missing customerId – leads fetch skipped')
+        setLeadsLoading(false)
+        return
+      }
+      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
       const sheetAccounts = new Set(
         (accountsData ?? [])
           .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
