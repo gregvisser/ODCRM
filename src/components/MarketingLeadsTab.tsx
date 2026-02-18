@@ -55,7 +55,8 @@ import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
+import { fetchLeadsFromApi, persistLeadsToStorage, getSyncStatus, type SyncStatus } from '../utils/leadsApi'
+import { fetchAllCustomers, fetchMetricsForCustomers, type AggregateMetricsResult } from '../utils/leadsAggregate'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -184,7 +185,10 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     return stored || new Date()
   })
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
-  
+  const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
+  const [aggregateLoading, setAggregateLoading] = useState(false)
+  const [syncStatusForEmpty, setSyncStatusForEmpty] = useState<SyncStatus | null>(null)
+
   // Advanced filtering state
   const [filters, setFilters] = useState<FilterState>(() => {
     // Load from URL params if available
@@ -393,6 +397,35 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       clearInterval(refreshInterval)
     }
   }, [loadLeads])
+
+  // Aggregate metrics for "All Accounts Combined" (poll 60s + visibility)
+  const loadAggregate = useCallback(async () => {
+    setAggregateLoading(true)
+    try {
+      const customers = await fetchAllCustomers()
+      const result = await fetchMetricsForCustomers(customers)
+      setAggregateMetrics(result)
+    } catch (e) {
+      console.warn('Aggregate metrics fetch failed:', e)
+    } finally {
+      setAggregateLoading(false)
+    }
+  }, [])
+  useEffect(() => {
+    loadAggregate()
+    const poll = setInterval(loadAggregate, 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === 'visible') loadAggregate() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(poll); document.removeEventListener('visibilitychange', onVisible) }
+  }, [loadAggregate])
+
+  // When leads are empty, fetch sync status so we can show lastError / lastSyncAt
+  useEffect(() => {
+    if (leads.length > 0) { setSyncStatusForEmpty(null); return }
+    const customerId = getCurrentCustomerId('')
+    if (!customerId) return
+    getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
+  }, [leads.length])
 
   // Get all unique column headers from all leads (excluding accountName)
   const allColumns = new Set<string>()
@@ -728,6 +761,17 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
       }
     }
   }, [leads])
+
+  // For "All Accounts Combined" card: use API aggregate when available, else in-memory unifiedAnalytics
+  const displayUnifiedPeriodMetrics = useMemo(() => {
+    const base = unifiedAnalytics.periodMetrics
+    if (!aggregateMetrics) return base
+    return {
+      today: { ...base.today, actual: aggregateMetrics.totals.today, breakdown: aggregateMetrics.breakdownBySource, teamBreakdown: aggregateMetrics.breakdownByOwner },
+      week: { ...base.week, actual: aggregateMetrics.totals.week, breakdown: aggregateMetrics.breakdownBySource, teamBreakdown: aggregateMetrics.breakdownByOwner },
+      month: { ...base.month, actual: aggregateMetrics.totals.month, breakdown: aggregateMetrics.breakdownBySource, teamBreakdown: aggregateMetrics.breakdownByOwner },
+    }
+  }, [unifiedAnalytics, aggregateMetrics])
 
   // Account-specific performance analytics
   const accountPerformance = useMemo(() => {
@@ -1265,6 +1309,24 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
 
   return (
     <Stack spacing={{ base: 4, md: 6, lg: 8 }} px={{ base: 0, md: 0 }} pb={8}>
+      {leads.length === 0 && syncStatusForEmpty && (
+        <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Why 0 leads?</AlertTitle>
+            <AlertDescription>
+              Last sync: {syncStatusForEmpty.lastSyncAt ? new Date(syncStatusForEmpty.lastSyncAt).toLocaleString() : 'Never'}
+              {syncStatusForEmpty.lastSuccessAt && ` · Last success: ${new Date(syncStatusForEmpty.lastSuccessAt).toLocaleString()}`}
+              {syncStatusForEmpty.lastError && (
+                <Text mt={2} fontWeight="semibold" color="orange.600">Sync error: {syncStatusForEmpty.lastError}</Text>
+              )}
+              {(syncStatusForEmpty.isPaused || syncStatusForEmpty.isRunning) && (
+                <Text mt={1} fontSize="sm">Status: {syncStatusForEmpty.isPaused ? 'Paused' : ''} {syncStatusForEmpty.isRunning ? 'Sync in progress' : ''}</Text>
+              )}
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
       {/* Header Section */}
       <Box
         bg="white"
@@ -1330,6 +1392,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             <Heading size={{ base: "sm", md: "md" }} color="gray.800" mt={1}>
               All Accounts Combined
             </Heading>
+            <Text fontSize="xs" color="gray.500" mt={1}>Totals from all accounts with sheets. Select an account to view individual lead rows.</Text>
           </Box>
           <Text fontSize="sm" color="gray.500" fontWeight="medium">
             {new Date().toLocaleDateString('en-GB', {
@@ -1340,9 +1403,30 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
             })}
           </Text>
         </Stack>
+        {aggregateLoading && (
+          <HStack mb={4} fontSize="sm" color="gray.500">
+            <Spinner size="sm" />
+            <Text>Updating combined metrics…</Text>
+          </HStack>
+        )}
+        {aggregateMetrics && (
+          <Box mb={4} fontSize="sm" color="gray.600">
+            <Text>Data health: Newest sync {aggregateMetrics.lastSyncNewest ? new Date(aggregateMetrics.lastSyncNewest).toLocaleString() : '—'} · Oldest sync {aggregateMetrics.lastSyncOldest ? new Date(aggregateMetrics.lastSyncOldest).toLocaleString() : '—'}</Text>
+            {aggregateMetrics.errors.length > 0 && (
+              <Box mt={2}>
+                <Text fontWeight="semibold" color="orange.600">{aggregateMetrics.errors.length} customer(s) have sync errors</Text>
+                <Stack as="ul" mt={1} pl={4} spacing={0.5}>
+                  {aggregateMetrics.errors.map((e) => (
+                    <Text key={e.customerId} as="li" fontSize="xs">{e.name}: {e.message}</Text>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+          </Box>
+        )}
         <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={{ base: 3, md: 4 }}>
           {(['today', 'week', 'month'] as const).map((periodKey) => {
-            const period = unifiedAnalytics.periodMetrics[periodKey]
+            const period = displayUnifiedPeriodMetrics[periodKey]
             // Ensure variance calculation handles NaN/undefined safely
             const actual = period.actual || 0
             const target = period.target || 0

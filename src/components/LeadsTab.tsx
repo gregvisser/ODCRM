@@ -47,7 +47,9 @@ import {
   updateLeadStatus,
   exportLeadsToCSV,
   getSequences,
-  type LeadRecord
+  getSyncStatus,
+  type LeadRecord,
+  type SyncStatus
 } from '../utils/leadsApi'
 
 type Lead = LeadRecord & {
@@ -101,8 +103,17 @@ function LeadsTab() {
   const [convertingLeadId, setConvertingLeadId] = useState<string | null>(null)
   const [bulkConverting, setBulkConverting] = useState(false)
   const [sequences, setSequences] = useState<Array<{ id: string; name: string; description?: string }>>([])
-  
+  const [syncStatusForEmpty, setSyncStatusForEmpty] = useState<SyncStatus | null>(null)
+
   const toast = useToast()
+
+  // When leads are empty, fetch sync status to show lastError / lastSyncAt
+  useEffect(() => {
+    if (leads.length > 0) { setSyncStatusForEmpty(null); return }
+    const customerId = localStorage.getItem('currentCustomerId') || ''
+    if (!customerId) return
+    getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
+  }, [leads.length])
 
   // Load sequences on mount
   useEffect(() => {
@@ -383,14 +394,34 @@ function LeadsTab() {
 
   if (leads.length === 0) {
     return (
-      <Box textAlign="center" py={12}>
-        <Text fontSize="lg" color="gray.600">
-          No leads data available
-        </Text>
-        <Text fontSize="sm" color="gray.500" mt={2}>
-          Configure Client Leads sheets in account settings to view leads data
-        </Text>
-      </Box>
+      <Stack spacing={4} py={12}>
+        <Box textAlign="center">
+          <Text fontSize="lg" color="gray.600">
+            No leads data available
+          </Text>
+          <Text fontSize="sm" color="gray.500" mt={2}>
+            Configure Client Leads sheets in account settings to view leads data
+          </Text>
+        </Box>
+        {syncStatusForEmpty && (
+          <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg" maxW="2xl" mx="auto">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Sync status</AlertTitle>
+              <AlertDescription>
+                Last sync: {syncStatusForEmpty.lastSyncAt ? new Date(syncStatusForEmpty.lastSyncAt).toLocaleString() : 'Never'}
+                {syncStatusForEmpty.lastSuccessAt && ` · Last success: ${new Date(syncStatusForEmpty.lastSuccessAt).toLocaleString()}`}
+                {syncStatusForEmpty.lastError && (
+                  <Text mt={2} fontWeight="semibold" color="orange.600">Error: {syncStatusForEmpty.lastError}</Text>
+                )}
+                {(syncStatusForEmpty.isPaused || syncStatusForEmpty.isRunning) && (
+                  <Text mt={1} fontSize="sm">{syncStatusForEmpty.isPaused ? 'Paused' : ''} {syncStatusForEmpty.isRunning ? 'Sync in progress' : ''}</Text>
+                )}
+              </AlertDescription>
+            </Box>
+          </Alert>
+        )}
+      </Stack>
     )
   }
 
