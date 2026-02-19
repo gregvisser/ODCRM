@@ -267,6 +267,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       where: { customerId_sourceType: { customerId, sourceType } },
     })
     if (!config?.spreadsheetId) {
+      res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
       return res.json({ batches: [] })
     }
     const grouped = await prisma.leadSourceRowSeen.groupBy({
@@ -274,11 +275,9 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       where: {
         customerId,
         sourceType,
-        spreadsheetId: config.spreadsheetId,
         batchKey: { startsWith: date },
       },
       _count: { _all: true },
-      _min: { firstSeenAt: true },
       _max: { firstSeenAt: true },
     })
     const batches = grouped
@@ -287,14 +286,13 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
         const parsed = parseBatchKey(g.batchKey)
         return {
           batchKey: g.batchKey,
-          date: parsed.date,
           client: parsed.date === '' ? '(unknown batch)' : parsed.client,
           jobTitle: parsed.jobTitle,
           count: g._count._all,
-          firstSeenMin: g._min.firstSeenAt?.toISOString() ?? '',
-          firstSeenMax: g._max.firstSeenAt?.toISOString() ?? '',
+          lastSeenAt: g._max.firstSeenAt?.toISOString() ?? '',
         }
       })
+    res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
     res.json({ batches })
   } catch (e) {
     const err = e as Error & { status?: number }

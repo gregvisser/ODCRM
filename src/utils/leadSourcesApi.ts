@@ -28,12 +28,13 @@ export interface LeadSourcePollResponse {
 
 export interface LeadSourceBatch {
   batchKey: string
-  date: string
+  date?: string
   client: string
   jobTitle: string
   count: number
-  firstSeenMin: string
-  firstSeenMax: string
+  firstSeenMin?: string
+  firstSeenMax?: string
+  lastSeenAt?: string
 }
 
 export interface LeadSourceBatchesResponse {

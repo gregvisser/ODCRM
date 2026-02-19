@@ -507,8 +507,7 @@ export default function LeadSourcesTabNew({
                                         </Td>
                                       ))}
                                     </Tr>
-                                  ))
-                                )}
+                          )))}
                               </Tbody>
                             </Table>
                           </Box>
