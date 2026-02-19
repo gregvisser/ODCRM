@@ -10,5 +10,6 @@ export * as campaignWorkflowsStore from './stores/campaignWorkflows'
 export * as usersStore from './stores/users'
 export * as settingsStore from './stores/settings'
 export * as headerImageStore from './stores/headerImage'
+export * as leadSourceSelectionStore from './stores/leadSourceSelection'
 
 

@@ -67,8 +67,9 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore } from '../../../platform'
+import { settingsStore, leadSourceSelectionStore } from '../../../platform'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -187,6 +188,35 @@ const SequencesTab: React.FC = () => {
   const { isOpen: isStartOpen, onOpen: onStartOpen, onClose: onStartClose } = useDisclosure()
   const cancelStartRef = useRef<HTMLButtonElement | null>(null)
   const toast = useToast()
+  const [leadSourceSelection, setLeadSourceSelection] = useState(leadSourceSelectionStore.getLeadSourceBatchSelection())
+  const { isOpen: isPreviewOpen, onOpen: onPreviewOpen, onClose: onPreviewClose } = useDisclosure()
+  const [previewContacts, setPreviewContacts] = useState<Record<string, string>[]>([])
+  const [previewColumns, setPreviewColumns] = useState<string[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  useEffect(() => {
+    const unsub = leadSourceSelectionStore.onLeadSourceBatchSelectionChanged(setLeadSourceSelection)
+    return unsub
+  }, [])
+
+  const handlePreviewRecipients = async () => {
+    const sel = leadSourceSelectionStore.getLeadSourceBatchSelection()
+    const cid = selectedCustomerId || settingsStore.getCurrentCustomerId('')
+    if (!sel || !cid) return
+    setPreviewLoading(true)
+    setPreviewContacts([])
+    setPreviewColumns([])
+    onPreviewOpen()
+    try {
+      const data = await getLeadSourceContacts(cid, sel.sourceType, sel.batchKey, 1, 50)
+      setPreviewContacts(data.contacts)
+      setPreviewColumns(data.columns)
+    } catch (e) {
+      toast({ title: 'Preview failed', description: e instanceof Error ? e.message : 'Error', status: 'error' })
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
 
   useEffect(() => {
     loadCustomers()
@@ -971,6 +1001,24 @@ const SequencesTab: React.FC = () => {
         </Alert>
       )}
 
+      {leadSourceSelection && (
+        <Alert status="info" mb={4}>
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>Lead source batch selected</AlertTitle>
+            <AlertDescription>
+              {leadSourceSelection.sourceType} — {leadSourceSelection.batchKey}. Preview recipients or clear to choose another.
+            </AlertDescription>
+          </Box>
+          <Button size="sm" colorScheme="blue" mr={2} onClick={handlePreviewRecipients} isLoading={previewLoading}>
+            Preview recipients
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => leadSourceSelectionStore.clearLeadSourceBatchSelection()}>
+            Clear
+          </Button>
+        </Alert>
+      )}
+
       {!templatesLoading && !templatesError && templates.length === 0 && selectedCustomerId && (
         <Alert status="warning" mb={4}>
           <AlertIcon />
@@ -1477,6 +1525,52 @@ const SequencesTab: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Modal isOpen={isPreviewOpen} onClose={onPreviewClose} size="full" scrollBehavior="inside">
+        <ModalOverlay />
+        <ModalContent maxW="90vw">
+          <ModalHeader>Preview recipients — Lead source batch</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            {previewLoading ? (
+              <Text>Loading...</Text>
+            ) : (
+              <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
+                <Table size="sm" minW="max-content">
+                  <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                    <Tr>
+                      {previewColumns.map((col) => (
+                        <Th key={col} whiteSpace="nowrap">
+                          {col}
+                        </Th>
+                      ))}
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {previewContacts.length === 0 ? (
+                      <Tr>
+                        <Td colSpan={previewColumns.length || 1} color="gray.500">
+                          No contacts
+                        </Td>
+                      </Tr>
+                    ) : (
+                      previewContacts.map((row, i) => (
+                        <Tr key={i}>
+                          {previewColumns.map((col) => (
+                            <Td key={col} whiteSpace="nowrap">
+                              {row[col] ?? ''}
+                            </Td>
+                          ))}
+                        </Tr>
+                      ))
+                    )}
+                  </Tbody>
+                </Table>
+              </Box>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </Box>
   )
 }

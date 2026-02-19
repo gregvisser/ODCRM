@@ -17,6 +17,7 @@ export type OdcrmEventName =
   | 'navigateToLeads'
   | 'customerCreated'
   | 'customerUpdated'
+  | 'leadSourceBatchSelectionChanged'
 
 export function emit<TDetail = unknown>(name: OdcrmEventName, detail?: TDetail): void {
   if (typeof window === 'undefined') return

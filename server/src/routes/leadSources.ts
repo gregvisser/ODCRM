@@ -5,20 +5,27 @@
 
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { prisma as prismaTyped } from '../lib/prisma.js'
-
-/** Local type alias when Prisma LeadSourceType enum is not generated (no schema change). */
-type LeadSourceType = string
-
-const prisma = prismaTyped as any
+import { LeadSourceType } from '@prisma/client'
+import { prisma } from '../lib/prisma.js'
 import { csvToMappedRows } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, formatDateBucketEuropeLondon, parseBatchKey } from '../services/leadSourcesBatch.js'
 
 const router = Router()
-const SOURCE_TYPES: LeadSourceType[] = ['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK']
+
 const CACHE_TTL_MS = 45 * 1000 // 30–60s in-memory cache for CSV-derived contacts
 const FETCH_TIMEOUT_MS = 15 * 1000
+
+const SOURCE_TYPES: LeadSourceType[] = [
+  'COGNISM',
+  'APOLLO',
+  'SOCIAL',
+  'BLACKBOOK',
+]
+
+function isValidSourceType(value: string): value is LeadSourceType {
+  return SOURCE_TYPES.includes(value as LeadSourceType)
+}
 
 function getCustomerId(req: Request): string {
   const id = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
@@ -30,15 +37,12 @@ function getCustomerId(req: Request): string {
   return id.trim()
 }
 
-function isValidSourceType(source: string): source is LeadSourceType {
-  return SOURCE_TYPES.includes(source as LeadSourceType)
-}
-
 function getCsvExportUrl(spreadsheetId: string, gid?: string | null): string {
   const g = gid && /^\d+$/.test(gid) ? gid : '0'
   return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${g}`
 }
 
+/** Fetches CSV from external URL only (Google Sheets export). No self-fetch; frontend calls POST /poll explicitly. */
 async function fetchCsvFromUrl(url: string): Promise<string> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
@@ -99,7 +103,8 @@ router.get('/', async (req: Request, res: Response) => {
   }
 })
 
-// POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName (guard with admin/auth in production)
+// POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
+// TODO: In production, guard with admin/auth middleware; customerId is from getCustomerId(req) only.
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
   displayName: z.string().trim().min(1),
@@ -107,10 +112,11 @@ const connectSchema = z.object({
 router.post('/:sourceType/connect', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const { sourceType } = req.params
-    if (!isValidSourceType(sourceType)) {
+    const { sourceType: sourceTypeRaw } = req.params
+    if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
+    const sourceType = sourceTypeRaw
     const { sheetUrl, displayName } = connectSchema.parse(req.body)
     const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
     if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
@@ -120,10 +126,10 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
     const csvUrl = getCsvExportUrl(spreadsheetId, gid)
     await fetchCsvFromUrl(csvUrl)
     const config = await prisma.leadSourceSheetConfig.upsert({
-      where: { customerId_sourceType: { customerId, sourceType: sourceType as LeadSourceType } },
+      where: { customerId_sourceType: { customerId, sourceType } },
       create: {
         customerId,
-        sourceType: sourceType as LeadSourceType,
+        sourceType,
         spreadsheetId,
         gid,
         displayName,
@@ -150,12 +156,13 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
 router.post('/:sourceType/poll', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const { sourceType } = req.params
-    if (!isValidSourceType(sourceType)) {
+    const { sourceType: sourceTypeRaw } = req.params
+    if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
+    const sourceType = sourceTypeRaw
     const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType: sourceType as LeadSourceType } },
+      where: { customerId_sourceType: { customerId, sourceType } },
     })
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
@@ -176,7 +183,7 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
       const batchKey = buildBatchKey(now, client, jobTitle)
       toCreate.push({
         customerId,
-        sourceType: sourceType as LeadSourceType,
+        sourceType,
         spreadsheetId: config.spreadsheetId,
         fingerprint,
         batchKey,
@@ -204,10 +211,10 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
     })
   } catch (e) {
     const customerId = getCustomerId(req)
-    const sourceType = req.params.sourceType
-    if (isValidSourceType(sourceType)) {
+    const sourceTypeRaw = req.params.sourceType
+    if (isValidSourceType(sourceTypeRaw)) {
       await prisma.leadSourceSheetConfig.updateMany({
-        where: { customerId, sourceType: sourceType as LeadSourceType },
+        where: { customerId, sourceType: sourceTypeRaw },
         data: { lastError: (e as Error).message },
       }).catch(() => {})
     }
@@ -220,13 +227,14 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
 router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const { sourceType } = req.params
+    const { sourceType: sourceTypeRaw } = req.params
     const date = (req.query.date as string) || formatDateBucketEuropeLondon(new Date())
-    if (!isValidSourceType(sourceType)) {
+    if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
+    const sourceType = sourceTypeRaw
     const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType: sourceType as LeadSourceType } },
+      where: { customerId_sourceType: { customerId, sourceType } },
     })
     if (!config?.spreadsheetId) {
       return res.json({ batches: [] })
@@ -234,7 +242,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
     const rows = await prisma.leadSourceRowSeen.findMany({
       where: {
         customerId,
-        sourceType: sourceType as LeadSourceType,
+        sourceType,
         spreadsheetId: config.spreadsheetId,
         batchKey: { startsWith: date },
       },
@@ -274,12 +282,13 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
 router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const { sourceType } = req.params
-    if (!isValidSourceType(sourceType)) {
-      return res.status(400).json({ error: 'Invalid sourceType' })
+    const { sourceType: sourceTypeRaw } = req.params
+    if (!isValidSourceType(sourceTypeRaw)) {
+      return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
+    const sourceType = sourceTypeRaw
     const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType: sourceType as LeadSourceType } },
+      where: { customerId_sourceType: { customerId, sourceType } },
     })
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
@@ -297,16 +306,17 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
 router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const { sourceType } = req.params
+    const { sourceType: sourceTypeRaw } = req.params
     const batchKey = (req.query.batchKey as string)?.trim()
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1)
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string, 10) || 50))
-    if (!isValidSourceType(sourceType)) {
+    if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
+    const sourceType = sourceTypeRaw
     if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
     const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType: sourceType as LeadSourceType } },
+      where: { customerId_sourceType: { customerId, sourceType } },
     })
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
@@ -314,7 +324,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
       where: {
         customerId,
-        sourceType: sourceType as LeadSourceType,
+        sourceType,
         spreadsheetId: config.spreadsheetId,
         batchKey,
       },
@@ -334,7 +344,10 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       setCachedContacts(customerId, sourceType, columnKeys, flat)
       cached = { columnKeys, rows: flat }
     }
-    const filtered = cached.rows.filter((r: Record<string, string>) => fpSet.has((r as any).__fp))
+    const filtered = cached.rows.filter((r: Record<string, string>) => {
+      const fp = r['__fp']
+      return typeof fp === 'string' && fpSet.has(fp)
+    })
     const total = filtered.length
     const start = (page - 1) * pageSize
     const slice = filtered.slice(start, start + pageSize).map((r: Record<string, string>) => {

@@ -153,6 +153,8 @@ model Customer {
   suppressionEntries    SuppressionEntry[]
   sheetSourceConfigs    SheetSourceConfig[]
   contactSourceRows     ContactSourceRow[]
+  leadSourceSheetConfigs LeadSourceSheetConfig[]
+  leadSourceRowSeen      LeadSourceRowSeen[]
 
   @@index([id])
   @@index([domain])
@@ -815,4 +817,59 @@ model SheetSourceConfig {
   @@index([customerId])
   @@index([source])
   @@map("sheet_source_configs")
+}
+
+// ============================================================================
+// LEAD SOURCES REBUILD (4 sheets: Cognism, Apollo, Social, Blackbook)
+// Metadata only; contacts are NOT persisted. Sheet is immutable source of truth.
+// ============================================================================
+
+enum LeadSourceType {
+  COGNISM
+  APOLLO
+  SOCIAL
+  BLACKBOOK
+}
+
+// Sheet configuration per customer per source (metadata only)
+model LeadSourceSheetConfig {
+  id             String         @id @default(cuid())
+  customerId     String
+  sourceType     LeadSourceType
+  spreadsheetId  String         // Google spreadsheet ID (no full URL stored for UI)
+  gid            String?        // Sheet tab GID for CSV export
+  displayName    String         // User-facing name; never show spreadsheetId in UI
+  isLocked       Boolean        @default(true)
+  lastFetchAt    DateTime?
+  lastError      String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, sourceType])
+  @@index([customerId])
+  @@map("lead_source_sheet_configs")
+}
+
+// Row first-seen tracking for virtual batching (fingerprint = email | linkedin | name+company+job)
+model LeadSourceRowSeen {
+  id            String         @id @default(cuid())
+  customerId    String
+  sourceType    LeadSourceType
+  spreadsheetId String
+  fingerprint   String         // Normalized: email, or linkedin URL, or "firstName|lastName|company|jobTitle"
+  batchKey      String         // YYYY-MM-DD|client=<norm>|job=<norm> (Europe/London date + client + jobTitle)
+  firstSeenAt   DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, sourceType, spreadsheetId, fingerprint])
+  @@index([customerId])
+  @@index([customerId, sourceType])
+  @@index([customerId, sourceType, firstSeenAt])
+  @@index([customerId, sourceType, batchKey])
+  @@map("lead_source_row_seen")
 }
