@@ -37,10 +37,29 @@ function getCustomerId(req: Request): string {
   return id.trim()
 }
 
+/** True if URL is a published CSV link (/d/e/..., /pub, or output=csv). */
+function isPublishedCsvUrl(url: string): boolean {
+  const u = url.toLowerCase()
+  return u.includes('/spreadsheets/d/e/') || u.includes('/pub') || u.includes('output=csv')
+}
+
 function getCsvExportUrl(spreadsheetId: string, gid?: string | null): string {
+  if (spreadsheetId.startsWith('http://') || spreadsheetId.startsWith('https://')) {
+    try {
+      const parsed = new URL(spreadsheetId)
+      parsed.searchParams.set('output', 'csv')
+      parsed.searchParams.set('single', 'true')
+      return parsed.toString()
+    } catch {
+      return spreadsheetId
+    }
+  }
   const g = gid && /^\d+$/.test(gid) ? gid : '0'
   return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${g}`
 }
+
+const HTML_ERROR_MSG =
+  'Sheet URL returned HTML. This usually means the sheet is not published / not accessible, or the URL format is unsupported. If you are using a published link, it must contain output=csv.'
 
 /** Fetches CSV from external URL only (Google Sheets export). No self-fetch; frontend calls POST /poll explicitly. */
 async function fetchCsvFromUrl(url: string): Promise<string> {
@@ -52,11 +71,12 @@ async function fetchCsvFromUrl(url: string): Promise<string> {
       signal: controller.signal,
     })
     clearTimeout(timeout)
-    const contentType = (res.headers.get('content-type') || '').toLowerCase()
-    if (contentType.includes('text/html')) throw new Error('URL returned HTML instead of CSV')
     const text = await res.text()
-    if (text.trim().toLowerCase().includes('<html')) throw new Error('URL returned HTML instead of CSV')
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+    const contentType = (res.headers.get('content-type') || '').toLowerCase()
+    if (contentType.includes('text/html') || text.trim().toLowerCase().includes('<html')) {
+      throw new Error(HTML_ERROR_MSG)
+    }
     return text
   } catch (e) {
     clearTimeout(timeout)
@@ -111,18 +131,43 @@ const connectSchema = z.object({
 })
 router.post('/:sourceType/connect', async (req: Request, res: Response) => {
   try {
+    const { sheetUrl, displayName } = connectSchema.parse(req.body)
+
     const customerId = getCustomerId(req)
     const { sourceType: sourceTypeRaw } = req.params
     if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
     const sourceType = sourceTypeRaw
-    const { sheetUrl, displayName } = connectSchema.parse(req.body)
-    const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
-    if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
-    const spreadsheetId = idMatch[1]
-    const gidMatch = sheetUrl.match(/gid=(\d+)/)
-    const gid = gidMatch ? gidMatch[1] : null
+
+    let spreadsheetId: string
+    let gid: string | null = null
+
+    if (isPublishedCsvUrl(sheetUrl)) {
+      spreadsheetId = sheetUrl.trim()
+      try {
+        const parsed = new URL(spreadsheetId)
+        const gidParam = parsed.searchParams.get('gid')
+        if (gidParam && /^\d+$/.test(gidParam)) gid = gidParam
+      } catch {
+        // keep gid null
+      }
+    } else {
+      const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
+      if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
+      spreadsheetId = idMatch[1]
+      try {
+        const parsed = new URL(sheetUrl)
+        const fromQuery = parsed.searchParams.get('gid')
+        const fromHash = parsed.hash ? /gid=(\d+)/.exec(parsed.hash)?.[1] : null
+        const gidVal = fromQuery || fromHash
+        if (gidVal && /^\d+$/.test(gidVal)) gid = gidVal
+      } catch {
+        const gidMatch = sheetUrl.match(/gid=(\d+)/)
+        gid = gidMatch ? gidMatch[1] : null
+      }
+    }
+
     const csvUrl = getCsvExportUrl(spreadsheetId, gid)
     await fetchCsvFromUrl(csvUrl)
     const config = await prisma.leadSourceSheetConfig.upsert({
@@ -293,9 +338,24 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
-    const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
-    const url = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
-    res.redirect(302, url)
+    const isFullUrl =
+      config.spreadsheetId.startsWith('http://') || config.spreadsheetId.startsWith('https://')
+    let redirectUrl: string
+    if (isFullUrl && config.spreadsheetId.toLowerCase().includes('/pub')) {
+      try {
+        const parsed = new URL(config.spreadsheetId)
+        parsed.searchParams.set('output', 'html')
+        redirectUrl = parsed.toString()
+      } catch {
+        redirectUrl = config.spreadsheetId
+      }
+    } else if (isFullUrl) {
+      redirectUrl = config.spreadsheetId
+    } else {
+      const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
+      redirectUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
+    }
+    res.redirect(302, redirectUrl)
   } catch (e) {
     const err = e as Error & { status?: number }
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed' })
