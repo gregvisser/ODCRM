@@ -1320,17 +1320,22 @@ router.get('/sync/validate', async (req, res) => {
       urlConfigured: true,
     }
     if (result.ok) {
+      payload.finalUrl = result.finalUrl
       payload.httpStatus = result.httpStatus
       payload.contentType = result.contentType
+      payload.firstBytes = result.firstBytes
       payload.rowCount = result.rowCount
       payload.headerKeys = result.headerKeys
       payload.detected = result.detected
       payload.sampleRow = result.sampleRow
       if (result.sheetGid) payload.sheetGid = result.sheetGid
     } else {
-      payload.httpStatus = result.httpStatus
+      if (result.finalUrl !== undefined) payload.finalUrl = result.finalUrl
+      if (result.httpStatus !== undefined) payload.httpStatus = result.httpStatus
+      if (result.contentType !== undefined) payload.contentType = result.contentType
+      if (result.firstBytes !== undefined) payload.firstBytes = result.firstBytes
       payload.error = result.error
-      payload.hint = result.hint
+      if (result.hint) payload.hint = result.hint
     }
     return res.json(payload)
   } catch (error) {

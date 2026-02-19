@@ -65,28 +65,46 @@ function extractGid(url: string): string | null {
   }
 }
 
-/** Normalize header: trim, lowercase, collapse spaces. Map common sheet column names to canonical keys so getters find values. */
+/** Normalize header for matching: trim, lowercase, collapse whitespace, remove punctuation. */
+function normalizeHeaderForMatch(header: string): string {
+  return header
+    .trim()
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** Map common sheet column names to canonical keys. Source / Owner / OccurredAt / ExternalId. */
 function toCanonicalHeader(header: string): string | null {
-  const normalized = header.trim().toLowerCase().replace(/\s+/g, ' ').trim()
+  const normalized = normalizeHeaderForMatch(header)
   if (!normalized) return null
   const aliases: Record<string, string> = {
+    // Source (Channel)
     'channel of lead': 'source',
     'lead source': 'source',
     'channel': 'source',
     'source': 'source',
     'campaign': 'source',
+    'utm source': 'source',
+    'marketing channel': 'source',
+    // Owner (OD Team)
     'od team member': 'owner',
-    'team member': 'owner',
-    'rep': 'owner',
+    'od team': 'owner',
     'owner': 'owner',
     'user': 'owner',
-    'assigned to': 'owner',
+    'rep': 'owner',
     'agent': 'owner',
+    'assigned to': 'owner',
+    'salesperson': 'owner',
+    'team member': 'owner',
+    // OccurredAt (Date)
     'created': 'occurredAt',
     'timestamp': 'occurredAt',
     'created at': 'occurredAt',
     'date': 'occurredAt',
     'added': 'occurredAt',
+    // ExternalId
     'lead id': 'externalId',
     'external id': 'externalId',
     'id': 'externalId',
@@ -184,17 +202,30 @@ async function fetchLeadsFromSheetUrl(
   const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
 
   let lastError: Error | null = null
-  const diagnostics = {
+  const diagnostics: {
+    sheetId: string
+    extractedGid?: string
+    gidsAttempted: string[]
+    fetchDuration: number
+    csvSize: number
+    totalRows: number
+    validHeaders: string[]
+    usedKeys?: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
+    filteredRows: number
+    finalLeads: number
+    errors: string[]
+    retryCount: number
+  } = {
     sheetId,
     extractedGid,
-    gidsAttempted: [] as string[],
+    gidsAttempted: [],
     fetchDuration: 0,
     csvSize: 0,
     totalRows: 0,
-    validHeaders: [] as string[],
+    validHeaders: [],
     filteredRows: 0,
     finalLeads: 0,
-    errors: [] as string[],
+    errors: [],
     retryCount: 0,
   }
 
@@ -317,6 +348,12 @@ async function fetchLeadsFromSheetUrl(
       const headers = rows[headerRowIndex].map((h) => h.trim())
       diagnostics.validHeaders = headers.filter(h => h && h.trim() !== '')
 
+      const occurredAtKey = headers.find((h) => toCanonicalHeader(h) === 'occurredAt') ?? null
+      const sourceKey = headers.find((h) => toCanonicalHeader(h) === 'source') ?? null
+      const ownerKey = headers.find((h) => toCanonicalHeader(h) === 'owner') ?? null
+      const externalIdKey = headers.find((h) => toCanonicalHeader(h) === 'externalId') ?? null
+      diagnostics.usedKeys = { occurredAtKey, sourceKey, ownerKey, externalIdKey }
+
       // Skip the header row and any rows before it
       const dataRows = rows.slice(headerRowIndex + 1)
 
@@ -428,21 +465,30 @@ async function fetchLeadsFromSheetUrl(
   throw lastError || new Error('Failed to fetch leads from Google Sheet')
 }
 
+const FIRST_BYTES_LEN = 200
+/** Safe preview of body: first N chars, control chars replaced by space. */
+function safeFirstBytes(text: string, maxLen: number = FIRST_BYTES_LEN): string {
+  const slice = (text || '').slice(0, maxLen)
+  return slice.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ' ')
+}
+
 /** Result of validating a sheet URL (no DB writes). Used by GET /api/leads/sync/validate. */
 export type ValidateSheetResult =
   | {
       ok: true
+      finalUrl: string
       httpStatus: number
       contentType: string
+      firstBytes: string
       rowCount: number
       headerKeys: string[]
       detected: { occurredAtKey: string | null; sourceKey: string | null; ownerKey: string | null; externalIdKey: string | null }
       sampleRow: Record<string, string>
     }
-  | { ok: false; httpStatus?: number; error: string; hint?: string }
+  | { ok: false; finalUrl?: string; httpStatus?: number; contentType?: string; firstBytes?: string; error: string; hint?: string }
 
 /**
- * Fetch and parse a sheet URL exactly like sync does; return headers + row count + one sample row.
+ * Fetch and parse a sheet URL exactly like sync does; return diagnostic-grade result.
  * No DB writes. Used for "Test sheet" validation.
  */
 export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetResult & { sheetGid?: string }> {
@@ -451,20 +497,22 @@ export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetR
     return { ok: false, error: 'Invalid Google Sheets URL format', hint: 'Use a full URL like https://docs.google.com/spreadsheets/d/...' }
   }
   const gid = extractGid(sheetUrl) || '0'
-  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+  const finalUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
 
   let response: Response
   try {
-    response = await fetch(csvUrl, {
+    response = await fetch(finalUrl, {
       headers: { Accept: 'text/csv, text/plain, */*', 'User-Agent': 'ODCRM-LeadsSync/2.0' },
       signal: AbortSignal.timeout(15000),
     })
   } catch (e: any) {
-    return { ok: false, error: e?.message || 'Sheet fetch failed', hint: 'Use a published-to-web CSV URL or ensure access is public.' }
+    return { ok: false, finalUrl, error: e?.message || 'Sheet fetch failed', hint: 'Use a published-to-web CSV URL or ensure access is public.' }
   }
 
   const httpStatus = response.status
   const contentType = response.headers.get('content-type') || ''
+  const csvText = await response.text()
+  const firstBytes = safeFirstBytes(csvText)
 
   if (!response.ok) {
     const hint =
@@ -473,19 +521,43 @@ export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetR
         : httpStatus === 404
           ? 'Check the sheet ID and gid in the URL.'
           : 'Use a published-to-web CSV URL or ensure access is public.'
-    return { ok: false, httpStatus, error: `Sheet fetch failed: ${response.status} ${response.statusText}`, hint }
+    return { ok: false, finalUrl, httpStatus, contentType, firstBytes, error: `Sheet fetch failed: ${response.status} ${response.statusText}`, hint }
   }
 
-  const csvText = await response.text()
+  const isHtmlByType = contentType.toLowerCase().includes('text/html')
+  const isHtmlByBody = firstBytes.toLowerCase().includes('<html')
+  if (isHtmlByType || isHtmlByBody) {
+    return {
+      ok: false,
+      finalUrl,
+      httpStatus: 200,
+      contentType,
+      firstBytes,
+      error: 'URL did not return CSV (got HTML)',
+      hint: 'Use Google Sheets publish-to-web CSV or /export?format=csv&gid=...',
+    }
+  }
+
   if (csvText.trim().startsWith('<!DOCTYPE') || csvText.trim().startsWith('<html')) {
-    return { ok: false, httpStatus: 200, error: 'Received HTML instead of CSV', hint: 'Publish the sheet to web (File → Share → Publish to web) as CSV.' }
+    return {
+      ok: false,
+      finalUrl,
+      httpStatus: 200,
+      contentType,
+      firstBytes,
+      error: 'URL did not return CSV (got HTML)',
+      hint: 'Use Google Sheets publish-to-web CSV or /export?format=csv&gid=...',
+    }
   }
 
   const rows = parseCsv(csvText)
   if (rows.length < 2) {
     return {
       ok: false,
+      finalUrl,
       httpStatus: 200,
+      contentType,
+      firstBytes,
       error: `Sheet returned ${rows.length} row(s) (need at least 2: headers + data)`,
       hint: 'Ensure the sheet has a header row and at least one data row.',
     }
@@ -521,8 +593,10 @@ export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetR
   return {
     ok: true,
     sheetGid: gid,
+    finalUrl,
     httpStatus: 200,
     contentType: contentType || 'text/csv',
+    firstBytes,
     rowCount: dataRows.length,
     headerKeys: headers,
     detected: { occurredAtKey, sourceKey, ownerKey, externalIdKey },
@@ -633,9 +707,9 @@ function getExternalId(lead: LeadRow, customerId: string, sheetGid?: string | nu
   return generateStableLeadId(lead, customerId)
 }
 
-/** Lead date from sheet for occurredAt; null if missing or unparseable. */
+/** Lead date from sheet for occurredAt; null if missing or unparseable. Prefer canonical then raw aliases. */
 function getOccurredAt(lead: LeadRow): Date | null {
-  const keys = ['Date', 'date', 'Created', 'Created At', 'createdAt', 'Added', 'Timestamp', 'First Meeting Date', 'Lead Date', 'lead date']
+  const keys = ['occurredAt', 'Date', 'date', 'Created', 'Created At', 'createdAt', 'Added', 'Timestamp', 'First Meeting Date', 'Lead Date', 'lead date']
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') {
@@ -646,9 +720,12 @@ function getOccurredAt(lead: LeadRow): Date | null {
   return null
 }
 
-/** Source from sheet (Channel/Source/Campaign). */
+/** Source from sheet (Channel/Source/Campaign). Prefer canonical then raw aliases. */
 function getSource(lead: LeadRow): string | null {
-  const keys = ['source', 'Source', 'channel', 'Channel', 'Lead Source', 'Campaign', 'platform', 'Platform', 'type', 'Type']
+  const keys = [
+    'source', 'Source', 'channel', 'Channel', 'Channel of Lead', 'Lead Source', 'Campaign',
+    'UTM Source', 'Marketing Channel', 'platform', 'Platform', 'type', 'Type',
+  ]
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') return String(v).trim()
@@ -656,9 +733,12 @@ function getSource(lead: LeadRow): string | null {
   return null
 }
 
-/** Owner/user from sheet (Team member/Rep/Agent). */
+/** Owner from sheet (OD Team Member/Rep/Agent). Prefer canonical then raw aliases. */
 function getOwner(lead: LeadRow): string | null {
-  const keys = ['user', 'User', 'owner', 'Owner', 'Rep', 'Agent', 'team member', 'Team Member', 'TeamMember', 'Assigned To', 'assigned to']
+  const keys = [
+    'owner', 'Owner', 'user', 'User', 'Rep', 'Agent', 'OD Team Member', 'OD Team',
+    'Team Member', 'TeamMember', 'Assigned To', 'assigned to', 'Salesperson',
+  ]
   for (const k of keys) {
     const v = lead[k]
     if (v != null && String(v).trim() !== '') return String(v).trim()
@@ -934,11 +1014,14 @@ async function syncCustomerLeads(
           lastSyncAt: syncStartedAt,
         },
       })
-      const headerKeys = (diagnostics.validHeaders || []).join(', ')
-      console.log(`   [leadsSync] customerId=${customer.id} sheetGid=${gidUsed} rowCount=0 detectedHeaders=${headerKeys || 'n/a'}`)
+      const usedKeys = diagnostics.usedKeys ?? {}
+      console.log(`   [leadsSync] customerId=${customer.id} sheetGid=${gidUsed} rowCount=0 usedKeys=${JSON.stringify(usedKeys)}`)
       onProgress?.({ percent: 100, message: zeroRowError })
       return
     }
+
+    const usedKeys = diagnostics.usedKeys ?? {}
+    console.log(`   [leadsSync] customerId=${customer.id} sheetGid=${gidUsed} rowCount=${leads.length} usedKeys=${JSON.stringify(usedKeys)}`)
 
     onProgress?.({ percent: 50, message: 'Calculating aggregations...' })
 
