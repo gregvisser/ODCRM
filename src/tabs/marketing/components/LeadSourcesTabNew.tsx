@@ -1,6 +1,7 @@
 /**
  * Lead Sources — 4 sheets (Cognism, Apollo, Social, Blackbook) as immutable source of truth.
- * Uses /api/lead-sources. No raw Google Sheet URLs in UI. Wide table for contacts.
+ * Uses /api/lead-sources only (batches + contacts). No /api/live/leads in this tab.
+ * Wide table for contacts.
  */
 
 import React, { useEffect, useState, useCallback } from 'react'
@@ -158,7 +159,8 @@ export default function LeadSourcesTabNew({
       setBatchesLoading(true)
       try {
         const data = await getLeadSourceBatches(customerId, viewBatchesSource, batchDate)
-        if (!cancelled) setBatches(data.batches)
+        const list = Array.isArray(data) ? data : (data?.batches ?? [])
+        if (!cancelled) setBatches(list)
       } catch {
         if (!cancelled) setBatches([])
       } finally {
@@ -226,7 +228,8 @@ export default function LeadSourcesTabNew({
       loadSources()
       if (viewBatchesSource === sourceType) {
         const data = await getLeadSourceBatches(customerId, sourceType, batchDate)
-        setBatches(data.batches)
+        const list = Array.isArray(data) ? data : (data?.batches ?? [])
+        setBatches(list)
       }
     } catch (e) {
       toast({ title: 'Poll failed', description: e instanceof Error ? e.message : 'Error', status: 'error', duration: 5000 })
@@ -507,7 +510,8 @@ export default function LeadSourcesTabNew({
                                         </Td>
                                       ))}
                                     </Tr>
-                          )))}
+                                  ))
+                                )}
                               </Tbody>
                             </Table>
                           </Box>
