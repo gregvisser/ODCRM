@@ -384,76 +384,87 @@ export default function LeadSourcesTabNew({
             </SimpleGrid>
 
             {viewBatchesSource && (
-              <Card>
-                <CardHeader>
-                  <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                    <Heading size="md">Batches — {SOURCE_LABELS[viewBatchesSource]}</Heading>
-                    <HStack>
-                      <FormControl width="auto">
-                        <FormLabel fontSize="sm">Date</FormLabel>
-                        <Input
-                          type="date"
-                          size="sm"
-                          value={batchDate}
-                          onChange={(e) => setBatchDate(e.target.value)}
-                          maxW="160px"
-                        />
-                      </FormControl>
-                      <Button size="sm" onClick={() => setViewBatchesSource(null)}>
-                        Back
-                      </Button>
-                    </HStack>
-                  </Flex>
-                </CardHeader>
-                <CardBody pt={0}>
-                  {batchesLoading && batches.length === 0 ? (
-                    <Spinner size="sm" />
-                  ) : batches.length === 0 ? (
-                    <Text color="gray.600">No batches for this date. Poll the source to detect rows.</Text>
-                  ) : (
+              <Box mt={6}>
+                <Flex justify="space-between" align="center" mb={3}>
+                  <Heading size="md">Batches — {SOURCE_LABELS[viewBatchesSource]}</Heading>
+                  <HStack>
+                    <FormControl width="auto">
+                      <FormLabel fontSize="sm">Date</FormLabel>
+                      <Input
+                        type="date"
+                        size="sm"
+                        value={batchDate}
+                        onChange={(e) => setBatchDate(e.target.value)}
+                        maxW="160px"
+                      />
+                    </FormControl>
+                    <Button size="sm" onClick={() => setViewBatchesSource(null)}>
+                      Back
+                    </Button>
+                  </HStack>
+                </Flex>
+                {batchesLoading && batches.length === 0 ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Box overflowX="auto" borderWidth="1px" borderRadius="md">
                     <Table size="sm">
                       <Thead>
                         <Tr>
                           <Th>Client</Th>
                           <Th>Job Title</Th>
-                          <Th>Count</Th>
+                          <Th isNumeric>Count</Th>
                           <Th>Last updated</Th>
-                          <Th></Th>
+                          <Th>Actions</Th>
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {batches.map((b) => (
-                          <Tr key={b.batchKey}>
-                            <Td>{b.client ?? '(none)'}</Td>
-                            <Td>{b.jobTitle ?? '(none)'}</Td>
-                            <Td>{b.count}</Td>
-                            <Td>{b.firstSeenMax ? new Date(b.firstSeenMax).toLocaleString() : '—'}</Td>
-                            <Td>
-                              <HStack spacing={2}>
-                                <Button
-                                  size="xs"
-                                  onClick={() => {
-                                    setContactsPage(1)
-                                    setContacts([])
-                                    setContactsColumns([])
-                                    setContactsTotal(0)
-                                    setContactsBatchKey({ sourceType: viewBatchesSource, batchKey: b.batchKey })
-                                  }}
-                                >
-                                  View contacts
-                                </Button>
-                                <Button size="xs" variant="outline" onClick={() => handleUseInSequence(b)}>
-                                  Use in sequence
-                                </Button>
-                              </HStack>
+                        {batches.length === 0 ? (
+                          <Tr>
+                            <Td colSpan={5} color="gray.500">
+                              No batches
                             </Td>
                           </Tr>
-                        ))}
+                        ) : (
+                          batches.map((b) => (
+                            <Tr key={b.batchKey}>
+                              <Td>{b.client ?? '(none)'}</Td>
+                              <Td>{b.jobTitle ?? '(none)'}</Td>
+                              <Td isNumeric>{b.count ?? 0}</Td>
+                              <Td>
+                                {b.lastSeenAt
+                                  ? new Date(b.lastSeenAt).toLocaleString()
+                                  : '—'}
+                              </Td>
+                              <Td>
+                                <HStack spacing={2}>
+                                  <Button
+                                    size="xs"
+                                    onClick={() => {
+                                      setContacts([])
+                                      setContactsColumns([])
+                                      setContactsTotal(0)
+                                      setContactsPage(1)
+                                      setContactsBatchKey({
+                                        sourceType: viewBatchesSource,
+                                        batchKey: b.batchKey,
+                                      })
+                                    }}
+                                  >
+                                    View contacts
+                                  </Button>
+                                  <Button size="xs" variant="outline" onClick={() => handleUseInSequence(b)}>
+                                    Use in sequence
+                                  </Button>
+                                </HStack>
+                              </Td>
+                            </Tr>
+                          ))
+                        )}
                       </Tbody>
                     </Table>
-                  )}
-                </CardBody>
-              </Card>
+                  </Box>
+                )}
+              </Box>
             )}
 
             {contactsBatchKey && (
