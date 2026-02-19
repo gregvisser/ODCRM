@@ -70,6 +70,7 @@ import { normalizeCustomersListResponse } from '../../../utils/normalizeApiRespo
 import { settingsStore, leadSourceSelectionStore } from '../../../platform'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
+import { visibleColumns } from '../../../utils/visibleColumns'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -1535,38 +1536,43 @@ const SequencesTab: React.FC = () => {
             {previewLoading ? (
               <Text>Loading...</Text>
             ) : (
-              <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
-                <Table size="sm" minW="max-content">
-                  <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
-                    <Tr>
-                      {previewColumns.map((col) => (
-                        <Th key={col} whiteSpace="nowrap">
-                          {col}
-                        </Th>
-                      ))}
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {previewContacts.length === 0 ? (
-                      <Tr>
-                        <Td colSpan={previewColumns.length || 1} color="gray.500">
-                          No contacts
-                        </Td>
-                      </Tr>
-                    ) : (
-                      previewContacts.map((row, i) => (
-                        <Tr key={i}>
-                          {previewColumns.map((col) => (
-                            <Td key={col} whiteSpace="nowrap">
-                              {row[col] ?? ''}
-                            </Td>
+              (() => {
+                const cols = previewContacts.length > 0 ? visibleColumns(previewColumns, previewContacts) : previewColumns
+                return (
+                  <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
+                    <Table size="sm" minW="max-content">
+                      <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                        <Tr>
+                          {cols.map((col) => (
+                            <Th key={col} whiteSpace="nowrap">
+                              {col}
+                            </Th>
                           ))}
                         </Tr>
-                      ))
-                    )}
-                  </Tbody>
-                </Table>
-              </Box>
+                      </Thead>
+                      <Tbody>
+                        {previewContacts.length === 0 ? (
+                          <Tr>
+                            <Td colSpan={cols.length || 1} color="gray.500">
+                              No contacts
+                            </Td>
+                          </Tr>
+                        ) : (
+                          previewContacts.map((row, i) => (
+                            <Tr key={i}>
+                              {cols.map((col) => (
+                                <Td key={col} whiteSpace="nowrap">
+                                  {row[col] ?? ''}
+                                </Td>
+                              ))}
+                            </Tr>
+                          ))
+                        )}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                )
+              })()
             )}
           </ModalBody>
         </ModalContent>

@@ -37,23 +37,17 @@ function getCustomerId(req: Request): string {
   return id.trim()
 }
 
+const PUBLISHED_LINK_REJECT_MESSAGE =
+  'Please paste the normal Google Sheets URL (…/spreadsheets/d/<ID>/edit). Do not use published CSV (/pub?output=csv) links.'
+
 /** True if URL is a published CSV link (/d/e/..., /pub, or output=csv). */
 function isPublishedCsvUrl(url: string): boolean {
   const u = url.toLowerCase()
   return u.includes('/spreadsheets/d/e/') || u.includes('/pub') || u.includes('output=csv')
 }
 
+/** Build CSV export URL. spreadsheetId is always a sheet ID (not a full URL). */
 function getCsvExportUrl(spreadsheetId: string, gid?: string | null): string {
-  if (spreadsheetId.startsWith('http://') || spreadsheetId.startsWith('https://')) {
-    try {
-      const parsed = new URL(spreadsheetId)
-      parsed.searchParams.set('output', 'csv')
-      parsed.searchParams.set('single', 'true')
-      return parsed.toString()
-    } catch {
-      return spreadsheetId
-    }
-  }
   const g = gid && /^\d+$/.test(gid) ? gid : '0'
   return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${g}`
 }
@@ -133,6 +127,10 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
   try {
     const { sheetUrl, displayName } = connectSchema.parse(req.body)
 
+    if (isPublishedCsvUrl(sheetUrl)) {
+      return res.status(400).json({ error: PUBLISHED_LINK_REJECT_MESSAGE })
+    }
+
     const customerId = getCustomerId(req)
     const { sourceType: sourceTypeRaw } = req.params
     if (!isValidSourceType(sourceTypeRaw)) {
@@ -140,32 +138,19 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
     }
     const sourceType = sourceTypeRaw
 
-    let spreadsheetId: string
+    const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
+    if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
+    const spreadsheetId = idMatch[1]
     let gid: string | null = null
-
-    if (isPublishedCsvUrl(sheetUrl)) {
-      spreadsheetId = sheetUrl.trim()
-      try {
-        const parsed = new URL(spreadsheetId)
-        const gidParam = parsed.searchParams.get('gid')
-        if (gidParam && /^\d+$/.test(gidParam)) gid = gidParam
-      } catch {
-        // keep gid null
-      }
-    } else {
-      const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
-      if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
-      spreadsheetId = idMatch[1]
-      try {
-        const parsed = new URL(sheetUrl)
-        const fromQuery = parsed.searchParams.get('gid')
-        const fromHash = parsed.hash ? /gid=(\d+)/.exec(parsed.hash)?.[1] : null
-        const gidVal = fromQuery || fromHash
-        if (gidVal && /^\d+$/.test(gidVal)) gid = gidVal
-      } catch {
-        const gidMatch = sheetUrl.match(/gid=(\d+)/)
-        gid = gidMatch ? gidMatch[1] : null
-      }
+    try {
+      const parsed = new URL(sheetUrl)
+      const fromQuery = parsed.searchParams.get('gid')
+      const fromHash = parsed.hash ? /gid=(\d+)/.exec(parsed.hash)?.[1] : null
+      const gidVal = fromQuery || fromHash
+      if (gidVal && /^\d+$/.test(gidVal)) gid = gidVal
+    } catch {
+      const gidMatch = sheetUrl.match(/gid=(\d+)/)
+      gid = gidMatch ? gidMatch[1] : null
     }
 
     const csvUrl = getCsvExportUrl(spreadsheetId, gid)
@@ -323,7 +308,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   }
 })
 
-// GET /api/lead-sources/:sourceType/open-sheet — redirect to sheet (no spreadsheetId in client)
+// GET /api/lead-sources/:sourceType/open-sheet — redirect to sheet (spreadsheetId is always an ID)
 router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
@@ -338,23 +323,8 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
-    const isFullUrl =
-      config.spreadsheetId.startsWith('http://') || config.spreadsheetId.startsWith('https://')
-    let redirectUrl: string
-    if (isFullUrl && config.spreadsheetId.toLowerCase().includes('/pub')) {
-      try {
-        const parsed = new URL(config.spreadsheetId)
-        parsed.searchParams.set('output', 'html')
-        redirectUrl = parsed.toString()
-      } catch {
-        redirectUrl = config.spreadsheetId
-      }
-    } else if (isFullUrl) {
-      redirectUrl = config.spreadsheetId
-    } else {
-      const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
-      redirectUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
-    }
+    const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
+    const redirectUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
     res.redirect(302, redirectUrl)
   } catch (e) {
     const err = e as Error & { status?: number }
@@ -391,6 +361,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       select: { fingerprint: true },
     })
     const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
+    const rowSeenCount = fingerprintsInBatch.length
     let cached = getCachedContacts(customerId, sourceType)
     if (!cached) {
       const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
@@ -409,6 +380,15 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       return typeof fp === 'string' && fpSet.has(fp)
     })
     const total = filtered.length
+    if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_LEAD_SOURCES === '1') {
+      console.debug('[lead-sources contacts]', {
+        batchKey,
+        rowSeenCount,
+        fpSetSize: fpSet.size,
+        mappedRowsCount: cached.rows.length,
+        filteredRowsCount: filtered.length,
+      })
+    }
     const start = (page - 1) * pageSize
     const slice = filtered.slice(start, start + pageSize).map((r: Record<string, string>) => {
       const { __fp, ...rest } = r

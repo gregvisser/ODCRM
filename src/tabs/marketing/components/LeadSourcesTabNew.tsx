@@ -57,6 +57,7 @@ import {
   type LeadSourceType,
   type LeadSourceBatch,
 } from '../../../utils/leadSourcesApi'
+import { visibleColumns } from '../../../utils/visibleColumns'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const SOURCE_LABELS: Record<LeadSourceType, string> = {
@@ -92,8 +93,14 @@ export default function LeadSourcesTabNew({
   const [connectUrl, setConnectUrl] = useState('')
   const [connectName, setConnectName] = useState('')
   const [connectSubmitting, setConnectSubmitting] = useState(false)
+  const [connectUrlError, setConnectUrlError] = useState<string | null>(null)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
+
+  const isPublishedOrCsvUrl = (url: string): boolean => {
+    const u = url.toLowerCase().trim()
+    return u.includes('/spreadsheets/d/e/') || u.includes('/pub') || u.includes('output=csv')
+  }
 
   const loadCustomers = useCallback(async () => {
     const res = await api.get('/api/customers')
@@ -223,11 +230,17 @@ export default function LeadSourcesTabNew({
     setConnectSource(sourceType)
     setConnectName(SOURCE_LABELS[sourceType])
     setConnectUrl('')
+    setConnectUrlError(null)
     onConnectOpen()
   }
 
   const submitConnect = async () => {
     if (!connectSource || !connectUrl.trim() || !connectName.trim()) return
+    if (isPublishedOrCsvUrl(connectUrl)) {
+      setConnectUrlError('Use the normal sheet URL (…/spreadsheets/d/<ID>/edit), not a published CSV link.')
+      return
+    }
+    setConnectUrlError(null)
     setConnectSubmitting(true)
     try {
       await connectLeadSource(customerId, connectSource, connectUrl.trim(), connectName.trim())
@@ -411,6 +424,9 @@ export default function LeadSourcesTabNew({
                                   size="xs"
                                   onClick={() => {
                                     setContactsPage(1)
+                                    setContacts([])
+                                    setContactsColumns([])
+                                    setContactsTotal(0)
                                     setContactsBatchKey({ sourceType: viewBatchesSource, batchKey: b.batchKey })
                                   }}
                                 >
@@ -445,46 +461,51 @@ export default function LeadSourcesTabNew({
                     <Spinner size="sm" />
                   ) : (
                     <>
-                      <Box
-                        overflowX="auto"
-                        overflowY="auto"
-                        maxH="60vh"
-                        borderWidth="1px"
-                        borderRadius="md"
-                        bg="white"
-                        _dark={{ bg: 'gray.800' }}
-                      >
-                        <Table size="sm" layout="fixed" minW="max-content">
-                          <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
-                            <Tr>
-                              {contactsColumns.map((col) => (
-                                <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
-                                  {col}
-                                </Th>
-                              ))}
-                            </Tr>
-                          </Thead>
-                          <Tbody>
-                            {contacts.length === 0 ? (
-                              <Tr>
-                                <Td colSpan={contactsColumns.length || 1} color="gray.500">
-                                  No contacts
-                                </Td>
-                              </Tr>
-                            ) : (
-                              contacts.map((row, i) => (
-                                <Tr key={i}>
-                                  {contactsColumns.map((col) => (
-                                    <Td key={col} whiteSpace="nowrap" minW="120px" maxW="200px" overflow="hidden" textOverflow="ellipsis">
-                                      {row[col] ?? ''}
-                                    </Td>
+                      {(() => {
+                        const contactsCols = contacts.length > 0 ? visibleColumns(contactsColumns, contacts) : contactsColumns
+                        return (
+                          <Box
+                            overflowX="auto"
+                            overflowY="auto"
+                            maxH="60vh"
+                            borderWidth="1px"
+                            borderRadius="md"
+                            bg="white"
+                            _dark={{ bg: 'gray.800' }}
+                          >
+                            <Table size="sm" layout="fixed" minW="max-content">
+                              <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                                <Tr>
+                                  {contactsCols.map((col) => (
+                                    <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
+                                      {col}
+                                    </Th>
                                   ))}
                                 </Tr>
-                              ))
-                            )}
-                          </Tbody>
-                        </Table>
-                      </Box>
+                              </Thead>
+                              <Tbody>
+                                {contacts.length === 0 ? (
+                                  <Tr>
+                                    <Td colSpan={Math.max(1, contactsCols.length)} color="gray.500">
+                                      {contactsTotal > 0 ? 'No rows in this page (pagination)' : 'No contacts'}
+                                    </Td>
+                                  </Tr>
+                                ) : (
+                                  contacts.map((row, i) => (
+                                    <Tr key={i}>
+                                      {contactsCols.map((col) => (
+                                        <Td key={col} whiteSpace="nowrap" minW="120px" maxW="200px" overflow="hidden" textOverflow="ellipsis">
+                                          {row[col] ?? ''}
+                                        </Td>
+                                      ))}
+                                    </Tr>
+                                  ))
+                                )}
+                              </Tbody>
+                            </Table>
+                          </Box>
+                        )
+                      })()}
                       <Flex justify="space-between" align="center" mt={4}>
                         <Text fontSize="sm" color="gray.600">
                           Page {contactsPage} of {Math.ceil(contactsTotal / contactsPageSize) || 1} ({contactsTotal} total)
@@ -521,13 +542,25 @@ export default function LeadSourcesTabNew({
           <ModalHeader>Connect sheet — {connectSource && SOURCE_LABELS[connectSource]}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <FormControl isRequired mb={3}>
+            <FormControl isRequired mb={3} isInvalid={!!connectUrlError}>
               <FormLabel>Sheet URL</FormLabel>
               <Input
                 placeholder="https://docs.google.com/spreadsheets/d/..."
                 value={connectUrl}
-                onChange={(e) => setConnectUrl(e.target.value)}
+                onChange={(e) => {
+                  setConnectUrl(e.target.value)
+                  if (connectUrlError && !isPublishedOrCsvUrl(e.target.value)) setConnectUrlError(null)
+                }}
               />
+              <Text fontSize="sm" color="gray.600" mt={1}>
+                Paste the normal Google Sheets URL (…/spreadsheets/d/&lt;ID&gt;/edit). The sheet must be viewable by anyone with the link.
+              </Text>
+              {connectUrlError && (
+                <Alert status="error" mt={2} size="sm">
+                  <AlertIcon />
+                  <AlertDescription>{connectUrlError}</AlertDescription>
+                </Alert>
+              )}
             </FormControl>
             <FormControl isRequired>
               <FormLabel>Display name</FormLabel>
