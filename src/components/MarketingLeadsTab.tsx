@@ -170,9 +170,9 @@ const DEFAULT_FILTERS: FilterState = {
   sortOrder: 'desc',
 }
 
-function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) {
+function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountName?: string; enabled?: boolean }) {
   const customerId = getCurrentCustomerId('')
-  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, { enabled })
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
 

@@ -1,22 +1,29 @@
 /**
  * Poll /api/live/leads every 30s. Refetch on visibilitychange and window focus.
  * Returns { data, loading, error, lastUpdatedAt } for leads.
+ * Only runs when enabled is true (e.g. when the actual Leads tab is active).
  */
 import { useCallback, useEffect, useState } from 'react'
 import { getLiveLeads, getLiveLeadMetrics, type LiveLeadsResponse, type LiveLeadMetricsResponse } from '../utils/liveLeadsApi'
 
 const POLL_MS = 30000
 
-export function useLiveLeadsPolling(customerId: string | null) {
+export type UseLiveLeadsPollingOptions = {
+  /** When false, no fetch and no interval. Default true. */
+  enabled?: boolean
+}
+
+export function useLiveLeadsPolling(customerId: string | null, options: UseLiveLeadsPollingOptions = {}) {
+  const { enabled = true } = options
   const [data, setData] = useState<LiveLeadsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
 
   const fetchData = useCallback(async () => {
-    if (!customerId || customerId.trim() === '') {
-      setLoading(false)
-      setData(null)
+    if (!enabled || !customerId || customerId.trim() === '') {
+      if (!enabled) setLoading(false)
+      else if (!customerId || customerId.trim() === '') setData(null)
       return
     }
     setLoading(true)
@@ -31,9 +38,13 @@ export function useLiveLeadsPolling(customerId: string | null) {
     } finally {
       setLoading(false)
     }
-  }, [customerId])
+  }, [customerId, enabled])
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      return
+    }
     fetchData()
     const interval = setInterval(fetchData, POLL_MS)
     const onVisible = () => {
@@ -47,7 +58,7 @@ export function useLiveLeadsPolling(customerId: string | null) {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [fetchData])
+  }, [fetchData, enabled])
 
   return { data, loading, error, lastUpdatedAt, refetch: fetchData }
 }

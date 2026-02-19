@@ -45,7 +45,7 @@ export default function CustomersHomePage({
       id: 'leads-reporting',
       label: 'Leads',
       icon: MdAssessment,
-      content: <MarketingLeadsTab focusAccountName={focusAccountName} />,
+      content: <MarketingLeadsTab focusAccountName={focusAccountName} enabled={activeView === 'leads-reporting'} />,
     },
   ]
 
