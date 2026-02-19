@@ -58,7 +58,7 @@ export function computeFingerprint(row: CanonicalLike): string {
   }
 
   const linkedin = (row.linkedinUrl ?? '').trim()
-  if (linkedin && (linkedin.includes('linkedin.com') || linkedin.startsWith('http'))) {
+  if (linkedin && linkedin.includes('linkedin.com')) {
     return `linkedin:${normalizeLinkedInUrl(linkedin)}`
   }
 
