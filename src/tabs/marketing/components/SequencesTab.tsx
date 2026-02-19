@@ -1537,13 +1537,14 @@ const SequencesTab: React.FC = () => {
               <Text>Loading...</Text>
             ) : (
               (() => {
-                const cols = previewContacts.length > 0 ? visibleColumns(previewColumns, previewContacts) : previewColumns
+                const computed = previewContacts.length ? visibleColumns(previewColumns, previewContacts) : previewColumns
+                const previewCols = computed.length ? computed : previewColumns
                 return (
                   <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
                     <Table size="sm" minW="max-content">
                       <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
                         <Tr>
-                          {cols.map((col) => (
+                          {previewCols.map((col) => (
                             <Th key={col} whiteSpace="nowrap">
                               {col}
                             </Th>
@@ -1553,14 +1554,14 @@ const SequencesTab: React.FC = () => {
                       <Tbody>
                         {previewContacts.length === 0 ? (
                           <Tr>
-                            <Td colSpan={cols.length || 1} color="gray.500">
+                            <Td colSpan={previewCols.length || 1} color="gray.500">
                               No contacts
                             </Td>
                           </Tr>
                         ) : (
                           previewContacts.map((row, i) => (
                             <Tr key={i}>
-                              {cols.map((col) => (
+                              {previewCols.map((col) => (
                                 <Td key={col} whiteSpace="nowrap">
                                   {row[col] ?? ''}
                                 </Td>

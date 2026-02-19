@@ -97,9 +97,15 @@ export default function LeadSourcesTabNew({
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
 
-  const isPublishedOrCsvUrl = (url: string): boolean => {
-    const u = url.toLowerCase().trim()
-    return u.includes('/spreadsheets/d/e/') || u.includes('/pub') || u.includes('output=csv')
+  function isPublishedOrCsvUrl(url: string) {
+    const u = (url || '').toLowerCase().trim()
+    return (
+      u.includes('/spreadsheets/d/e/') ||
+      u.includes('/pub') ||
+      u.includes('output=csv') ||
+      u.includes('/export?format=csv') ||
+      u.includes('/gviz/tq')
+    )
   }
 
   const loadCustomers = useCallback(async () => {
@@ -237,7 +243,7 @@ export default function LeadSourcesTabNew({
   const submitConnect = async () => {
     if (!connectSource || !connectUrl.trim() || !connectName.trim()) return
     if (isPublishedOrCsvUrl(connectUrl)) {
-      setConnectUrlError('Use the normal sheet URL (…/spreadsheets/d/<ID>/edit), not a published CSV link.')
+      setConnectUrlError('Use normal Google Sheets URL …/spreadsheets/d/<ID>/edit#gid=… (not published/CSV links).')
       return
     }
     setConnectUrlError(null)
@@ -462,7 +468,8 @@ export default function LeadSourcesTabNew({
                   ) : (
                     <>
                       {(() => {
-                        const contactsCols = contacts.length > 0 ? visibleColumns(contactsColumns, contacts) : contactsColumns
+                        const computed = contacts.length ? visibleColumns(contactsColumns, contacts) : contactsColumns
+                        const contactsCols = computed.length ? computed : contactsColumns
                         return (
                           <Box
                             overflowX="auto"
@@ -486,8 +493,8 @@ export default function LeadSourcesTabNew({
                               <Tbody>
                                 {contacts.length === 0 ? (
                                   <Tr>
-                                    <Td colSpan={Math.max(1, contactsCols.length)} color="gray.500">
-                                      {contactsTotal > 0 ? 'No rows in this page (pagination)' : 'No contacts'}
+                                    <Td colSpan={contactsCols.length || 1} color="gray.500">
+                                      {contacts.length === 0 && contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
                                     </Td>
                                   </Tr>
                                 ) : (
@@ -553,14 +560,13 @@ export default function LeadSourcesTabNew({
                 }}
               />
               <Text fontSize="sm" color="gray.600" mt={1}>
-                Paste the normal Google Sheets URL (…/spreadsheets/d/&lt;ID&gt;/edit). The sheet must be viewable by anyone with the link.
+                Use normal Google Sheets URL …/spreadsheets/d/&lt;ID&gt;/edit#gid=… (sheet must be viewable by anyone with the link).
               </Text>
-              {connectUrlError && (
-                <Alert status="error" mt={2} size="sm">
-                  <AlertIcon />
-                  <AlertDescription>{connectUrlError}</AlertDescription>
-                </Alert>
-              )}
+              {connectUrlError ? (
+                <Text fontSize="sm" color="red.500" mt={1}>
+                  {connectUrlError}
+                </Text>
+              ) : null}
             </FormControl>
             <FormControl isRequired>
               <FormLabel>Display name</FormLabel>

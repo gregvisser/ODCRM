@@ -382,11 +382,12 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     const total = filtered.length
     if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_LEAD_SOURCES === '1') {
       console.debug('[lead-sources contacts]', {
+        customerId,
+        sourceType,
         batchKey,
         rowSeenCount,
-        fpSetSize: fpSet.size,
-        mappedRowsCount: cached.rows.length,
-        filteredRowsCount: filtered.length,
+        cachedCount: cached.rows.length,
+        filteredCount: filtered.length,
       })
     }
     const start = (page - 1) * pageSize

@@ -54,7 +54,9 @@ npm run build
 cd server && npx tsc --noEmit
 # Should complete without errors
 ```
+
 - [ ] Production build succeeds
+- **PowerShell:** Use `;` not `&&` for chained commands (e.g. `cd server; npm run build` then `cd ..; npm run build`).
 - [ ] No build warnings (if possible)
 - [ ] Build output looks correct
 
