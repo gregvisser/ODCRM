@@ -39,6 +39,7 @@ import {
   ModalFooter,
   ModalCloseButton,
   FormControl,
+  FormErrorMessage,
   FormLabel,
   Input,
   useToast,
@@ -552,21 +553,18 @@ export default function LeadSourcesTabNew({
             <FormControl isRequired mb={3} isInvalid={!!connectUrlError}>
               <FormLabel>Sheet URL</FormLabel>
               <Input
-                placeholder="https://docs.google.com/spreadsheets/d/..."
                 value={connectUrl}
                 onChange={(e) => {
-                  setConnectUrl(e.target.value)
-                  if (connectUrlError && !isPublishedOrCsvUrl(e.target.value)) setConnectUrlError(null)
+                  const next = e.target.value
+                  setConnectUrl(next)
+                  if (connectUrlError && !isPublishedOrCsvUrl(next)) setConnectUrlError(null)
                 }}
+                placeholder="https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0"
               />
               <Text fontSize="sm" color="gray.600" mt={1}>
                 Use normal Google Sheets URL …/spreadsheets/d/&lt;ID&gt;/edit#gid=… (sheet must be viewable by anyone with the link).
               </Text>
-              {connectUrlError ? (
-                <Text fontSize="sm" color="red.500" mt={1}>
-                  {connectUrlError}
-                </Text>
-              ) : null}
+              <FormErrorMessage>{connectUrlError}</FormErrorMessage>
             </FormControl>
             <FormControl isRequired>
               <FormLabel>Display name</FormLabel>
