@@ -14,6 +14,21 @@ export type UseLiveLeadsPollingOptions = {
 }
 
 export function useLiveLeadsPolling(customerId: string | null, options: UseLiveLeadsPollingOptions = {}) {
+  // Hard route guard: only allow polling on leads-reporting view
+  if (typeof window !== 'undefined') {
+    const url = new URL(window.location.href)
+    const view = url.searchParams.get('view')
+    if (view !== 'leads-reporting') {
+      return {
+        data: null,
+        loading: false,
+        error: null,
+        lastUpdatedAt: null,
+        refetch: () => {},
+      }
+    }
+  }
+
   const { enabled = true } = options
   const [data, setData] = useState<LiveLeadsResponse | null>(null)
   const [loading, setLoading] = useState(true)
