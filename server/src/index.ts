@@ -29,6 +29,7 @@ import userPreferencesRoutes from './routes/userPreferences.js'
 import sheetsRoutes from './routes/sheets.js'
 import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
+import liveLeadsRouter from './routes/liveLeads.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
 // process.env.DATABASE_URL is not overridden after this block.
@@ -299,6 +300,7 @@ app.get('/api/routes', (req, res) => {
     '/api/customers',
     '/api/customers/:id/email-identities',
     '/api/leads',
+    '/api/live',
     '/api/templates',
     '/api/company-data',
     '/api/admin',
@@ -331,6 +333,7 @@ app.use('/api/sequences', sequencesRoutes)
 app.use('/api/customers', customersRoutes)
 console.log('  ✓ Mounted: /api/customers (includes /:id/email-identities)')
 app.use('/api/leads', leadsRoutes)
+app.use('/api/live', liveLeadsRouter)
 app.use('/api/templates', templatesRoutes)
 app.use('/api/company-data', companyDataRoutes)
 app.use('/api/admin', adminRoutes)

@@ -30,46 +30,32 @@ import {
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
-import { OdcrmStorageKeys } from '../platform/keys'
-import { getItem, getJson } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
+import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
+import type { LiveLeadRow } from '../utils/liveLeadsApi'
 
 type Lead = {
-  [key: string]: string // Dynamic fields from Google Sheet
+  [key: string]: string
   accountName: string
 }
 
-// Load leads from storage
-function loadLeadsFromStorage(): Lead[] {
-  const parsed = getJson<Lead[]>(OdcrmStorageKeys.leads)
-  if (!parsed || !Array.isArray(parsed)) return []
-  console.log('✅ Loaded leads from storage:', parsed.length)
-  return parsed
-}
-
-// Save leads to storage
-function saveLeadsToStorage(leads: Lead[], lastSyncAt?: string | null): Date {
-  const refreshTime = persistLeadsToStorage(leads, lastSyncAt)
-  console.log('💾 Saved leads to storage:', leads.length)
-  return refreshTime
-}
-
-// Load last refresh time from storage
-function loadLastRefreshFromStorage(): Date | null {
-  const stored = getItem(OdcrmStorageKeys.leadsLastRefresh)
-  if (!stored) return null
-  const d = new Date(stored)
-  return isNaN(d.getTime()) ? null : d
+function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
+  return rows.map((row, i) => ({
+    ...row.raw,
+    accountName,
+    Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
+    'Channel of Lead': row.source ?? row.raw['Channel of Lead'] ?? '',
+    'OD Team Member': row.owner ?? row.raw['OD Team Member'] ?? '',
+  }))
 }
 
 function LeadsReportingTab() {
-  // Start with empty state - server is source of truth
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true) // Auto-load on mount from server
-  const [error, setError] = useState<string | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const [hasServerData, setHasServerData] = useState(false)
+  const customerId = getCurrentCustomerId('')
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const lastRefresh = lastUpdatedAt
+  const hasServerData = !!liveData
+
   const [filters, setFilters] = useState({
     account: '',
     channelOfLead: '',
@@ -85,109 +71,23 @@ function LeadsReportingTab() {
     return date.toLocaleTimeString()
   }
 
-  // Check if 30 minutes have passed since last refresh
-  const shouldRefresh = useCallback((): boolean => {
-    const lastRefreshTime = loadLastRefreshFromStorage()
-    if (!lastRefreshTime) return true // No previous refresh, allow refresh
-    
-    const now = new Date()
-    const thirtyMinutesInMs = 30 * 60 * 1000
-    const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime()
-    
-    return timeSinceLastRefresh >= thirtyMinutesInMs
-  }, [])
-
-  const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
-    // Skip auto-refresh if we have recent server data and it's not forced
-    if (!forceRefresh && hasServerData && !shouldRefresh()) {
-      console.log('Skipping refresh - have recent server data and not forced')
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      const customerId = getCurrentCustomerId('')
-      if (!customerId) {
-        console.warn('Missing customerId – leads fetch skipped')
-        setLoading(false)
-        return
-      }
-      console.log('Fetching leads from server (source of truth)...')
-      const { leads: serverLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
-
-      // Server succeeded - this is our source of truth
-      setLeads(serverLeads)
-      setHasServerData(true)
-      const refreshTime = saveLeadsToStorage(serverLeads, lastSyncAt)
-      setLastRefresh(refreshTime)
-      syncAccountLeadCountsFromLeads(serverLeads)
-
-      console.log(`✅ Loaded ${serverLeads.length} leads from server`)
-    } catch (serverError) {
-      console.warn('Server fetch failed, trying localStorage fallback:', serverError)
-
-      // Server failed - try localStorage as fallback only
-      try {
-        const cachedLeads = loadLeadsFromStorage()
-        if (cachedLeads.length > 0) {
-          setLeads(cachedLeads)
-          setHasServerData(false) // Mark that this is stale cached data
-          const cachedTime = loadLastRefreshFromStorage()
-          setLastRefresh(cachedTime)
-          setError('Using cached data - server unavailable. Data may be stale.')
-          console.log(`⚠️  Using ${cachedLeads.length} cached leads as fallback`)
-        } else {
-          setError('No data available - server and cache both unavailable.')
-        }
-      } catch (cacheError) {
-        console.error('Both server and cache failed:', cacheError)
-        setError('Unable to load leads data from server or cache.')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [shouldRefresh, hasServerData])
+  useEffect(() => {
+    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
+  }, [leads])
 
   useEffect(() => {
-    // Auto-load from server on mount
-    loadLeads(false)
-
-    // Auto-refresh every 30 minutes
-    const refreshInterval = setInterval(() => {
-      loadLeads(false)
-    }, 30 * 60 * 1000) // 30 minutes in milliseconds
-
-    // Listen for navigation events
-    const handleNavigate = (event: { accountName?: string } | undefined) => {
-      const accountName = event?.accountName
-      if (accountName) {
-        toast({
-          title: 'Loading leads...',
-          description: `Fetching leads for ${accountName}`,
-          status: 'info',
-          duration: 2000,
-        })
-        loadLeads(true)
-      }
+    const handleNavigate = () => {
+      toast({ title: 'Loading leads...', status: 'info', duration: 2000 })
+      refetch()
     }
-
-    // When accounts (or their sheet URLs) change, force refresh
-    const handleAccountsUpdated = () => {
-      console.log('Accounts updated, refreshing leads...')
-      loadLeads(true)
-    }
-
-    const offNavigate = on<{ accountName?: string }>('navigateToLeads', (detail) => handleNavigate(detail))
-    const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
-
+    const handleAccountsUpdated = () => refetch()
+    const offNavigate = on<{ accountName?: string }>('navigateToLeads', handleNavigate)
+    const offAccountsUpdated = on('accountsUpdated', handleAccountsUpdated)
     return () => {
-      clearInterval(refreshInterval)
       offNavigate()
       offAccountsUpdated()
     }
-  }, [loadLeads, toast])
+  }, [refetch, toast])
 
   if (loading) {
     return (
@@ -386,7 +286,7 @@ function LeadsReportingTab() {
         <IconButton
           aria-label="Refresh leads data"
           icon={<RepeatIcon />}
-          onClick={() => loadLeads(true)}
+          onClick={() => refetch()}
           isLoading={loading}
           colorScheme="gray"
           size="sm"

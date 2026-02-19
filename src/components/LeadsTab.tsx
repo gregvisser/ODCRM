@@ -36,11 +36,7 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
-import { OdcrmStorageKeys } from '../platform/keys'
-import { getItem, getJson } from '../platform/storage'
-import { 
-  fetchLeadsFromApi, 
-  persistLeadsToStorage,
+import {
   convertLeadToContact,
   bulkConvertLeads,
   scoreLead,
@@ -53,46 +49,36 @@ import {
   type SyncStatus,
   type ValidateSheetResult
 } from '../utils/leadsApi'
+import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
+import type { LiveLeadRow } from '../utils/liveLeadsApi'
 
 type Lead = LeadRecord & {
   [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
   accountName: string
 }
 
-// Load leads from storage
-function loadLeadsFromStorage(): Lead[] {
-  const parsed = getJson<Lead[]>(OdcrmStorageKeys.leads)
-  if (!parsed || !Array.isArray(parsed)) return []
-  console.log('✅ Loaded leads from storage:', parsed.length)
-  return parsed
-}
-
-// Save leads to storage
-function saveLeadsToStorage(leads: Lead[], lastSyncAt?: string | null): Date {
-  const refreshTime = persistLeadsToStorage(leads, lastSyncAt)
-  console.log('💾 Saved leads to storage:', leads.length)
-  return refreshTime
-}
-
-// Load last refresh time from storage
-function loadLastRefreshFromStorage(): Date | null {
-  const stored = getItem(OdcrmStorageKeys.leadsLastRefresh)
-  if (!stored) return null
-  const d = new Date(stored)
-  return isNaN(d.getTime()) ? null : d
+/** Map live API rows to Lead shape for table (accountName, source, owner, id, raw fields). */
+function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
+  return rows.map((row, i) => {
+    const lead: Lead = {
+      ...row.raw,
+      id: `live-${i}`,
+      accountName,
+      source: row.source ?? undefined,
+      owner: row.owner ?? undefined,
+      Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
+    }
+    return lead
+  })
 }
 
 
 function LeadsTab() {
-  // Load initial leads from localStorage
-  const cachedLeads = loadLeadsFromStorage()
-  const [leads, setLeads] = useState<Lead[]>(cachedLeads)
-  const [loading, setLoading] = useState(cachedLeads.length === 0) // Show loading if no cached data
-  const [error, setError] = useState<string | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date>(() => {
-    const stored = loadLastRefreshFromStorage()
-    return stored || new Date()
-  })
+  const customerId = localStorage.getItem('currentCustomerId') || ''
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const lastRefresh = lastUpdatedAt ?? new Date()
+
   const [filters, setFilters] = useState({
     account: '',
     channelOfLead: '',
@@ -110,6 +96,11 @@ function LeadsTab() {
 
   const toast = useToast()
 
+  // Sync account lead counts when live leads change (for badge updates)
+  useEffect(() => {
+    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
+  }, [leads])
+
   // When leads are empty, fetch sync status and validator to show why 0 leads
   useEffect(() => {
     if (leads.length > 0) {
@@ -117,11 +108,10 @@ function LeadsTab() {
       setSheetValidateForEmpty(null)
       return
     }
-    const customerId = localStorage.getItem('currentCustomerId') || ''
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
     getValidateSheetResult(customerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
-  }, [leads.length])
+  }, [leads.length, customerId])
 
   // Load sequences on mount
   useEffect(() => {
@@ -181,7 +171,7 @@ function LeadsTab() {
           isClosable: true,
         })
         // Refresh leads to get updated status
-        await loadLeads(true)
+        refetch()
       }
     } catch (err) {
       toast({
@@ -229,7 +219,7 @@ function LeadsTab() {
           isClosable: true,
         })
         setSelectedLeads(new Set())
-        await loadLeads(true)
+        refetch()
       }
     } catch (err) {
       toast({
@@ -304,78 +294,19 @@ function LeadsTab() {
     }
   }
 
-  const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const customerId = localStorage.getItem('currentCustomerId') || undefined
-      if (!customerId) {
-        console.warn('Missing customerId – leads fetch skipped')
-        setLoading(false)
-        return
-      }
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
-      setLeads(allLeads as Lead[])
-      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
-      setLastRefresh(refreshTime)
-      syncAccountLeadCountsFromLeads(allLeads)
-    } catch (err) {
-      setError('Failed to load leads data from the server.')
-      console.error('Error loading leads:', err)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
   useEffect(() => {
-    loadLeads(true)
-
-    const pollInterval = 60 * 1000 // 60 seconds
-    const refreshInterval = setInterval(() => {
-      const customerId = localStorage.getItem('currentCustomerId')
-      if (customerId) {
-        console.log('[LeadsTab] Polling leads (60s)')
-        loadLeads(true)
-      }
-    }, pollInterval)
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        const customerId = localStorage.getItem('currentCustomerId')
-        if (customerId) loadLeads(true)
-      }
+    const handleNavigate = () => {
+      toast({ title: 'Loading leads...', status: 'info', duration: 2000 })
+      refetch()
     }
-    document.addEventListener('visibilitychange', handleVisibility)
-
-    const handleNavigate = (event: { accountName?: string } | undefined) => {
-      const accountName = event?.accountName
-      if (accountName) {
-        toast({
-          title: 'Loading leads...',
-          description: `Fetching leads for ${accountName}`,
-          status: 'info',
-          duration: 2000,
-        })
-        loadLeads(true)
-      }
-    }
-
-    const handleAccountsUpdated = () => {
-      console.log('Accounts updated, refreshing leads...')
-      loadLeads(true)
-    }
-
-    const offNavigate = on<{ accountName?: string }>('navigateToLeads', (detail) => handleNavigate(detail))
-    const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
-
+    const handleAccountsUpdated = () => refetch()
+    const offNavigate = on<{ accountName?: string }>('navigateToLeads', handleNavigate)
+    const offAccountsUpdated = on('accountsUpdated', handleAccountsUpdated)
     return () => {
-      clearInterval(refreshInterval)
-      document.removeEventListener('visibilitychange', handleVisibility)
       offNavigate()
       offAccountsUpdated()
     }
-  }, [loadLeads, toast])
+  }, [refetch, toast])
 
   if (loading) {
     return (
@@ -401,15 +332,17 @@ function LeadsTab() {
   }
 
   if (leads.length === 0) {
-    const whyZeroMessage = sheetValidateForEmpty
-      ? sheetValidateForEmpty.ok
-        ? (sheetValidateForEmpty.rowCount === 0
-          ? 'The sheet returned 0 data rows. Publish the sheet to web (File → Share → Publish to web) as CSV and ensure it has a header row and at least one data row.'
-          : null)
-        : sheetValidateForEmpty.error?.toLowerCase().includes('no leads reporting url')
-          ? 'This account has no Leads reporting URL configured. Add a Google Sheet URL in Settings → Accounts.'
-          : sheetValidateForEmpty.error
-      : null
+    const whyZeroMessage =
+      error?.toLowerCase().includes('no leads reporting url')
+        ? 'This account has no Leads reporting URL configured. Add a Google Sheet URL in Settings → Accounts.'
+        : error
+          ?? (sheetValidateForEmpty
+            ? sheetValidateForEmpty.ok
+              ? (sheetValidateForEmpty.rowCount === 0
+                ? 'The sheet returned 0 data rows. Publish the sheet to web (File → Share → Publish to web) as CSV and ensure it has a header row and at least one data row.'
+                : null)
+              : sheetValidateForEmpty.error
+            : null)
     return (
       <Stack spacing={4} py={12}>
         <Box textAlign="center">
@@ -651,7 +584,7 @@ function LeadsTab() {
           <IconButton
             aria-label="Refresh leads data"
             icon={<RepeatIcon />}
-            onClick={() => loadLeads(true)}
+            onClick={() => refetch()}
             isLoading={loading}
             colorScheme="gray"
             size="sm"

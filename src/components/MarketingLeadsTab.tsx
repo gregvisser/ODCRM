@@ -56,8 +56,10 @@ import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import { fetchLeadsFromApi, persistLeadsToStorage, getSyncStatus, type SyncStatus } from '../utils/leadsApi'
-import { fetchAllCustomers, fetchMetricsForCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
+import { getSyncStatus, type SyncStatus } from '../utils/leadsApi'
+import { fetchAllCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
+import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
+import { fetchLiveMetricsForCustomers, type LiveLeadRow } from '../utils/liveLeadsApi'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -115,23 +117,16 @@ const normalizeLeadSource = (value: string | undefined): string | null => {
   return null
 }
 
-// Load leads from storage
-function loadLeadsFromStorage(): Lead[] {
-  const parsed = getJson<Lead[]>(OdcrmStorageKeys.marketingLeads)
-  return parsed && Array.isArray(parsed) ? parsed : []
-}
-
-// Save leads to storage
-function saveLeadsToStorage(leads: Lead[], lastSyncAt?: string | null): Date {
-  return persistLeadsToStorage(leads, lastSyncAt)
-}
-
-// Load last refresh time from storage
-function loadLastRefreshFromStorage(): Date | null {
-  const stored = getItem(OdcrmStorageKeys.marketingLeadsLastRefresh)
-  if (!stored) return null
-  const d = new Date(stored)
-  return isNaN(d.getTime()) ? null : d
+/** Map live API rows to Lead shape for table. */
+function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
+  return rows.map((row, i) => ({
+    ...row.raw,
+    id: `live-${i}`,
+    accountName,
+    source: row.source ?? undefined,
+    owner: row.owner ?? undefined,
+    Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
+  }))
 }
 
 type LeadWithDate = {
@@ -176,15 +171,11 @@ const DEFAULT_FILTERS: FilterState = {
 }
 
 function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) {
-  // Load initial leads from localStorage
-  const cachedLeads = loadLeadsFromStorage()
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastRefresh, setLastRefresh] = useState<Date>(() => {
-    const stored = loadLastRefreshFromStorage()
-    return stored || new Date()
-  })
+  const customerId = getCurrentCustomerId('')
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const lastRefresh = lastUpdatedAt ?? new Date()
+
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
   const [aggregateLoading, setAggregateLoading] = useState(false)
@@ -250,11 +241,6 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   const toast = useToast()
   const lastErrorToastAtRef = useRef(0)
   
-  // Use refs to prevent infinite refresh loops
-  const cachedLeadsRef = useRef(cachedLeads)
-  useEffect(() => {
-    cachedLeadsRef.current = cachedLeads
-  }, [cachedLeads])
 
   // Allow parent navigators (top-tab shell) to focus an account's performance view.
   useEffect(() => {
@@ -272,142 +258,23 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
     return date.toLocaleDateString()
   }
 
-  // Check if 6 hours have passed since last refresh
-  const shouldRefresh = useCallback((): boolean => {
-    const lastRefreshTime = loadLastRefreshFromStorage()
-    if (!lastRefreshTime) return true // No previous refresh, allow refresh
-
-    // If accounts were updated since last refresh (e.g., sheet URLs pasted), refresh immediately.
-    try {
-      const accountsUpdatedIso = getItem(OdcrmStorageKeys.accountsLastUpdated)
-      if (accountsUpdatedIso) {
-        const accountsUpdatedAt = new Date(accountsUpdatedIso)
-        if (!isNaN(accountsUpdatedAt.getTime()) && accountsUpdatedAt > lastRefreshTime) {
-          return true
-        }
-      }
-    } catch {
-      // ignore
-    }
-    
-    const now = new Date()
-    const sixHoursInMs = 6 * 60 * 60 * 1000
-    const timeSinceLastRefresh = now.getTime() - lastRefreshTime.getTime()
-    
-    return timeSinceLastRefresh >= sixHoursInMs
-  }, [])
-
-  const loadLeads = useCallback(async (forceRefresh: boolean = false) => {
-    const accountsData = loadAccountsFromStorage()
-    const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-    if (!hasSheets) {
-      setLeads([])
-      const refreshTime = saveLeadsToStorage([], null)
-      setLastRefresh(refreshTime)
-      setLoading(false)
-      return
-    }
-
-    // Check if we should refresh (unless forced)
-    if (!forceRefresh && !shouldRefresh()) {
-      console.log('Skipping refresh - less than 6 hours since last refresh')
-      const currentCached = cachedLeadsRef.current
-      if (currentCached.length > 0) {
-        setLeads(currentCached)
-      }
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      const customerId = getCurrentCustomerId('')
-      if (!customerId) {
-        console.warn('Missing customerId – leads fetch skipped')
-        setLoading(false)
-        return
-      }
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
-      setLeads(allLeads)
-      const refreshTime = saveLeadsToStorage(allLeads, lastSyncAt)
-      setLastRefresh(refreshTime)
-
-      // Keep account lead counts in sync (so "Leads: X" badges update across the app).
-      syncAccountLeadCountsFromLeads(allLeads)
-
-      // Group leads by account for summary
-      const leadsByAccount: Record<string, number> = {}
-      allLeads.forEach(lead => {
-        leadsByAccount[lead.accountName] = (leadsByAccount[lead.accountName] || 0) + 1
-      })
-      console.log(`✅ Leads loaded by account:`, leadsByAccount)
-
-      const description = `Loaded ${allLeads.length} leads from the server.`
-      toast({
-        title: 'Leads loaded successfully',
-        description,
-        status: 'success',
-        duration: 5000,
-        isClosable: true,
-      })
-    } catch (err) {
-      const currentCached = cachedLeadsRef.current
-      if (currentCached.length > 0) {
-        setLeads(currentCached)
-      }
-      setError('Failed to load leads data from the server.')
-      console.error('Error loading leads:', err)
-      const now = Date.now()
-      if (now - lastErrorToastAtRef.current > 60000) {
-        toast({
-          title: 'Error loading leads',
-          description: 'Failed to fetch data from the server. Please try again.',
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        })
-        lastErrorToastAtRef.current = now
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [toast])
+  useEffect(() => {
+    const handleAccountsUpdated = () => refetch()
+    const off = on('accountsUpdated', handleAccountsUpdated)
+    return () => off()
+  }, [refetch])
 
   useEffect(() => {
-    // Only load fresh data on mount if 6 hours have passed since last refresh
-    // Otherwise, use cached data
-    loadLeads(false)
+    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
+  }, [leads])
 
-    // Listen for account updates (when new accounts are created or metadata changes)
-    const handleAccountsUpdated = (event?: Event) => {
-      console.log('📥 Accounts updated event received - refreshing leads...', event)
-      // Force refresh when accounts are updated to keep lead counts current
-      // API will handle filtering for accounts with Google Sheets URLs
-      loadLeads(true)
-    }
-
-    const offAccountsUpdated = on('accountsUpdated', () => handleAccountsUpdated())
-
-    // Auto-refresh every 30 minutes
-    const refreshInterval = setInterval(() => {
-      loadLeads(false)
-    }, 30 * 60 * 1000) // 30 minutes in milliseconds
-
-    return () => {
-      offAccountsUpdated()
-      clearInterval(refreshInterval)
-    }
-  }, [loadLeads])
-
-  // Aggregate metrics for "All Accounts Combined" (poll 60s + visibility)
+  // Aggregate metrics for "All Accounts Combined" — live metrics, 30s polling
   const loadAggregate = useCallback(async () => {
     setAggregateLoading(true)
     try {
       const customers = await fetchAllCustomers()
       setAggregateCustomersList(customers)
-      const result = await fetchMetricsForCustomers(customers)
+      const result = await fetchLiveMetricsForCustomers(customers)
       setAggregateMetrics(result)
     } catch (e) {
       console.warn('Aggregate metrics fetch failed:', e)
@@ -417,7 +284,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
   }, [])
   useEffect(() => {
     loadAggregate()
-    const poll = setInterval(loadAggregate, 60 * 1000)
+    const poll = setInterval(loadAggregate, 30 * 1000)
     const onVisible = () => { if (document.visibilityState === 'visible') loadAggregate() }
     document.addEventListener('visibilitychange', onVisible)
     return () => { clearInterval(poll); document.removeEventListener('visibilitychange', onVisible) }
@@ -1361,7 +1228,7 @@ function MarketingLeadsTab({ focusAccountName }: { focusAccountName?: string }) 
           <IconButton
             aria-label="Refresh leads data"
             icon={<RepeatIcon />}
-            onClick={() => loadLeads(true)}
+            onClick={() => refetch()}
             isLoading={loading}
             colorScheme="blue"
             size="md"

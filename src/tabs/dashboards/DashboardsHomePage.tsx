@@ -29,7 +29,8 @@ import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
-import { fetchLeadsFromApi } from '../../utils/leadsApi'
+import { useLiveLeadsPolling } from '../../hooks/useLiveLeadsPolling'
+import type { LiveLeadRow } from '../../utils/liveLeadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 
 type Lead = {
@@ -200,75 +201,36 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   return applyCustomerFieldsToAccount(base, customer)
 }
 
-// localStorage helper functions removed - dashboard now uses API as single source of truth
+/** Map live API rows to Lead shape for dashboard. */
+function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
+  return rows.map((row, i) => ({
+    ...row.raw,
+    accountName,
+    Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
+    'Channel of Lead': row.source ?? row.raw['Channel of Lead'] ?? '',
+    'OD Team Member': row.owner ?? row.raw['OD Team Member'] ?? '',
+  }))
+}
 
 export default function DashboardsHomePage() {
   const toast = useToast()
-  // Start with empty arrays - API will load fresh data immediately
+  const customerId = getCurrentCustomerId('')
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const lastRefresh = lastUpdatedAt ?? new Date()
+
   const [accountsData, setAccountsData] = useState<Account[]>([])
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
   
-  // Use ref to avoid dependency issues that cause glitching
   const leadsRef = useRef(leads)
   useEffect(() => {
     leadsRef.current = leads
   }, [leads])
 
-  const refreshLeads = useCallback(async (forceRefresh: boolean) => {
-    const customerId = getCurrentCustomerId('')
-    if (!customerId) {
-      console.warn('Missing customerId – dashboard leads fetch skipped')
-      return
-    }
-    setLoading(true)
-    try {
-      console.log('🔄 Dashboard: Fetching fresh leads from API...')
-      const response = await fetchLeadsFromApi(customerId)
-      const allLeads = response.leads || []
-      const lastSyncAt = response.lastSyncAt
-      
-      console.log(`✅ Dashboard: Loaded ${allLeads.length} leads from API`)
-      console.log('📊 Response details:', { 
-        leadsCount: allLeads.length, 
-        lastSyncAt,
-        diagnostics: response.diagnostics || 'none'
-      })
-      
-      if (allLeads.length === 0) {
-        console.warn('⚠️ Dashboard: ZERO leads returned from API!')
-        console.warn('⚠️ Possible reasons:')
-        console.warn('   1. No customers have Google Sheets URLs configured')
-        console.warn('   2. Leads sync has not been triggered yet')
-        console.warn('   3. Leads sync is failing')
-        console.warn('   4. Check Accounts tab → Ensure customers have Google Sheets URLs')
-      } else {
-        // Sample the first lead to see its structure
-        console.log('📄 Sample lead structure:', Object.keys(allLeads[0] || {}))
-      }
-      
-      // NO localStorage persistence - keep data in memory only
-      setLeads(allLeads)
-      setLastRefresh(lastSyncAt ? new Date(lastSyncAt) : new Date())
-      syncAccountLeadCountsFromLeads(allLeads)
-      
-      console.log('✅ Dashboard: Leads state updated, syncAccountLeadCounts called')
-    } catch (err: any) {
-      console.error('❌ Dashboard: Failed to fetch leads:', err)
-      toast({
-        title: 'Leads refresh failed',
-        description: err?.message || 'Unable to refresh leads from the server.',
-        status: 'error',
-        duration: 6000,
-        isClosable: true,
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [toast])
+  useEffect(() => {
+    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
+  }, [leads])
 
   useEffect(() => {
     const syncFromCustomers = async () => {
@@ -313,42 +275,26 @@ export default function DashboardsHomePage() {
 
     const init = async () => {
       await syncFromCustomers()
-      await refreshLeads(false)
+      refetch()
     }
 
     void init()
 
     const offAccountsUpdated = on<Account[]>('accountsUpdated', (accounts) => {
-      // Use the passed data instead of loading from localStorage
-      if (accounts && accounts.length > 0) {
-        setAccountsData(accounts)
-      }
-      void refreshLeads(true)
+      if (accounts && accounts.length > 0) setAccountsData(accounts)
+      refetch()
     })
-    const offLeadsUpdated = on<Lead[]>('leadsUpdated', (updatedLeads) => {
-      // Use the passed data instead of loading from localStorage
-      if (updatedLeads && updatedLeads.length > 0) {
-        setLeads(updatedLeads)
-        setLastRefresh(new Date())
-      }
-    })
+    const offLeadsUpdated = on<Lead[]>('leadsUpdated', () => refetch())
 
-    // Auto-refresh every 30 seconds to keep dashboard current
     const refreshInterval = setInterval(async () => {
-      // Refresh both customers and leads automatically
-      const syncFromCustomers = async () => {
+      const syncCustomers = async () => {
         const { data, error } = await api.get<CustomerApi[]>('/api/customers')
         if (error || !data || data.length === 0) return
         const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
-        // NO localStorage persistence - API is the ONLY source of truth
         setAccountsData(hydrated)
         emit('accountsUpdated', hydrated)
       }
-
-      await Promise.allSettled([
-        syncFromCustomers(),
-        refreshLeads(false)
-      ])
+      await Promise.allSettled([syncCustomers(), refetch()])
     }, 30 * 1000)
 
     return () => {
@@ -356,7 +302,7 @@ export default function DashboardsHomePage() {
       offLeadsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [refreshLeads, hasSyncedCustomers])
+  }, [refetch, hasSyncedCustomers])
 
   const unifiedAnalytics = useMemo(() => {
     const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
@@ -775,7 +721,7 @@ export default function DashboardsHomePage() {
                       status: 'success',
                       duration: 5000,
                     })
-                    setTimeout(() => refreshLeads(true), 10000)
+                    setTimeout(() => refetch(), 10000)
                   }
                 } catch (err: any) {
                   toast({
@@ -807,10 +753,9 @@ export default function DashboardsHomePage() {
                 emit('accountsUpdated', hydrated)
               }
 
-              // Use Promise.allSettled for consistency with auto-refresh
               const results = await Promise.allSettled([
                 syncFromCustomers(),
-                refreshLeads(true)
+                refetch()
               ])
 
               // Check actual operation success before showing feedback
