@@ -421,10 +421,10 @@ export default function LeadSourcesTabNew({
                       <Tbody>
                         {batches.map((b) => (
                           <Tr key={b.batchKey}>
-                            <Td>{b.client}</Td>
-                            <Td>{b.jobTitle}</Td>
+                            <Td>{b.client ?? '(none)'}</Td>
+                            <Td>{b.jobTitle ?? '(none)'}</Td>
                             <Td>{b.count}</Td>
-                            <Td>{new Date(b.firstSeenMax).toLocaleString()}</Td>
+                            <Td>{b.firstSeenMax ? new Date(b.firstSeenMax).toLocaleString() : '—'}</Td>
                             <Td>
                               <HStack spacing={2}>
                                 <Button

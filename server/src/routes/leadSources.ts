@@ -253,7 +253,7 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
   }
 })
 
-// GET /api/lead-sources/:sourceType/batches?date=YYYY-MM-DD
+// GET /api/lead-sources/:sourceType/batches?date=YYYY-MM-DD — distinct batches (groupBy), never raw row_seen rows
 router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
@@ -269,38 +269,32 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
     if (!config?.spreadsheetId) {
       return res.json({ batches: [] })
     }
-    const rows = await prisma.leadSourceRowSeen.findMany({
+    const grouped = await prisma.leadSourceRowSeen.groupBy({
+      by: ['batchKey'],
       where: {
         customerId,
         sourceType,
         spreadsheetId: config.spreadsheetId,
         batchKey: { startsWith: date },
       },
-      select: { batchKey: true, firstSeenAt: true },
+      _count: { _all: true },
+      _min: { firstSeenAt: true },
+      _max: { firstSeenAt: true },
     })
-    const byBatch = new Map<string, { firstSeenMin: Date; firstSeenMax: Date; count: number }>()
-    for (const r of rows) {
-      const existing = byBatch.get(r.batchKey)
-      if (!existing) {
-        byBatch.set(r.batchKey, { firstSeenMin: r.firstSeenAt, firstSeenMax: r.firstSeenAt, count: 1 })
-      } else {
-        existing.count += 1
-        if (r.firstSeenAt < existing.firstSeenMin) existing.firstSeenMin = r.firstSeenAt
-        if (r.firstSeenAt > existing.firstSeenMax) existing.firstSeenMax = r.firstSeenAt
-      }
-    }
-    const batches = Array.from(byBatch.entries()).map(([batchKey, v]) => {
-      const parsed = parseBatchKey(batchKey)
-      return {
-        batchKey,
-        date: parsed.date,
-        client: parsed.client,
-        jobTitle: parsed.jobTitle,
-        count: v.count,
-        firstSeenMin: v.firstSeenMin.toISOString(),
-        firstSeenMax: v.firstSeenMax.toISOString(),
-      }
-    })
+    const batches = grouped
+      .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
+      .map((g) => {
+        const parsed = parseBatchKey(g.batchKey)
+        return {
+          batchKey: g.batchKey,
+          date: parsed.date,
+          client: parsed.date === '' ? '(unknown batch)' : parsed.client,
+          jobTitle: parsed.jobTitle,
+          count: g._count._all,
+          firstSeenMin: g._min.firstSeenAt?.toISOString() ?? '',
+          firstSeenMax: g._max.firstSeenAt?.toISOString() ?? '',
+        }
+      })
     res.json({ batches })
   } catch (e) {
     const err = e as Error & { status?: number }
@@ -380,14 +374,16 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       return typeof fp === 'string' && fpSet.has(fp)
     })
     const total = filtered.length
-    if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_LEAD_SOURCES === '1') {
+    const returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
+    if (process.env.DEBUG_LEAD_SOURCES === '1') {
       console.debug('[lead-sources contacts]', {
         customerId,
         sourceType,
         batchKey,
         rowSeenCount,
-        cachedCount: cached.rows.length,
-        filteredCount: filtered.length,
+        cachedRowCount: cached.rows.length,
+        filteredRowCount: filtered.length,
+        returnedColumnCount: returnedColumns.length,
       })
     }
     const start = (page - 1) * pageSize
@@ -396,7 +392,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       return rest
     })
     res.json({
-      columns: cached.columnKeys.filter((k) => k !== '__fp'),
+      columns: returnedColumns,
       contacts: slice,
       page,
       pageSize,
