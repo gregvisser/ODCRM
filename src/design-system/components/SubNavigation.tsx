@@ -217,6 +217,7 @@ export function SubNavigation({
           if (item) onChange?.(item.id)
         }}
         isLazy
+        lazyBehavior="unmount"
         variant="unstyled"
       >
         {/* Mobile Tab List - Horizontal Scroll */}
@@ -299,6 +300,7 @@ export function SubNavigation({
         if (item) onChange?.(item.id)
       }}
       isLazy
+      lazyBehavior="unmount"
       variant="unstyled"
       orientation="vertical"
     >
