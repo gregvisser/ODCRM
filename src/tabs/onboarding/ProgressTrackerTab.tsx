@@ -124,7 +124,7 @@ export default function ProgressTrackerTab() {
   const [salesChecklist, setSalesChecklist] = useState<ChecklistState>({})
   const [opsChecklist, setOpsChecklist] = useState<ChecklistState>({})
   const [amChecklist, setAmChecklist] = useState<ChecklistState>({})
-  const [linkedEmailCount, setLinkedEmailCount] = useState<number>(0)
+  const [linkedEmailCount, setLinkedEmailCount] = useState<number | null>(0)
   const [isLoadingProgress, setIsLoadingProgress] = useState(false)
   const [activeSubTab, setActiveSubTab] = useState(0)
 
@@ -155,7 +155,13 @@ export default function ProgressTrackerTab() {
       setSalesChecklist(progressTracker?.sales || {})
       setOpsChecklist(progressTracker?.ops || {})
       setAmChecklist(progressTracker?.am || {})
-      setLinkedEmailCount(typeof data?.linkedEmailCount === 'number' ? data.linkedEmailCount : 0)
+      setLinkedEmailCount(
+        typeof data?.linkedEmailCount === 'number'
+          ? data.linkedEmailCount
+          : data?.linkedEmailCount === null
+            ? null
+            : 0,
+      )
       setIsLoadingProgress(false)
     },
     [toast],
@@ -178,7 +184,7 @@ export default function ProgressTrackerTab() {
     if (!selectedCustomerId) return
     if (showCompleted) return
 
-    const opsWithEmails = { ...opsChecklist, ops_emails_linked: linkedEmailCount >= 5 }
+    const opsWithEmails = { ...opsChecklist, ops_emails_linked: (linkedEmailCount ?? 0) >= 5 }
     const isCompleteNow =
       isGroupComplete(SALES_TEAM_ITEMS, salesChecklist) &&
       isGroupComplete(OPS_TEAM_ITEMS, opsWithEmails) &&
@@ -247,7 +253,11 @@ export default function ProgressTrackerTab() {
 
   const salesComplete = useMemo(() => isGroupComplete(SALES_TEAM_ITEMS, salesChecklist), [salesChecklist])
   const opsComplete = useMemo(
-    () => isGroupComplete(OPS_TEAM_ITEMS, { ...opsChecklist, ops_emails_linked: linkedEmailCount >= 5 }),
+    () =>
+      isGroupComplete(OPS_TEAM_ITEMS, {
+        ...opsChecklist,
+        ops_emails_linked: (linkedEmailCount ?? 0) >= 5,
+      }),
     [opsChecklist, linkedEmailCount],
   )
   const amComplete = useMemo(() => isGroupComplete(AM_ITEMS, amChecklist), [amChecklist])
@@ -416,7 +426,10 @@ export default function ProgressTrackerTab() {
                   </Heading>
                   {OPS_TEAM_ITEMS.map((item, idx) => {
                     const isEmailsLinked = item.key === 'ops_emails_linked'
-                    const checked = isEmailsLinked ? linkedEmailCount >= 5 : (opsChecklist[item.key] || false)
+                    // DB-derived, read-only: never call saveChecklistState; checked state from linkedEmailCount only
+                    const checked = isEmailsLinked
+                      ? (linkedEmailCount ?? 0) >= 5
+                      : (opsChecklist[item.key] || false)
                     return (
                       <Box key={item.key}>
                         <Checkbox
@@ -429,7 +442,16 @@ export default function ProgressTrackerTab() {
                           }
                           size="md"
                         >
-                          <Text fontSize="sm">{withManualTickSuffix('ops', item.key, item.label)}</Text>
+                          <HStack as="span" spacing={2} display="inline-flex">
+                            <Text as="span" fontSize="sm">
+                              {withManualTickSuffix('ops', item.key, item.label)}
+                            </Text>
+                            {isEmailsLinked && linkedEmailCount === null && (
+                              <Text as="span" fontSize="xs" color="gray.500">
+                                (count unavailable)
+                              </Text>
+                            )}
+                          </HStack>
                         </Checkbox>
                         {(idx === 11 || idx === 12) && <Divider my={2} />}
                       </Box>

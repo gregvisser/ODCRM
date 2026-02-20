@@ -646,7 +646,8 @@ router.get('/:id', async (req, res) => {
       ;(serialized as any).linkedEmailCount = linkedEmailCount
     } catch (err) {
       console.warn(`[${correlationId}] linkedEmailCount lookup failed`, err)
-      ;(serialized as any).linkedEmailCount = 0
+      ;(serialized as any).linkedEmailCount = null
+      res.setHeader('x-odcrm-linked-email-count', 'error')
     }
 
     return res.json(serialized)
