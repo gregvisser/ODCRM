@@ -39,6 +39,7 @@ import {
   ModalBody,
   ModalFooter,
   ModalCloseButton,
+  Checkbox,
   FormControl,
   FormErrorMessage,
   FormLabel,
@@ -427,6 +428,7 @@ export default function LeadSourcesTabNew({
   const [connectName, setConnectName] = useState('')
   const [connectSubmitting, setConnectSubmitting] = useState(false)
   const [connectUrlError, setConnectUrlError] = useState<string | null>(null)
+  const [connectApplyToAllAccounts, setConnectApplyToAllAccounts] = useState(false)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
 
@@ -591,6 +593,7 @@ export default function LeadSourcesTabNew({
     setConnectName(SOURCE_LABELS[sourceType])
     setConnectUrl('')
     setConnectUrlError(null)
+    setConnectApplyToAllAccounts(false)
     onConnectOpen()
   }
 
@@ -603,7 +606,7 @@ export default function LeadSourcesTabNew({
     setConnectUrlError(null)
     setConnectSubmitting(true)
     try {
-      await connectLeadSource(customerId, connectSource, connectUrl.trim(), connectName.trim())
+      await connectLeadSource(customerId, connectSource, connectUrl.trim(), connectName.trim(), connectApplyToAllAccounts)
       toast({ title: 'Connected', status: 'success', duration: 3000 })
       onConnectClose()
       loadSources()
@@ -626,8 +629,6 @@ export default function LeadSourcesTabNew({
     })
     onNavigateToSequences?.()
   }
-
-  if (!customerId && customers.length > 0) return null
 
   const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
 
@@ -657,20 +658,34 @@ export default function LeadSourcesTabNew({
           </Select>
         </Flex>
 
-        {loading && (
-          <Flex justify="center" py={8}>
-            <Spinner size="lg" />
-          </Flex>
-        )}
-        {error && (
-          <Alert status="error">
-            <AlertIcon />
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
-        {!loading && (
+        {!customerId ? (
+          <Card>
+            <CardBody>
+              <VStack py={8} spacing={2}>
+                <Text color="gray.600" fontSize="md">
+                  Select a customer to view Lead Sources
+                </Text>
+                <Text fontSize="sm" color="gray.500">
+                  Choose a customer from the dropdown above to connect sheets and view batches and contacts.
+                </Text>
+              </VStack>
+            </CardBody>
+          </Card>
+        ) : (
+          <>
+            {loading && (
+              <Flex justify="center" py={8}>
+                <Spinner size="lg" />
+              </Flex>
+            )}
+            {error && (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertTitle>Error</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            {!loading && customerId && (
           contactsBatchKey ? (
             <ContactsBlock
               sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
@@ -723,6 +738,8 @@ export default function LeadSourcesTabNew({
               onPoll={(sourceType) => handlePoll(sourceType)}
             />
           )
+            )}
+          </>
         )}
       </VStack>
 
@@ -755,6 +772,14 @@ export default function LeadSourcesTabNew({
                 value={connectName}
                 onChange={(e) => setConnectName(e.target.value)}
               />
+            </FormControl>
+            <FormControl mt={3}>
+              <Checkbox
+                isChecked={connectApplyToAllAccounts}
+                onChange={(e) => setConnectApplyToAllAccounts(e.target.checked)}
+              >
+                Apply to all accounts (use this sheet for every customer that does not have their own)
+              </Checkbox>
             </FormControl>
           </ModalBody>
           <ModalFooter>

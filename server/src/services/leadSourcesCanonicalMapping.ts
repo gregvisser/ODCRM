@@ -186,10 +186,27 @@ export function mapRowToCanonical(
   }
 }
 
+export type CsvDelimiter = ',' | '\t' | ';'
+
+/**
+ * Auto-detect delimiter from first line of CSV.
+ * If header contains tab → \t; else if contains ; and commas are low → ; else ,
+ */
+export function detectDelimiter(firstLine: string): CsvDelimiter {
+  const hasTab = firstLine.includes('\t')
+  if (hasTab) return '\t'
+  const commaCount = (firstLine.match(/,/g) || []).length
+  const semicolonCount = (firstLine.match(/;/g) || []).length
+  if (semicolonCount > 0 && commaCount <= semicolonCount) return ';'
+  return ','
+}
+
 /**
  * Parse CSV text into rows (array of string[]). Handles quoted values.
+ * Uses given delimiter (default comma).
  */
-export function parseCsvRows(text: string): string[][] {
+export function parseCsvRows(text: string, delimiter: CsvDelimiter = ','): string[][] {
+  const sep = delimiter
   const lines: string[][] = []
   let currentLine: string[] = []
   let currentField = ''
@@ -206,7 +223,7 @@ export function parseCsvRows(text: string): string[][] {
       } else {
         inQuotes = !inQuotes
       }
-    } else if (char === ',' && !inQuotes) {
+    } else if (char === sep && !inQuotes) {
       currentLine.push(currentField.trim())
       currentField = ''
     } else if ((char === '\r' || char === '\n') && !inQuotes) {
@@ -230,12 +247,14 @@ export function parseCsvRows(text: string): string[][] {
 
 /**
  * Full pipeline: raw CSV text → header mapping + array of MappedRow.
- * First row = header; rest = data. Duplicate headers handled.
+ * First row = header; rest = data. Delimiter auto-detected from first line. Duplicate headers handled.
  */
-export function csvToMappedRows(csvText: string): { columnKeys: string[]; rows: MappedRow[] } {
-  const allRows = parseCsvRows(csvText)
+export function csvToMappedRows(csvText: string): { columnKeys: string[]; rows: MappedRow[]; delimiter: CsvDelimiter } {
+  const firstLine = csvText.split(/\r?\n/)[0] ?? ''
+  const delimiter = detectDelimiter(firstLine)
+  const allRows = parseCsvRows(csvText, delimiter)
   if (allRows.length < 2) {
-    return { columnKeys: [], rows: [] }
+    return { columnKeys: [], rows: [], delimiter }
   }
   const rawHeaderRow = allRows[0]
   const { orderedColumns, headerToCanonicalOrExtra } = buildColumnMapping(rawHeaderRow)
@@ -245,5 +264,5 @@ export function csvToMappedRows(csvText: string): { columnKeys: string[]; rows: 
   }
   const columnKeys = [...new Set(rows.flatMap((row) => row.columnKeys))]
   if (columnKeys.length === 0 && orderedColumns.length > 0) columnKeys.push(...orderedColumns)
-  return { columnKeys, rows }
+  return { columnKeys, rows, delimiter }
 }

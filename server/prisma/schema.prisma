@@ -831,24 +831,31 @@ enum LeadSourceType {
   BLACKBOOK
 }
 
+enum LeadSourceAppliesTo {
+  CUSTOMER_ONLY   // only this customer
+  ALL_ACCOUNTS    // use for any customer that has no own config (connect once, apply everywhere)
+}
+
 // Sheet configuration per customer per source (metadata only)
 model LeadSourceSheetConfig {
-  id             String         @id @default(cuid())
+  id             String               @id @default(cuid())
   customerId     String
   sourceType     LeadSourceType
-  spreadsheetId  String         // Google spreadsheet ID (no full URL stored for UI)
-  gid            String?        // Sheet tab GID for CSV export
-  displayName    String         // User-facing name; never show spreadsheetId in UI
-  isLocked       Boolean        @default(true)
+  spreadsheetId  String               // Google spreadsheet ID (no full URL stored for UI)
+  gid            String?              // Sheet tab GID for CSV export
+  displayName    String               // User-facing name; never show spreadsheetId in UI
+  isLocked       Boolean              @default(true)
+  appliesTo      LeadSourceAppliesTo  @default(CUSTOMER_ONLY)
   lastFetchAt    DateTime?
   lastError      String?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
-  customer       Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer       Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, sourceType])
   @@index([customerId])
+  @@index([sourceType, appliesTo])
   @@map("lead_source_sheet_configs")
 }
 

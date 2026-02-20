@@ -5,9 +5,9 @@
 
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { LeadSourceType } from '@prisma/client'
+import { LeadSourceType, LeadSourceAppliesTo } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
-import { csvToMappedRows } from '../services/leadSourcesCanonicalMapping.js'
+import { csvToMappedRows, detectDelimiter } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
 
@@ -92,15 +92,40 @@ function setCachedContacts(customerId: string, sourceType: string, columnKeys: s
   contactsCache.set(`${customerId}|${sourceType}`, { columnKeys, rows, at: Date.now() })
 }
 
-// GET /api/lead-sources — list 4 source configs
+/** Resolve sheet config: exact customer first, then any config with appliesTo ALL_ACCOUNTS for this sourceType. */
+async function resolveLeadSourceConfig(
+  customerId: string,
+  sourceType: LeadSourceType
+): Promise<{ id: string; customerId: string; sourceType: LeadSourceType; spreadsheetId: string; gid: string | null; displayName: string; isLocked: boolean; lastFetchAt: Date | null; lastError: string | null } | null> {
+  const exact = await prisma.leadSourceSheetConfig.findUnique({
+    where: { customerId_sourceType: { customerId, sourceType } },
+  })
+  if (exact?.spreadsheetId) return exact
+  const fallback = await prisma.leadSourceSheetConfig.findFirst({
+    where: { sourceType, appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS },
+  })
+  return fallback?.spreadsheetId ? fallback : null
+}
+
+/** Resolve configs for all source types (for list endpoint). */
+async function resolveAllLeadSourceConfigs(customerId: string): Promise<Array<{ sourceType: LeadSourceType; config: Awaited<ReturnType<typeof resolveLeadSourceConfig>> }>> {
+  const results = await Promise.all(
+    SOURCE_TYPES.map(async (sourceType) => ({
+      sourceType,
+      config: await resolveLeadSourceConfig(customerId, sourceType),
+    }))
+  )
+  return results
+}
+
+// GET /api/lead-sources — list 4 source configs (respects inheritance)
 router.get('/', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
-    const configs = await prisma.leadSourceSheetConfig.findMany({
-      where: { customerId },
-    })
+    const resolved = await resolveAllLeadSourceConfigs(customerId)
     const sources = SOURCE_TYPES.map((sourceType) => {
-      const c = configs.find((x) => x.sourceType === sourceType)
+      const r = resolved.find((x) => x.sourceType === sourceType)
+      const c = r?.config
       return {
         sourceType,
         displayName: c?.displayName ?? sourceType,
@@ -122,10 +147,11 @@ router.get('/', async (req: Request, res: Response) => {
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
   displayName: z.string().trim().min(1),
+  applyToAllAccounts: z.boolean().optional().default(false),
 })
 router.post('/:sourceType/connect', async (req: Request, res: Response) => {
   try {
-    const { sheetUrl, displayName } = connectSchema.parse(req.body)
+    const { sheetUrl, displayName, applyToAllAccounts } = connectSchema.parse(req.body)
 
     if (isPublishedCsvUrl(sheetUrl)) {
       return res.status(400).json({ error: PUBLISHED_LINK_REJECT_MESSAGE })
@@ -155,6 +181,7 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
 
     const csvUrl = getCsvExportUrl(spreadsheetId, gid)
     await fetchCsvFromUrl(csvUrl)
+    const appliesTo = applyToAllAccounts ? LeadSourceAppliesTo.ALL_ACCOUNTS : LeadSourceAppliesTo.CUSTOMER_ONLY
     const config = await prisma.leadSourceSheetConfig.upsert({
       where: { customerId_sourceType: { customerId, sourceType } },
       create: {
@@ -164,8 +191,9 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
         gid,
         displayName,
         isLocked: true,
+        appliesTo,
       },
-      update: { spreadsheetId, gid, displayName, lastError: null },
+      update: { spreadsheetId, gid, displayName, lastError: null, appliesTo },
     })
     res.json({
       success: true,
@@ -191,9 +219,7 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
     const sourceType = sourceTypeRaw
-    const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType } },
-    })
+    const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
     }
@@ -267,9 +293,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
     const sourceType = sourceTypeRaw
-    const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType } },
-    })
+    const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config?.spreadsheetId) {
       res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
       return res.json({ batches: [] })
@@ -342,9 +366,7 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
     const sourceType = sourceTypeRaw
-    const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType } },
-    })
+    const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
@@ -383,9 +405,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     }
     const sourceType = sourceTypeRaw
     if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
-    const config = await prisma.leadSourceSheetConfig.findUnique({
-      where: { customerId_sourceType: { customerId, sourceType } },
-    })
+    const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
@@ -404,7 +424,29 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     if (!cached) {
       const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
       const csvText = await fetchCsvFromUrl(csvUrl)
+      if (process.env.DEBUG_LEAD_SOURCES === '1') {
+        const firstThreeLines = csvText.split(/\r?\n/).slice(0, 3).map((l) => l.slice(0, 200))
+        const firstLine = firstThreeLines[0] ?? ''
+        const commaCount = (firstLine.match(/,/g) || []).length
+        const tabCount = (firstLine.match(/\t/g) || []).length
+        const semicolonCount = (firstLine.match(/;/g) || []).length
+        const inferred = detectDelimiter(firstLine)
+        console.debug('[lead-sources contacts] raw CSV', {
+          firstLineSample: firstLine.slice(0, 120),
+          firstThreeLinesTruncated: firstThreeLines,
+          commaCount,
+          tabCount,
+          semicolonCount,
+          inferredDelimiter: inferred === '\t' ? 'TAB' : inferred === ';' ? 'SEMICOLON' : 'COMMA',
+        })
+      }
       const { columnKeys, rows } = csvToMappedRows(csvText)
+      if (process.env.DEBUG_LEAD_SOURCES === '1') {
+        console.debug('[lead-sources contacts] parsed header', {
+          headerArrayLength: columnKeys.length,
+          first10ColumnNames: columnKeys.slice(0, 10),
+        })
+      }
       const flat = rows.map((r) => {
         const canonical = { ...r.canonical }
         const fingerprint = computeFingerprint(canonical)
@@ -418,7 +460,14 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       return typeof fp === 'string' && fpSet.has(fp)
     })
     const total = filtered.length
-    const returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
+    let returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
+    if (returnedColumns.length === 0 && cached.rows.length > 0) {
+      const keySet = new Set<string>()
+      for (const row of cached.rows.slice(0, 200)) {
+        for (const k of Object.keys(row)) if (k && k !== '__fp') keySet.add(k)
+      }
+      returnedColumns = Array.from(keySet)
+    }
     if (process.env.DEBUG_LEAD_SOURCES === '1') {
       const firstRow = cached.rows[0] as Record<string, string> | undefined
       const firstRowKeys = firstRow ? Object.keys(firstRow).filter((k) => k !== '__fp') : []

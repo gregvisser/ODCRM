@@ -66,12 +66,13 @@ export async function connectLeadSource(
   customerId: string,
   sourceType: LeadSourceType,
   sheetUrl: string,
-  displayName: string
+  displayName: string,
+  applyToAllAccounts?: boolean
 ): Promise<{ success: boolean }> {
   const res = await fetch(`${API_BASE}/api/lead-sources/${sourceType}/connect`, {
     method: 'POST',
     headers: headers(customerId),
-    body: JSON.stringify({ sheetUrl, displayName }),
+    body: JSON.stringify({ sheetUrl, displayName, applyToAllAccounts: !!applyToAllAccounts }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
@@ -95,17 +96,21 @@ export async function pollLeadSource(
   return res.json()
 }
 
+export type LeadSourceBatchesResult = LeadSourceBatchesResponse & { batchesFallback?: boolean }
+
 export async function getLeadSourceBatches(
   customerId: string,
   sourceType: LeadSourceType,
   date: string
-): Promise<LeadSourceBatchesResponse> {
+): Promise<LeadSourceBatchesResult> {
   const res = await fetch(
     `${API_BASE}/api/lead-sources/${sourceType}/batches?date=${encodeURIComponent(date)}`,
     { headers: headers(customerId) }
   )
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
-  return res.json()
+  const data = await res.json() as LeadSourceBatchesResponse
+  const batchesFallback = res.headers.get('x-odcrm-batches-fallback') === '1'
+  return { ...data, batchesFallback }
 }
 
 export async function getLeadSourceContacts(
