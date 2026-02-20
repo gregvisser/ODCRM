@@ -135,6 +135,15 @@ app.use((req, res, next) => {
   next()
 })
 
+// Deployment fingerprint: all responses carry server version for verification
+app.use((_req, res, next) => {
+  res.setHeader(
+    'x-odcrm-server-version',
+    process.env.GIT_SHA || process.env.WEBSITE_INSTANCE_ID || 'unknown'
+  )
+  next()
+})
+
 const parseAllowedOrigins = () => {
   // Parse FRONTEND_URLS (comma-separated), FRONTEND_URL (single URL), and FRONTDOOR_URL
   const envUrls = []

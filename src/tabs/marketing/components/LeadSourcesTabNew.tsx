@@ -70,6 +70,321 @@ const SOURCE_LABELS: Record<LeadSourceType, string> = {
 }
 const POLL_INTERVAL_MS = 45 * 1000
 
+const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? v : [])
+
+function isoToday(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function isIsoDate(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test((s || '').trim())
+}
+
+function normalizeBatchDate(s: string): string {
+  return isIsoDate(s) ? s : isoToday()
+}
+
+function isoYesterday(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
+function SourcesOverview({
+  sources,
+  customerId,
+  onViewBatches,
+  onOpenConnect,
+  onPoll,
+}: {
+  sources: Awaited<ReturnType<typeof getLeadSources>>['sources']
+  customerId: string
+  onViewBatches: (sourceType: LeadSourceType) => void
+  onOpenConnect: (sourceType: LeadSourceType) => void
+  onPoll: (sourceType: LeadSourceType) => void
+}) {
+  return (
+    <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
+      {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
+        const src = sources.find((s) => s.sourceType === sourceType)
+        const connected = !!src?.connected
+        return (
+          <Card key={sourceType}>
+            <CardHeader>
+              <Flex justify="space-between" align="center">
+                <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
+                {connected ? (
+                  <Badge colorScheme="green">Connected</Badge>
+                ) : (
+                  <Badge colorScheme="gray">Not connected</Badge>
+                )}
+              </Flex>
+            </CardHeader>
+            <CardBody pt={0}>
+              {src?.lastError && (
+                <Text fontSize="xs" color="red.600" mb={2}>
+                  {src.lastError}
+                </Text>
+              )}
+              {src?.lastFetchAt && (
+                <Text fontSize="xs" color="gray.600" mb={2}>
+                  Last fetch: {new Date(src.lastFetchAt).toLocaleString()}
+                </Text>
+              )}
+              <VStack align="stretch" spacing={2}>
+                <Button
+                  size="sm"
+                  leftIcon={<ViewIcon />}
+                  isDisabled={!connected}
+                  onClick={() => onViewBatches(sourceType)}
+                >
+                  View Batches
+                </Button>
+                {connected && (
+                  <Link
+                    href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
+                    isExternal
+                    _hover={{ textDecoration: 'none' }}
+                  >
+                    <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="outline">
+                      Open Sheet
+                    </Button>
+                  </Link>
+                )}
+                <Button size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => onOpenConnect(sourceType)}>
+                  Connect
+                </Button>
+                {connected && (
+                  <Button size="sm" leftIcon={<RepeatIcon />} variant="ghost" onClick={() => onPoll(sourceType)}>
+                    Poll now
+                  </Button>
+                )}
+              </VStack>
+            </CardBody>
+          </Card>
+        )
+      })}
+    </SimpleGrid>
+  )
+}
+
+function BatchesBlock({
+  batches,
+  batchesLoading,
+  batchesFallback,
+  sourceLabel,
+  batchDate,
+  onBatchDateChange,
+  onBack,
+  onViewContacts,
+  onUseInSequence,
+}: {
+  batches: LeadSourceBatch[]
+  batchesLoading: boolean
+  batchesFallback?: boolean
+  sourceLabel: string
+  batchDate: string
+  onBatchDateChange: (date: string) => void
+  onBack: () => void
+  onViewContacts: (batchKey: string) => void
+  onUseInSequence: (batch: LeadSourceBatch) => void
+}) {
+  const safeBatches = asArray<LeadSourceBatch>(batches)
+  return (
+    <Box mt={6}>
+      <Flex justify="space-between" align="center" mb={3}>
+        <Heading size="md">Batches — {sourceLabel}</Heading>
+        <HStack>
+          <FormControl width="auto">
+            <FormLabel fontSize="sm">Date</FormLabel>
+            <Input
+              type="date"
+              size="sm"
+              value={normalizeBatchDate(batchDate)}
+              onChange={(e) => onBatchDateChange(normalizeBatchDate(e.target.value))}
+              maxW="160px"
+            />
+          </FormControl>
+          <Button size="sm" onClick={onBack}>
+            Back
+          </Button>
+        </HStack>
+      </Flex>
+      {batchesLoading && safeBatches.length === 0 ? (
+        <Spinner size="sm" />
+      ) : (
+        <>
+          {batchesFallback && (
+            <Text fontSize="sm" color="gray.600" mb={2}>
+              No batches for selected date; showing most recent batches.
+            </Text>
+          )}
+          <Box overflowX="auto" borderWidth="1px" borderRadius="md">
+            <Table size="sm">
+              <Thead>
+                <Tr>
+                  <Th>Client</Th>
+                  <Th>Job Title</Th>
+                  <Th isNumeric>Count</Th>
+                  <Th>Last updated</Th>
+                  <Th>Actions</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+              {safeBatches.length === 0 ? (
+                <Tr>
+                  <Td colSpan={5} color="gray.500">
+                    <VStack align="stretch" spacing={2} py={2}>
+                      <Text>
+                        No batches for this date. Try selecting yesterday&apos;s date or click Poll now on the source.
+                      </Text>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        width="fit-content"
+                        onClick={() => onBatchDateChange(isoYesterday())}
+                      >
+                        Set date to yesterday
+                      </Button>
+                    </VStack>
+                  </Td>
+                </Tr>
+              ) : (
+                safeBatches.map((b) => (
+                  <Tr key={b.batchKey}>
+                    <Td>{b.client ?? '(none)'}</Td>
+                    <Td>{b.jobTitle ?? '(none)'}</Td>
+                    <Td isNumeric>{b.count ?? 0}</Td>
+                    <Td>{b.lastSeenAt ? new Date(b.lastSeenAt).toLocaleString() : '—'}</Td>
+                    <Td>
+                      <HStack spacing={2}>
+                        <Button size="xs" onClick={() => onViewContacts(b.batchKey)}>
+                          View contacts
+                        </Button>
+                        <Button size="xs" variant="outline" onClick={() => onUseInSequence(b)}>
+                          Use in sequence
+                        </Button>
+                      </HStack>
+                    </Td>
+                  </Tr>
+                ))
+              )}
+            </Tbody>
+          </Table>
+        </Box>
+        </>
+      )}
+    </Box>
+  )
+}
+
+function ContactsBlock({
+  contacts,
+  contactsColumns,
+  contactsTotal,
+  contactsLoading,
+  contactsPage,
+  contactsPageSize,
+  sourceLabel,
+  onPrevPage,
+  onNextPage,
+  onBack,
+}: {
+  contacts: Record<string, string>[]
+  contactsColumns: string[]
+  contactsTotal: number
+  contactsLoading: boolean
+  contactsPage: number
+  contactsPageSize: number
+  sourceLabel: string
+  onPrevPage: () => void
+  onNextPage: () => void
+  onBack: () => void
+}) {
+  const contactsCols = contacts.length ? visibleColumns(contactsColumns, contacts) : contactsColumns
+  const cols = contactsCols.length ? contactsCols : contactsColumns
+  return (
+    <Card>
+      <CardHeader>
+        <Flex justify="space-between" align="center">
+          <Heading size="md">Contacts — {sourceLabel}</Heading>
+          <Button size="sm" onClick={onBack}>
+            Back
+          </Button>
+        </Flex>
+      </CardHeader>
+      <CardBody pt={0}>
+        {contactsLoading && contacts.length === 0 ? (
+          <Spinner size="sm" />
+        ) : (
+          <>
+            <Box
+              overflowX="auto"
+              overflowY="auto"
+              maxH="60vh"
+              borderWidth="1px"
+              borderRadius="md"
+              bg="white"
+              _dark={{ bg: 'gray.800' }}
+            >
+              <Table size="sm" layout="fixed" minW="max-content">
+                <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                  <Tr>
+                    {cols.map((col) => (
+                      <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
+                        {col}
+                      </Th>
+                    ))}
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {contacts.length === 0 ? (
+                    <Tr>
+                      <Td colSpan={cols.length || 1} color="gray.500">
+                        {contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
+                      </Td>
+                    </Tr>
+                  ) : (
+                    contacts.map((row, i) => (
+                      <Tr key={i}>
+                        {cols.map((col) => (
+                          <Td
+                            key={col}
+                            whiteSpace="nowrap"
+                            minW="120px"
+                            maxW="200px"
+                            overflow="hidden"
+                            textOverflow="ellipsis"
+                          >
+                            {row[col] ?? ''}
+                          </Td>
+                        ))}
+                      </Tr>
+                    ))
+                  )}
+                </Tbody>
+              </Table>
+            </Box>
+            <Flex justify="space-between" align="center" mt={4}>
+              <Text fontSize="sm" color="gray.600">
+                Page {contactsPage} of {Math.ceil(contactsTotal / contactsPageSize) || 1} ({contactsTotal} total)
+              </Text>
+              <HStack>
+                <Button size="sm" isDisabled={contactsPage <= 1} onClick={onPrevPage}>
+                  Previous
+                </Button>
+                <Button size="sm" isDisabled={contactsPage >= Math.ceil(contactsTotal / contactsPageSize)} onClick={onNextPage}>
+                  Next
+                </Button>
+              </HStack>
+            </Flex>
+          </>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
 export default function LeadSourcesTabNew({
   onNavigateToSequences,
 }: {
@@ -83,7 +398,8 @@ export default function LeadSourcesTabNew({
   const [viewBatchesSource, setViewBatchesSource] = useState<LeadSourceType | null>(null)
   const [batches, setBatches] = useState<LeadSourceBatch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
-  const [batchDate, setBatchDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [batchesFallback, setBatchesFallback] = useState(false)
+  const [batchDate, setBatchDate] = useState<string>(isoToday())
   const [contactsBatchKey, setContactsBatchKey] = useState<{ sourceType: LeadSourceType; batchKey: string } | null>(null)
   const [contacts, setContacts] = useState<Record<string, string>[]>([])
   const [contactsColumns, setContactsColumns] = useState<string[]>([])
@@ -154,15 +470,28 @@ export default function LeadSourcesTabNew({
 
   useEffect(() => {
     if (!customerId || !viewBatchesSource) return
+    const safeDate = normalizeBatchDate(batchDate)
+    if (safeDate !== batchDate) {
+      setBatchDate(safeDate)
+      return
+    }
     let cancelled = false
     const run = async () => {
       setBatchesLoading(true)
       try {
-        const data = await getLeadSourceBatches(customerId, viewBatchesSource, batchDate)
+        const data = await getLeadSourceBatches(customerId, viewBatchesSource, safeDate)
         const list = Array.isArray(data) ? data : (data?.batches ?? [])
-        if (!cancelled) setBatches(list)
+        const safeList = asArray<LeadSourceBatch>(list)
+        if (!cancelled) {
+          setBatches(safeList)
+          setBatchesFallback(!!(data && 'batchesFallback' in data && data.batchesFallback))
+          if (import.meta.env.DEV) console.log('[LeadSources] batches[0]=', safeList?.[0])
+        }
       } catch {
-        if (!cancelled) setBatches([])
+        if (!cancelled) {
+          setBatches([])
+          setBatchesFallback(false)
+        }
       } finally {
         if (!cancelled) setBatchesLoading(false)
       }
@@ -187,9 +516,9 @@ export default function LeadSourcesTabNew({
           contactsPage,
           contactsPageSize
         )
-        setContacts(data.contacts)
-        setContactsColumns(data.columns)
-        setContactsTotal(data.total)
+        setContacts(asArray<Record<string, string>>(data?.contacts))
+        setContactsColumns(asArray<string>(data?.columns))
+        setContactsTotal(Number(data?.total) ?? 0)
       } catch {
         if (!opts?.keepPrevious) {
           setContacts([])
@@ -227,9 +556,10 @@ export default function LeadSourcesTabNew({
       toast({ title: 'Poll complete', description: `${result.totalRows} rows, ${result.newRowsDetected} new`, status: 'success', duration: 3000 })
       loadSources()
       if (viewBatchesSource === sourceType) {
-        const data = await getLeadSourceBatches(customerId, sourceType, batchDate)
+        const data = await getLeadSourceBatches(customerId, sourceType, normalizeBatchDate(batchDate))
         const list = Array.isArray(data) ? data : (data?.batches ?? [])
         setBatches(list)
+        setBatchesFallback(!!(data && 'batchesFallback' in data && data.batchesFallback))
       }
     } catch (e) {
       toast({ title: 'Poll failed', description: e instanceof Error ? e.message : 'Error', status: 'error', duration: 5000 })
@@ -279,11 +609,20 @@ export default function LeadSourcesTabNew({
 
   if (!customerId && customers.length > 0) return null
 
+  const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
+
   return (
     <Box p={4}>
       <VStack align="stretch" spacing={6}>
         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-          <Heading size="lg">Lead Sources</Heading>
+          <Box>
+            <Heading size="lg">Lead Sources</Heading>
+            {import.meta.env.DEV && (
+              <Text fontSize="xs" color="gray.500" mt={0.5}>
+                build: {buildVersion}
+              </Text>
+            )}
+          </Box>
           <Select
             maxW="280px"
             value={customerId}
@@ -312,249 +651,58 @@ export default function LeadSourcesTabNew({
         )}
 
         {!loading && (
-          <>
-            <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
-              {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
-                const src = sources.find((s) => s.sourceType === sourceType)
-                const connected = !!src?.connected
-                return (
-                  <Card key={sourceType}>
-                    <CardHeader>
-                      <Flex justify="space-between" align="center">
-                        <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
-                        {connected ? (
-                          <Badge colorScheme="green">Connected</Badge>
-                        ) : (
-                          <Badge colorScheme="gray">Not connected</Badge>
-                        )}
-                      </Flex>
-                    </CardHeader>
-                    <CardBody pt={0}>
-                      {src?.lastError && (
-                        <Text fontSize="xs" color="red.600" mb={2}>
-                          {src.lastError}
-                        </Text>
-                      )}
-                      {src?.lastFetchAt && (
-                        <Text fontSize="xs" color="gray.600" mb={2}>
-                          Last fetch: {new Date(src.lastFetchAt).toLocaleString()}
-                        </Text>
-                      )}
-                      <VStack align="stretch" spacing={2}>
-                        <Button
-                          size="sm"
-                          leftIcon={<ViewIcon />}
-                          isDisabled={!connected}
-                          onClick={() => {
-                            setViewBatchesSource(sourceType)
-                            setContactsBatchKey(null)
-                          }}
-                        >
-                          View Batches
-                        </Button>
-                        {connected && (
-                          <Link
-                            href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
-                            isExternal
-                            _hover={{ textDecoration: 'none' }}
-                          >
-                            <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="outline">
-                              Open Sheet
-                            </Button>
-                          </Link>
-                        )}
-                        <Button size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => openConnect(sourceType)}>
-                          Connect
-                        </Button>
-                        {connected && (
-                          <Button
-                            size="sm"
-                            leftIcon={<RepeatIcon />}
-                            variant="ghost"
-                            onClick={() => handlePoll(sourceType)}
-                          >
-                            Poll now
-                          </Button>
-                        )}
-                      </VStack>
-                    </CardBody>
-                  </Card>
-                )
-              })}
-            </SimpleGrid>
-
-            {viewBatchesSource && (
-              <Box mt={6}>
-                <Flex justify="space-between" align="center" mb={3}>
-                  <Heading size="md">Batches — {SOURCE_LABELS[viewBatchesSource]}</Heading>
-                  <HStack>
-                    <FormControl width="auto">
-                      <FormLabel fontSize="sm">Date</FormLabel>
-                      <Input
-                        type="date"
-                        size="sm"
-                        value={batchDate}
-                        onChange={(e) => setBatchDate(e.target.value)}
-                        maxW="160px"
-                      />
-                    </FormControl>
-                    <Button size="sm" onClick={() => setViewBatchesSource(null)}>
-                      Back
-                    </Button>
-                  </HStack>
-                </Flex>
-                {batchesLoading && batches.length === 0 ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <Box overflowX="auto" borderWidth="1px" borderRadius="md">
-                    <Table size="sm">
-                      <Thead>
-                        <Tr>
-                          <Th>Client</Th>
-                          <Th>Job Title</Th>
-                          <Th isNumeric>Count</Th>
-                          <Th>Last updated</Th>
-                          <Th>Actions</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {batches.length === 0 ? (
-                          <Tr>
-                            <Td colSpan={5} color="gray.500">
-                              No batches
-                            </Td>
-                          </Tr>
-                        ) : (
-                          batches.map((b) => (
-                            <Tr key={b.batchKey}>
-                              <Td>{b.client ?? '(none)'}</Td>
-                              <Td>{b.jobTitle ?? '(none)'}</Td>
-                              <Td isNumeric>{b.count ?? 0}</Td>
-                              <Td>
-                                {b.lastSeenAt
-                                  ? new Date(b.lastSeenAt).toLocaleString()
-                                  : '—'}
-                              </Td>
-                              <Td>
-                                <HStack spacing={2}>
-                                  <Button
-                                    size="xs"
-                                    onClick={() => {
-                                      setContacts([])
-                                      setContactsColumns([])
-                                      setContactsTotal(0)
-                                      setContactsPage(1)
-                                      setContactsBatchKey({
-                                        sourceType: viewBatchesSource,
-                                        batchKey: b.batchKey,
-                                      })
-                                    }}
-                                  >
-                                    View contacts
-                                  </Button>
-                                  <Button size="xs" variant="outline" onClick={() => handleUseInSequence(b)}>
-                                    Use in sequence
-                                  </Button>
-                                </HStack>
-                              </Td>
-                            </Tr>
-                          ))
-                        )}
-                      </Tbody>
-                    </Table>
-                  </Box>
-                )}
-              </Box>
-            )}
-
-            {contactsBatchKey && (
-              <Card>
-                <CardHeader>
-                  <Flex justify="space-between" align="center">
-                    <Heading size="md">Contacts — {SOURCE_LABELS[contactsBatchKey.sourceType]}</Heading>
-                    <Button size="sm" onClick={() => setContactsBatchKey(null)}>
-                      Back
-                    </Button>
-                  </Flex>
-                </CardHeader>
-                <CardBody pt={0}>
-                  {contactsLoading && contacts.length === 0 ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <>
-                      {(() => {
-                        const computed = contacts.length ? visibleColumns(contactsColumns, contacts) : contactsColumns
-                        const contactsCols = computed.length ? computed : contactsColumns
-                        return (
-                          <Box
-                            overflowX="auto"
-                            overflowY="auto"
-                            maxH="60vh"
-                            borderWidth="1px"
-                            borderRadius="md"
-                            bg="white"
-                            _dark={{ bg: 'gray.800' }}
-                          >
-                            <Table size="sm" layout="fixed" minW="max-content">
-                              <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
-                                <Tr>
-                                  {contactsCols.map((col) => (
-                                    <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
-                                      {col}
-                                    </Th>
-                                  ))}
-                                </Tr>
-                              </Thead>
-                              <Tbody>
-                                {contacts.length === 0 ? (
-                                  <Tr>
-                                    <Td colSpan={contactsCols.length || 1} color="gray.500">
-                                      {contacts.length === 0 && contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
-                                    </Td>
-                                  </Tr>
-                                ) : (
-                                  contacts.map((row, i) => (
-                                    <Tr key={i}>
-                                      {contactsCols.map((col) => (
-                                        <Td key={col} whiteSpace="nowrap" minW="120px" maxW="200px" overflow="hidden" textOverflow="ellipsis">
-                                          {row[col] ?? ''}
-                                        </Td>
-                                      ))}
-                                    </Tr>
-                                  ))
-                                )}
-                              </Tbody>
-                            </Table>
-                          </Box>
-                        )
-                      })()}
-                      <Flex justify="space-between" align="center" mt={4}>
-                        <Text fontSize="sm" color="gray.600">
-                          Page {contactsPage} of {Math.ceil(contactsTotal / contactsPageSize) || 1} ({contactsTotal} total)
-                        </Text>
-                        <HStack>
-                          <Button
-                            size="sm"
-                            isDisabled={contactsPage <= 1}
-                            onClick={() => setContactsPage((p) => p - 1)}
-                          >
-                            Previous
-                          </Button>
-                          <Button
-                            size="sm"
-                            isDisabled={contactsPage >= Math.ceil(contactsTotal / contactsPageSize)}
-                            onClick={() => setContactsPage((p) => p + 1)}
-                          >
-                            Next
-                          </Button>
-                        </HStack>
-                      </Flex>
-                    </>
-                  )}
-                </CardBody>
-              </Card>
-            )}
-          </>
+          contactsBatchKey ? (
+            <ContactsBlock
+              sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
+              contacts={contacts}
+              contactsColumns={contactsColumns}
+              contactsTotal={contactsTotal}
+              contactsLoading={contactsLoading}
+              contactsPage={contactsPage}
+              contactsPageSize={contactsPageSize}
+              onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
+              onNextPage={() => setContactsPage((p) => p + 1)}
+              onBack={() => {
+                setContactsBatchKey(null)
+                setContacts([])
+                setContactsColumns([])
+                setContactsTotal(0)
+                setContactsPage(1)
+              }}
+            />
+          ) : viewBatchesSource ? (
+            <BatchesBlock
+              sourceLabel={SOURCE_LABELS[viewBatchesSource]}
+              batches={batches}
+              batchesLoading={batchesLoading}
+              batchesFallback={batchesFallback}
+              batchDate={batchDate}
+              onBatchDateChange={(next) => setBatchDate(next)}
+              onBack={() => setViewBatchesSource(null)}
+              onViewContacts={(batchKey) => {
+                setContacts([])
+                setContactsColumns([])
+                setContactsTotal(0)
+                setContactsPage(1)
+                setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
+              }}
+              onUseInSequence={(batch) => handleUseInSequence(batch)}
+            />
+          ) : (
+            <SourcesOverview
+              sources={sources}
+              customerId={customerId}
+              onViewBatches={(sourceType) => {
+                setViewBatchesSource(sourceType)
+                setContactsBatchKey(null)
+                setBatchDate((prev) => normalizeBatchDate(prev))
+                setBatches([])
+                setBatchesFallback(false)
+              }}
+              onOpenConnect={(sourceType) => openConnect(sourceType)}
+              onPoll={(sourceType) => handlePoll(sourceType)}
+            />
+          )
         )}
       </VStack>
 
