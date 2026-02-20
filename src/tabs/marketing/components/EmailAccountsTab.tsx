@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -63,7 +63,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -109,8 +109,12 @@ const EmailAccountsTab: React.FC = () => {
   useEffect(() => {
     if (selectedCustomerId) {
       loadIdentities()
+    } else {
+      setIdentities([])
+      setError(null)
+      setLoading(false)
     }
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, loadIdentities])
 
   const loadCustomers = async () => {
     const { data, error: apiError } = await api.get('/api/customers')
@@ -142,11 +146,14 @@ const EmailAccountsTab: React.FC = () => {
     }
   }
 
-  const loadIdentities = async () => {
+  const loadIdentities = useCallback(async () => {
+    if (!selectedCustomerId) return
     setLoading(true)
     setError(null)
 
-    const { data, error: apiError } = await api.get<EmailIdentity[]>('/api/outlook/identities')
+    const { data, error: apiError } = await api.get<EmailIdentity[]>(
+      `/api/outlook/identities?customerId=${encodeURIComponent(selectedCustomerId)}`
+    )
 
     if (apiError) {
       setError(apiError)
@@ -156,7 +163,7 @@ const EmailAccountsTab: React.FC = () => {
     }
 
     setLoading(false)
-  }
+  }, [selectedCustomerId])
 
   const filteredIdentities = useMemo(() => {
     return identities
@@ -315,6 +322,46 @@ const EmailAccountsTab: React.FC = () => {
     })
   }
 
+  if (!selectedCustomerId) {
+    return (
+      <Box>
+        <VStack align="start" spacing={1} mb={4}>
+          <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
+          <Text color="gray.600">Connect Outlook accounts to send campaigns (max 5 per customer)</Text>
+          <FormControl w="300px" mt={2}>
+            <FormLabel fontSize="sm">Customer</FormLabel>
+            <Select
+              value=""
+              onChange={(e) => {
+                const id = e.target.value
+                if (id) {
+                  setSelectedCustomerId(id)
+                  setCurrentCustomerId(id)
+                }
+              }}
+              placeholder="Select customer"
+            >
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </Select>
+          </FormControl>
+        </VStack>
+        <Card>
+          <CardBody textAlign="center" py={10}>
+            <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a customer to view email accounts</Text>
+            <Text color="gray.600">
+              Choose a customer from the dropdown above to see their connected email accounts, or connect new ones.
+            </Text>
+          </CardBody>
+        </Card>
+      </Box>
+    )
+  }
+
   if (loading && identities.length === 0) {
     return (
       <Box textAlign="center" py={10}>
@@ -352,7 +399,11 @@ const EmailAccountsTab: React.FC = () => {
               <FormLabel fontSize="sm">Customer</FormLabel>
               <Select
                 value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                onChange={(e) => {
+                  const id = e.target.value
+                  setSelectedCustomerId(id)
+                  setCurrentCustomerId(id)
+                }}
                 placeholder="Select customer"
               >
                 {customers.map((customer) => (

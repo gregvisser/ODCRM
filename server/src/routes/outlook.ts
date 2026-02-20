@@ -574,10 +574,12 @@ router.get('/callback', async (req, res) => {
   }
 })
 
+// Prefer explicit query param so callers (e.g. Marketing Email Accounts tab) can request a specific customer;
+// header/body remain fallbacks. Tenant scope is still enforced (single customerId per request).
 const getCustomerId = (req: express.Request) =>
+  (req.query.customerId as string) ||
   (req.body?.customerId as string) ||
-  (req.headers['x-customer-id'] as string) ||
-  (req.query.customerId as string)
+  (req.headers['x-customer-id'] as string)
 
 // Create SMTP identity
 router.post('/identities', async (req, res, next) => {
@@ -702,12 +704,25 @@ router.get('/identities', async (req, res, next) => {
   }
 })
 
-// Update identity (e.g., daily send limit)
+// Update identity (e.g., daily send limit). Whitelist only - never pass req.body to Prisma (prevents token overwrite).
+const PATCH_IDENTITY_WHITELIST = [
+  'displayName',
+  'dailySendLimit',
+  'sendWindowHoursStart',
+  'sendWindowHoursEnd',
+  'sendWindowTimeZone',
+  'isActive',
+] as const
+
 router.patch('/identities/:id', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
-    const data = req.body
+    const body = req.body || {}
+    const data: Record<string, unknown> = {}
+    for (const key of PATCH_IDENTITY_WHITELIST) {
+      if (body[key] !== undefined) data[key] = body[key]
+    }
 
     const identity = await prisma.emailIdentity.findFirst({
       where: { id, customerId }
@@ -719,7 +734,7 @@ router.patch('/identities/:id', async (req, res, next) => {
 
     const updated = await prisma.emailIdentity.update({
       where: { id },
-      data
+      data: data as any
     })
 
     res.json(updated)
