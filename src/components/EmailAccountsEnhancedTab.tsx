@@ -48,6 +48,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { settingsStore } from '../platform'
+import { emit } from '../platform/events'
 import { api } from '../utils/api'
 
 interface EmailIdentity {
@@ -194,6 +195,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
         isClosable: true,
       })
       void fetchIdentities()
+      if (customerId) emit('customerUpdated', { id: customerId })
       url.searchParams.delete('emailConnected')
       url.searchParams.delete('connectedEmail')
       url.searchParams.delete('oauth')
@@ -255,6 +257,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
 
       onSmtpClose()
       fetchIdentities()
+      if (smtpForm.customerId) emit('customerUpdated', { id: smtpForm.customerId })
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -352,6 +355,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     } else {
       toast({ title: 'Success', description: 'Account disconnected', status: 'success' })
       fetchIdentities()
+      if (customerId) emit('customerUpdated', { id: customerId })
     }
   }
 

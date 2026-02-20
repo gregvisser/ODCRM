@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -64,6 +64,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { emit } from '../../../platform/events'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -101,6 +102,11 @@ const EmailAccountsTab: React.FC = () => {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [editingIdentity, setEditingIdentity] = useState<EmailIdentity | null>(null)
   const toast = useToast()
+  const selectedCustomerIdRef = useRef(selectedCustomerId)
+
+  useEffect(() => {
+    selectedCustomerIdRef.current = selectedCustomerId
+  }, [selectedCustomerId])
 
   useEffect(() => {
     loadCustomers()
@@ -148,12 +154,16 @@ const EmailAccountsTab: React.FC = () => {
 
   const loadIdentities = useCallback(async () => {
     if (!selectedCustomerId) return
+    const requestedCustomerId = selectedCustomerId
     setLoading(true)
     setError(null)
 
     const { data, error: apiError } = await api.get<EmailIdentity[]>(
-      `/api/outlook/identities?customerId=${encodeURIComponent(selectedCustomerId)}`
+      `/api/outlook/identities?customerId=${encodeURIComponent(requestedCustomerId)}`
     )
+
+    // Ignore stale response: user may have changed customer while request was in flight
+    if (requestedCustomerId !== selectedCustomerIdRef.current) return
 
     if (apiError) {
       setError(apiError)
@@ -315,6 +325,7 @@ const EmailAccountsTab: React.FC = () => {
     }
 
     await loadIdentities()
+    if (selectedCustomerId) emit('customerUpdated', { id: selectedCustomerId })
     toast({
       title: 'Account disconnected',
       status: 'success',

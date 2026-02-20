@@ -19,7 +19,7 @@ import {
   Divider,
 } from '@chakra-ui/react'
 import { api } from '../../utils/api'
-import { emit } from '../../platform/events'
+import { emit, on } from '../../platform/events'
 import { useCustomersFromDatabase } from '../../hooks/useCustomersFromDatabase'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 
@@ -49,6 +49,7 @@ const OPS_TEAM_ITEMS = [
   { key: 'ops_populate_ppt', label: 'Populate Onboarding Meeting PPT' },
   { key: 'ops_receive_file', label: 'Receive & File Onboarding Information Received from Client' },
   { key: 'ops_create_emails', label: 'Create/Set Up Emails for Outreach with Agreed Auto Signatures' },
+  { key: 'ops_emails_linked', label: 'Emails (5 linked)' }, // DB-derived: linkedEmailCount >= 5 (read-only)
   { key: 'ops_create_ddi', label: 'Create Client DDI & Test' },
   { key: 'ops_lead_tracker', label: 'Add Client to Lead Tracker' },
   { key: 'ops_brief_campaigns', label: 'Brief Campaigns Creator' },
@@ -84,13 +85,14 @@ const AM_ITEMS = [
 
 type ChecklistState = Record<string, boolean>
 
-// Auto-ticked items (from Customer Onboarding actions). Everything else is manual-only.
+// Auto-ticked items (from Customer Onboarding actions). ops_emails_linked is DB-derived (linkedEmailCount >= 5), read-only.
 const AUTO_TICK_KEY_SET = new Set<string>([
   'sales.sales_client_agreement',
   'sales.sales_start_date',
   'sales.sales_assign_am',
   'ops.ops_added_crm',
   'ops.ops_lead_tracker',
+  'ops.ops_emails_linked',
   'am.am_send_dnc',
 ])
 
@@ -122,6 +124,7 @@ export default function ProgressTrackerTab() {
   const [salesChecklist, setSalesChecklist] = useState<ChecklistState>({})
   const [opsChecklist, setOpsChecklist] = useState<ChecklistState>({})
   const [amChecklist, setAmChecklist] = useState<ChecklistState>({})
+  const [linkedEmailCount, setLinkedEmailCount] = useState<number>(0)
   const [isLoadingProgress, setIsLoadingProgress] = useState(false)
   const [activeSubTab, setActiveSubTab] = useState(0)
 
@@ -152,6 +155,7 @@ export default function ProgressTrackerTab() {
       setSalesChecklist(progressTracker?.sales || {})
       setOpsChecklist(progressTracker?.ops || {})
       setAmChecklist(progressTracker?.am || {})
+      setLinkedEmailCount(typeof data?.linkedEmailCount === 'number' ? data.linkedEmailCount : 0)
       setIsLoadingProgress(false)
     },
     [toast],
@@ -162,14 +166,22 @@ export default function ProgressTrackerTab() {
     void loadChecklistState(selectedCustomerId)
   }, [selectedCustomerId, loadChecklistState])
 
+  useEffect(() => {
+    const unsubscribe = on<{ id?: string }>('customerUpdated', (detail) => {
+      if (detail?.id && detail.id === selectedCustomerId) void loadChecklistState(selectedCustomerId)
+    })
+    return unsubscribe
+  }, [selectedCustomerId, loadChecklistState])
+
   // AUTO-REMOVE completed customers when Show completed is OFF.
   useEffect(() => {
     if (!selectedCustomerId) return
     if (showCompleted) return
 
+    const opsWithEmails = { ...opsChecklist, ops_emails_linked: linkedEmailCount >= 5 }
     const isCompleteNow =
       isGroupComplete(SALES_TEAM_ITEMS, salesChecklist) &&
-      isGroupComplete(OPS_TEAM_ITEMS, opsChecklist) &&
+      isGroupComplete(OPS_TEAM_ITEMS, opsWithEmails) &&
       isGroupComplete(AM_ITEMS, amChecklist)
 
     if (!isCompleteNow) return
@@ -184,7 +196,7 @@ export default function ProgressTrackerTab() {
       duration: 5000,
       isClosable: true,
     })
-  }, [amChecklist, filteredCustomers, opsChecklist, salesChecklist, selectedCustomerId, showCompleted, toast])
+  }, [amChecklist, filteredCustomers, linkedEmailCount, opsChecklist, salesChecklist, selectedCustomerId, showCompleted, toast])
 
   const saveChecklistState = useCallback(
     async (group: 'sales' | 'ops' | 'am', itemKey: string, checked: boolean) => {
@@ -234,7 +246,10 @@ export default function ProgressTrackerTab() {
   )
 
   const salesComplete = useMemo(() => isGroupComplete(SALES_TEAM_ITEMS, salesChecklist), [salesChecklist])
-  const opsComplete = useMemo(() => isGroupComplete(OPS_TEAM_ITEMS, opsChecklist), [opsChecklist])
+  const opsComplete = useMemo(
+    () => isGroupComplete(OPS_TEAM_ITEMS, { ...opsChecklist, ops_emails_linked: linkedEmailCount >= 5 }),
+    [opsChecklist, linkedEmailCount],
+  )
   const amComplete = useMemo(() => isGroupComplete(AM_ITEMS, amChecklist), [amChecklist])
 
   // Color for sub-tab: light red by default, green when complete
@@ -399,18 +414,27 @@ export default function ProgressTrackerTab() {
                   <Heading size="sm" mb={2}>
                     Operations Team Checklist
                   </Heading>
-                  {OPS_TEAM_ITEMS.map((item, idx) => (
-                    <Box key={item.key}>
-                      <Checkbox
-                        isChecked={opsChecklist[item.key] || false}
-                        onChange={(e) => void saveChecklistState('ops', item.key, e.target.checked)}
-                        size="md"
-                      >
-                        <Text fontSize="sm">{withManualTickSuffix('ops', item.key, item.label)}</Text>
-                      </Checkbox>
-                      {(idx === 11 || idx === 12) && <Divider my={2} />}
-                    </Box>
-                  ))}
+                  {OPS_TEAM_ITEMS.map((item, idx) => {
+                    const isEmailsLinked = item.key === 'ops_emails_linked'
+                    const checked = isEmailsLinked ? linkedEmailCount >= 5 : (opsChecklist[item.key] || false)
+                    return (
+                      <Box key={item.key}>
+                        <Checkbox
+                          isChecked={checked}
+                          isDisabled={isEmailsLinked}
+                          onChange={
+                            isEmailsLinked
+                              ? undefined
+                              : (e) => void saveChecklistState('ops', item.key, e.target.checked)
+                          }
+                          size="md"
+                        >
+                          <Text fontSize="sm">{withManualTickSuffix('ops', item.key, item.label)}</Text>
+                        </Checkbox>
+                        {(idx === 11 || idx === 12) && <Divider my={2} />}
+                      </Box>
+                    )
+                  })}
                 </VStack>
               </Box>
             </TabPanel>

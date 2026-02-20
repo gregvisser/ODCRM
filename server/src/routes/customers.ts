@@ -634,6 +634,21 @@ router.get('/:id', async (req, res) => {
       console.warn(`[${correlationId}] assignedAccountManagerUser lookup failed`, err)
     }
 
+    // linkedEmailCount: active EmailIdentity count for Progress Tracker "Emails" step (same definition as Marketing list)
+    try {
+      const linkedEmailCount = await prisma.emailIdentity.count({
+        where: {
+          customerId: id,
+          isActive: true,
+          provider: { in: ['outlook', 'smtp'] },
+        },
+      })
+      ;(serialized as any).linkedEmailCount = linkedEmailCount
+    } catch (err) {
+      console.warn(`[${correlationId}] linkedEmailCount lookup failed`, err)
+      ;(serialized as any).linkedEmailCount = 0
+    }
+
     return res.json(serialized)
   } catch (error: any) {
     console.error(`[${correlationId}] Error fetching customer:`, error.message)
