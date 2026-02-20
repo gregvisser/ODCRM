@@ -44,6 +44,7 @@ import {
   FormErrorMessage,
   FormLabel,
   Input,
+  Tooltip,
   useToast,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, AddIcon } from '@chakra-ui/icons'
@@ -112,13 +113,20 @@ function SourcesOverview({
         return (
           <Card key={sourceType}>
             <CardHeader>
-              <Flex justify="space-between" align="center">
+              <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
                 <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
-                {connected ? (
-                  <Badge colorScheme="green">Connected</Badge>
-                ) : (
-                  <Badge colorScheme="gray">Not connected</Badge>
-                )}
+                <HStack spacing={2}>
+                  {connected ? (
+                    <Badge colorScheme="green">Connected</Badge>
+                  ) : (
+                    <Badge colorScheme="gray">Not connected</Badge>
+                  )}
+                  {connected && src?.usingGlobalConfig && (
+                    <Tooltip label="This sheet is shared across all accounts." hasArrow>
+                      <Badge colorScheme="blue" cursor="help">Using global config</Badge>
+                    </Tooltip>
+                  )}
+                </HStack>
               </Flex>
             </CardHeader>
             <CardBody pt={0}>

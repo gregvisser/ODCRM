@@ -11,6 +11,8 @@ export interface LeadSourceConfig {
   sourceType: LeadSourceType
   displayName: string
   connected: boolean
+  /** True when this customer is using a sheet connected for "all accounts" (not their own). */
+  usingGlobalConfig?: boolean
   lastFetchAt: string | null
   lastError: string | null
   isLocked: boolean

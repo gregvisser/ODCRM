@@ -126,10 +126,12 @@ router.get('/', async (req: Request, res: Response) => {
     const sources = SOURCE_TYPES.map((sourceType) => {
       const r = resolved.find((x) => x.sourceType === sourceType)
       const c = r?.config
+      const usingGlobalConfig = !!(c && c.customerId !== customerId)
       return {
         sourceType,
         displayName: c?.displayName ?? sourceType,
         connected: !!c?.spreadsheetId,
+        usingGlobalConfig,
         lastFetchAt: c?.lastFetchAt?.toISOString() ?? null,
         lastError: c?.lastError ?? null,
         isLocked: c?.isLocked ?? true,
@@ -180,7 +182,14 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
     }
 
     const csvUrl = getCsvExportUrl(spreadsheetId, gid)
-    await fetchCsvFromUrl(csvUrl)
+    const csvText = await fetchCsvFromUrl(csvUrl)
+    const { columnKeys } = csvToMappedRows(csvText)
+    if (columnKeys.length < 2) {
+      return res.status(400).json({
+        error:
+          'Sheet export appears to have only 1 column. Check the header row has multiple columns, no merged cells in row 1, and the correct sheet tab (gid).',
+      })
+    }
     const appliesTo = applyToAllAccounts ? LeadSourceAppliesTo.ALL_ACCOUNTS : LeadSourceAppliesTo.CUSTOMER_ONLY
     const config = await prisma.leadSourceSheetConfig.upsert({
       where: { customerId_sourceType: { customerId, sourceType } },
@@ -409,6 +418,21 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
+    const configScope = config.customerId === customerId ? 'customer' : 'all_accounts'
+    res.set('x-odcrm-leadsource-config-scope', configScope)
+    res.set('x-odcrm-leadsource-spreadsheet-id', config.spreadsheetId)
+    res.set('x-odcrm-leadsource-sheet-gid', config.gid ?? '')
+    if (process.env.DEBUG_LEAD_SOURCES === '1') {
+      console.debug('[lead-sources contacts] resolved config', {
+        source: configScope === 'customer' ? 'exact customer match' : 'ALL_ACCOUNTS fallback',
+        customerIdRequested: customerId,
+        configCustomerId: config.customerId,
+        sourceType,
+        spreadsheetId: config.spreadsheetId,
+        sheetGid: config.gid ?? '',
+        appliesTo: (config as { appliesTo?: string }).appliesTo,
+      })
+    }
     const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
       where: {
         customerId,
@@ -424,16 +448,15 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     if (!cached) {
       const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
       const csvText = await fetchCsvFromUrl(csvUrl)
+      const firstLine = csvText.split(/\r?\n/)[0] ?? ''
       if (process.env.DEBUG_LEAD_SOURCES === '1') {
-        const firstThreeLines = csvText.split(/\r?\n/).slice(0, 3).map((l) => l.slice(0, 200))
-        const firstLine = firstThreeLines[0] ?? ''
         const commaCount = (firstLine.match(/,/g) || []).length
         const tabCount = (firstLine.match(/\t/g) || []).length
         const semicolonCount = (firstLine.match(/;/g) || []).length
         const inferred = detectDelimiter(firstLine)
         console.debug('[lead-sources contacts] raw CSV', {
-          firstLineSample: firstLine.slice(0, 120),
-          firstThreeLinesTruncated: firstThreeLines,
+          csvUrl,
+          firstLineTrunc500: firstLine.slice(0, 500),
           commaCount,
           tabCount,
           semicolonCount,
@@ -442,9 +465,12 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       }
       const { columnKeys, rows } = csvToMappedRows(csvText)
       if (process.env.DEBUG_LEAD_SOURCES === '1') {
-        console.debug('[lead-sources contacts] parsed header', {
-          headerArrayLength: columnKeys.length,
-          first10ColumnNames: columnKeys.slice(0, 10),
+        const firstRowKeys = rows[0] ? Object.keys({ ...rows[0].canonical, ...rows[0].extraFields }) : []
+        console.debug('[lead-sources contacts] parser output', {
+          parsedHeadersLength: columnKeys.length,
+          first30Headers: columnKeys.slice(0, 30),
+          firstRowKeysCount: firstRowKeys.length,
+          firstRowKeysList: firstRowKeys.slice(0, 30),
         })
       }
       const flat = rows.map((r) => {
