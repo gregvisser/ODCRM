@@ -641,6 +641,11 @@ const TemplatesTab: React.FC = () => {
                       <option value="Sales">Sales</option>
                       <option value="Marketing">Marketing</option>
                       <option value="Follow-up">Follow-up</option>
+                      <option value="Follow-up 1">Follow-up 1</option>
+                      <option value="Follow-up 2">Follow-up 2</option>
+                      <option value="Follow-up 3">Follow-up 3</option>
+                      <option value="Follow-up 4">Follow-up 4</option>
+                      <option value="Follow-up 5">Follow-up 5</option>
                       <option value="Introduction">Introduction</option>
                       <option value="Newsletter">Newsletter</option>
                     </Select>
