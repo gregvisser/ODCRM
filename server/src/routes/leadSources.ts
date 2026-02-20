@@ -357,6 +357,19 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
   }
 })
 
+/** Ensure every row has every column key (empty string if missing). Stops downstream from collapsing to 1 column. */
+function normalizeRowKeepKeys(
+  row: Record<string, string>,
+  columns: string[]
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const col of columns) {
+    const v = row[col]
+    out[col] = v === null || v === undefined ? '' : String(v)
+  }
+  return out
+}
+
 // GET /api/lead-sources/:sourceType/contacts?batchKey=...&page=1&pageSize=50
 router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
   try {
@@ -410,30 +423,25 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       const firstRow = cached.rows[0] as Record<string, string> | undefined
       const firstRowKeys = firstRow ? Object.keys(firstRow).filter((k) => k !== '__fp') : []
       console.debug('[lead-sources contacts]', {
+        cachedColumnsLength: cached.columnKeys.length,
+        cachedColumnsFirst10: cached.columnKeys.filter((k) => k !== '__fp').slice(0, 10),
+        firstRowKeysLength: firstRowKeys.length,
+        firstRowKeysFirst10: firstRowKeys.slice(0, 10),
+        returnedColumnsLength: returnedColumns.length,
+        returnedColumnsFirst10: returnedColumns.slice(0, 10),
         customerId,
         sourceType,
         batchKey,
         rowSeenCount,
         cachedRowCount: cached.rows.length,
         filteredRowCount: filtered.length,
-        returnedColumnCount: returnedColumns.length,
-        firstTwoColumns: returnedColumns.slice(0, 2),
-        firstRowKeys: firstRowKeys.slice(0, 8),
-        firstRowSample: firstRow ? Object.fromEntries(Object.entries(firstRow).filter(([k]) => k !== '__fp').slice(0, 5)) : null,
       })
     }
     const start = (page - 1) * pageSize
     const slice = filtered.slice(start, start + pageSize).map((r: Record<string, string>) => {
       const { __fp, ...rest } = r
-      return rest
+      return normalizeRowKeepKeys(rest as Record<string, string>, returnedColumns)
     })
-    if (process.env.DEBUG_LEAD_SOURCES === '1' && slice.length > 0) {
-      console.debug('[lead-sources contacts] sample contact returned', {
-        columns: returnedColumns.slice(0, 6),
-        sampleKeys: Object.keys(slice[0]).slice(0, 6),
-        sampleRow: Object.fromEntries(Object.entries(slice[0]).slice(0, 5)),
-      })
-    }
     res.json({
       columns: returnedColumns,
       contacts: slice,

@@ -171,10 +171,11 @@ export function mapRowToCanonical(
   rawHeaderRow.forEach((h, i) => {
     const value = (rawRow[i] ?? '').trim()
     const key = headerToCanonicalOrExtra[h ?? ''] ?? `_col${i}`
+    const outValue = value || ''
     if (CANONICAL_FIELDS.includes(key as CanonicalFieldName)) {
-      if (value) (canonical as Record<string, string>)[key] = value
+      (canonical as Record<string, string>)[key] = outValue
     } else {
-      if (value) extraFields[key] = value
+      extraFields[key] = outValue
     }
   })
 
