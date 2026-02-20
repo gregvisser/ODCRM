@@ -31,9 +31,18 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../utils/api'
 import { getItem, setItem } from '../platform/storage'
-import { getEmailTemplates, type OdcrmEmailTemplate } from '../platform/stores/emailTemplates'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
 import { accountsStore, settingsStore } from '../platform'
+
+/** Shape used for template picker; sourced from GET /api/templates (DB). */
+interface WizardEmailTemplate {
+  id: string
+  name: string
+  subject: string
+  body: string
+  stepNumber: number
+  account?: string
+}
 
 interface EmailIdentity {
   id: string
@@ -219,13 +228,44 @@ export default function CampaignWizard({
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
   }, [])
 
-  const allTemplates = useMemo(() => getEmailTemplates(), [])
+  const [templatesFromApi, setTemplatesFromApi] = useState<WizardEmailTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+
+  const fetchTemplates = useCallback(async () => {
+    setTemplatesLoading(true)
+    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    if (!customerId) {
+      setTemplatesFromApi([])
+      setTemplatesLoading(false)
+      return
+    }
+    const { data, error } = await api.get<Array<{ id: string; name: string; subjectTemplate: string; bodyTemplateHtml: string; bodyTemplateText?: string | null; stepNumber: number }>>('/api/templates')
+    if (error) {
+      toast({ title: 'Error', description: 'Failed to load templates', status: 'error' })
+      setTemplatesFromApi([])
+    } else if (data) {
+      setTemplatesFromApi(
+        data.map((t) => ({
+          id: t.id,
+          name: t.name || '',
+          subject: t.subjectTemplate || '',
+          body: t.bodyTemplateText || t.bodyTemplateHtml || '',
+          stepNumber: t.stepNumber || 1,
+        }))
+      )
+    }
+    setTemplatesLoading(false)
+  }, [toast])
+
+  useEffect(() => {
+    fetchTemplates()
+  }, [fetchTemplates])
 
   const templatesForAccount = useMemo(() => {
     const acct = (formData.customerAccountName || '').trim()
-    if (!acct) return allTemplates
-    return allTemplates.filter((t) => !t.account || t.account.toLowerCase() === acct.toLowerCase())
-  }, [allTemplates, formData.customerAccountName])
+    if (!acct) return templatesFromApi
+    return templatesFromApi.filter((t) => !t.account || t.account.toLowerCase() === acct.toLowerCase())
+  }, [templatesFromApi, formData.customerAccountName])
 
   const handleNext = () => {
     if (step === 1 && !formData.senderIdentityId) {
@@ -361,7 +401,7 @@ export default function CampaignWizard({
     }
   }
 
-  const applyTemplateToStep = (stepNumber: number, t: OdcrmEmailTemplate) => {
+  const applyTemplateToStep = (stepNumber: number, t: WizardEmailTemplate) => {
     setFormData((prev) => ({
       ...prev,
       sequenceSteps: (prev.sequenceSteps || []).map((s: SequenceEmailStepDraft) =>
@@ -688,7 +728,7 @@ export default function CampaignWizard({
                   <FormControl mb={3}>
                     <FormLabel>Pick a saved template (optional)</FormLabel>
                   <Select
-                      placeholder={templatesForAccount.length ? 'Select a template' : 'No templates found'}
+                      placeholder={templatesLoading ? 'Loading...' : templatesForAccount.length ? 'Select a template' : 'No templates found'}
                       value={s.templateId || ''}
                     onChange={(e) => {
                         const picked = templatesForAccount.find((t) => t.id === e.target.value)

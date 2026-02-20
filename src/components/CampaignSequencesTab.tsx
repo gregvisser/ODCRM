@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Box,
   Heading,
@@ -52,7 +52,8 @@ import {
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { MdEmail } from 'react-icons/md'
 import { accounts } from './AccountsTab'
-import { accountsStore, campaignWorkflowsStore, emailTemplatesStore } from '../platform'
+import { accountsStore, campaignWorkflowsStore, settingsStore } from '../platform'
+import { api } from '../utils/api'
 
 type EmailTemplate = {
   id: string
@@ -189,55 +190,12 @@ function loadWorkflowsFromStore(): CampaignWorkflow[] {
   return parsed
 }
 
-// Default email templates provided by user
-const defaultTemplates: SavedEmailTemplate[] = [
-  {
-    id: 'template-1',
-    name: 'Reply Success Story - First Email',
-    subject: 'How Reply helped us grow',
-    body: `Hi A,
-
-At Reply, we used our own software to attract customers, find more leads, and grow our business. In six months, thousands of people visited our site and signed up to try out our app. Hundreds went on to become paying customers.
-
-How?
-
-We tested our messaging until we found the best emails. We automated the process so we could reach more people. Using our own software, it was easy to improve our open/reply rates and find more customers.
-
-We'd love to help you see the same great results. If you're still sending emails manually, why not come back to Reply and give us another try?
-
-Best regards,
-
-{{Your_Name}} and {{Your_Company}}`,
-    stepNumber: 1,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'template-2',
-    name: 'Follow-up - Second Email',
-    subject: 'Following up - {{accountName}}',
-    body: `Hi A.
-
-You must have been very busy, but I'd really love to connect with you and see whether or not we can help {{accountName}} with [Your brief value proposition].
-
-We've helped many companies in your space improve their team's ability to successfully engage with their prospective clients and deliver tremendous ROI.
-
-I'd love to share some insights on how {{accountName}} can benefit from collaborating with us.
-
-What will it take to get 10 minutes on your calendar in the next few days?`,
-    stepNumber: 2,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-]
-
-function loadEmailTemplatesFromStore(): SavedEmailTemplate[] {
-  return emailTemplatesStore.ensureEmailTemplatesSeeded(defaultTemplates as any) as any
-}
-
 function CampaignSequencesTab() {
+  const customerId = settingsStore.getCurrentCustomerId('prod-customer-1') || ''
   const [workflows, setWorkflows] = useState<CampaignWorkflow[]>(() => loadWorkflowsFromStore())
-  const [templates, setTemplates] = useState<SavedEmailTemplate[]>(() => loadEmailTemplatesFromStore())
+  const [templates, setTemplates] = useState<SavedEmailTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [templatesError, setTemplatesError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const {
     isOpen: isDeleteOpen,
@@ -292,20 +250,41 @@ function CampaignSequencesTab() {
     campaignWorkflowsStore.setCampaignWorkflows(workflows)
   }, [workflows])
 
-  // Persist templates immediately (and broadcast cross-tab)
-  useEffect(() => {
-    emailTemplatesStore.setEmailTemplates(templates as any)
-  }, [templates])
-
-  // Cross-tab sync for workflows/templates
-  useEffect(() => {
-    const offWorkflows = campaignWorkflowsStore.onCampaignWorkflowsUpdated<CampaignWorkflow>((items) => setWorkflows(items))
-    const offTemplates = emailTemplatesStore.onEmailTemplatesUpdated((items) => setTemplates(items as any))
-    return () => {
-      offWorkflows()
-      offTemplates()
+  // Load templates from DB when customer is selected (tenant-safe)
+  const fetchTemplates = useCallback(async () => {
+    if (!customerId) {
+      setTemplates([])
+      setTemplatesError(null)
+      return
     }
-  }, [])
+    setTemplatesLoading(true)
+    setTemplatesError(null)
+    const headers = { 'X-Customer-Id': customerId }
+    const { data, error } = await api.get<Array<{ id: string; name: string; subjectTemplate: string; bodyTemplateHtml: string; bodyTemplateText?: string | null; stepNumber: number; createdAt: string; updatedAt: string }>>('/api/templates', { headers })
+    if (error) {
+      setTemplatesError(error)
+      setTemplates([])
+      toast({ title: 'Error loading templates', description: error, status: 'error' })
+    } else if (data) {
+      setTemplates(
+        data.map((t) => ({
+          id: t.id,
+          name: t.name || '',
+          subject: t.subjectTemplate || '',
+          body: t.bodyTemplateText || t.bodyTemplateHtml || '',
+          account: undefined,
+          stepNumber: (t.stepNumber === 2 ? 2 : 1) as 1 | 2,
+          createdAt: t.createdAt || new Date().toISOString(),
+          updatedAt: t.updatedAt || new Date().toISOString(),
+        }))
+      )
+    }
+    setTemplatesLoading(false)
+  }, [customerId, toast])
+
+  useEffect(() => {
+    fetchTemplates()
+  }, [fetchTemplates])
 
   // Form state
   const [newWorkflow, setNewWorkflow] = useState<Omit<CampaignWorkflow, 'id' | 'createdAt' | 'updatedAt'>>({
@@ -511,7 +490,7 @@ function CampaignSequencesTab() {
     stepNumber: 1,
   })
 
-  const handleCreateTemplate = () => {
+  const handleCreateTemplate = async () => {
     if (!newTemplate.name || !newTemplate.subject || !newTemplate.body) {
       toast({
         title: 'Validation Error',
@@ -522,29 +501,30 @@ function CampaignSequencesTab() {
       })
       return
     }
-
-    const templateId = Date.now().toString()
-    const now = new Date().toISOString()
-    const template: SavedEmailTemplate = {
-      id: templateId,
-      ...newTemplate,
-      createdAt: now,
-      updatedAt: now,
+    if (!customerId) {
+      toast({ title: 'No customer selected', description: 'Select a customer to create templates.', status: 'error' })
+      return
     }
 
-    setTemplates([...templates, template])
-    setNewTemplate({
-      name: '',
-      subject: '',
-      body: '',
-      account: '',
-      stepNumber: 1,
-    })
+    const headers = { 'X-Customer-Id': customerId }
+    const payload = {
+      name: newTemplate.name.trim(),
+      subjectTemplate: newTemplate.subject.trim(),
+      bodyTemplateHtml: newTemplate.body,
+      bodyTemplateText: newTemplate.body,
+      stepNumber: newTemplate.stepNumber,
+    }
+    const { data, error } = await api.post<SavedEmailTemplate>('/api/templates', payload, { headers })
+    if (error) {
+      toast({ title: 'Failed to create template', description: error, status: 'error' })
+      return
+    }
+    setNewTemplate({ name: '', subject: '', body: '', account: '', stepNumber: 1 })
     onTemplateModalClose()
-
+    await fetchTemplates()
     toast({
       title: 'Template Created',
-      description: `${template.name} has been successfully created`,
+      description: `${newTemplate.name} has been successfully created`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -564,7 +544,7 @@ function CampaignSequencesTab() {
     onTemplateModalOpen()
   }
 
-  const handleUpdateTemplate = () => {
+  const handleUpdateTemplate = async () => {
     if (!templateToEdit) return
 
     if (!newTemplate.name || !newTemplate.subject || !newTemplate.body) {
@@ -577,28 +557,32 @@ function CampaignSequencesTab() {
       })
       return
     }
-
-    const updatedTemplate: SavedEmailTemplate = {
-      ...templateToEdit,
-      ...newTemplate,
-      updatedAt: new Date().toISOString(),
+    if (!customerId) {
+      toast({ title: 'No customer selected', description: 'Select a customer to update templates.', status: 'error' })
+      return
     }
 
-    setTemplates(templates.map((t) => (t.id === templateToEdit.id ? updatedTemplate : t)))
-    setNewTemplate({
-      name: '',
-      subject: '',
-      body: '',
-      account: '',
-      stepNumber: 1,
-    })
+    const headers = { 'X-Customer-Id': customerId }
+    const payload = {
+      name: newTemplate.name.trim(),
+      subjectTemplate: newTemplate.subject.trim(),
+      bodyTemplateHtml: newTemplate.body,
+      bodyTemplateText: newTemplate.body,
+      stepNumber: newTemplate.stepNumber,
+    }
+    const { error } = await api.patch(`/api/templates/${templateToEdit.id}`, payload, { headers })
+    if (error) {
+      toast({ title: 'Failed to update template', description: error, status: 'error' })
+      return
+    }
+    setNewTemplate({ name: '', subject: '', body: '', account: '', stepNumber: 1 })
     setTemplateToEdit(null)
     setIsTemplateEditMode(false)
     onTemplateModalClose()
-
+    await fetchTemplates()
     toast({
       title: 'Template Updated',
-      description: `${updatedTemplate.name} has been successfully updated`,
+      description: `${newTemplate.name} has been successfully updated`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -623,19 +607,28 @@ function CampaignSequencesTab() {
     onTemplateDeleteOpen()
   }
 
-  const handleDeleteTemplateConfirm = () => {
-    if (templateToDelete) {
-      setTemplates(templates.filter((t) => t.id !== templateToDelete.id))
-      toast({
-        title: 'Template Deleted',
-        description: `${templateToDelete.name} has been permanently deleted`,
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      })
-      setTemplateToDelete(null)
-      onTemplateDeleteClose()
+  const handleDeleteTemplateConfirm = async () => {
+    if (!templateToDelete) return
+    if (!customerId) {
+      toast({ title: 'No customer selected', description: 'Select a customer to delete templates.', status: 'error' })
+      return
     }
+    const headers = { 'X-Customer-Id': customerId }
+    const { error } = await api.delete(`/api/templates/${templateToDelete.id}`, { headers })
+    if (error) {
+      toast({ title: 'Failed to delete template', description: error, status: 'error' })
+      return
+    }
+    setTemplateToDelete(null)
+    onTemplateDeleteClose()
+    await fetchTemplates()
+    toast({
+      title: 'Template Deleted',
+      description: `${templateToDelete.name} has been permanently deleted`,
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
   }
 
   return (
@@ -796,13 +789,18 @@ function CampaignSequencesTab() {
           {/* Templates Tab */}
           <TabPanel>
             <Stack spacing={6}>
+              {!customerId && (
+                <Box p={4} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.200">
+                  <Text>Select a customer to view and manage templates.</Text>
+                </Box>
+              )}
               <HStack justify="flex-end">
-                <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>
+                <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen} isDisabled={!customerId}>
                   Create Template
                 </Button>
               </HStack>
 
-              {templates.length === 0 ? (
+              {templates.length === 0 && !templatesLoading ? (
                 <Box
                   textAlign="center"
                   py={12}
@@ -816,11 +814,13 @@ function CampaignSequencesTab() {
                     No templates yet
                   </Text>
                   <Text fontSize="sm" color="gray.500" mb={4}>
-                    Create your first email template to get started
+                    {customerId ? 'Create your first email template to get started' : 'Select a customer first.'}
                   </Text>
-                  <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>
-                    Create Your First Template
-                  </Button>
+                  {customerId && (
+                    <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>
+                      Create Your First Template
+                    </Button>
+                  )}
                 </Box>
               ) : (
                 <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" boxShadow="sm">
