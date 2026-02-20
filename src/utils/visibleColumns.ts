@@ -1,3 +1,15 @@
+/**
+ * Normalize column/row key for consistent lookup (case-insensitive, no spaces/special chars).
+ * Use for both columns list and row object keys so UI and data match.
+ */
+export function normKey(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '')
+}
+
 /** Treat empty: null, undefined, '', whitespace-only, 'N/A', '-'. */
 export function isEmptyCell(v: unknown): boolean {
   if (v === null || v === undefined) return true

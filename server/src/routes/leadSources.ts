@@ -9,7 +9,7 @@ import { LeadSourceType } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 import { csvToMappedRows } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
-import { buildBatchKey, formatDateBucketEuropeLondon, parseBatchKey } from '../services/leadSourcesBatch.js'
+import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
 
 const router = Router()
 
@@ -254,11 +254,15 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
 })
 
 // GET /api/lead-sources/:sourceType/batches?date=YYYY-MM-DD — distinct batches (groupBy), never raw row_seen rows
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+const BATCHES_NO_DATE_TAKE = 200
+
 router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   try {
     const customerId = getCustomerId(req)
     const { sourceType: sourceTypeRaw } = req.params
-    const date = (req.query.date as string) || formatDateBucketEuropeLondon(new Date())
+    const dateRaw = String(req.query.date ?? '').trim()
+    const isIsoDate = ISO_DATE_REGEX.test(dateRaw)
     if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
     }
@@ -270,29 +274,58 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
       return res.json({ batches: [] })
     }
-    const grouped = await prisma.leadSourceRowSeen.groupBy({
-      by: ['batchKey'],
-      where: {
-        customerId,
-        sourceType,
-        batchKey: { startsWith: date },
-      },
-      _count: { _all: true },
-      _max: { firstSeenAt: true },
-    })
+    const baseWhere = { customerId, sourceType }
+    type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
+    let grouped: GroupRow[]
+    let fallback = false
+
+    if (isIsoDate) {
+      const r1 = await prisma.leadSourceRowSeen.groupBy({
+        by: ['batchKey'],
+        where: { ...baseWhere, batchKey: { startsWith: dateRaw } },
+        _count: { _all: true },
+        _max: { firstSeenAt: true },
+      })
+      grouped = r1 as GroupRow[]
+      if (grouped.length === 0) {
+        const r2 = await prisma.leadSourceRowSeen.groupBy({
+          by: ['batchKey'],
+          where: baseWhere,
+          _count: { _all: true },
+          _max: { firstSeenAt: true },
+        })
+        grouped = (r2 as GroupRow[])
+          .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
+          .slice(0, BATCHES_NO_DATE_TAKE)
+        fallback = true
+      }
+    } else {
+      const r3 = await prisma.leadSourceRowSeen.groupBy({
+        by: ['batchKey'],
+        where: baseWhere,
+        _count: { _all: true },
+        _max: { firstSeenAt: true },
+      })
+      grouped = (r3 as GroupRow[])
+        .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
+        .slice(0, BATCHES_NO_DATE_TAKE)
+    }
+
     const batches = grouped
       .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
       .map((g) => {
         const parsed = parseBatchKey(g.batchKey)
         return {
           batchKey: g.batchKey,
-          client: parsed.date === '' ? '(unknown batch)' : parsed.client,
-          jobTitle: parsed.jobTitle,
+          client: parsed.client && parsed.client.trim() !== '' ? parsed.client : '(none)',
+          jobTitle: parsed.jobTitle && parsed.jobTitle.trim() !== '' ? parsed.jobTitle : '(none)',
           count: g._count._all,
           lastSeenAt: g._max.firstSeenAt?.toISOString() ?? '',
         }
       })
+
     res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
+    res.set('x-odcrm-batches-fallback', fallback ? '1' : '0')
     res.json({ batches })
   } catch (e) {
     const err = e as Error & { status?: number }
@@ -374,6 +407,8 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     const total = filtered.length
     const returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
     if (process.env.DEBUG_LEAD_SOURCES === '1') {
+      const firstRow = cached.rows[0] as Record<string, string> | undefined
+      const firstRowKeys = firstRow ? Object.keys(firstRow).filter((k) => k !== '__fp') : []
       console.debug('[lead-sources contacts]', {
         customerId,
         sourceType,
@@ -382,6 +417,9 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         cachedRowCount: cached.rows.length,
         filteredRowCount: filtered.length,
         returnedColumnCount: returnedColumns.length,
+        firstTwoColumns: returnedColumns.slice(0, 2),
+        firstRowKeys: firstRowKeys.slice(0, 8),
+        firstRowSample: firstRow ? Object.fromEntries(Object.entries(firstRow).filter(([k]) => k !== '__fp').slice(0, 5)) : null,
       })
     }
     const start = (page - 1) * pageSize
@@ -389,6 +427,13 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       const { __fp, ...rest } = r
       return rest
     })
+    if (process.env.DEBUG_LEAD_SOURCES === '1' && slice.length > 0) {
+      console.debug('[lead-sources contacts] sample contact returned', {
+        columns: returnedColumns.slice(0, 6),
+        sampleKeys: Object.keys(slice[0]).slice(0, 6),
+        sampleRow: Object.fromEntries(Object.entries(slice[0]).slice(0, 5)),
+      })
+    }
     res.json({
       columns: returnedColumns,
       contacts: slice,

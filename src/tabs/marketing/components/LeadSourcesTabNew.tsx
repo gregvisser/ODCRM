@@ -59,7 +59,7 @@ import {
   type LeadSourceType,
   type LeadSourceBatch,
 } from '../../../utils/leadSourcesApi'
-import { visibleColumns } from '../../../utils/visibleColumns'
+import { visibleColumns, normKey } from '../../../utils/visibleColumns'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const SOURCE_LABELS: Record<LeadSourceType, string> = {
@@ -301,8 +301,23 @@ function ContactsBlock({
   onNextPage: () => void
   onBack: () => void
 }) {
-  const contactsCols = contacts.length ? visibleColumns(contactsColumns, contacts) : contactsColumns
-  const cols = contactsCols.length ? contactsCols : contactsColumns
+  // Normalize keys so columns and row lookups match (backend may send camelCase, sheet headers vary)
+  const normalizedColumns = contactsColumns.map((c) => normKey(c))
+  const normToDisplay: Record<string, string> = {}
+  contactsColumns.forEach((c) => {
+    const n = normKey(c)
+    if (!(n in normToDisplay)) normToDisplay[n] = c
+  })
+  const normalizedContacts = contacts.map((row) => {
+    const out: Record<string, string> = {}
+    for (const [k, v] of Object.entries(row ?? {})) out[normKey(k)] = typeof v === 'string' ? v : String(v ?? '')
+    return out
+  })
+  const visibleCols = normalizedContacts.length
+    ? visibleColumns(normalizedColumns, normalizedContacts)
+    : normalizedColumns
+  const cols = visibleCols.length ? visibleCols : normalizedColumns
+  const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
   return (
     <Card>
       <CardHeader>
@@ -332,20 +347,20 @@ function ContactsBlock({
                   <Tr>
                     {cols.map((col) => (
                       <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
-                        {col}
+                        {displayLabel(col)}
                       </Th>
                     ))}
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {contacts.length === 0 ? (
+                  {normalizedContacts.length === 0 ? (
                     <Tr>
                       <Td colSpan={cols.length || 1} color="gray.500">
                         {contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
                       </Td>
                     </Tr>
                   ) : (
-                    contacts.map((row, i) => (
+                    normalizedContacts.map((row, i) => (
                       <Tr key={i}>
                         {cols.map((col) => (
                           <Td
@@ -516,6 +531,11 @@ export default function LeadSourcesTabNew({
           contactsPage,
           contactsPageSize
         )
+        if (import.meta.env.DEV) {
+          console.log('[LeadSources] contacts columns:', data?.columns)
+          console.log('[LeadSources] contacts[0] keys:', Object.keys(data?.contacts?.[0] ?? {}))
+          console.log('[LeadSources] contacts[0] row:', data?.contacts?.[0])
+        }
         setContacts(asArray<Record<string, string>>(data?.contacts))
         setContactsColumns(asArray<string>(data?.columns))
         setContactsTotal(Number(data?.total) ?? 0)
