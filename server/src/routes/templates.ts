@@ -4,13 +4,13 @@
  * Stores templates in database (not localStorage)
  */
 
-import { Router } from 'express'
-import { z } from 'zod'
-import { prisma } from '../lib/prisma.js'
-import { applyTemplatePlaceholders, previewTemplate } from '../services/templateRenderer.js'
-import { randomUUID } from 'crypto'
+import { randomUUID } from 'crypto';
+import { Router } from 'express';
+import { z } from 'zod';
+import { prisma } from '../lib/prisma.js';
+import { applyTemplatePlaceholders, applyTemplatePlaceholdersSafe, previewTemplate } from '../services/templateRenderer.js';
 
-const router = Router()
+const router = Router();
 
 const getCustomerId = (req: any): string => {
   const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
@@ -131,17 +131,23 @@ router.delete('/:id', async (req, res, next) => {
   }
 })
 
-// POST /api/templates/preview - Preview template with placeholders
+// POST /api/templates/preview - Preview template with placeholders (variables escaped for safe HTML display)
+// Manual verification: POST with body { "subject": "Hi {{firstName}}", "body": "{{firstName}}", "variables": { "firstName": "<script>alert(1)</script>" } }
+// => response subject/body must contain &lt;script&gt;alert(1)&lt;/script&gt; (escaped), not raw <script>
 router.post('/preview', async (req, res) => {
   try {
+    const customerId =
+      (req.headers['x-customer-id'] as string) || (req.query.customerId as string) || null
+    console.log('templates.preview customerId_present=' + (!!customerId));
+
     const { subject, body, variables } = req.body
 
     const previewedSubject = variables
-      ? applyTemplatePlaceholders(subject || '', variables)
+      ? applyTemplatePlaceholdersSafe(subject || '', variables)
       : previewTemplate(subject || '')
 
     const previewedBody = variables
-      ? applyTemplatePlaceholders(body || '', variables)
+      ? applyTemplatePlaceholdersSafe(body || '', variables)
       : previewTemplate(body || '')
 
     return res.json({
@@ -154,4 +160,4 @@ router.post('/preview', async (req, res) => {
   }
 })
 
-export default router
+export default router;
