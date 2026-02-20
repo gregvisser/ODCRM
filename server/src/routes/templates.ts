@@ -60,9 +60,15 @@ router.post('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = createTemplateSchema.parse(req.body)
-    
-    console.log(`[templates] POST / - Creating template for customer ${customerId}: ${data.name}`)
-    
+
+    console.log('[templates] create for customerId=', customerId)
+
+    const existingCustomer = await prisma.customer.findUnique({ where: { id: customerId } })
+    if (!existingCustomer) {
+      console.error('[templates] invalid customerId on create')
+      return res.status(400).json({ error: 'Invalid customer context' })
+    }
+
     const created = await prisma.emailTemplate.create({
       data: {
         id: randomUUID(),

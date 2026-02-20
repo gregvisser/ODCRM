@@ -259,6 +259,15 @@ const TemplatesTab: React.FC = () => {
       })
       return
     }
+    if (!selectedCustomerId) {
+      toast({
+        title: 'No customer selected',
+        description: 'Select a customer to create or update templates.',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
 
     try {
       const payload = {
@@ -300,6 +309,15 @@ const TemplatesTab: React.FC = () => {
   }
 
   const handleDuplicateTemplate = async (template: EmailTemplate) => {
+    if (!selectedCustomerId) {
+      toast({
+        title: 'No customer selected',
+        description: 'Select a customer to duplicate templates.',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
     try {
       const duplicatedTemplate = {
         name: `${template.name} (Copy)`,
