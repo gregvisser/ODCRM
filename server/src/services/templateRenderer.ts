@@ -26,6 +26,20 @@ const PLACEHOLDER_KEYS: Array<keyof TemplateVariables> = [
 ];
 
 /**
+ * Resolve effective value for a placeholder key, applying alias fallbacks
+ * (company <-> companyName, title <-> jobTitle) so both names get the same value.
+ */
+function getValueForPlaceholder(key: keyof TemplateVariables, vars: TemplateVariables): string {
+  const v = vars[key];
+  if (v != null) return String(v);
+  if (key === 'company') return vars.companyName != null ? String(vars.companyName) : '';
+  if (key === 'companyName') return vars.company != null ? String(vars.company) : '';
+  if (key === 'title') return vars.jobTitle != null ? String(vars.jobTitle) : '';
+  if (key === 'jobTitle') return vars.title != null ? String(vars.title) : '';
+  return '';
+}
+
+/**
  * Apply template placeholders like {{firstName}}, {{company}}, etc.
  * @param template - Template string with {{placeholder}} syntax
  * @param vars - Variable values to replace
@@ -38,24 +52,8 @@ export function applyTemplatePlaceholders(
   let out = template;
 
   for (const key of PLACEHOLDER_KEYS) {
-    const value = vars[key] == null ? '' : String(vars[key]);
+    const value = getValueForPlaceholder(key, vars);
     out = out.replaceAll(`{{${key}}}`, value);
-  }
-
-  // Also support {{companyName}} -> {{company}} fallback
-  if (vars.companyName && !vars.company) {
-    out = out.replaceAll('{{company}}', vars.companyName);
-  }
-  if (vars.company && !vars.companyName) {
-    out = out.replaceAll('{{companyName}}', vars.company);
-  }
-
-  // Support {{jobTitle}} -> {{title}} fallback
-  if (vars.jobTitle && !vars.title) {
-    out = out.replaceAll('{{title}}', vars.jobTitle);
-  }
-  if (vars.title && !vars.jobTitle) {
-    out = out.replaceAll('{{jobTitle}}', vars.title);
   }
 
   return out;
@@ -116,9 +114,8 @@ export function applyTemplatePlaceholdersSafe(
 ): string {
   const escaped: Partial<TemplateVariables> = {};
   for (const key of PLACEHOLDER_KEYS) {
-    const v = vars[key];
-    escaped[key as keyof TemplateVariables] =
-      v == null ? '' : escapeForHtml(String(v));
+    const raw = getValueForPlaceholder(key, vars);
+    escaped[key as keyof TemplateVariables] = escapeForHtml(raw);
   }
   return applyTemplatePlaceholders(template, escaped as TemplateVariables);
 }
