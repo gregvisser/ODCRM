@@ -8,7 +8,7 @@
 
 | Item | Value |
 |------|--------|
-| **Current HEAD SHA** | `3fadc579250ce36e970a5ed5908f0ea372f346a2` |
+| **Current HEAD SHA** | `36a026c` (after commit *fix(lead-sources): contacts columns proven + config trace*) |
 | **Production backend base URL** | `https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net` |
 | **Production frontend URL** | `https://odcrm.bidlow.co.uk` |
 | **Contacts endpoint pattern** | `GET /api/lead-sources/:sourceType/contacts?batchKey=...&page=1&pageSize=50` |
@@ -113,8 +113,16 @@ After deploy of `fix(lead-sources): contacts columns proven + config trace`:
 
 ---
 
+## Phase 7 — Cleanup (after stable)
+
+- **Temporary logs:** All extra logging is behind `DEBUG_LEAD_SOURCES=1`; no removal needed.
+- **Response headers** `x-odcrm-leadsource-*` are kept for verification.
+- **Dead code:** None removed in this pass.
+
+---
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
-| (today) | Audit file created; backend trace headers and DEBUG logging added; connect validation (≥2 columns); GET / returns usingGlobalConfig; UI "Using global config" badge; Phase 5 guard confirmed. |
+| (today) | Audit file created. Backend: response headers (config-scope, spreadsheet-id, sheet-gid); DEBUG log for resolved config, CSV first line + delimiter, parser output (headers length, first 30, first row keys). Connect: validate ≥2 columns or reject with clear error. GET /: usingGlobalConfig per source. Frontend: LeadSourceConfig.usingGlobalConfig; "Using global config" badge + tooltip. Phase 5: guard confirmed (handleCustomerChange clears view state; empty state when no customer). Committed as *fix(lead-sources): contacts columns proven + config trace*. |
