@@ -654,10 +654,27 @@ router.post('/identities', async (req, res, next) => {
 // List email identities for customer
 router.get('/identities', async (req, res, next) => {
   try {
-    const customerId = getCustomerId(req)
+    const queryCustomerId = (req.query.customerId as string) || undefined
+    const headerCustomerId = (req.headers['x-customer-id'] as string) || undefined
+    const bodyCustomerId = (req.body?.customerId as string) || undefined
+
+    const customerId = queryCustomerId || bodyCustomerId || headerCustomerId
+    type Source = 'query' | 'header' | 'body'
+    const source: Source = queryCustomerId ? 'query' : bodyCustomerId ? 'body' : 'header'
+
     if (!customerId) {
       return res.status(400).json({ error: 'Customer ID required' })
     }
+
+    if (queryCustomerId && headerCustomerId && queryCustomerId !== headerCustomerId) {
+      console.warn('[customerId mismatch]', {
+        route: 'GET /api/outlook/identities',
+        queryPresent: true,
+        headerPresent: true,
+      })
+      res.setHeader('x-odcrm-customer-mismatch', 'true')
+    }
+    res.setHeader('x-odcrm-customer-source', source)
 
     const identities = await prisma.emailIdentity.findMany({
       // Safety: ignore any legacy/invalid providers (e.g., "outlook_app_only").
