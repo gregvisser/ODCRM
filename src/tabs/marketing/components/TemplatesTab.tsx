@@ -59,7 +59,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import { settingsStore } from '../../../platform'
 
 type EmailTemplate = {
   id: string
@@ -129,38 +129,42 @@ const TemplatesTab: React.FC = () => {
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
+      setSelectedCustomerId('')
       return
     }
 
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-
-      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
-      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      // Only use customer IDs that exist in the API response (real cust_*). Never use prod-customer-1.
+      const storeCustomerId = settingsStore.getCurrentCustomerId('')
+      const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
-        setSelectedCustomerId(currentCustomerId)
+        setSelectedCustomerId(currentCustomer.id)
       } else if (customerList.length > 0) {
         setSelectedCustomerId(customerList[0].id)
+      } else {
+        setSelectedCustomerId('')
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in TemplatesTab:', err)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
+      setSelectedCustomerId('')
     }
   }
 
   const loadData = async () => {
-    if (!selectedCustomerId) {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       return
     }
 
     setLoading(true)
     setError(null)
+
+    if (import.meta.env.DEV) {
+      console.log('[TemplatesTab] request customerId present=', !!selectedCustomerId)
+    }
 
     const { data, error: apiError } = await api.get<any[]>('/api/templates', {
       headers: { 'X-Customer-Id': selectedCustomerId }
@@ -259,7 +263,7 @@ const TemplatesTab: React.FC = () => {
       })
       return
     }
-    if (!selectedCustomerId) {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       toast({
         title: 'No customer selected',
         description: 'Select a customer to create or update templates.',
@@ -309,7 +313,7 @@ const TemplatesTab: React.FC = () => {
   }
 
   const handleDuplicateTemplate = async (template: EmailTemplate) => {
-    if (!selectedCustomerId) {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       toast({
         title: 'No customer selected',
         description: 'Select a customer to duplicate templates.',
@@ -382,7 +386,7 @@ const TemplatesTab: React.FC = () => {
     }
   }
 
-  if (!selectedCustomerId) {
+  if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <Box textAlign="center" py={10}>
         <Text>Please select a customer to view templates.</Text>

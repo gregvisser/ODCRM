@@ -59,7 +59,8 @@ async function apiRequest<T>(
       if (!headers.has('Cache-Control')) headers.set('Cache-Control', 'no-cache')
       if (!headers.has('Pragma')) headers.set('Pragma', 'no-cache')
 
-      if (customerId) headers.set('X-Customer-Id', customerId)
+      // Caller-provided X-Customer-Id wins (e.g. Templates tab dropdown); only fall back to store when not set.
+      if (!headers.has('X-Customer-Id') && customerId) headers.set('X-Customer-Id', customerId)
 
       return {
         ...options,
