@@ -24,6 +24,7 @@ import {
   SimpleGrid,
   Spinner,
   Table,
+  TableContainer,
   Tbody,
   Td,
   Text,
@@ -328,7 +329,7 @@ function ContactsBlock({
   const cols = visibleCols.length ? visibleCols : normalizedColumns
   const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
   return (
-    <Card>
+    <Card overflow="visible">
       <CardHeader>
         <Flex justify="space-between" align="center">
           <Heading size="md">Contacts — {sourceLabel}</Heading>
@@ -337,12 +338,13 @@ function ContactsBlock({
           </Button>
         </Flex>
       </CardHeader>
-      <CardBody pt={0}>
+      <CardBody pt={0} overflow="visible">
         {contactsLoading && contacts.length === 0 ? (
           <Spinner size="sm" />
         ) : (
           <>
-            <Box
+            <TableContainer
+              w="100%"
               overflowX="auto"
               overflowY="auto"
               maxH="60vh"
@@ -351,11 +353,11 @@ function ContactsBlock({
               bg="white"
               _dark={{ bg: 'gray.800' }}
             >
-              <Table size="sm" layout="fixed" minW="max-content">
+              <Table size="sm" minW="1100px">
                 <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
                   <Tr>
                     {cols.map((col) => (
-                      <Th key={col} whiteSpace="nowrap" minW="120px" maxW="200px">
+                      <Th key={col} whiteSpace="nowrap" minW="120px">
                         {displayLabel(col)}
                       </Th>
                     ))}
@@ -372,14 +374,7 @@ function ContactsBlock({
                     normalizedContacts.map((row, i) => (
                       <Tr key={i}>
                         {cols.map((col) => (
-                          <Td
-                            key={col}
-                            whiteSpace="nowrap"
-                            minW="120px"
-                            maxW="200px"
-                            overflow="hidden"
-                            textOverflow="ellipsis"
-                          >
+                          <Td key={col} whiteSpace="nowrap" minW="120px">
                             {row[col] ?? ''}
                           </Td>
                         ))}
@@ -388,7 +383,7 @@ function ContactsBlock({
                   )}
                 </Tbody>
               </Table>
-            </Box>
+            </TableContainer>
             <Flex justify="space-between" align="center" mt={4}>
               <Text fontSize="sm" color="gray.600">
                 Page {contactsPage} of {Math.ceil(contactsTotal / contactsPageSize) || 1} ({contactsTotal} total)
