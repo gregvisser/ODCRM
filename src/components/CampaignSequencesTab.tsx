@@ -519,12 +519,13 @@ function CampaignSequencesTab() {
       toast({ title: 'Failed to create template', description: error, status: 'error' })
       return
     }
+    const createdName = newTemplate.name
     setNewTemplate({ name: '', subject: '', body: '', account: '', stepNumber: 1 })
     onTemplateModalClose()
     await fetchTemplates()
     toast({
       title: 'Template Created',
-      description: `${newTemplate.name} has been successfully created`,
+      description: `${createdName} has been successfully created`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -575,6 +576,7 @@ function CampaignSequencesTab() {
       toast({ title: 'Failed to update template', description: error, status: 'error' })
       return
     }
+    const updatedName = newTemplate.name
     setNewTemplate({ name: '', subject: '', body: '', account: '', stepNumber: 1 })
     setTemplateToEdit(null)
     setIsTemplateEditMode(false)
@@ -582,7 +584,7 @@ function CampaignSequencesTab() {
     await fetchTemplates()
     toast({
       title: 'Template Updated',
-      description: `${newTemplate.name} has been successfully updated`,
+      description: `${updatedName} has been successfully updated`,
       status: 'success',
       duration: 3000,
       isClosable: true,
@@ -619,12 +621,13 @@ function CampaignSequencesTab() {
       toast({ title: 'Failed to delete template', description: error, status: 'error' })
       return
     }
+    const deletedName = templateToDelete?.name ?? 'Template'
     setTemplateToDelete(null)
     onTemplateDeleteClose()
     await fetchTemplates()
     toast({
       title: 'Template Deleted',
-      description: `${templateToDelete.name} has been permanently deleted`,
+      description: `${deletedName} has been permanently deleted`,
       status: 'success',
       duration: 3000,
       isClosable: true,
