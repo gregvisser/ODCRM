@@ -1,4 +1,4 @@
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 // API utility for making requests to backend
 // VITE_API_URL MUST be set. In production, Azure SWA proxy handles /api/* routing.
@@ -30,7 +30,7 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     const fullUrl = `${API_BASE_URL}${endpoint}`
     
     console.log(`[API] ${options.method || 'GET'} ${fullUrl}`)

@@ -3,7 +3,7 @@
  * This allows AccountsTab to use its existing Account type while loading from database
  */
 
-import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
+import type { DatabaseCustomer } from '../types/customer'
 import type { Account } from '../components/AccountsTab'
 
 function mapClientStatusToAccountStatus(

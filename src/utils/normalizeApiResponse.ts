@@ -8,7 +8,7 @@
  * DO NOT silently return [] - throw errors so failures surface in UI.
  */
 
-import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
+import type { DatabaseCustomer } from '../types/customer'
 
 /**
  * Normalize GET /api/customers response
