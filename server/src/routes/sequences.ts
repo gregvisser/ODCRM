@@ -142,23 +142,13 @@ router.get('/:id', async (req, res) => {
 // POST /api/sequences - Create a new sequence (with optional steps)
 router.post('/', async (req, res) => {
   try {
-    console.log('[sequences] POST / - Create sequence request:', {
-      customerId: req.headers['x-customer-id'],
-      bodyKeys: Object.keys(req.body),
-      senderIdentityId: req.body.senderIdentityId,
-      name: req.body.name,
-      stepsCount: req.body.steps?.length,
-    })
+    const customerId = getCustomerId(req)
+    const existingCustomer = await prisma.customer.findUnique({ where: { id: customerId } })
+    if (!existingCustomer) {
+      return res.status(400).json({ error: 'Invalid customer context' })
+    }
 
     const validated = createSequenceSchema.parse(req.body)
-    const customerId = getCustomerId(req)
-
-    console.log('[sequences] Validated payload:', {
-      customerId,
-      senderIdentityId: validated.senderIdentityId,
-      name: validated.name,
-      stepsCount: validated.steps?.length || 0,
-    })
 
     // Verify senderIdentityId belongs to customer
     const senderIdentity = await prisma.emailIdentity.findFirst({
@@ -170,10 +160,6 @@ router.post('/', async (req, res) => {
     })
 
     if (!senderIdentity) {
-      console.error('[sequences] Invalid sender identity:', {
-        senderIdentityId: validated.senderIdentityId,
-        customerId,
-      })
       return res.status(400).json({
         error: 'Invalid sender identity - must belong to customer and be active',
         field: 'senderIdentityId',
@@ -240,8 +226,6 @@ router.post('/', async (req, res) => {
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
-      console.error('[sequences] Zod validation error:', error.errors)
-      
       // Format Zod errors into user-friendly messages
       const fieldErrors = error.errors.map(err => {
         const field = err.path.join('.')
@@ -255,14 +239,12 @@ router.post('/', async (req, res) => {
       })
     }
     
-    // Handle missing customer ID
     if (error instanceof Error && error.message === 'customerId is required') {
       return res.status(400).json({
         error: 'Customer ID is required (X-Customer-Id header)',
         details: 'Ensure X-Customer-Id header is sent with the request',
       })
     }
-    
     console.error('[sequences] Error creating sequence:', error)
     return res.status(500).json({ error: 'Failed to create sequence' })
   }
@@ -271,13 +253,22 @@ router.post('/', async (req, res) => {
 // PUT /api/sequences/:id - Update a sequence (metadata only, not steps)
 router.put('/:id', async (req, res) => {
   try {
+    const customerId = getCustomerId(req)
     const { id } = req.params
     const validated = updateSequenceSchema.parse(req.body)
+
+    const existing = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
+    })
+    if (!existing) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
 
     const sequence = await prisma.emailSequence.update({
       where: { id },
       data: {
-        ...validated,
+        name: validated.name ?? existing.name,
+        description: validated.description !== undefined ? validated.description : existing.description,
         updatedAt: new Date(),
       },
       include: {
@@ -308,13 +299,19 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/sequences/:id - Delete a sequence
 router.delete('/:id', async (req, res) => {
   try {
+    const customerId = getCustomerId(req)
     const { id } = req.params
 
-    // Check if sequence is used by any campaigns
+    const existing = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
+    })
+    if (!existing) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
+
     const campaignsUsingSequence = await prisma.emailCampaign.count({
       where: { sequenceId: id },
     })
-
     if (campaignsUsingSequence > 0) {
       return res.status(400).json({
         error: `Cannot delete sequence. It is used by ${campaignsUsingSequence} campaign(s).`,
@@ -324,7 +321,6 @@ router.delete('/:id', async (req, res) => {
     await prisma.emailSequence.delete({
       where: { id },
     })
-
     return res.json({ success: true })
   } catch (error) {
     console.error('Error deleting sequence:', error)
@@ -335,19 +331,18 @@ router.delete('/:id', async (req, res) => {
 // POST /api/sequences/:id/steps - Add a step to a sequence
 router.post('/:id/steps', async (req, res) => {
   try {
+    const customerId = getCustomerId(req)
     const { id } = req.params
     const validated = createStepSchema.parse(req.body)
 
-    // Verify sequence exists and check step count
-    const sequence = await prisma.emailSequence.findUnique({
-      where: { id },
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
       include: {
         _count: {
           select: { steps: true },
         },
       },
     })
-    
     if (!sequence) {
       return res.status(404).json({ error: 'Sequence not found' })
     }
@@ -415,18 +410,29 @@ router.post('/:id/steps', async (req, res) => {
 // PUT /api/sequences/:id/steps/:stepId - Update a step
 router.put('/:id/steps/:stepId', async (req, res) => {
   try {
+    const customerId = getCustomerId(req)
     const { id, stepId } = req.params
     const validated = createStepSchema.partial().parse(req.body)
 
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
+    })
+    if (!sequence) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
+
+    const stepData: Record<string, unknown> = { updatedAt: new Date() }
+    if (validated.stepOrder !== undefined) stepData.stepOrder = validated.stepOrder
+    if (validated.delayDaysFromPrevious !== undefined) stepData.delayDaysFromPrevious = validated.delayDaysFromPrevious
+    if (validated.subjectTemplate !== undefined) stepData.subjectTemplate = validated.subjectTemplate
+    if (validated.bodyTemplateHtml !== undefined) stepData.bodyTemplateHtml = validated.bodyTemplateHtml
+    if (validated.bodyTemplateText !== undefined) stepData.bodyTemplateText = validated.bodyTemplateText
+
     const step = await prisma.emailSequenceStep.update({
-      where: { id: stepId },
-      data: {
-        ...validated,
-        updatedAt: new Date(),
-      },
+      where: { id: stepId, sequenceId: id },
+      data: stepData as any,
     })
 
-    // Update sequence's updatedAt
     await prisma.emailSequence.update({
       where: { id },
       data: { updatedAt: new Date() },
@@ -454,18 +460,23 @@ router.put('/:id/steps/:stepId', async (req, res) => {
 // DELETE /api/sequences/:id/steps/:stepId - Delete a step
 router.delete('/:id/steps/:stepId', async (req, res) => {
   try {
+    const customerId = getCustomerId(req)
     const { id, stepId } = req.params
 
-    await prisma.emailSequenceStep.delete({
-      where: { id: stepId },
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
     })
+    if (!sequence) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
 
-    // Update sequence's updatedAt
+    await prisma.emailSequenceStep.deleteMany({
+      where: { id: stepId, sequenceId: id },
+    })
     await prisma.emailSequence.update({
       where: { id },
       data: { updatedAt: new Date() },
     })
-
     return res.json({ success: true })
   } catch (error) {
     console.error('Error deleting step:', error)

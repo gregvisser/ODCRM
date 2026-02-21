@@ -68,7 +68,6 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { settingsStore, leadSourceSelectionStore } from '../../../platform'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
 import { visibleColumns } from '../../../utils/visibleColumns'
 
@@ -202,7 +201,7 @@ const SequencesTab: React.FC = () => {
 
   const handlePreviewRecipients = async () => {
     const sel = leadSourceSelectionStore.getLeadSourceBatchSelection()
-    const cid = selectedCustomerId || settingsStore.getCurrentCustomerId('')
+    const cid = selectedCustomerId?.startsWith('cust_') ? selectedCustomerId : ''
     if (!sel || !cid) return
     setPreviewLoading(true)
     setPreviewContacts([])
@@ -221,12 +220,20 @@ const SequencesTab: React.FC = () => {
 
   useEffect(() => {
     loadCustomers()
-    loadData()
     maybeOpenFromSnapshot()
   }, [])
 
   useEffect(() => {
-    if (selectedCustomerId) {
+    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
+      loadData()
+    } else {
+      setSequences([])
+      setError(null)
+    }
+  }, [selectedCustomerId])
+
+  useEffect(() => {
+    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
       loadFormOptions()
     }
   }, [selectedCustomerId])
@@ -236,36 +243,41 @@ const SequencesTab: React.FC = () => {
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
+      setSelectedCustomerId('')
       return
     }
 
     try {
-      // Use canonical normalizer - throws on unexpected shape
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-
-      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
-      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      const storeCustomerId = settingsStore.getCurrentCustomerId('')
+      const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
-        setSelectedCustomerId(currentCustomerId)
+        setSelectedCustomerId(currentCustomer.id)
       } else if (customerList.length > 0) {
         setSelectedCustomerId(customerList[0].id)
+      } else {
+        setSelectedCustomerId('')
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in SequencesTab:', err)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
+      setSelectedCustomerId('')
     }
   }
 
   const loadData = async () => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+      setSequences([])
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
-    const campaignsRes = await api.get<SequenceCampaign[]>('/api/campaigns')
+    const campaignsRes = await api.get<SequenceCampaign[]>('/api/campaigns', {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
     if (campaignsRes.error) {
       setError(campaignsRes.error)
     } else {
@@ -283,7 +295,7 @@ const SequencesTab: React.FC = () => {
     setTemplatesError(null)
     setSendersError(null)
 
-    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : {}
+    const headers = selectedCustomerId?.startsWith('cust_') ? { 'X-Customer-Id': selectedCustomerId } : {}
     const [snapshotsRes, templatesRes, sendersRes] = await Promise.all([
       loadSnapshots(),
       api.get<EmailTemplate[]>('/api/templates', { headers }),
@@ -518,8 +530,10 @@ const SequencesTab: React.FC = () => {
     onOpen()
     
     // Load steps from backend if sequenceId exists
-    if (sequence.sequenceId) {
-      const { data, error: apiError } = await api.get<SequenceDetail>(`/api/sequences/${sequence.sequenceId}`)
+    if (sequence.sequenceId && selectedCustomerId?.startsWith('cust_')) {
+      const { data, error: apiError } = await api.get<SequenceDetail>(`/api/sequences/${sequence.sequenceId}`, {
+        headers: { 'X-Customer-Id': selectedCustomerId },
+      })
       if (apiError || !data) {
         console.error('Failed to load sequence steps:', apiError)
         return
@@ -544,8 +558,12 @@ const SequencesTab: React.FC = () => {
     steps: SequenceStep[],
     sequenceId?: string | null
   ) => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+      throw new Error('Select a customer to save sequences.')
+    }
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+
     if (!sequenceId) {
-      // Create new sequence with all steps
       const payload = {
         senderIdentityId,
         name,
@@ -558,13 +576,8 @@ const SequencesTab: React.FC = () => {
           bodyTemplateText: step.bodyTemplateText || undefined,
         })),
       }
-      
-      console.log('[SequencesTab] Creating sequence with payload:', payload)
-      console.log('[SequencesTab] Using customer ID:', selectedCustomerId)
 
-      const createRes = await api.post<{ id: string }>('/api/sequences', payload, {
-        headers: { 'X-Customer-Id': selectedCustomerId }
-      })
+      const createRes = await api.post<{ id: string }>('/api/sequences', payload, { headers })
       
       if (createRes.error || !createRes.data?.id) {
         console.error('[SequencesTab] Create sequence failed:', createRes.error)
@@ -575,7 +588,7 @@ const SequencesTab: React.FC = () => {
     }
 
     // Update existing sequence - need to sync steps
-    const detailRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`)
+    const detailRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`, { headers })
     if (detailRes.error || !detailRes.data) {
       throw new Error(detailRes.error || 'Failed to load sequence')
     }
@@ -587,39 +600,35 @@ const SequencesTab: React.FC = () => {
       const existingStep = existingSteps.find(s => s.stepOrder === step.stepOrder)
       
       if (existingStep) {
-        // Update existing step
         const updateRes = await api.put(`/api/sequences/${sequenceId}/steps/${existingStep.id}`, {
           stepOrder: step.stepOrder,
           delayDaysFromPrevious: step.delayDaysFromPrevious,
           subjectTemplate: step.subjectTemplate,
           bodyTemplateHtml: step.bodyTemplateHtml,
           bodyTemplateText: step.bodyTemplateText || undefined,
-        })
+        }, { headers })
         if (updateRes.error) {
           throw new Error(`Failed to update step ${step.stepOrder}: ${updateRes.error}`)
         }
       } else {
-        // Create new step
         const addRes = await api.post(`/api/sequences/${sequenceId}/steps`, {
           stepOrder: step.stepOrder,
           delayDaysFromPrevious: step.delayDaysFromPrevious,
           subjectTemplate: step.subjectTemplate,
           bodyTemplateHtml: step.bodyTemplateHtml,
           bodyTemplateText: step.bodyTemplateText || undefined,
-        })
+        }, { headers })
         if (addRes.error) {
           throw new Error(`Failed to add step ${step.stepOrder}: ${addRes.error}`)
         }
       }
     }
 
-    // Delete steps that were removed
     const stepsToDelete = existingSteps.filter(
       existing => !steps.some(s => s.stepOrder === existing.stepOrder)
     )
-    
     for (const step of stepsToDelete) {
-      const deleteRes = await api.delete(`/api/sequences/${sequenceId}/steps/${step.id}`)
+      const deleteRes = await api.delete(`/api/sequences/${sequenceId}/steps/${step.id}`, { headers })
       if (deleteRes.error) {
         console.error(`Failed to delete step ${step.stepOrder}:`, deleteRes.error)
       }
@@ -696,10 +705,14 @@ const SequencesTab: React.FC = () => {
         sequenceId: sequenceId || undefined,
       }
 
+      if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+        throw new Error('Select a customer to save.')
+      }
+      const campaignHeaders = { 'X-Customer-Id': selectedCustomerId }
       if (editingSequence.id) {
-        await api.patch(`/api/campaigns/${editingSequence.id}`, payload)
+        await api.patch(`/api/campaigns/${editingSequence.id}`, payload, { headers: campaignHeaders })
       } else {
-        const response = await api.post<SequenceCampaign>('/api/campaigns', payload)
+        const response = await api.post<SequenceCampaign>('/api/campaigns', payload, { headers: campaignHeaders })
         if (response.error) {
           throw new Error(response.error)
         }
@@ -840,8 +853,13 @@ const SequencesTab: React.FC = () => {
         return
       }
 
-      // Sequence already has steps from save, just verify it exists
-      const verifyRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`)
+      if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+        toast({ title: 'Select a customer to start sequence', status: 'error' })
+        return
+      }
+      const startHeaders = { 'X-Customer-Id': selectedCustomerId }
+
+      const verifyRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`, { headers: startHeaders })
       if (verifyRes.error || !verifyRes.data || !verifyRes.data.steps || verifyRes.data.steps.length === 0) {
         throw new Error('Sequence has no steps. Save draft again.')
       }
@@ -854,10 +872,10 @@ const SequencesTab: React.FC = () => {
           listId,
           senderIdentityId,
           sequenceId,
-        })
+        }, { headers: startHeaders })
       }
 
-      const listRes = await api.get<{ contacts: Array<{ id: string }> }>(`/api/lists/${listId}`)
+      const listRes = await api.get<{ contacts: Array<{ id: string }> }>(`/api/lists/${listId}`, { headers: startHeaders })
       if (listRes.error) {
         throw new Error(listRes.error)
       }
@@ -866,13 +884,13 @@ const SequencesTab: React.FC = () => {
       if (contactIds.length > 0) {
         const attachRes = await api.post(`/api/campaigns/${campaignId}/prospects`, {
           contactIds,
-        })
+        }, { headers: startHeaders })
         if (attachRes.error) {
           throw new Error(attachRes.error)
         }
       }
 
-      const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/start`, {})
+      const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/start`, {}, { headers: startHeaders })
       if (apiError) {
         throw new Error(apiError)
       }
@@ -897,7 +915,8 @@ const SequencesTab: React.FC = () => {
   }
 
   const handlePauseSequence = async (campaignId: string) => {
-    const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/pause`, {})
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/pause`, {}, { headers: { 'X-Customer-Id': selectedCustomerId } })
     if (apiError) {
       toast({
         title: 'Failed to pause sequence',
@@ -917,8 +936,10 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleDeleteSequence = async (campaignId: string) => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    const deleteHeaders = { 'X-Customer-Id': selectedCustomerId }
     try {
-      await api.delete(`/api/campaigns/${campaignId}`)
+      await api.delete(`/api/campaigns/${campaignId}`, { headers: deleteHeaders })
       await loadData()
       toast({
         title: 'Sequence deleted',
@@ -963,6 +984,14 @@ const SequencesTab: React.FC = () => {
     if (view !== 'sequences' || !snapshotId) return
     handleCreateSequence()
     setEditingSequence((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
+  }
+
+  if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+    return (
+      <Box textAlign="center" py={10}>
+        <Text>Please select a customer to view sequences.</Text>
+      </Box>
+    )
   }
 
   if (loading && sequences.length === 0) {
