@@ -48,7 +48,6 @@ router.get('/', async (req, res, next) => {
       orderBy: [{ updatedAt: 'desc' }],
     })
 
-    console.log('[templates] GET count=' + templates.length)
     return res.json(templates)
   } catch (error) {
     next(error)
@@ -61,11 +60,7 @@ router.post('/', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const data = createTemplateSchema.parse(req.body)
 
-    console.log('[templates] create customerId_present=' + String(!!customerId))
-
     const existingCustomer = await prisma.customer.findUnique({ where: { id: customerId } })
-    res.setHeader('x-odcrm-templates-customerid-present', String(!!customerId))
-    res.setHeader('x-odcrm-templates-customerid-valid', String(!!existingCustomer))
     if (!existingCustomer) {
       console.error('[templates] invalid customerId on create')
       return res.status(400).json({ error: 'Invalid customer context' })
@@ -82,8 +77,6 @@ router.post('/', async (req, res, next) => {
         stepNumber: data.stepNumber,
       },
     })
-    
-    console.log('[templates] create success')
     res.status(201).json(created)
   } catch (error) {
     next(error)
@@ -94,7 +87,6 @@ router.post('/', async (req, res, next) => {
 router.patch('/:id', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    res.setHeader('x-odcrm-templates-customerid-present', String(!!customerId))
     const data = updateTemplateSchema.parse(req.body)
     const { id } = req.params
 
@@ -123,7 +115,6 @@ router.patch('/:id', async (req, res, next) => {
 router.delete('/:id', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    res.setHeader('x-odcrm-templates-customerid-present', String(!!customerId))
     const { id } = req.params
 
     const existing = await prisma.emailTemplate.findUnique({ where: { id } })
@@ -148,8 +139,6 @@ router.post('/preview', async (req, res) => {
   try {
     const customerId =
       (req.headers['x-customer-id'] as string) || (req.query.customerId as string) || null
-    console.log('templates.preview customerId_present=' + String(!!customerId))
-    res.setHeader('x-odcrm-templates-customerid-present', String(!!customerId))
 
     const { subject, body, variables } = req.body
 

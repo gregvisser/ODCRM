@@ -1,6 +1,6 @@
 # Templates Production QA — Tenant Header Verification
 
-Verify that template create/update/delete use `x-customer-id` correctly in production and that response trace headers confirm tenant presence and validity.
+Verify that template create/update/delete use `x-customer-id` correctly in production. **Trace response headers** (e.g. `x-odcrm-templates-customerid-present` / `-valid`) were temporary and have been removed; verification should rely on **Request Headers** only.
 
 ---
 
@@ -43,36 +43,21 @@ Open:
 ### 5) Check POST /api/templates
 
 - In Network, find the **POST** request to **/api/templates**.
-- Click it and check:
+- Click it and check **Request Headers**:
+  - `x-customer-id` must be **present** and look like `cust_...` (real customer ID).
+- If create succeeds (201), tenant header is correct. If you get 400 "Invalid customer context", the sent customerId is not in the DB.
 
-**Request Headers**
+### 6) If x-customer-id is missing or not cust_...
 
-- `x-customer-id` must be **present** and look like `cust_...` (real customer ID).
+- The frontend is not sending the selected customer id (or sent an invalid one).
+- **Action:** Capture a screenshot of Request Headers and stop. Report to fix frontend header/source.
 
-**Response Headers**
-
-- `x-odcrm-templates-customerid-present`: **true**
-- `x-odcrm-templates-customerid-valid`: **true**
-
-### 6) If present=true but valid=false
-
-- The dropdown is sending a `customerId` that does **not** exist in the DB (e.g. stale mapping).
-- **Action:** Capture a screenshot and stop. Report to fix dropdown/API mapping.
-
-### 7) If present=false
-
-- The frontend is **not** sending `x-customer-id` for Templates create.
-- **Action:** Capture a screenshot and stop. Report to fix frontend header.
-
-### 8) Verify update and delete
+### 7) Verify update and delete
 
 - **Edit:** Open the created template, change something (e.g. name), save.
-- In Network, find **PATCH** `/api/templates/:id`.
-- **Response headers:** `x-odcrm-templates-customerid-present`: **true**.
-
+- In Network, find **PATCH** `/api/templates/:id`; confirm **Request Headers** include `x-customer-id: cust_...`.
 - **Delete:** Delete the template.
-- In Network, find **DELETE** `/api/templates/:id`.
-- **Response headers:** `x-odcrm-templates-customerid-present`: **true**.
+- In Network, find **DELETE** `/api/templates/:id`; confirm **Request Headers** include `x-customer-id: cust_...`.
 
 ### 9) Preview safety (optional)
 
@@ -83,22 +68,11 @@ Open:
 
 ## What to paste back into ChatGPT
 
-- Screenshot of **Request Headers** for **POST /api/templates** (showing `x-customer-id`).
-- Screenshot of **Response Headers** for the same request (showing `x-odcrm-templates-customerid-present` and `x-odcrm-templates-customerid-valid`).
+- Screenshot of **Request Headers** for **POST /api/templates** (showing `x-customer-id: cust_...`).
 - Any error toast text (if something failed).
 
 ---
 
-## Cleanup / rollback plan (after verification)
+## Note on trace headers
 
-1. **Remove trace headers**  
-   In `server/src/routes/templates.ts`, remove:
-   - `res.setHeader('x-odcrm-templates-customerid-present', ...)`
-   - `res.setHeader('x-odcrm-templates-customerid-valid', ...)`  
-   from POST, PATCH, DELETE, and preview. Commit as e.g. `chore(templates): remove observability trace headers` and push.
-
-2. **If production is broken**  
-   Revert the observability commit (or the whole templates route file) and push to restore previous behavior; then fix forward.
-
-3. **No DB or schema changes**  
-   This QA only adds response headers and logs; no rollback of data is needed.
+Temporary response trace headers (`x-odcrm-templates-customerid-present`, `x-odcrm-templates-customerid-valid`) were removed after verification. QA should rely only on **Request Headers** (that `x-customer-id` is present and looks like `cust_...`) and on success/400 behavior.
