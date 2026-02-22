@@ -5,6 +5,8 @@ declare const __GIT_SHA__: string
 
 interface ImportMetaEnv {
   readonly VITE_API_URL?: string
+  readonly VITE_BUILD_SHA?: string
+  readonly VITE_BUILD_TIME?: string
   readonly VITE_AZURE_CLIENT_ID: string
   readonly VITE_AZURE_TENANT_ID: string
   readonly VITE_AZURE_REDIRECT_URI: string

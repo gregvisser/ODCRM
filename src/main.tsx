@@ -9,7 +9,14 @@ import LoginPage from './auth/LoginPage'
 import { msalConfig } from './auth/msalConfig'
 import ErrorBoundary from './components/ErrorBoundary'
 import { UserPreferencesProvider } from './contexts/UserPreferencesContext'
+import { BUILD_SHA, BUILD_TIME } from './version'
 import './index.css'
+
+declare global {
+  interface Window {
+    __ODCRM_BUILD__?: { sha: string; time: string }
+  }
+}
 import theme from './theme'
 
 // Import migration utility for browser console access
@@ -26,6 +33,7 @@ try {
   const BootFlag = ({ children }: { children: React.ReactNode }) => {
     useEffect(() => {
       window.__odcrm_loaded = true
+      window.__ODCRM_BUILD__ = { sha: BUILD_SHA, time: BUILD_TIME }
     }, [])
     return <>{children}</>
   }

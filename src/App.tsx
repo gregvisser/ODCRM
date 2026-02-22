@@ -20,6 +20,7 @@ import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
 // import { DiagnosticBanner } from './components/DiagnosticBanner' // REMOVED per user request
 import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
+import { BUILD_SHA, BUILD_TIME } from './version'
 
 const POST_LOGIN_REDIRECT_KEY = 'odcrm_post_login_redirect_v1'
 
@@ -344,7 +345,7 @@ function App() {
       </Box>
       <Box px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }} pb={{ base: spacing[3], md: spacing[4] }}>
         <Text fontSize="xs" color={semanticColor.textMuted} textAlign="center">
-          Build {__BUILD_STAMP__}
+          {import.meta.env.PROD ? `Build ${__BUILD_STAMP__}` : `Build: ${BUILD_SHA} ${BUILD_TIME}`}
         </Text>
       </Box>
     </Flex>
