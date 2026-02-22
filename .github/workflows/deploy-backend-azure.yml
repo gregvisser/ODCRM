@@ -1,21 +1,59 @@
 name: Deploy Backend to Azure App Service
 
+# workflow_dispatch: run from GitHub Actions UI to redeploy backend on demand (no fake commits).
+# push: runs on every push to main; a check job skips deploy unless path filter matches OR ALWAYS_DEPLOY_BACKEND=true.
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-    paths:
-      - 'server/**'
-      - '.github/workflows/deploy-backend-azure.yml'
 
 env:
   # Must match frontend VITE_API_URL / staticwebapp proxy — same App Service
   BACKEND_DEPLOY_URL: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
   APP_NAME_DISPLAY: odcrm-api-hkbsfbdzdvezedg8
+# Optional: set repository variable ALWAYS_DEPLOY_BACKEND=true to deploy on every push to main (default: path-filtered only).
+# ALWAYS_DEPLOY_BACKEND is read in the check job via vars.ALWAYS_DEPLOY_BACKEND.
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      run_deploy: ${{ steps.set.outputs.run_deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: set
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_deploy=true" >> $GITHUB_OUTPUT
+            echo "Reason: workflow_dispatch"
+            exit 0
+          fi
+          if [ "${{ vars.ALWAYS_DEPLOY_BACKEND }}" = "true" ]; then
+            echo "run_deploy=true" >> $GITHUB_OUTPUT
+            echo "Reason: ALWAYS_DEPLOY_BACKEND=true"
+            exit 0
+          fi
+          # Path filter: only deploy when server/** or this workflow file changed
+          BEFORE="${{ github.event.before }}"
+          SHA="${{ github.sha }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="${SHA}^"
+          fi
+          FILES=$(git diff --name-only "$BEFORE" "$SHA" 2>/dev/null || true)
+          if echo "$FILES" | grep -qE '^server/|^\.github/workflows/deploy-backend-azure\.yml'; then
+            echo "run_deploy=true" >> $GITHUB_OUTPUT
+            echo "Reason: path filter matched"
+          else
+            echo "run_deploy=false" >> $GITHUB_OUTPUT
+            echo "Reason: path filter not matched (set ALWAYS_DEPLOY_BACKEND=true to deploy on every push)"
+          fi
+
   build-and-deploy:
+    needs: check
+    if: needs.check.outputs.run_deploy == 'true'
     runs-on: ubuntu-latest
 
     steps:

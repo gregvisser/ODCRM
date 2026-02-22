@@ -93,6 +93,41 @@ This does not change runtime logic.
 
 ---
 
+## How to redeploy backend to match frontend
+
+**Why drift happens:** Frontend deploys on every push to `main`. Backend deploy is path-filtered: it runs only when `server/**` or `.github/workflows/deploy-backend-azure.yml` changes. So docs-only or frontend-only commits advance the frontend SHA but not the backend, and the SHAs drift until the next backend-triggering change.
+
+**Ways to redeploy backend (no fake commits):**
+
+1. **Manual run from GitHub Actions (recommended)**  
+   - Go to: **Actions** → **Deploy Backend to Azure App Service** → **Run workflow** → choose branch **main** → **Run workflow**.  
+   - The workflow uses `workflow_dispatch`, so it runs on the current `main` and deploys that commit.  
+   - After the run completes, verify:  
+     `(Invoke-WebRequest -UseBasicParsing "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/_build").Content`  
+     The `sha` in the response should match `main`’s commit.
+
+2. **Optional: deploy backend on every push**  
+   - In the repo: **Settings** → **Secrets and variables** → **Actions** → **Variables** → add `ALWAYS_DEPLOY_BACKEND` = `true`.  
+   - Then every push to `main` will run the backend deploy (path filter is ignored). Remove or set to `false` to restore path-filtered behavior.
+
+3. **No-op change under `server/**`**  
+   - As in “Force backend redeploy” above: update `server/DEPLOY_TRIGGER.txt`, commit, and push so the path filter triggers the workflow.
+
+**Exact verification (PowerShell):**
+
+```powershell
+# Frontend SHA
+(Invoke-WebRequest -UseBasicParsing "https://odcrm.bidlow.co.uk/__build.json").Content
+
+# Backend SHA (should match after manual redeploy)
+$api = "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+(Invoke-WebRequest -UseBasicParsing "$api/api/_build").Content
+```
+
+Compare the `sha` values; they match when frontend and backend are on the same commit.
+
+---
+
 ## Clean PowerShell evidence commands (copy/paste)
 
 Run these **exact** commands to verify backend. No sign-in or DevTools required.
