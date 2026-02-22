@@ -1,6 +1,20 @@
 {
   "routes": [
     {
+      "route": "/api/_build",
+      "allowedRoles": ["anonymous"],
+      "backend": {
+        "url": "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+      }
+    },
+    {
+      "route": "/api/__build",
+      "allowedRoles": ["anonymous"],
+      "backend": {
+        "url": "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+      }
+    },
+    {
       "route": "/api/*",
       "allowedRoles": ["anonymous"],
       "backend": {
