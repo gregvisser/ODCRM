@@ -4,6 +4,40 @@
 
 ---
 
+## A) Confirm deployed build stamps (copy/paste safe)
+
+Run these **exact** commands. No quoting issues; use variables for the API base.
+
+**Frontend:**
+
+```powershell
+(Invoke-WebRequest -UseBasicParsing 'https://odcrm.bidlow.co.uk/__build.json').Content
+```
+
+**Backend:**
+
+```powershell
+$api = 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+$r = Invoke-WebRequest -UseBasicParsing "$api/api/_build"
+"__build status: $($r.StatusCode)"
+"__build body: $($r.Content)"
+```
+
+---
+
+## If /__diag lastFatal stack has index-*.js:LINE:COL (sourcemap pinning)
+
+When lastFatal contains a stack line like `assets/index-XXXX.js:LINE:COL`:
+
+1. Set `build.sourcemap = true` in `vite.config.ts`.
+2. Run `npm run build`.
+3. Run: `node scripts/resolve-sourcemap.cjs LINE COL`  
+   (script auto-picks newest `dist/assets/index-*.js.map`, outputs source file + original line/col + code line + import block).
+4. Apply minimal fix (remove `platform/stores/settings` from that module; use leaf imports only).
+5. Set `build.sourcemap = false` again, then `npm run build` and deploy.
+
+---
+
 ## Backend evidence (PowerShell)
 
 ```text
