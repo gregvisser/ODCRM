@@ -48,6 +48,7 @@ function installFatalHandlers() {
       time: new Date().toISOString(),
       message: `Unhandled rejection: ${message}`,
       stack: event.reason?.stack,
+      source: undefined,
     })
   })
 }
@@ -65,6 +66,7 @@ try {
   const isDiagPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/__diag')
 
   if (isDiagPath) {
+    window.__ODCRM_BUILD__ = { sha: BUILD_SHA, time: BUILD_TIME }
     createRoot(rootElement).render(
       <StrictMode>
         <ChakraProvider theme={theme}>
