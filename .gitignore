@@ -39,5 +39,8 @@ assets/c__Users_*
 # Backup files (local only - not committed)
 server/backups/*.json
 
+# Backend build stamp (generated in CI)
+server/buildInfo.generated.json
+
 # Embedded repositories (should be separate)
 OpensDoorsV2/

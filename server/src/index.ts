@@ -267,6 +267,54 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
+// ============================================================================
+// Public build + route probes (NO auth) for deploy verification
+// ============================================================================
+function getBuildInfo(): { sha: string; time: string } {
+  const envSha = process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA
+  const envTime = process.env.BUILD_TIME
+  if (envSha && envTime) return { sha: envSha, time: envTime }
+  try {
+    const p = path.join(process.cwd(), 'buildInfo.generated.json')
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf8'))
+      return { sha: data.GIT_SHA || 'unknown', time: data.BUILD_TIME || 'unknown' }
+    }
+  } catch {
+    // ignore
+  }
+  return { sha: envSha || 'unknown', time: envTime || 'unknown' }
+}
+
+app.get('/api/__build', (_req, res) => {
+  const { sha, time } = getBuildInfo()
+  res.json({ sha, time, service: 'odcrm-api' })
+})
+
+app.get('/api/__routes', async (req, res) => {
+  const base = `${req.protocol}://${req.get('host') || 'localhost'}`
+  const paths = [
+    { path: '/api/overview', name: 'overview' },
+    { path: '/api/inbox/replies?limit=1', name: 'inbox' },
+    { path: '/api/customers', name: 'customers' },
+  ]
+  const results: { path: string; status: string; code?: number; error?: string }[] = []
+  for (const { path: p, name } of paths) {
+    try {
+      const r = await fetch(`${base}${p}`, { method: 'GET' })
+      if (r.status === 400) results.push({ path: p, status: 'requiresTenant', code: r.status })
+      else if (r.status === 401) results.push({ path: p, status: 'requiresAuth', code: r.status })
+      else if (r.status === 403) results.push({ path: p, status: 'requiresAuth', code: r.status })
+      else if (r.status === 404) results.push({ path: p, status: 'missing', code: r.status })
+      else if (r.status >= 500) results.push({ path: p, status: 'error', code: r.status, error: r.statusText })
+      else results.push({ path: p, status: 'exists', code: r.status })
+    } catch (e: any) {
+      results.push({ path: p, status: 'error', error: e?.message || String(e) })
+    }
+  }
+  res.json({ routes: results, timestamp: new Date().toISOString() })
+})
+
 // API health check (kept separate from customer-scoped routes)
 app.get('/api/health', (req, res) => {
   res.json({ 

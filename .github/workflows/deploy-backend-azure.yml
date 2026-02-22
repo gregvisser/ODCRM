@@ -115,6 +115,23 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+    - name: Set build env for deploy verification
+      run: echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+
+    - name: Write buildInfo.generated.json
+      run: |
+        cd server
+        node -e "
+        const fs = require('fs');
+        fs.writeFileSync('buildInfo.generated.json', JSON.stringify({
+          GIT_SHA: process.env.GIT_SHA || 'unknown',
+          BUILD_TIME: process.env.BUILD_TIME || 'unknown'
+        }));
+        "
+      env:
+        GIT_SHA: ${{ github.sha }}
+        BUILD_TIME: ${{ env.BUILD_TIME }}
+
     - name: Build application
       run: cd server && npm run build
 
