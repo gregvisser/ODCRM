@@ -252,3 +252,45 @@ none (not visited marketing routes in this session; visit /marketing?tab=marketi
 
 - Do **not** claim "Email Accounts no longer crashes" unless `lastFatal` is empty and `/__diag` shows none after visiting marketing routes.
 - Primary goal: prove deployed sha + detect fatal crash without DevTools or sign-in.
+
+---
+
+## Evidence — 2026-02-22T16:13:00Z
+
+Backend workflow run triggered by commit 781f3cc (feat(ci): workflow_dispatch + optional ALWAYS_DEPLOY_BACKEND).
+
+**Backend workflow run ID:** 22280558217
+
+**gh run view 22280558217 --json headSha,conclusion,displayTitle:**
+
+```json
+{"conclusion":"success","displayTitle":"feat(ci): workflow_dispatch + optional ALWAYS_DEPLOY_BACKEND for back…","headSha":"781f3cc21b3a4790d46bca8be39068b3fa87b034"}
+```
+
+**Frontend /__build.json (Step C):**
+
+```text
+StatusCode: 200
+Content: {"sha":"781f3cc21b3a4790d46bca8be39068b3fa87b034","time":"2026-02-22T16:08:10Z","app":"odcrm","env":"production","version":1}
+```
+
+**Backend /api/_build, /api/_routes, /api/health (Step D):**
+
+```text
+__build status: 200
+__build body: {"sha":"781f3cc21b3a4790d46bca8be39068b3fa87b034","time":"2026-02-22T16:08:33Z","service":"odcrm-api"}
+
+__routes status: 200
+__routes body: {"routes":[{"path":"/api/overview","status":"requiresTenant","code":400},{"path":"/api/inbox/replies?limit=1","status":"requiresTenant","code":400},{"path":"/api/customers","status":"exists","code":200}],"timestamp":"2026-02-22T16:12:38.084Z"}
+
+health status: 200
+health body: {"status":"ok","timestamp":"2026-02-22T16:12:38.661Z","env":"production","version":"2026-02-11-archive-fix","sha":"781f3cc21b3a4790d46bca8be39068b3fa87b034","buildTime":"2026-02-22T16:08:33Z","commit":null,"buildTimeEnv":null}
+```
+
+**SHA comparison:**
+
+- frontend=781f3cc21b3a4790d46bca8be39068b3fa87b034
+- backend=781f3cc21b3a4790d46bca8be39068b3fa87b034
+- match=yes
+
+**Conclusion:** Frontend and backend are aligned. Both report SHA 781f3cc (commit 781f3cc feat(ci): workflow_dispatch + optional ALWAYS_DEPLOY_BACKEND for backend redeploy). Timestamps: frontend 2026-02-22T16:08:10Z, backend 2026-02-22T16:08:33Z.
