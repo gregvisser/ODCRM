@@ -34,6 +34,21 @@ export interface ApiResponse<T> {
   }
 }
 
+/** Unwrap common response envelopes so callers always get payload (array/object), not wrapper. Backwards compatible. */
+export function unwrapResponsePayload<T = unknown>(parsed: unknown, endpoint: string): T {
+  if (parsed === null || typeof parsed !== 'object') return parsed as T
+  const o = parsed as Record<string, unknown>
+  if (Object.prototype.hasOwnProperty.call(o, 'data')) return o.data as T
+  const path = endpoint.replace(/^\//, '').split('?')[0].toLowerCase()
+  if (
+    (path === 'api/customers' || path.startsWith('api/customers?')) &&
+    Object.prototype.hasOwnProperty.call(o, 'customers')
+  ) {
+    return o.customers as T
+  }
+  return parsed as T
+}
+
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -168,7 +183,8 @@ async function apiRequest<T>(
       return { data: (null as unknown) as T }
     }
 
-    const data = await response.json()
+    const raw = await response.json()
+    const data = unwrapResponsePayload<T>(raw, endpoint)
     console.log(`[API SUCCESS] ${fullUrl}:`, data)
     return { data }
   } catch (error: any) {
