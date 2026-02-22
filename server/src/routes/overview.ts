@@ -81,7 +81,7 @@ router.get('/', async (req, res, next) => {
       },
     })
 
-    // Get per-employee stats for today and this week
+    // Get per-employee stats (Prisma-only: no raw SQL)
     const weekStart = new Date(today)
     weekStart.setDate(weekStart.getDate() - 7)
 
@@ -95,78 +95,82 @@ router.get('/', async (req, res, next) => {
       repliesWeek: number
     }> = []
     try {
-      // Raw SQL: quote mixed-case column names for Postgres (unquoted identifiers are lowercased)
-      const employeeStatsResult = await prisma.$queryRaw<
-        Array<{
-          senderIdentityId: string
-          emailAddress: string
-          displayName: string | null
-          emailsSentToday: number
-          emailsSentWeek: number
-          repliesToday: number
-          repliesWeek: number
-        }>
-      >`
-      SELECT
-        ei.id as "senderIdentityId",
-        ei."emailAddress",
-        ei."displayName",
-        COALESCE(sent_today.count, 0)::int as "emailsSentToday",
-        COALESCE(sent_week.count, 0)::int as "emailsSentWeek",
-        COALESCE(replies_today.count, 0)::int as "repliesToday",
-        COALESCE(replies_week.count, 0)::int as "repliesWeek"
-      FROM email_identities ei
-      LEFT JOIN (
-        SELECT ee."campaignId", COUNT(*) as count
-        FROM email_events ee
-        WHERE ee.type = 'sent'
-          AND ee."occurredAt" >= ${today}
-          AND ee."occurredAt" < ${tomorrow}
-        GROUP BY ee."campaignId"
-      ) sent_today ON sent_today."campaignId" IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
-      )
-      LEFT JOIN (
-        SELECT ee."campaignId", COUNT(*) as count
-        FROM email_events ee
-        WHERE ee.type = 'sent'
-          AND ee."occurredAt" >= ${weekStart}
-        GROUP BY ee."campaignId"
-      ) sent_week ON sent_week."campaignId" IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
-      )
-      LEFT JOIN (
-        SELECT ee."campaignId", COUNT(*) as count
-        FROM email_events ee
-        WHERE ee.type = 'replied'
-          AND ee."occurredAt" >= ${today}
-          AND ee."occurredAt" < ${tomorrow}
-        GROUP BY ee."campaignId"
-      ) replies_today ON replies_today."campaignId" IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
-      )
-      LEFT JOIN (
-        SELECT ee."campaignId", COUNT(*) as count
-        FROM email_events ee
-        WHERE ee.type = 'replied'
-          AND ee."occurredAt" >= ${weekStart}
-        GROUP BY ee."campaignId"
-      ) replies_week ON replies_week."campaignId" IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
-      )
-      WHERE ei."customerId" = ${customerId}
-        AND ei."isActive" = true
-      ORDER BY "emailsSentToday" DESC
-      `
-      employeeStats = employeeStatsResult.map(stat => ({
-        employeeId: stat.senderIdentityId,
-        employeeName: stat.displayName || stat.emailAddress.split('@')[0],
-        emailAddress: stat.emailAddress,
-        emailsSentToday: Number(stat.emailsSentToday),
-        emailsSentWeek: Number(stat.emailsSentWeek),
-        repliesToday: Number(stat.repliesToday),
-        repliesWeek: Number(stat.repliesWeek),
-      }))
+      const identities = await prisma.emailIdentity.findMany({
+        where: { customerId, isActive: true },
+        select: { id: true, emailAddress: true, displayName: true },
+      })
+      const campaigns = await prisma.emailCampaign.findMany({
+        where: { customerId },
+        select: { id: true, senderIdentityId: true },
+      })
+      const campaignIds = campaigns.map(c => c.id)
+      const campaignToIdentity = new Map(campaigns.map(c => [c.id, c.senderIdentityId]))
+
+      const [sentTodayRows, sentWeekRows, repliesTodayRows, repliesWeekRows] = await Promise.all([
+        campaignIds.length > 0
+          ? prisma.emailEvent.findMany({
+              where: {
+                campaignId: { in: campaignIds },
+                type: 'sent',
+                occurredAt: { gte: today, lt: tomorrow },
+              },
+              select: { campaignId: true },
+            })
+          : [],
+        campaignIds.length > 0
+          ? prisma.emailEvent.findMany({
+              where: {
+                campaignId: { in: campaignIds },
+                type: 'sent',
+                occurredAt: { gte: weekStart },
+              },
+              select: { campaignId: true },
+            })
+          : [],
+        campaignIds.length > 0
+          ? prisma.emailEvent.findMany({
+              where: {
+                campaignId: { in: campaignIds },
+                type: 'replied',
+                occurredAt: { gte: today, lt: tomorrow },
+              },
+              select: { campaignId: true },
+            })
+          : [],
+        campaignIds.length > 0
+          ? prisma.emailEvent.findMany({
+              where: {
+                campaignId: { in: campaignIds },
+                type: 'replied',
+                occurredAt: { gte: weekStart },
+              },
+              select: { campaignId: true },
+            })
+          : [],
+      ])
+
+      const countByIdentity = (rows: { campaignId: string }[]) => {
+        const m = new Map<string, number>()
+        for (const r of rows) {
+          const id = campaignToIdentity.get(r.campaignId)
+          if (id) m.set(id, (m.get(id) ?? 0) + 1)
+        }
+        return m
+      }
+      const sentTodayByIdentity = countByIdentity(sentTodayRows)
+      const sentWeekByIdentity = countByIdentity(sentWeekRows)
+      const repliesTodayByIdentity = countByIdentity(repliesTodayRows)
+      const repliesWeekByIdentity = countByIdentity(repliesWeekRows)
+
+      employeeStats = identities.map(id => ({
+        employeeId: id.id,
+        employeeName: id.displayName || id.emailAddress.split('@')[0],
+        emailAddress: id.emailAddress,
+        emailsSentToday: sentTodayByIdentity.get(id.id) ?? 0,
+        emailsSentWeek: sentWeekByIdentity.get(id.id) ?? 0,
+        repliesToday: repliesTodayByIdentity.get(id.id) ?? 0,
+        repliesWeek: repliesWeekByIdentity.get(id.id) ?? 0,
+      })).sort((a, b) => b.emailsSentToday - a.emailsSentToday)
     } catch (err: any) {
       console.warn('[overview] employeeStats query failed:', err?.message || err)
     }
