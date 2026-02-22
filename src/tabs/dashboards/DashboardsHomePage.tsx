@@ -245,17 +245,18 @@ export default function DashboardsHomePage() {
         return
       }
       
-      if (!data || data.length === 0) {
+      const list = Array.isArray(data) ? data : []
+      if (list.length === 0) {
         console.warn('⚠️ Dashboard: ZERO customers returned from API!')
         console.warn('⚠️ You need to add customers in the Accounts tab first.')
         return
       }
 
-      console.log(`✅ Dashboard: Loaded ${data.length} customers from API`)
+      console.log(`✅ Dashboard: Loaded ${list.length} customers from API`)
       
       // Check which customers have Google Sheets URLs
-      const customersWithUrls = data.filter(c => c.leadsReportingUrl)
-      console.log(`📊 Customers with Google Sheets URLs: ${customersWithUrls.length}/${data.length}`)
+      const customersWithUrls = list.filter(c => c.leadsReportingUrl)
+      console.log(`📊 Customers with Google Sheets URLs: ${customersWithUrls.length}/${list.length}`)
       
       if (customersWithUrls.length === 0) {
         console.warn('⚠️ Dashboard: NO customers have Google Sheets URLs configured!')
@@ -267,7 +268,7 @@ export default function DashboardsHomePage() {
         })
       }
 
-      const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
+      const hydrated = list.map((customer) => buildAccountFromCustomer(customer))
       // NO localStorage persistence - API is the ONLY source of truth
       setAccountsData(hydrated)
       emit('accountsUpdated', hydrated)
@@ -289,8 +290,9 @@ export default function DashboardsHomePage() {
     const refreshInterval = setInterval(async () => {
       const syncCustomers = async () => {
         const { data, error } = await api.get<CustomerApi[]>('/api/customers')
-        if (error || !data || data.length === 0) return
-        const hydrated = data.map((customer) => buildAccountFromCustomer(customer))
+        const list = Array.isArray(data) ? data : []
+        if (error || list.length === 0) return
+        const hydrated = list.map((customer) => buildAccountFromCustomer(customer))
         setAccountsData(hydrated)
         emit('accountsUpdated', hydrated)
       }
