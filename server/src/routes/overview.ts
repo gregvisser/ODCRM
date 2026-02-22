@@ -46,15 +46,21 @@ router.get('/', async (req, res, next) => {
       return acc
     }, {} as Record<string, number>)
 
-    // Get active sequences (sequences with at least one active enrollment)
-    const activeSequencesResult = await prisma.$queryRaw<{ count: number }[]>`
-      SELECT COUNT(DISTINCT es.id) as count
-      FROM email_sequences es
-      INNER JOIN sequence_enrollments se ON es.id = se.sequenceId
-      WHERE es.customerId = ${customerId}
-        AND se.status = 'active'
-    `
-    const activeSequences = Number(activeSequencesResult[0]?.count || 0)
+    // Get active sequences (sequences with at least one active enrollment) — use Prisma to avoid raw SQL identifier casing in Postgres
+    let activeSequences = 0
+    try {
+      const activeEnrollments = await prisma.sequenceEnrollment.findMany({
+        where: {
+          status: 'active',
+          sequence: { customerId },
+        },
+        select: { sequenceId: true },
+        distinct: ['sequenceId'],
+      })
+      activeSequences = activeEnrollments.length
+    } catch (err: any) {
+      console.warn('[overview] activeSequences query failed:', err?.message || err)
+    }
 
     // Get emails sent today
     const today = new Date()
@@ -79,82 +85,91 @@ router.get('/', async (req, res, next) => {
     const weekStart = new Date(today)
     weekStart.setDate(weekStart.getDate() - 7)
 
-    // Get employee stats by sender identity
-    const employeeStatsResult = await prisma.$queryRaw<
-      Array<{
-        senderIdentityId: string
-        emailAddress: string
-        displayName: string | null
-        emailsSentToday: number
-        emailsSentWeek: number
-        repliesToday: number
-        repliesWeek: number
-      }>
-    >`
+    let employeeStats: Array<{
+      employeeId: string
+      employeeName: string
+      emailAddress: string
+      emailsSentToday: number
+      emailsSentWeek: number
+      repliesToday: number
+      repliesWeek: number
+    }> = []
+    try {
+      // Raw SQL: quote mixed-case column names for Postgres (unquoted identifiers are lowercased)
+      const employeeStatsResult = await prisma.$queryRaw<
+        Array<{
+          senderIdentityId: string
+          emailAddress: string
+          displayName: string | null
+          emailsSentToday: number
+          emailsSentWeek: number
+          repliesToday: number
+          repliesWeek: number
+        }>
+      >`
       SELECT
-        ei.id as senderIdentityId,
-        ei.emailAddress,
-        ei.displayName,
-        COALESCE(sent_today.count, 0) as emailsSentToday,
-        COALESCE(sent_week.count, 0) as emailsSentWeek,
-        COALESCE(replies_today.count, 0) as repliesToday,
-        COALESCE(replies_week.count, 0) as repliesWeek
+        ei.id as "senderIdentityId",
+        ei."emailAddress",
+        ei."displayName",
+        COALESCE(sent_today.count, 0)::int as "emailsSentToday",
+        COALESCE(sent_week.count, 0)::int as "emailsSentWeek",
+        COALESCE(replies_today.count, 0)::int as "repliesToday",
+        COALESCE(replies_week.count, 0)::int as "repliesWeek"
       FROM email_identities ei
       LEFT JOIN (
-        SELECT ee.campaignId, COUNT(*) as count
+        SELECT ee."campaignId", COUNT(*) as count
         FROM email_events ee
         WHERE ee.type = 'sent'
-          AND ee.occurredAt >= ${today}
-          AND ee.occurredAt < ${tomorrow}
-        GROUP BY ee.campaignId
-      ) sent_today ON sent_today.campaignId IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+          AND ee."occurredAt" >= ${today}
+          AND ee."occurredAt" < ${tomorrow}
+        GROUP BY ee."campaignId"
+      ) sent_today ON sent_today."campaignId" IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
       )
       LEFT JOIN (
-        SELECT ee.campaignId, COUNT(*) as count
+        SELECT ee."campaignId", COUNT(*) as count
         FROM email_events ee
         WHERE ee.type = 'sent'
-          AND ee.occurredAt >= ${weekStart}
-        GROUP BY ee.campaignId
-      ) sent_week ON sent_week.campaignId IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+          AND ee."occurredAt" >= ${weekStart}
+        GROUP BY ee."campaignId"
+      ) sent_week ON sent_week."campaignId" IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
       )
       LEFT JOIN (
-        SELECT ee.campaignId, COUNT(*) as count
+        SELECT ee."campaignId", COUNT(*) as count
         FROM email_events ee
         WHERE ee.type = 'replied'
-          AND ee.occurredAt >= ${today}
-          AND ee.occurredAt < ${tomorrow}
-        GROUP BY ee.campaignId
-      ) replies_today ON replies_today.campaignId IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+          AND ee."occurredAt" >= ${today}
+          AND ee."occurredAt" < ${tomorrow}
+        GROUP BY ee."campaignId"
+      ) replies_today ON replies_today."campaignId" IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
       )
       LEFT JOIN (
-        SELECT ee.campaignId, COUNT(*) as count
+        SELECT ee."campaignId", COUNT(*) as count
         FROM email_events ee
         WHERE ee.type = 'replied'
-          AND ee.occurredAt >= ${weekStart}
-        GROUP BY ee.campaignId
-      ) replies_week ON replies_week.campaignId IN (
-        SELECT ec.id FROM email_campaigns ec WHERE ec.senderIdentityId = ei.id
+          AND ee."occurredAt" >= ${weekStart}
+        GROUP BY ee."campaignId"
+      ) replies_week ON replies_week."campaignId" IN (
+        SELECT ec.id FROM email_campaigns ec WHERE ec."senderIdentityId" = ei.id
       )
-      WHERE ei.customerId = ${customerId}
-        AND ei.isActive = true
-      ORDER BY emailsSentToday DESC
-    `
-
-    // Transform to employee stats (map EmailIdentity to employees)
-    // For now, use emailAddress/displayName as employee identifier
-    // TODO: Add proper userId field to EmailIdentity for better employee mapping
-    const employeeStats = employeeStatsResult.map(stat => ({
-      employeeId: stat.senderIdentityId, // Use identity ID as proxy for employee ID
-      employeeName: stat.displayName || stat.emailAddress.split('@')[0], // Fallback to email username
-      emailAddress: stat.emailAddress,
-      emailsSentToday: Number(stat.emailsSentToday),
-      emailsSentWeek: Number(stat.emailsSentWeek),
-      repliesToday: Number(stat.repliesToday),
-      repliesWeek: Number(stat.repliesWeek),
-    }))
+      WHERE ei."customerId" = ${customerId}
+        AND ei."isActive" = true
+      ORDER BY "emailsSentToday" DESC
+      `
+      employeeStats = employeeStatsResult.map(stat => ({
+        employeeId: stat.senderIdentityId,
+        employeeName: stat.displayName || stat.emailAddress.split('@')[0],
+        emailAddress: stat.emailAddress,
+        emailsSentToday: Number(stat.emailsSentToday),
+        emailsSentWeek: Number(stat.emailsSentWeek),
+        repliesToday: Number(stat.repliesToday),
+        repliesWeek: Number(stat.repliesWeek),
+      }))
+    } catch (err: any) {
+      console.warn('[overview] employeeStats query failed:', err?.message || err)
+    }
 
     res.setHeader('x-odcrm-customer-id', customerId)
     res.json({

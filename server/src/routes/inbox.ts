@@ -29,6 +29,58 @@ function parseRange(start?: string, end?: string) {
 }
 
 // Reply.io-style “Inbox”: list prospects with detected replies
+// GET /api/inbox (root) - 404-safe for Marketing Overview
+router.get('/', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const limit = Math.min(parseInt(String(req.query.limit || '10'), 10) || 10, 100)
+    const { startDate, endDate } = parseRange()
+
+    const rows = await prisma.emailCampaignProspect.findMany({
+      where: {
+        campaign: { customerId },
+        replyDetectedAt: { not: null, gte: startDate, lte: endDate },
+      },
+      include: {
+        contact: true,
+        campaign: {
+          select: {
+            id: true,
+            name: true,
+            senderIdentity: { select: { emailAddress: true, displayName: true } },
+          },
+        },
+      },
+      orderBy: { replyDetectedAt: 'desc' },
+      take: limit,
+    })
+
+    const items = rows.map((p) => ({
+      prospectId: p.id,
+      campaignId: p.campaignId,
+      campaignName: p.campaign?.name,
+      senderEmail: p.campaign?.senderIdentity?.emailAddress,
+      senderName: p.campaign?.senderIdentity?.displayName,
+      contact: {
+        id: p.contact.id,
+        firstName: p.contact.firstName,
+        lastName: p.contact.lastName,
+        companyName: p.contact.companyName,
+        email: p.contact.email,
+      },
+      replyDetectedAt: p.replyDetectedAt,
+      receivedAt: p.replyDetectedAt,
+      replyCount: p.replyCount,
+      lastReplySnippet: p.lastReplySnippet,
+    }))
+
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: items })
+  } catch (error) {
+    next(error)
+  }
+})
+
 router.get('/replies', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
