@@ -2,6 +2,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 
 const router = Router()
 
@@ -680,6 +681,239 @@ router.post('/:id/enroll', async (req, res) => {
   } catch (error) {
     console.error('Error enrolling contacts:', error)
     return res.status(500).json({ error: 'Failed to enroll contacts' })
+  }
+})
+
+// POST /api/sequences/:id/dry-run
+// Read-only planning endpoint — computes what WOULD be sent without touching DB or sending email.
+//
+// Real send path for reference:
+//   1. POST /api/sequences/:id/enroll  → creates SequenceEnrollment rows (sequences.ts:530)
+//   2. POST /api/campaigns/:id/start   → sets EmailCampaign status = 'running'
+//   3. emailScheduler.ts (cron * * * *) → processScheduledEmails() picks up running campaigns,
+//      calls sendEmail() in outlookEmailService.ts (Microsoft Graph API).
+//   No email is sent from this dry-run endpoint.
+router.post('/:id/dry-run', async (req, res) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+    const { contactIds, limit, asOf } = req.body || {}
+
+    const asOfDate = asOf ? new Date(asOf) : new Date()
+    if (isNaN(asOfDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid asOf date' })
+    }
+    const safeLimit = Math.min(Math.max(1, Number(limit) || 10), 50)
+
+    // 1. Verify sequence belongs to this customer
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id, customerId },
+      include: {
+        steps: { orderBy: { stepOrder: 'asc' } },
+        senderIdentity: {
+          select: {
+            id: true,
+            emailAddress: true,
+            displayName: true,
+            provider: true,
+            isActive: true,
+            customerId: true,
+          },
+        },
+      },
+    })
+
+    if (!sequence) {
+      return res.status(404).json({ error: 'Sequence not found' })
+    }
+
+    // 2. Verify sender identity is active and belongs to this customer
+    const identity = sequence.senderIdentity
+    if (!identity) {
+      return res.status(400).json({ error: 'Sequence has no sender identity configured' })
+    }
+    if (!identity.isActive) {
+      return res.status(400).json({ error: `Sender identity ${identity.emailAddress} is inactive` })
+    }
+    if (identity.customerId !== customerId) {
+      return res.status(400).json({ error: 'Sender identity does not belong to this customer' })
+    }
+
+    // 3. Verify sequence has at least one valid step
+    if (!Array.isArray(sequence.steps) || sequence.steps.length === 0) {
+      return res.status(400).json({ error: 'Sequence has no steps' })
+    }
+    for (const step of sequence.steps) {
+      const hasSubject = typeof step.subjectTemplate === 'string' && step.subjectTemplate.trim().length > 0
+      const hasBody = typeof step.bodyTemplateHtml === 'string' && step.bodyTemplateHtml.trim().length > 0
+      if (!hasSubject && !hasBody) {
+        return res.status(400).json({
+          error: `Step ${step.stepOrder} has neither subjectTemplate nor bodyTemplateHtml`,
+        })
+      }
+    }
+
+    // 4. Determine candidate contacts (no DB writes)
+    let candidateContacts
+    if (Array.isArray(contactIds) && contactIds.length > 0) {
+      candidateContacts = await prisma.contact.findMany({
+        where: { id: { in: contactIds.slice(0, safeLimit) }, customerId },
+        select: { id: true, email: true, firstName: true, lastName: true, companyName: true, jobTitle: true },
+      })
+    } else {
+      candidateContacts = await prisma.contact.findMany({
+        where: { customerId },
+        select: { id: true, email: true, firstName: true, lastName: true, companyName: true, jobTitle: true },
+        take: safeLimit,
+        orderBy: { createdAt: 'desc' },
+      })
+    }
+
+    // 5. Load suppression entries (mirrors enroll logic exactly)
+    const contactEmails = candidateContacts.map(c => c.email).filter(Boolean)
+    const suppressionEntries = await prisma.suppressionEntry.findMany({
+      where: {
+        customerId,
+        OR: [
+          { type: 'email', emailNormalized: { in: contactEmails.map(e => e.toLowerCase().trim()) } },
+          { type: 'domain', value: { in: contactEmails.map(e => e.split('@')[1]).filter(Boolean) } },
+        ],
+      },
+      select: { type: true, value: true, emailNormalized: true, reason: true },
+    })
+
+    const getSuppressionReason = (email) => {
+      const normalized = email.toLowerCase().trim()
+      const domain = email.split('@')[1]
+      const emailEntry = suppressionEntries.find(
+        s => s.type === 'email' && (s.emailNormalized || s.value) === normalized
+      )
+      if (emailEntry) return emailEntry.reason || 'Email suppressed'
+      const domainEntry = suppressionEntries.find(s => s.type === 'domain' && s.value === domain)
+      if (domainEntry) return domainEntry.reason || 'Domain suppressed'
+      return null
+    }
+
+    // 6. Check existing active/pending enrollments (no DB writes)
+    const existingEnrollments = await prisma.sequenceEnrollment.findMany({
+      where: {
+        sequenceId: id,
+        contactId: { in: candidateContacts.map(c => c.id) },
+        status: { in: ['active', 'pending'] },
+      },
+      select: { contactId: true },
+    })
+    const enrolledContactIds = new Set(existingEnrollments.map(e => e.contactId))
+
+    // 7. Build plan — pure computation, zero DB writes
+    const sample = []
+    let suppressedCount = 0
+    let enrolledSkippedCount = 0
+
+    for (const contact of candidateContacts) {
+      const suppressionReason = contact.email ? getSuppressionReason(contact.email) : 'No email address'
+
+      if (suppressionReason) {
+        suppressedCount++
+        sample.push({
+          contactId: contact.id,
+          email: contact.email || null,
+          name: `${contact.firstName} ${contact.lastName}`.trim(),
+          suppressed: true,
+          suppressedReason: suppressionReason,
+          steps: [],
+        })
+        continue
+      }
+
+      if (enrolledContactIds.has(contact.id)) {
+        enrolledSkippedCount++
+        sample.push({
+          contactId: contact.id,
+          email: contact.email,
+          name: `${contact.firstName} ${contact.lastName}`.trim(),
+          suppressed: false,
+          skippedReason: 'Already enrolled (active/pending)',
+          steps: [],
+        })
+        continue
+      }
+
+      // Compute per-step schedule using cumulative delayDaysFromPrevious
+      const vars = {
+        firstName: contact.firstName,
+        lastName: contact.lastName,
+        company: contact.companyName,
+        companyName: contact.companyName,
+        email: contact.email,
+        jobTitle: contact.jobTitle,
+        title: contact.jobTitle,
+        phone: null,
+      }
+
+      let cumulativeDays = 0
+      const steps = sequence.steps.map(step => {
+        cumulativeDays += step.delayDaysFromPrevious
+        const plannedSendAt = new Date(asOfDate.getTime() + cumulativeDays * 24 * 60 * 60 * 1000)
+        const subjectPreview = applyTemplatePlaceholders(step.subjectTemplate || '', vars)
+        const rawBody = step.bodyTemplateHtml || ''
+        const bodyPreview = applyTemplatePlaceholders(rawBody.substring(0, 1000), vars)
+        return {
+          stepOrder: step.stepOrder,
+          delayDaysFromPrevious: step.delayDaysFromPrevious,
+          plannedSendAt: plannedSendAt.toISOString(),
+          subjectPreview,
+          bodyPreviewHtml: bodyPreview.length > 300 ? bodyPreview.substring(0, 300) + '…' : bodyPreview,
+          wouldSendFromIdentityId: identity.id,
+          wouldSendFromEmail: identity.emailAddress,
+          provider: identity.provider,
+        }
+      })
+
+      sample.push({
+        contactId: contact.id,
+        email: contact.email,
+        name: `${contact.firstName} ${contact.lastName}`.trim(),
+        suppressed: false,
+        steps,
+      })
+    }
+
+    const eligibleCount = sample.filter(c => !c.suppressed && !c.skippedReason).length
+    const plannedSendsCount = eligibleCount * sequence.steps.length
+
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({
+      data: {
+        _dryRun: true,
+        _warning: 'NO emails will be sent. This is a read-only planning preview.',
+        sequenceId: id,
+        sequenceName: sequence.name,
+        customerId,
+        asOf: asOfDate.toISOString(),
+        senderIdentity: {
+          id: identity.id,
+          emailAddress: identity.emailAddress,
+          displayName: identity.displayName,
+          provider: identity.provider,
+        },
+        summary: {
+          candidateCount: candidateContacts.length,
+          eligibleCount,
+          suppressedCount,
+          enrolledSkippedCount,
+          plannedSendsCount,
+          stepCount: sequence.steps.length,
+        },
+        sample,
+      },
+    })
+  } catch (error: any) {
+    if (error?.status === 400 || error?.message === 'customerId is required') {
+      return res.status(400).json({ error: 'Customer ID is required (x-customer-id header)' })
+    }
+    console.error('[sequences] dry-run error:', error)
+    return res.status(500).json({ error: 'Dry-run failed' })
   }
 })
 
