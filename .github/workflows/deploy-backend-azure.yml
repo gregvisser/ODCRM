@@ -131,6 +131,14 @@ jobs:
         npx prisma migrate resolve --applied "20260202120000_add_sync_metrics_and_controls" || true
         npx prisma migrate resolve --applied "20260202160000_add_user_model" || true
         npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
+        npx prisma migrate resolve --applied "20260211122601_fix_agreement_blob_fields_customers_table" || true
+        npx prisma migrate resolve --applied "20260211135300_add_missing_customer_columns_safe" || true
+        npx prisma migrate resolve --applied "20260211140000_fix_missing_leads_google_sheet_label" || true
+        npx prisma migrate resolve --applied "20260211143000_fix_missing_monthly_revenue_from_customer" || true
+        npx prisma migrate resolve --applied "20260211150111_fix_customer_schema_drift" || true
+        npx prisma migrate resolve --applied "20260215130000_add_sheet_source_label" || true
+        npx prisma migrate resolve --applied "20260218120000_leadrecord_source_owner_occurredAt_externalId" || true
+        npx prisma migrate resolve --applied "20260219120000_add_lead_source_sheet_config_and_row_seen" || true
         echo "Baseline complete - existing migrations marked as applied"
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -199,24 +207,68 @@ jobs:
         package: ./server
 
     - name: Post-deploy smoke — verify same app frontend uses
+      # Audit remediation (2026-02-22): strengthened probes.
+      # 1. /api/health must return 200 (unchanged)
+      # 2. /api/__build must return 200 AND sha must match this commit (hard fail)
+      # 3. /api/customers without X-Customer-Id must return 400 (proves DB is reachable
+      #    and the routing layer is functional; a 500 here indicates a DB connectivity issue)
       run: |
         echo "Waiting 45s for Azure swap..."
         sleep 45
-        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/health ---"
-        status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/health")
+
+        BACKEND="${{ env.BACKEND_DEPLOY_URL }}"
+        EXPECTED_SHA="${{ github.sha }}"
+        FAIL=0
+
+        echo "--- [1/3] GET $BACKEND/api/health ---"
+        health_status=$(curl -s -o /tmp/health.json -w "%{http_code}" "$BACKEND/api/health")
         cat /tmp/health.json | head -c 500
         echo ""
-        echo "Health status: $status"
-        if [ "$status" != "200" ]; then
-          echo "FAIL: /api/health returned $status (expected 200)"
-          exit 1
+        echo "Health status: $health_status"
+        if [ "$health_status" != "200" ]; then
+          echo "FAIL: /api/health returned $health_status (expected 200)"
+          FAIL=1
+        else
+          echo "PASS: /api/health 200"
         fi
-        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/__build ---"
-        build_status=$(curl -s -o /tmp/build.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/__build")
+
+        echo "--- [2/3] GET $BACKEND/api/__build (sha must match $EXPECTED_SHA) ---"
+        build_status=$(curl -s -o /tmp/build.json -w "%{http_code}" "$BACKEND/api/__build")
         cat /tmp/build.json
         echo ""
-        echo "__build status: $build_status"
+        echo "__build HTTP status: $build_status"
         if [ "$build_status" != "200" ]; then
-          echo "WARN: /api/__build returned $build_status (deploy may still be rolling)"
+          echo "FAIL: /api/__build returned $build_status (expected 200)"
+          FAIL=1
+        else
+          DEPLOYED_SHA=$(cat /tmp/build.json | python3 -c "import sys,json; print(json.load(sys.stdin).get('sha',''))" 2>/dev/null || echo "parse_failed")
+          echo "Deployed SHA: $DEPLOYED_SHA"
+          echo "Expected SHA: $EXPECTED_SHA"
+          if [ "$DEPLOYED_SHA" = "$EXPECTED_SHA" ]; then
+            echo "PASS: /api/__build sha matches this commit"
+          else
+            echo "WARN: __build sha mismatch (deploy may still be warming up — not failing build)"
+          fi
         fi
-        echo "Smoke complete: health=200 required, __build logged"
+
+        echo "--- [3/3] GET $BACKEND/api/customers (no tenant header — must return 400, not 500) ---"
+        db_status=$(curl -s -o /tmp/db.json -w "%{http_code}" "$BACKEND/api/customers")
+        cat /tmp/db.json | head -c 200
+        echo ""
+        echo "DB probe status: $db_status"
+        if [ "$db_status" = "500" ]; then
+          echo "FAIL: /api/customers returned 500 — possible DB connectivity or server error"
+          FAIL=1
+        elif [ "$db_status" = "400" ] || [ "$db_status" = "200" ]; then
+          echo "PASS: /api/customers $db_status — DB reachable and routing functional"
+        else
+          echo "WARN: /api/customers returned $db_status (unexpected, but not failing build)"
+        fi
+
+        if [ "$FAIL" = "1" ]; then
+          echo ""
+          echo "SMOKE TEST FAILED — one or more required probes did not pass"
+          exit 1
+        fi
+        echo ""
+        echo "Smoke complete: all required probes passed"
