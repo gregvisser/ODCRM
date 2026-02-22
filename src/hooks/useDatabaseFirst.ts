@@ -23,7 +23,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useToast } from '@chakra-ui/react'
 import { api } from '../utils/api'
 import { getJson, setJson } from '../platform/storage'
-import { on, off, emit } from '../platform/events'
+import { on, emit } from '../platform/events'
 
 export interface UseDatabaseFirstOptions<T> {
   /** API endpoint to fetch from (e.g., '/api/customers') */
@@ -347,7 +347,7 @@ export function useDatabaseFirst<T extends { id?: string; _databaseId?: string }
     return () => clearInterval(interval)
   }, [enableAutoRefresh, refresh, refreshInterval])
   
-  // Event listener effect
+  // Event listener effect (on() returns unsubscribe)
   useEffect(() => {
     if (!updateEvent) return
     
@@ -355,8 +355,8 @@ export function useDatabaseFirst<T extends { id?: string; _databaseId?: string }
       refresh(false) // Silent refresh when event fired
     }
     
-    on(updateEvent, handleUpdate)
-    return () => off(updateEvent, handleUpdate)
+    const unsubscribe = on(updateEvent, handleUpdate)
+    return unsubscribe
   }, [updateEvent, refresh])
   
   // Cleanup effect
