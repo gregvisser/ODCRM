@@ -33,6 +33,8 @@ health body: {"status":"ok","timestamp":"2026-02-22T10:13:39.849Z","env":"produc
 PS C:\CodeProjects\Clients\Opensdoors\ODCRM>
 ```
 
+Short interpretation:
+
 - **Backend _build** is 200 and shows SHA/time.
 - **_routes** returns expected `requiresTenant` 400 for tenant endpoints; `/api/customers` exists (200).
 - **health** includes sha/buildTime (verifiable swap).
@@ -65,6 +67,29 @@ Exact PowerShell commands to run:
 | Backend `/api/_build` | `fe24ad06034255bcac91a18345bce56e715f56fb` |
 
 **They do not match.** Frontend and backend are on different commits (frontend is newer from a frontend-only deploy; backend deploy runs only when `server/**` or the backend workflow file changes).
+
+---
+
+## Why frontend/backend SHAs may not match
+
+The backend deploy workflow is **path-filtered**: it runs only when there are changes under `server/**` or to `.github/workflows/deploy-backend-azure.yml`. Docs-only or frontend-only commits do not trigger a backend redeploy, so the backend can stay on an older commit (and thus an older SHA) until the next server or workflow change.
+
+---
+
+## Force backend redeploy (no behavior change)
+
+To align backend SHA with frontend without changing app behavior:
+
+1. Make a **no-op change inside `server/**`**, e.g. create or update `server/DEPLOY_TRIGGER.txt` with a single line:
+   - `trigger=<UTC_ISO_TIME> sha=<FULL_SHA>` (e.g. current UTC timestamp and `git rev-parse HEAD`).
+2. Commit only that file:
+   - `git add server/DEPLOY_TRIGGER.txt`
+   - `git commit -m "chore(server): trigger backend deploy for SHA alignment"`
+   - `git push origin main`
+3. Watch the backend workflow: `gh run list --workflow "Deploy Backend to Azure App Service" --limit 3`, then `gh run watch <id> --exit-status`.
+4. Verify in prod: call `/api/_build` and confirm the returned `sha` matches the commit you pushed.
+
+This does not change runtime logic.
 
 ---
 
