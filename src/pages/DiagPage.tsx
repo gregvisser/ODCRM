@@ -166,8 +166,31 @@ export default function DiagPage() {
           <Text fontWeight="bold" fontSize="sm" color="gray.600">Last fatal (window.__ODCRM_LAST_FATAL__ or odcrm:lastFatal)</Text>
           {lastFatal ? (
             <>
-              <Code display="block" p={2} mt={1} fontSize="xs" whiteSpace="pre-wrap" overflowX="auto" bg="red.50">
-                {JSON.stringify(lastFatal, null, 2)}
+              <Text fontSize="xs" color="gray.600" mt={1}>Last fatal JSON — copy for sourcemap pinning (stack, message, source, time):</Text>
+              <Code
+                as="pre"
+                display="block"
+                p={2}
+                mt={1}
+                fontSize="xs"
+                whiteSpace="pre-wrap"
+                overflowX="auto"
+                bg="red.50"
+                borderRadius="md"
+              >
+                {(() => {
+                  try {
+                    const payload = {
+                      message: lastFatal?.message ?? null,
+                      stack: lastFatal?.stack ?? null,
+                      source: lastFatal?.source ?? null,
+                      time: lastFatal?.time ?? null,
+                    }
+                    return JSON.stringify(payload, null, 2)
+                  } catch {
+                    return '{}'
+                  }
+                })()}
               </Code>
               <Button size="sm" mt={2} colorScheme="red" variant="outline" onClick={clearLastFatalAndReload}>
                 Clear last fatal &amp; reload
