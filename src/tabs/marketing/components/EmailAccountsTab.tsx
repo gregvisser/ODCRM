@@ -63,8 +63,21 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { getItem, setItem } from '../../../platform/storage'
+import { OdcrmStorageKeys } from '../../../platform/keys'
 import { emit } from '../../../platform/events'
+
+// Leaf helpers to avoid circular dependency with platform/stores/settings (TDZ crash when loading marketing tab).
+function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
+  const v = getItem(OdcrmStorageKeys.currentCustomerId)
+  if (v && String(v).trim()) return String(v)
+  if (fallback && String(fallback).trim()) setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
+  return fallback
+}
+function setCurrentCustomerId(customerId: string): void {
+  setItem(OdcrmStorageKeys.currentCustomerId, String(customerId || '').trim())
+  emit('settingsUpdated', { currentCustomerId: String(customerId || '').trim() })
+}
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
