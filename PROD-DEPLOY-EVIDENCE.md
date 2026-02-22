@@ -4,6 +4,70 @@
 
 ---
 
+## Backend evidence (PowerShell)
+
+```text
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> $api="https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM>
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> $r = Invoke-WebRequest -UseBasicParsing "$api/api/_build"
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "__build status: $($r.StatusCode)"
+__build status: 200
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "__build body: $($r.Content)"
+__build body: {"sha":"fe24ad06034255bcac91a18345bce56e715f56fb","time":"2026-02-22T09:35:09Z","service":"odcrm-api"}
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> ""
+
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM>
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> $r = Invoke-WebRequest -UseBasicParsing "$api/api/_routes"
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "__routes status: $($r.StatusCode)"
+__routes status: 200
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "__routes body: $($r.Content)"
+__routes body: {"routes":[{"path":"/api/overview","status":"requiresTenant","code":400},{"path":"/api/inbox/replies?limit=1","status":"requiresTenant","code":400},{"path":"/api/customers","status":"exists","code":200}],"timestamp":"2026-02-22T10:13:39.774Z"}
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> ""
+
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM>
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> $r = Invoke-WebRequest -UseBasicParsing "$api/api/health"
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "health status: $($r.StatusCode)"
+health status: 200
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM> "health body: $($r.Content)"
+health body: {"status":"ok","timestamp":"2026-02-22T10:13:39.849Z","env":"production","version":"2026-02-11-archive-fix","sha":"fe24ad06034255bcac91a18345bce56e715f56fb","buildTime":"2026-02-22T09:35:09Z","commit":null,"buildTimeEnv":null}
+PS C:\CodeProjects\Clients\Opensdoors\ODCRM>
+```
+
+- **Backend _build** is 200 and shows SHA/time.
+- **_routes** returns expected `requiresTenant` 400 for tenant endpoints; `/api/customers` exists (200).
+- **health** includes sha/buildTime (verifiable swap).
+
+---
+
+## Frontend evidence (no auth)
+
+Exact PowerShell commands to run:
+
+```powershell
+(Invoke-WebRequest -UseBasicParsing "https://odcrm.bidlow.co.uk/__build.json").StatusCode
+(Invoke-WebRequest -UseBasicParsing "https://odcrm.bidlow.co.uk/__build.json").Content
+```
+
+### Captured output
+
+```text
+200
+{"sha":"6608d846eac65d2677b3d3eafddcec67fb372c12","time":"2026-02-22T10:04:45Z","app":"odcrm","env":"production","version":1}
+```
+
+---
+
+## SHA comparison (frontend vs backend)
+
+| Source | SHA |
+|--------|-----|
+| Frontend `/__build.json` | `6608d846eac65d2677b3d3eafddcec67fb372c12` |
+| Backend `/api/_build` | `fe24ad06034255bcac91a18345bce56e715f56fb` |
+
+**They do not match.** Frontend and backend are on different commits (frontend is newer from a frontend-only deploy; backend deploy runs only when `server/**` or the backend workflow file changes).
+
+---
+
 ## Clean PowerShell evidence commands (copy/paste)
 
 Run these **exact** commands to verify backend. No sign-in or DevTools required.
@@ -32,14 +96,6 @@ $r = Invoke-WebRequest -UseBasicParsing "$api/api/health"
 2. **Diagnostics page:** Visit [https://odcrm.bidlow.co.uk/__diag](https://odcrm.bidlow.co.uk/__diag) — shows bundle build, frontend __build.json, backend /api/__build, and last fatal (if any).
 3. **Trigger marketing route (optional):** Visit [https://odcrm.bidlow.co.uk/marketing?tab=marketing-home&view=email-accounts](https://odcrm.bidlow.co.uk/marketing?tab=marketing-home&view=email-accounts) once.
 4. **Re-check diag:** Open [https://odcrm.bidlow.co.uk/__diag](https://odcrm.bidlow.co.uk/__diag) again and confirm **lastFatal** is still none (or note any crash captured).
-
----
-
-## Screenshot reference
-
-![Clean PowerShell evidence commands](docs/assets/backend-powershell-clean-evidence.png)
-
-*(Replace `docs/assets/backend-powershell-clean-evidence.png` with your screenshot of the PowerShell output if you have it.)*
 
 ---
 
