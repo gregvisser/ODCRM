@@ -44,3 +44,7 @@ server/buildInfo.generated.json
 
 # Embedded repositories (should be separate)
 OpensDoorsV2/
+
+# Local commit helper files (never commit these)
+_commit_msg.txt
+_commit_msg*.txt
