@@ -54,6 +54,11 @@ function installFatalHandlers() {
 }
 installFatalHandlers()
 
+// Set build info on all routes (diag and app) for verification
+if (typeof window !== 'undefined') {
+  window.__ODCRM_BUILD__ = { sha: BUILD_SHA, time: BUILD_TIME }
+}
+
 // Import migration utility for browser console access
 import './utils/migrateAccountsToDatabase'
 
@@ -66,7 +71,6 @@ try {
   const isDiagPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/__diag')
 
   if (isDiagPath) {
-    window.__ODCRM_BUILD__ = { sha: BUILD_SHA, time: BUILD_TIME }
     createRoot(rootElement).render(
       <StrictMode>
         <ChakraProvider theme={theme}>
@@ -80,7 +84,6 @@ try {
     const BootFlag = ({ children }: { children: React.ReactNode }) => {
       useEffect(() => {
         window.__odcrm_loaded = true
-        window.__ODCRM_BUILD__ = { sha: BUILD_SHA, time: BUILD_TIME }
       }, [])
       return <>{children}</>
     }
