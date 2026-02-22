@@ -268,30 +268,35 @@ app.get('/health', (req, res) => {
 })
 
 // ============================================================================
-// Public build + route probes (NO auth) for deploy verification
+// Public build + route probes (NO auth) — registered early, no auth/tenant
 // ============================================================================
 function getBuildInfo(): { sha: string; time: string } {
   const envSha = process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA
   const envTime = process.env.BUILD_TIME
   if (envSha && envTime) return { sha: envSha, time: envTime }
-  try {
-    const p = path.join(process.cwd(), 'buildInfo.generated.json')
-    if (fs.existsSync(p)) {
-      const data = JSON.parse(fs.readFileSync(p, 'utf8'))
-      return { sha: data.GIT_SHA || 'unknown', time: data.BUILD_TIME || 'unknown' }
+  const candidates = [
+    path.join(process.cwd(), 'buildInfo.generated.json'),
+    path.join(process.cwd(), 'dist', 'buildInfo.generated.json'),
+  ]
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf8'))
+        return { sha: data.GIT_SHA || 'unknown', time: data.BUILD_TIME || 'unknown' }
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
   return { sha: envSha || 'unknown', time: envTime || 'unknown' }
 }
 
-app.get('/api/__build', (_req, res) => {
+const buildProbeHandler = (_req: express.Request, res: express.Response) => {
   const { sha, time } = getBuildInfo()
   res.json({ sha, time, service: 'odcrm-api' })
-})
+}
 
-app.get('/api/__routes', async (req, res) => {
+const routesProbeHandler = async (req: express.Request, res: express.Response) => {
   const base = `${req.protocol}://${req.get('host') || 'localhost'}`
   const paths = [
     { path: '/api/overview', name: 'overview' },
@@ -299,7 +304,7 @@ app.get('/api/__routes', async (req, res) => {
     { path: '/api/customers', name: 'customers' },
   ]
   const results: { path: string; status: string; code?: number; error?: string }[] = []
-  for (const { path: p, name } of paths) {
+  for (const { path: p } of paths) {
     try {
       const r = await fetch(`${base}${p}`, { method: 'GET' })
       if (r.status === 400) results.push({ path: p, status: 'requiresTenant', code: r.status })
@@ -313,17 +318,27 @@ app.get('/api/__routes', async (req, res) => {
     }
   }
   res.json({ routes: results, timestamp: new Date().toISOString() })
-})
+}
 
-// API health check (kept separate from customer-scoped routes)
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
+// Double-underscore (canonical)
+app.get('/api/__build', buildProbeHandler)
+app.get('/api/__routes', routesProbeHandler)
+// Single-underscore (backward compat for one deploy)
+app.get('/api/_build', buildProbeHandler)
+app.get('/api/_routes', routesProbeHandler)
+
+// API health check — include sha + buildTime so backend swap is verifiable
+const buildInfo = getBuildInfo()
+app.get('/api/health', (_req, res) => {
+  res.json({
+    status: 'ok',
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV || 'development',
     version: '2026-02-11-archive-fix',
+    sha: buildInfo.sha,
+    buildTime: buildInfo.time,
     commit: process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA || null,
-    buildTime: process.env.BUILD_TIME || null
+    buildTimeEnv: process.env.BUILD_TIME || null,
   })
 })
 
