@@ -67,7 +67,8 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore, leadSourceSelectionStore } from '../../../platform'
+import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
 import { visibleColumns } from '../../../utils/visibleColumns'
 
@@ -263,7 +264,7 @@ const SequencesTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      const storeCustomerId = settingsStore.getCurrentCustomerId('')
+      const storeCustomerId = getCurrentCustomerId('')
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)
@@ -962,13 +963,12 @@ const SequencesTab: React.FC = () => {
       }
 
       await api.patch(`/api/campaigns/${campaignId}`, {
-          name: sequence.name.trim(),
-          description: sequence.description?.trim() || undefined,
-          listId,
-          senderIdentityId,
-          sequenceId,
-        }, { headers: startHeaders })
-      }
+        name: sequence.name.trim(),
+        description: sequence.description?.trim() || undefined,
+        listId,
+        senderIdentityId,
+        sequenceId,
+      }, { headers: startHeaders })
 
       const listRes = await api.get<{ contacts: Array<{ id: string }> }>(`/api/lists/${listId}`, { headers: startHeaders })
       if (listRes.error) {
@@ -1183,7 +1183,7 @@ const SequencesTab: React.FC = () => {
                   const newCustomerId = e.target.value
                   setSelectedCustomerId(newCustomerId)
                   // Update the global settings store so API calls use the correct customer
-                  settingsStore.setCurrentCustomerId(newCustomerId)
+                  setCurrentCustomerId(newCustomerId)
                 }}
                 placeholder="Select customer"
               >
@@ -1366,7 +1366,7 @@ const SequencesTab: React.FC = () => {
                           <MenuItem icon={<EditIcon />} onClick={() => handleEditSequence(sequence)}>
                             Edit
                           </MenuItem>
-                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.campaignId && (
+                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.campaignId && sequence.listId && (
                             <MenuItem icon={<EmailIcon />} onClick={() => handleEditSequence(sequence)}>
                               Start Sequence
                             </MenuItem>
