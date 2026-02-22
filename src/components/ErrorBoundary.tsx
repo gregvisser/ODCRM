@@ -21,7 +21,8 @@ export default class ErrorBoundary extends React.Component<
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('❌ ODCRM render error:', error, info)
+    console.error('❌ ODCRM render error:', error.message)
+    console.error('❌ ODCRM component stack:', info.componentStack)
   }
 
   render() {
