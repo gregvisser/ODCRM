@@ -85,6 +85,25 @@ type CampaignSchedule = {
   updatedAt: string
 }
 
+type TimeWindow = {
+  startTime: string
+  endTime: string
+  maxEmails: number
+}
+
+// DeliverySchedule extends CampaignSchedule with UI-only scheduling fields
+// (these fields are stored in the sender identity / not yet in DB, so they default gracefully)
+type DeliverySchedule = CampaignSchedule & {
+  description?: string
+  isActive: boolean
+  timezone: string
+  daysOfWeek: number[]
+  timeWindows: TimeWindow[]
+  maxEmailsPerDay?: number
+  maxEmailsPerHour?: number
+  respectRecipientTimezone?: boolean
+}
+
 type ScheduledEmail = {
   id: string
   campaignId: string
@@ -121,7 +140,7 @@ const SchedulesTab: React.FC = () => {
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [loading, setLoading] = useState(true)
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const [editingSchedule, setEditingSchedule] = useState<CampaignSchedule | null>(null)
+  const [editingSchedule, setEditingSchedule] = useState<DeliverySchedule | null>(null)
   const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null)
   const toast = useToast()
 
@@ -245,39 +264,57 @@ const SchedulesTab: React.FC = () => {
   const stats = useMemo(() => {
     const now = new Date()
     const today = now.toDateString()
-    const thisWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toDateString()
+    const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toDateString()
 
     return {
       totalSchedules: schedules.length,
-      activeSchedules: schedules.filter(s => s.isActive).length,
-      todayScheduled: scheduledEmails.filter(e => new Date(e.scheduledFor).toDateString() === today).length,
-      thisWeekScheduled: scheduledEmails.filter(e => new Date(e.scheduledFor).toDateString() <= thisWeek).length,
-      pendingEmails: scheduledEmails.filter(e => e.status === 'pending').length,
+      activeSchedules: schedules.filter((s) => s.status === 'running').length,
+      todayScheduled: scheduledEmails.filter(
+        (e) => new Date(e.scheduledFor).toDateString() === today,
+      ).length,
+      thisWeekScheduled: scheduledEmails.filter(
+        (e) => new Date(e.scheduledFor).toDateString() <= weekLater,
+      ).length,
+      pendingEmails: scheduledEmails.filter((e) => e.status === 'scheduled').length,
     }
   }, [schedules, scheduledEmails])
 
   const handleCreateSchedule = () => {
     setEditingSchedule({
       id: '',
+      customerId: '',
       name: '',
+      status: 'draft',
+      senderIdentity: null,
+      totalProspects: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       description: '',
       isActive: true,
-      timezone: 'America/New_York',
-      daysOfWeek: [1, 2, 3, 4, 5], // Monday to Friday
-      timeWindows: [
-        { startTime: '09:00', endTime: '17:00', maxEmails: 50 }
-      ],
+      timezone: 'Europe/London',
+      daysOfWeek: [1, 2, 3, 4, 5],
+      timeWindows: [{ startTime: '09:00', endTime: '17:00', maxEmails: 50 }],
       maxEmailsPerDay: 200,
       maxEmailsPerHour: 10,
       respectRecipientTimezone: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     })
     onOpen()
   }
 
-  const handleEditSchedule = (schedule: DeliverySchedule) => {
-    setEditingSchedule(schedule)
+  const handleEditSchedule = (schedule: CampaignSchedule) => {
+    setEditingSchedule({
+      ...schedule,
+      isActive: schedule.status === 'running',
+      timezone: schedule.senderIdentity?.sendWindowTimeZone ?? 'Europe/London',
+      daysOfWeek: [1, 2, 3, 4, 5],
+      timeWindows: [
+        {
+          startTime: `${String(schedule.senderIdentity?.sendWindowHoursStart ?? 9).padStart(2, '0')}:00`,
+          endTime: `${String(schedule.senderIdentity?.sendWindowHoursEnd ?? 17).padStart(2, '0')}:00`,
+          maxEmails: schedule.senderIdentity?.dailySendLimit ?? 50,
+        },
+      ],
+    })
     onOpen()
   }
 
@@ -307,12 +344,13 @@ const SchedulesTab: React.FC = () => {
     }
   }
 
-  const handleToggleSchedule = async (schedule: DeliverySchedule) => {
+  const handleToggleSchedule = async (schedule: CampaignSchedule) => {
+    const nowActive = schedule.status !== 'running'
     try {
-      await api.patch(`/api/schedules/${schedule.id}`, { isActive: !schedule.isActive })
+      await api.patch(`/api/schedules/${schedule.id}`, { isActive: nowActive })
       await loadData()
       toast({
-        title: `Schedule ${!schedule.isActive ? 'activated' : 'deactivated'}`,
+        title: `Schedule ${nowActive ? 'activated' : 'deactivated'}`,
         status: 'success',
         duration: 2000,
       })
@@ -777,14 +815,18 @@ const SchedulesTab: React.FC = () => {
   )
 }
 
-// Mock data for development
-const mockSchedules: DeliverySchedule[] = [
+// Mock data — kept for reference only, not used at runtime
+const _mockSchedules: DeliverySchedule[] = [
   {
     id: '1',
-    name: 'Business Hours - EST',
-    description: 'Standard business hours for East Coast prospects',
+    customerId: '',
+    name: 'Business Hours - UK',
+    status: 'running',
+    senderIdentity: null,
+    totalProspects: 0,
+    description: 'Standard business hours for UK prospects',
     isActive: true,
-    timezone: 'America/New_York',
+    timezone: 'Europe/London',
     daysOfWeek: [1, 2, 3, 4, 5],
     timeWindows: [
       { startTime: '09:00', endTime: '12:00', maxEmails: 50 },
@@ -796,44 +838,18 @@ const mockSchedules: DeliverySchedule[] = [
     createdAt: '2024-01-15T10:00:00Z',
     updatedAt: '2024-01-20T14:30:00Z',
   },
-  {
-    id: '2',
-    name: 'Extended Hours - PST',
-    description: 'Extended hours for West Coast and international prospects',
-    isActive: true,
-    timezone: 'America/Los_Angeles',
-    daysOfWeek: [1, 2, 3, 4, 5, 6],
-    timeWindows: [
-      { startTime: '08:00', endTime: '18:00', maxEmails: 30 },
-    ],
-    maxEmailsPerDay: 150,
-    maxEmailsPerHour: 8,
-    respectRecipientTimezone: true,
-    createdAt: '2024-01-18T09:15:00Z',
-    updatedAt: '2024-01-22T11:20:00Z',
-  },
 ]
 
-const mockScheduledEmails: ScheduledEmail[] = [
+const _mockScheduledEmails: ScheduledEmail[] = [
   {
     id: '1',
     campaignId: '1',
-    campaignName: 'Q1 Product Launch',
+    campaignName: 'Q1 Outreach',
     prospectEmail: 'john.smith@techcorp.com',
     prospectName: 'John Smith',
     scheduledFor: '2024-01-25T14:30:00Z',
-    status: 'pending',
-    scheduleId: '1',
-  },
-  {
-    id: '2',
-    campaignId: '2',
-    campaignName: 'Newsletter - January',
-    prospectEmail: 'sarah.johnson@startup.io',
-    prospectName: 'Sarah Johnson',
-    scheduledFor: '2024-01-25T16:00:00Z',
-    status: 'pending',
-    scheduleId: '1',
+    status: 'scheduled',
+    stepNumber: 1,
   },
 ]
 

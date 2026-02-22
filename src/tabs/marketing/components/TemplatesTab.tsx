@@ -368,18 +368,29 @@ const TemplatesTab: React.FC = () => {
   }
 
   const handleDeleteTemplate = async (templateId: string) => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+      toast({ title: 'No customer selected', status: 'error', duration: 3000 })
+      return
+    }
     try {
       const headers = { 'X-Customer-Id': selectedCustomerId }
-      await api.delete(`/api/templates/${templateId}`, { headers })
-      await loadData()
-      toast({
-        title: 'Template deleted',
-        status: 'success',
-        duration: 3000,
-      })
-    } catch (error) {
+      const { error: deleteError } = await api.delete(`/api/templates/${templateId}`, { headers })
+      if (deleteError) {
+        toast({
+          title: 'Failed to delete template',
+          description: deleteError,
+          status: 'error',
+          duration: 3000,
+        })
+        return
+      }
+      // Only update UI after confirmed backend deletion
+      setTemplates((prev) => prev.filter((t) => t.id !== templateId))
+      toast({ title: 'Template deleted', status: 'success', duration: 3000 })
+    } catch (error: any) {
       toast({
         title: 'Failed to delete template',
+        description: error?.message,
         status: 'error',
         duration: 3000,
       })

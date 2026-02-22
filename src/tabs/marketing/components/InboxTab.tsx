@@ -8,7 +8,9 @@ import {
   Button,
   Card,
   CardBody,
+  CardHeader,
   Flex,
+  Grid,
   Heading,
   HStack,
   Input,
@@ -17,6 +19,7 @@ import {
   Select,
   SimpleGrid,
   Text,
+  Textarea,
   VStack,
   Badge,
   Avatar,
@@ -30,10 +33,12 @@ import {
   Th,
   Td,
   Spinner,
+  useToast,
 } from '@chakra-ui/react'
 import {
   SearchIcon,
   EmailIcon,
+  NotAllowedIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
@@ -113,6 +118,7 @@ type RepliesResponse = {
 }
 
 const InboxTab: React.FC = () => {
+  const toast = useToast()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [replies, setReplies] = useState<ReplyItem[]>([])
@@ -178,9 +184,7 @@ const InboxTab: React.FC = () => {
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
       return
     }
 
@@ -188,18 +192,16 @@ const InboxTab: React.FC = () => {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
 
-      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
-      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
+      const storedCustomerId = getCurrentCustomerId('')
+      const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
       if (currentCustomer) {
-        setSelectedCustomerId(currentCustomerId)
+        setSelectedCustomerId(storedCustomerId)
       } else if (customerList.length > 0) {
         setSelectedCustomerId(customerList[0].id)
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
     }
   }
 
@@ -500,13 +502,51 @@ const InboxTab: React.FC = () => {
                       rows={4}
                       mb={3}
                     />
-                    <Button
-                      colorScheme="blue"
-                      onClick={sendReply}
-                      isDisabled={!replyContent.trim()}
-                    >
-                      Send Reply
-                    </Button>
+                    <HStack spacing={3}>
+                      <Button
+                        colorScheme="blue"
+                        onClick={sendReply}
+                        isDisabled={!replyContent.trim()}
+                      >
+                        Send Reply
+                      </Button>
+                      {selectedThread && selectedThread.length > 0 && (() => {
+                        const firstInbound = selectedThread.find((m) => m.direction === 'inbound')
+                        const contactEmail = firstInbound?.fromAddress
+                        if (!contactEmail) return null
+                        return (
+                          <Button
+                            leftIcon={<NotAllowedIcon />}
+                            colorScheme="red"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              const { error } = await api.post(
+                                `/api/suppression?customerId=${selectedCustomerId}`,
+                                {
+                                  type: 'email',
+                                  value: contactEmail,
+                                  reason: 'Opted out via inbox',
+                                  source: 'inbox-optout',
+                                },
+                              )
+                              if (error) {
+                                toast({ title: 'Failed to opt out', description: error, status: 'error', duration: 3000 })
+                              } else {
+                                toast({
+                                  title: 'Opt-out recorded',
+                                  description: `${contactEmail} added to suppression list`,
+                                  status: 'success',
+                                  duration: 4000,
+                                })
+                              }
+                            }}
+                          >
+                            Mark as Opt-out
+                          </Button>
+                        )
+                      })()}
+                    </HStack>
                   </Box>
                 </VStack>
               ) : (

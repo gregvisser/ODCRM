@@ -1392,66 +1392,29 @@ const SequencesTab: React.FC = () => {
         </CardBody>
       </Card>
 
-      <Modal isOpen={isOpen} onClose={onClose} size="xl">
+      <Modal isOpen={isOpen} onClose={onClose} size="6xl" scrollBehavior="inside">
         <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>{editingSequence?.id ? 'Edit Sequence' : 'Create Sequence'}</ModalHeader>
+        <ModalContent maxH="90vh">
+          <ModalHeader borderBottom="1px solid" borderColor="gray.200" pb={4}>
+            {editingSequence?.id ? 'Edit Sequence' : 'Create Sequence'}
+          </ModalHeader>
           <ModalCloseButton />
-          <ModalBody pb={6}>
+          <ModalBody p={0}>
             {editingSequence && (
-              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                <FormControl>
-                  <FormLabel>Sequence Name</FormLabel>
-                  <Input
-                    value={editingSequence.name}
-                    onChange={(e) => setEditingSequence({ ...editingSequence, name: e.target.value })}
-                    placeholder="Enter sequence name"
-                  />
-                </FormControl>
-                <FormControl isRequired>
-                  <FormLabel>Leads Snapshot</FormLabel>
-                  <Select
-                    value={materializedBatchKey ?? ''}
-                    onChange={async (e) => {
-                      const batchKey = e.target.value || ''
-                      if (!batchKey || !selectedCustomerId?.startsWith('cust_')) return
-                      try {
-                        const { data, error: matError } = await api.post<{ listId: string; name: string }>(
-                          `/api/lead-sources/batches/${encodeURIComponent(batchKey)}/materialize-list`,
-                          {},
-                          { headers: { 'X-Customer-Id': selectedCustomerId } }
-                        )
-                        if (matError || !data?.listId) {
-                          toast({ title: 'Failed to load list', description: matError ?? 'No list returned', status: 'error' })
-                          return
-                        }
-                        setMaterializedBatchKey(batchKey)
-                        setEditingSequence((prev) => prev ? { ...prev, listId: data.listId } : prev)
-                      } catch (err) {
-                        toast({ title: 'Failed to load list', description: err instanceof Error ? err.message : 'Error', status: 'error' })
-                      }
-                    }}
-                    placeholder={leadBatchesLoading ? 'Loading lead batches...' : 'Select a lead batch'}
-                  >
-                    {leadBatches.map((b) => (
-                      <option key={b.batchKey} value={b.batchKey}>
-                        {b.displayLabel} ({(b.count ?? 0)} leads)
-                      </option>
-                    ))}
-                  </Select>
-                  {leadBatches.length === 0 && !leadBatchesLoading && (
-                    <Text fontSize="sm" color="gray.500" mt={2}>
-                      No lead batches yet. Go to Lead Sources and click Sync.
-                    </Text>
-                  )}
-                </FormControl>
-                
-                {/* Multi-Step Editor */}
-                <Box>
-                  <Flex justify="space-between" align="center" mb={3}>
-                    <FormLabel m={0}>Sequence Steps ({editingSequence.steps?.length || 0}/8)</FormLabel>
-                    <Button 
-                      size="sm" 
+              <SimpleGrid columns={{ base: 1, lg: 2 }} minH="0" h="full">
+                {/* LEFT COLUMN — Sequence steps */}
+                <Box
+                  borderRight={{ lg: '1px solid' }}
+                  borderColor={{ lg: 'gray.200' }}
+                  p={6}
+                  overflowY="auto"
+                >
+                  <Flex justify="space-between" align="center" mb={4}>
+                    <Heading size="sm">
+                      Steps ({editingSequence.steps?.length || 0} / 8)
+                    </Heading>
+                    <Button
+                      size="sm"
                       leftIcon={<AddIcon />}
                       onClick={handleAddStep}
                       isDisabled={!editingSequence.steps || editingSequence.steps.length >= 8}
@@ -1459,124 +1422,241 @@ const SequencesTab: React.FC = () => {
                       Add Step
                     </Button>
                   </Flex>
-                  
+
                   {templates.length === 0 && !templatesLoading && (
-                    <Alert status="warning" mb={3}>
+                    <Alert status="warning" mb={4}>
                       <AlertIcon />
-                      <AlertDescription>
-                        Create templates first to build sequence steps.
+                      <AlertDescription fontSize="sm">
+                        Create templates first before building sequence steps.
                       </AlertDescription>
                     </Alert>
                   )}
 
-                  {editingSequence.steps?.map((step, index) => (
-                    <Box key={step.stepOrder} borderWidth="1px" borderRadius="md" p={4} mb={3} bg="gray.50">
+                  {(!editingSequence.steps || editingSequence.steps.length === 0) && (
+                    <Box
+                      textAlign="center"
+                      py={10}
+                      borderWidth="2px"
+                      borderStyle="dashed"
+                      borderColor="gray.200"
+                      borderRadius="lg"
+                    >
+                      <Text color="gray.500" fontSize="sm">
+                        No steps yet. Click "Add Step" to begin.
+                      </Text>
+                    </Box>
+                  )}
+
+                  {editingSequence.steps?.map((step) => (
+                    <Box
+                      key={step.stepOrder}
+                      borderWidth="1px"
+                      borderRadius="md"
+                      p={4}
+                      mb={3}
+                      bg="gray.50"
+                    >
                       <Flex justify="space-between" align="center" mb={3}>
-                        <Text fontWeight="bold" fontSize="md">Step {step.stepOrder}</Text>
+                        <Text fontWeight="bold" fontSize="sm" color="blue.700">
+                          Step {step.stepOrder}
+                        </Text>
                         {editingSequence.steps && editingSequence.steps.length > 1 && (
-                          <IconButton 
+                          <IconButton
                             aria-label="Remove step"
                             icon={<DeleteIcon />}
-                            size="sm"
+                            size="xs"
                             variant="ghost"
                             colorScheme="red"
                             onClick={() => handleRemoveStep(step.stepOrder)}
                           />
                         )}
                       </Flex>
-                      
+
                       {step.stepOrder > 1 && (
                         <FormControl mb={3}>
-                          <FormLabel fontSize="sm">Delay After Previous Step (days)</FormLabel>
-                          <Input 
-                            type="number" 
+                          <FormLabel fontSize="xs" color="gray.600">
+                            Delay after previous step (days)
+                          </FormLabel>
+                          <Input
+                            type="number"
                             min={0}
                             value={step.delayDaysFromPrevious}
-                            onChange={(e) => handleStepDelayChange(step.stepOrder, parseInt(e.target.value) || 0)}
+                            onChange={(e) =>
+                              handleStepDelayChange(step.stepOrder, parseInt(e.target.value) || 0)
+                            }
                             size="sm"
                           />
-                          <Text fontSize="xs" color="gray.600" mt={1}>
-                            This email will be sent {step.delayDaysFromPrevious} day{step.delayDaysFromPrevious !== 1 ? 's' : ''} after the previous step.
-                          </Text>
                         </FormControl>
                       )}
-                      
+
                       <FormControl isRequired>
-                        <FormLabel fontSize="sm">Template</FormLabel>
-                        <Select 
+                        <FormLabel fontSize="xs" color="gray.600">
+                          Template
+                        </FormLabel>
+                        <Select
                           value={step.templateId || ''}
                           onChange={(e) => handleStepTemplateChange(step.stepOrder, e.target.value)}
-                          placeholder={templatesLoading ? 'Loading...' : 'Select a template'}
+                          placeholder={templatesLoading ? 'Loading…' : 'Select a template'}
                           size="sm"
                         >
-                          {templates.map(t => (
+                          {templates.map((t) => (
                             <option key={t.id} value={t.id}>
-                              {t.name} — {t.subjectTemplate.substring(0, 50)}
+                              {t.name} — {t.subjectTemplate.substring(0, 45)}
                             </option>
                           ))}
                         </Select>
                       </FormControl>
-                      
+
                       {step.subjectTemplate && (
-                        <Box mt={2} p={2} bg="white" borderRadius="md" fontSize="xs">
-                          <Text fontWeight="semibold" color="gray.600">Preview:</Text>
-                          <Text mt={1}><strong>Subject:</strong> {step.subjectTemplate}</Text>
-                          <Text mt={1} noOfLines={2}><strong>Body:</strong> {step.bodyTemplateHtml.replace(/<[^>]*>/g, '').substring(0, 100)}...</Text>
+                        <Box mt={2} p={2} bg="white" borderRadius="sm" fontSize="xs" color="gray.600">
+                          <Text fontWeight="semibold">Subject:</Text>
+                          <Text noOfLines={1}>{step.subjectTemplate}</Text>
                         </Box>
                       )}
                     </Box>
                   ))}
                 </Box>
-                
-                <FormControl isRequired>
-                  <FormLabel>Sender</FormLabel>
-                  <Select
-                    value={editingSequence.senderIdentityId || ''}
-                    onChange={(e) => setEditingSequence({
-                      ...editingSequence,
-                      senderIdentityId: e.target.value || '',
-                    })}
-                    placeholder={sendersLoading ? 'Loading senders...' : 'Select a sender'}
-                  >
-                    {senderIdentities.map((sender) => (
-                      <option key={sender.id} value={sender.id}>
-                        {sender.displayName ? `${sender.displayName} — ${sender.emailAddress}` : sender.emailAddress}
-                      </option>
-                    ))}
-                  </Select>
-                  {senderIdentities.length === 0 && !sendersLoading && (
-                    <Text fontSize="sm" color="gray.500" mt={2}>
-                      Connect an Outlook sender first.
-                    </Text>
-                  )}
-                </FormControl>
+
+                {/* RIGHT COLUMN — Config (name, leads, sender) */}
+                <Box p={6} overflowY="auto">
+                  <Heading size="sm" mb={4}>
+                    Configuration
+                  </Heading>
+
+                  <VStack spacing={5} align="stretch">
+                    <FormControl isRequired>
+                      <FormLabel>Sequence Name</FormLabel>
+                      <Input
+                        value={editingSequence.name}
+                        onChange={(e) =>
+                          setEditingSequence({ ...editingSequence, name: e.target.value })
+                        }
+                        placeholder="e.g. Q1 Outreach — UK Property Managers"
+                      />
+                    </FormControl>
+
+                    <FormControl isRequired>
+                      <FormLabel>Leads Snapshot</FormLabel>
+                      <Select
+                        value={materializedBatchKey ?? ''}
+                        onChange={async (e) => {
+                          const batchKey = e.target.value || ''
+                          if (!batchKey || !selectedCustomerId?.startsWith('cust_')) return
+                          try {
+                            const { data, error: matError } = await api.post<{
+                              listId: string
+                              name: string
+                            }>(
+                              `/api/lead-sources/batches/${encodeURIComponent(batchKey)}/materialize-list`,
+                              {},
+                              { headers: { 'X-Customer-Id': selectedCustomerId } }
+                            )
+                            if (matError || !data?.listId) {
+                              toast({
+                                title: 'Failed to load list',
+                                description: matError ?? 'No list returned',
+                                status: 'error',
+                              })
+                              return
+                            }
+                            setMaterializedBatchKey(batchKey)
+                            setEditingSequence((prev) =>
+                              prev ? { ...prev, listId: data.listId } : prev
+                            )
+                          } catch (err) {
+                            toast({
+                              title: 'Failed to load list',
+                              description: err instanceof Error ? err.message : 'Error',
+                              status: 'error',
+                            })
+                          }
+                        }}
+                        placeholder={
+                          leadBatchesLoading ? 'Loading lead batches…' : 'Select a lead batch'
+                        }
+                      >
+                        {leadBatches.map((b) => (
+                          <option key={b.batchKey} value={b.batchKey}>
+                            {b.displayLabel} ({b.count ?? 0} leads)
+                          </option>
+                        ))}
+                      </Select>
+                      {leadBatches.length === 0 && !leadBatchesLoading && (
+                        <Text fontSize="sm" color="gray.500" mt={1}>
+                          No lead batches yet — go to Lead Sources and click Sync.
+                        </Text>
+                      )}
+                    </FormControl>
+
+                    <FormControl isRequired>
+                      <FormLabel>Sender</FormLabel>
+                      <Select
+                        value={editingSequence.senderIdentityId || ''}
+                        onChange={(e) =>
+                          setEditingSequence({
+                            ...editingSequence,
+                            senderIdentityId: e.target.value || '',
+                          })
+                        }
+                        placeholder={sendersLoading ? 'Loading senders…' : 'Select a sender'}
+                      >
+                        {senderIdentities.map((sender) => (
+                          <option key={sender.id} value={sender.id}>
+                            {sender.displayName
+                              ? `${sender.displayName} — ${sender.emailAddress}`
+                              : sender.emailAddress}
+                          </option>
+                        ))}
+                      </Select>
+                      {senderIdentities.length === 0 && !sendersLoading && (
+                        <Text fontSize="sm" color="gray.500" mt={1}>
+                          Connect an Outlook sender first in Email Accounts.
+                        </Text>
+                      )}
+                    </FormControl>
+
+                    {/* Save-first notice — only shown for new (unsaved) sequences */}
+                    {!editingSequence.id && (
+                      <Alert status="info" variant="left-accent" fontSize="sm">
+                        <AlertIcon />
+                        <Box>
+                          <AlertTitle fontSize="sm">Save draft to enable Start</AlertTitle>
+                          <AlertDescription fontSize="xs">
+                            Save first, then use "Start Sequence" to launch.
+                          </AlertDescription>
+                        </Box>
+                      </Alert>
+                    )}
+                  </VStack>
+                </Box>
               </SimpleGrid>
             )}
           </ModalBody>
-          <Box px={6} pb={2}>
-            {editingSequence && !editingSequence.id && (
-              <Alert status="info" variant="left-accent">
-                <AlertIcon />
-                <Box>
-                  <AlertTitle>Save draft to enable Start</AlertTitle>
-                  <AlertDescription>
-                    Starting requires a saved draft. Click Save Draft once, then Start.
-                  </AlertDescription>
-                </Box>
-              </Alert>
-            )}
-          </Box>
-          <Flex justify="flex-end" p={6} pt={0}>
-            <Button variant="ghost" mr={3} onClick={onClose}>
+
+          {/* CTA row */}
+          <Flex
+            justify="flex-end"
+            align="center"
+            gap={3}
+            px={6}
+            py={4}
+            borderTop="1px solid"
+            borderColor="gray.200"
+          >
+            <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button variant="outline" mr={3} onClick={handleSaveDraft}>
+            <Button variant="outline" onClick={handleSaveDraft}>
               Save Draft
             </Button>
             <Button
               colorScheme="blue"
               onClick={() => editingSequence && handleRequestStart(editingSequence)}
-              isDisabled={!editingSequence || !editingSequence.id || !!validateStartRequirements(editingSequence)}
+              isDisabled={
+                !editingSequence ||
+                !editingSequence.id ||
+                !!validateStartRequirements(editingSequence)
+              }
             >
               Start Sequence
             </Button>

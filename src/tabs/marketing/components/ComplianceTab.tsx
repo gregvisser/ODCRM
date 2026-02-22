@@ -58,7 +58,7 @@ export default function ComplianceTab() {
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [customerId, setCustomerId] = useState<string>(
-    getCurrentCustomerId('prod-customer-1'),
+    getCurrentCustomerId(''),
   )
   const [importing, setImporting] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -73,6 +73,7 @@ export default function ComplianceTab() {
     errors: string[]
     totalProcessed: number
   } | null>(null)
+  const [listTypeFilter, setListTypeFilter] = useState<'email' | 'domain'>('email')
   const toast = useToast()
 
   const loadEntries = useCallback(async () => {
@@ -143,7 +144,7 @@ export default function ComplianceTab() {
 
   const handleAdd = async () => {
     const payload = {
-      type,
+      type: listTypeFilter,
       value: value.trim(),
       reason: reason.trim() || undefined,
       source: 'manual',
@@ -166,13 +167,17 @@ export default function ComplianceTab() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Remove this suppression entry?')) return
+    // Optimistic update
+    const snapshot = entries
+    setEntries((prev) => prev.filter((entry) => entry.id !== id))
     const { error } = await api.delete(`/api/suppression/${id}?customerId=${customerId}`)
     if (error) {
+      // Rollback on failure
+      setEntries(snapshot)
       toast({ title: 'Error', description: error, status: 'error' })
       return
     }
     toast({ title: 'Removed', description: 'Suppression entry deleted', status: 'success' })
-    setEntries((prev) => prev.filter((entry) => entry.id !== id))
   }
 
   const parseCSV = (csvText: string): Array<{ email?: string; domain?: string; reason?: string }> => {
@@ -321,6 +326,24 @@ export default function ComplianceTab() {
           </HStack>
         </Box>
 
+        {/* Emails / Domains top-level tabs */}
+        <Tabs variant="soft-rounded" colorScheme="teal" mb={4}>
+          <TabList>
+            <Tab onClick={() => setListTypeFilter('email')}>
+              Suppressed Emails{' '}
+              <Badge ml={2} colorScheme="blue" variant="subtle">
+                {entries.filter((e) => e.type === 'email').length}
+              </Badge>
+            </Tab>
+            <Tab onClick={() => setListTypeFilter('domain')}>
+              Suppressed Domains{' '}
+              <Badge ml={2} colorScheme="purple" variant="subtle">
+                {entries.filter((e) => e.type === 'domain').length}
+              </Badge>
+            </Tab>
+          </TabList>
+        </Tabs>
+
         <Tabs variant="enclosed">
           <TabList>
             <Tab>Manual Entry</Tab>
@@ -329,92 +352,106 @@ export default function ComplianceTab() {
           <TabPanels>
             <TabPanel>
               <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
-                <Heading size="sm" mb={3}>Add suppression entry</Heading>
-          <HStack spacing={3} align="flex-end" flexWrap="wrap">
-            <FormControl w={{ base: '100%', md: '180px' }}>
-              <FormLabel fontSize="sm">Type</FormLabel>
-              <Select value={type} onChange={(e) => setType(e.target.value as 'domain' | 'email')}>
-                <option value="domain">Domain</option>
-                <option value="email">Email</option>
-              </Select>
-            </FormControl>
-            <FormControl flex="1" minW={{ base: '100%', md: '220px' }}>
-              <FormLabel fontSize="sm">Value</FormLabel>
-              <Input
-                placeholder={type === 'domain' ? 'domain.com' : 'name@domain.com'}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-              />
-            </FormControl>
-            <FormControl flex="1" minW={{ base: '100%', md: '240px' }}>
-              <FormLabel fontSize="sm">Reason (optional)</FormLabel>
-              <Input
-                placeholder="e.g. Requested removal"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </FormControl>
-            <Button colorScheme="teal" onClick={handleAdd}>
-              Add
-            </Button>
-          </HStack>
-        </Box>
+                <Heading size="sm" mb={3}>
+                  Add suppressed {listTypeFilter === 'email' ? 'email address' : 'domain'}
+                </Heading>
+                <HStack spacing={3} align="flex-end" flexWrap="wrap">
+                  <FormControl w={{ base: '100%', md: '180px' }}>
+                    <FormLabel fontSize="sm">Type</FormLabel>
+                    <Select
+                      value={listTypeFilter}
+                      onChange={(e) => {
+                        setListTypeFilter(e.target.value as 'domain' | 'email')
+                        setType(e.target.value as 'domain' | 'email')
+                      }}
+                    >
+                      <option value="email">Email</option>
+                      <option value="domain">Domain</option>
+                    </Select>
+                  </FormControl>
+                  <FormControl flex="1" minW={{ base: '100%', md: '220px' }}>
+                    <FormLabel fontSize="sm">Value</FormLabel>
+                    <Input
+                      placeholder={listTypeFilter === 'domain' ? 'domain.com' : 'name@domain.com'}
+                      value={value}
+                      onChange={(e) => setValue(e.target.value)}
+                    />
+                  </FormControl>
+                  <FormControl flex="1" minW={{ base: '100%', md: '240px' }}>
+                    <FormLabel fontSize="sm">Reason (optional)</FormLabel>
+                    <Input
+                      placeholder="e.g. Requested removal"
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                    />
+                  </FormControl>
+                  <Button colorScheme="teal" onClick={handleAdd}>
+                    Add
+                  </Button>
+                </HStack>
+              </Box>
 
-        <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" overflowX="auto">
-          {loading ? (
-            <Box textAlign="center" py={10}>
-              <Spinner size="xl" />
-            </Box>
-          ) : (
-            <Table size="sm">
-              <Thead bg="gray.50">
-                <Tr>
-                  <Th>Type</Th>
-                  <Th>Value</Th>
-                  <Th>Reason</Th>
-                  <Th>Source</Th>
-                  <Th>Added</Th>
-                  <Th>Actions</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {entries.length === 0 ? (
-                  <Tr>
-                    <Td colSpan={6} textAlign="center" py={6}>
-                      <Text color="gray.500">No suppression entries yet.</Text>
-                    </Td>
-                  </Tr>
+              {/* Filtered table for the active type */}
+              <Box
+                bg="white"
+                borderRadius="lg"
+                border="1px solid"
+                borderColor="gray.200"
+                overflowX="auto"
+                mt={4}
+              >
+                {loading ? (
+                  <Box textAlign="center" py={10}>
+                    <Spinner size="xl" />
+                  </Box>
                 ) : (
-                  entries.map((entry) => (
-                    <Tr key={entry.id}>
-                      <Td>
-                        <Badge colorScheme={entry.type === 'domain' ? 'purple' : 'blue'}>
-                          {entry.type.toUpperCase()}
-                        </Badge>
-                      </Td>
-                      <Td fontWeight="medium">{entry.value}</Td>
-                      <Td fontSize="sm">{entry.reason || '-'}</Td>
-                      <Td fontSize="sm">{entry.source || '-'}</Td>
-                      <Td fontSize="sm">
-                        {new Date(entry.createdAt).toLocaleDateString()}
-                      </Td>
-                      <Td>
-                        <IconButton
-                          aria-label="Remove"
-                          icon={<DeleteIcon />}
-                          size="xs"
-                          variant="ghost"
-                          colorScheme="red"
-                          onClick={() => handleDelete(entry.id)}
-                        />
-                      </Td>
-                    </Tr>
-                  ))
+                  <Table size="sm">
+                    <Thead bg="gray.50">
+                      <Tr>
+                        <Th>Value</Th>
+                        <Th>Reason</Th>
+                        <Th>Source</Th>
+                        <Th>Added</Th>
+                        <Th>Actions</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {entries.filter((e) => e.type === listTypeFilter).length === 0 ? (
+                        <Tr>
+                          <Td colSpan={5} textAlign="center" py={6}>
+                            <Text color="gray.500">
+                              No suppressed {listTypeFilter === 'email' ? 'emails' : 'domains'} yet.
+                            </Text>
+                          </Td>
+                        </Tr>
+                      ) : (
+                        entries
+                          .filter((e) => e.type === listTypeFilter)
+                          .map((entry) => (
+                            <Tr key={entry.id}>
+                              <Td fontWeight="medium">{entry.value}</Td>
+                              <Td fontSize="sm">{entry.reason || '-'}</Td>
+                              <Td fontSize="sm">{entry.source || '-'}</Td>
+                              <Td fontSize="sm">
+                                {new Date(entry.createdAt).toLocaleDateString()}
+                              </Td>
+                              <Td>
+                                <IconButton
+                                  aria-label="Remove"
+                                  icon={<DeleteIcon />}
+                                  size="xs"
+                                  variant="ghost"
+                                  colorScheme="red"
+                                  onClick={() => handleDelete(entry.id)}
+                                />
+                              </Td>
+                            </Tr>
+                          ))
+                      )}
+                    </Tbody>
+                  </Table>
                 )}
-              </Tbody>
-            </Table>
-          )}
-        </Box>
+              </Box>
             </TabPanel>
 
             <TabPanel>
