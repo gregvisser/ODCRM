@@ -117,6 +117,33 @@ const EmailAccountsTab: React.FC = () => {
   const toast = useToast()
   const selectedCustomerIdRef = useRef(selectedCustomerId)
 
+  // IMPORTANT: loadIdentities must be declared BEFORE the useEffect that lists it
+  // in its dependency array. Evaluating [selectedCustomerId, loadIdentities] is eager —
+  // if loadIdentities is a const declared later in the function body it will be in TDZ
+  // and throw "Cannot access '_' before initialization" at component mount time.
+  const loadIdentities = useCallback(async () => {
+    if (!selectedCustomerId) return
+    const requestedCustomerId = selectedCustomerId
+    setLoading(true)
+    setError(null)
+
+    const { data, error: apiError } = await api.get<EmailIdentity[]>(
+      `/api/outlook/identities?customerId=${encodeURIComponent(requestedCustomerId)}`
+    )
+
+    // Ignore stale response: user may have changed customer while request was in flight
+    if (requestedCustomerId !== selectedCustomerIdRef.current) return
+
+    if (apiError) {
+      setError(apiError)
+      // Keep previous data if we had any (don't wipe UI on transient errors)
+    } else {
+      setIdentities(data || [])
+    }
+
+    setLoading(false)
+  }, [selectedCustomerId])
+
   useEffect(() => {
     selectedCustomerIdRef.current = selectedCustomerId
   }, [selectedCustomerId])
@@ -164,29 +191,6 @@ const EmailAccountsTab: React.FC = () => {
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
     }
   }
-
-  const loadIdentities = useCallback(async () => {
-    if (!selectedCustomerId) return
-    const requestedCustomerId = selectedCustomerId
-    setLoading(true)
-    setError(null)
-
-    const { data, error: apiError } = await api.get<EmailIdentity[]>(
-      `/api/outlook/identities?customerId=${encodeURIComponent(requestedCustomerId)}`
-    )
-
-    // Ignore stale response: user may have changed customer while request was in flight
-    if (requestedCustomerId !== selectedCustomerIdRef.current) return
-
-    if (apiError) {
-      setError(apiError)
-      // Keep previous data if we had any (don't wipe UI on transient errors)
-    } else {
-      setIdentities(data || [])
-    }
-
-    setLoading(false)
-  }, [selectedCustomerId])
 
   const filteredIdentities = useMemo(() => {
     return identities
