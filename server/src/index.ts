@@ -325,12 +325,18 @@ const routesProbeHandler = async (req: express.Request, res: express.Response) =
   res.json({ routes: results, timestamp: new Date().toISOString() })
 }
 
-// Double-underscore (canonical)
+// ============================================================================
+// Build + route probes — MUST stay before any app.use('/api/...') so they
+// are never shadowed. Also register without /api prefix for proxies that strip it.
+// ============================================================================
 app.get('/api/__build', buildProbeHandler)
 app.get('/api/__routes', routesProbeHandler)
-// Single-underscore (backward compat for one deploy)
 app.get('/api/_build', buildProbeHandler)
 app.get('/api/_routes', routesProbeHandler)
+app.get('/__build', buildProbeHandler)
+app.get('/_build', buildProbeHandler)
+app.get('/__routes', routesProbeHandler)
+app.get('/_routes', routesProbeHandler)
 
 // API health check — include sha + buildTime so backend swap is verifiable (read per-request)
 app.get('/api/health', (_req, res) => {
@@ -435,7 +441,6 @@ app.use('/api/user-preferences', userPreferencesRoutes)
 app.use('/api/sheets', sheetsRoutes)
 app.use('/api/_diag', diagRoutes)
 app.use('/api/overview', observabilityHeaders, overviewRoutes)
-app.use('/api/reports', reportsRoutes)
 console.log('📦 All API routes mounted successfully')
 
 // Error handling middleware
