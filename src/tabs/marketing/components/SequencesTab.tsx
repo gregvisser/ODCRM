@@ -273,16 +273,41 @@ const SequencesTab: React.FC = () => {
       setError(null)
       return
     }
+    if (import.meta.env.DEV) {
+      console.debug('[SequencesTab] loadData', { hasCustomerId: true })
+    }
     setLoading(true)
     setError(null)
-    const campaignsRes = await api.get<SequenceCampaign[]>('/api/campaigns', {
+    const sequencesRes = await api.get<Array<{
+      id: string
+      name: string
+      description?: string | null
+      stepCount: number
+      senderIdentityId?: string
+      senderIdentity?: { id: string; emailAddress: string; displayName?: string } | null
+      createdAt: string
+      updatedAt: string
+    }>>('/api/sequences', {
       headers: { 'X-Customer-Id': selectedCustomerId },
     })
-    if (campaignsRes.error) {
-      setError(campaignsRes.error)
+    if (sequencesRes.error) {
+      setError(sequencesRes.error)
+      setSequences([])
     } else {
-      const allCampaigns = campaignsRes.data || []
-      setSequences(allCampaigns.filter((campaign) => !!campaign.sequenceId))
+      const list = sequencesRes.data || []
+      setSequences(list.map((seq) => ({
+        id: seq.id,
+        name: seq.name,
+        description: seq.description ?? null,
+        status: 'draft' as const,
+        listId: null,
+        sequenceId: seq.id,
+        senderIdentityId: seq.senderIdentityId ?? null,
+        createdAt: seq.createdAt,
+        updatedAt: seq.updatedAt,
+        senderIdentity: seq.senderIdentity ?? null,
+        metrics: undefined,
+      })))
     }
     setLoading(false)
   }
@@ -935,11 +960,11 @@ const SequencesTab: React.FC = () => {
     })
   }
 
-  const handleDeleteSequence = async (campaignId: string) => {
+  const handleDeleteSequence = async (sequenceId: string) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
     const deleteHeaders = { 'X-Customer-Id': selectedCustomerId }
     try {
-      await api.delete(`/api/campaigns/${campaignId}`, { headers: deleteHeaders })
+      await api.delete(`/api/sequences/${sequenceId}`, { headers: deleteHeaders })
       await loadData()
       toast({
         title: 'Sequence deleted',
@@ -1271,12 +1296,12 @@ const SequencesTab: React.FC = () => {
                           <MenuItem icon={<EditIcon />} onClick={() => handleEditSequence(sequence)}>
                             Edit
                           </MenuItem>
-                          {(sequence.status === 'draft' || sequence.status === 'paused') && (
+                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.listId && (
                             <MenuItem icon={<EmailIcon />} onClick={() => handleEditSequence(sequence)}>
                               Start Sequence
                             </MenuItem>
                           )}
-                          {sequence.status === 'sending' && (
+                          {sequence.status === 'sending' && sequence.listId && (
                             <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSequence(sequence.id)}>
                               Pause Sequence
                             </MenuItem>
