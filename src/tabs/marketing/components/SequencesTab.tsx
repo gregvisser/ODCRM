@@ -323,8 +323,8 @@ const SequencesTab: React.FC = () => {
       setLoading(false)
       return
     }
-    const seqList = sequencesRes.data || []
-    const campaigns = campaignsRes.data || []
+    const seqList = Array.isArray(sequencesRes.data) ? sequencesRes.data : []
+    const campaigns = Array.isArray(campaignsRes.data) ? campaignsRes.data : []
     const campaignBySequenceId = new Map<string, typeof campaigns[0]>()
     for (const c of campaigns) {
       if (c.sequenceId) campaignBySequenceId.set(c.sequenceId, c)
@@ -393,7 +393,7 @@ const SequencesTab: React.FC = () => {
     if (sendersRes.error) {
       setSendersError(sendersRes.error)
     } else {
-      setSenderIdentities((sendersRes.data || []).filter((sender) => sender.isActive !== false))
+      setSenderIdentities((Array.isArray(sendersRes.data) ? sendersRes.data : []).filter((sender) => sender.isActive !== false))
     }
 
     if (!batchesRes.error && Array.isArray(batchesRes.data)) {
@@ -551,9 +551,10 @@ const SequencesTab: React.FC = () => {
       return
     }
 
-    const updatedSteps = editingSequence.steps
+    const steps = Array.isArray(editingSequence.steps) ? editingSequence.steps : []
+    const updatedSteps = steps
       .filter(s => s.stepOrder !== stepOrder)
-      .map((s, index) => ({ ...s, stepOrder: index + 1 })) // Renumber steps
+      .map((s, index) => ({ ...s, stepOrder: index + 1 }))
 
     setEditingSequence({
       ...editingSequence,
@@ -562,12 +563,12 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleStepTemplateChange = (stepOrder: number, templateId: string) => {
-    if (!editingSequence || !editingSequence.steps) return
-    
+    if (!editingSequence) return
+    const steps = Array.isArray(editingSequence.steps) ? editingSequence.steps : []
     const template = templates.find(t => t.id === templateId)
     if (!template) return
 
-    const updatedSteps = editingSequence.steps.map(step => {
+    const updatedSteps = steps.map(step => {
       if (step.stepOrder === stepOrder) {
         return {
           ...step,
@@ -587,9 +588,9 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleStepDelayChange = (stepOrder: number, delay: number) => {
-    if (!editingSequence || !editingSequence.steps) return
-
-    const updatedSteps = editingSequence.steps.map(step => {
+    if (!editingSequence) return
+    const steps = Array.isArray(editingSequence.steps) ? editingSequence.steps : []
+    const updatedSteps = steps.map(step => {
       if (step.stepOrder === stepOrder) {
         return { ...step, delayDaysFromPrevious: Math.max(0, delay) }
       }
@@ -630,8 +631,8 @@ const SequencesTab: React.FC = () => {
         return
       }
 
-      // Convert loaded steps to editing format
-      const loadedSteps: SequenceStep[] = data.steps.map(step => ({
+      const stepsArr = Array.isArray(data.steps) ? data.steps : []
+      const loadedSteps: SequenceStep[] = stepsArr.map(step => ({
         stepOrder: step.stepOrder,
         delayDaysFromPrevious: step.delayDaysFromPrevious || 0,
         subjectTemplate: step.subjectTemplate,

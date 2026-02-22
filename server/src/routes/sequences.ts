@@ -81,7 +81,8 @@ router.get('/', async (req, res) => {
       updatedAt: seq.updatedAt.toISOString(),
     }))
 
-    return res.json(sequencesWithCount)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: sequencesWithCount })
   } catch (error) {
     console.error('Error fetching sequences:', error)
     return res.status(500).json({ error: 'Failed to fetch sequences' })
@@ -113,7 +114,9 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Sequence not found' })
     }
 
+    res.setHeader('x-odcrm-customer-id', getCustomerId(req))
     return res.json({
+      data: {
       id: sequence.id,
       customerId: sequence.customerId,
       senderIdentityId: sequence.senderIdentityId,
@@ -132,6 +135,7 @@ router.get('/:id', async (req, res) => {
         createdAt: step.createdAt.toISOString(),
         updatedAt: step.updatedAt.toISOString(),
       })),
+      },
     })
   } catch (error) {
     console.error('Error fetching sequence:', error)
@@ -146,6 +150,31 @@ router.post('/', async (req, res) => {
     const existingCustomer = await prisma.customer.findUnique({ where: { id: customerId } })
     if (!existingCustomer) {
       return res.status(400).json({ error: 'Invalid customer context' })
+    }
+
+    const body = req.body || {}
+    if (!body.name || typeof body.name !== 'string' || !String(body.name).trim()) {
+      return res.status(400).json({ error: 'name is required' })
+    }
+    const stepsRaw = body.steps
+    if (stepsRaw !== undefined && stepsRaw !== null) {
+      if (!Array.isArray(stepsRaw)) {
+        return res.status(400).json({ error: 'steps must be an array' })
+      }
+      if (stepsRaw.length === 0) {
+        return res.status(400).json({ error: 'steps must contain at least one step' })
+      }
+      for (let i = 0; i < stepsRaw.length; i++) {
+        const step = stepsRaw[i]
+        if (step == null || typeof step !== 'object') {
+          return res.status(400).json({ error: `steps[${i}]: invalid step (null/undefined or not object)` })
+        }
+        const hasSubject = typeof (step as any).subjectTemplate === 'string' && (step as any).subjectTemplate.trim().length > 0
+        const hasBody = typeof (step as any).bodyTemplateHtml === 'string' && (step as any).bodyTemplateHtml.trim().length > 0
+        if (!hasSubject && !hasBody) {
+          return res.status(400).json({ error: `steps[${i}]: subjectTemplate or bodyTemplateHtml is required` })
+        }
+      }
     }
 
     const validated = createSequenceSchema.parse(req.body)
@@ -203,26 +232,29 @@ router.post('/', async (req, res) => {
       },
     })
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     return res.status(201).json({
-      id: sequence.id,
-      customerId: sequence.customerId,
-      senderIdentityId: sequence.senderIdentityId,
-      senderIdentity: sequence.senderIdentity,
-      name: sequence.name,
-      description: sequence.description,
-      stepCount: sequence.steps.length,
-      createdAt: sequence.createdAt.toISOString(),
-      updatedAt: sequence.updatedAt.toISOString(),
-      steps: sequence.steps.map((step) => ({
-        id: step.id,
-        stepOrder: step.stepOrder,
-        delayDaysFromPrevious: step.delayDaysFromPrevious,
-        subjectTemplate: step.subjectTemplate,
-        bodyTemplateHtml: step.bodyTemplateHtml,
-        bodyTemplateText: step.bodyTemplateText,
-        createdAt: step.createdAt.toISOString(),
-        updatedAt: step.updatedAt.toISOString(),
-      })),
+      data: {
+        id: sequence.id,
+        customerId: sequence.customerId,
+        senderIdentityId: sequence.senderIdentityId,
+        senderIdentity: sequence.senderIdentity,
+        name: sequence.name,
+        description: sequence.description,
+        stepCount: sequence.steps.length,
+        createdAt: sequence.createdAt.toISOString(),
+        updatedAt: sequence.updatedAt.toISOString(),
+        steps: sequence.steps.map((step) => ({
+          id: step.id,
+          stepOrder: step.stepOrder,
+          delayDaysFromPrevious: step.delayDaysFromPrevious,
+          subjectTemplate: step.subjectTemplate,
+          bodyTemplateHtml: step.bodyTemplateHtml,
+          bodyTemplateText: step.bodyTemplateText,
+          createdAt: step.createdAt.toISOString(),
+          updatedAt: step.updatedAt.toISOString(),
+        })),
+      },
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -278,14 +310,17 @@ router.put('/:id', async (req, res) => {
       },
     })
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     return res.json({
-      id: sequence.id,
-      customerId: sequence.customerId,
-      name: sequence.name,
-      description: sequence.description,
-      stepCount: sequence._count.steps,
-      createdAt: sequence.createdAt.toISOString(),
-      updatedAt: sequence.updatedAt.toISOString(),
+      data: {
+        id: sequence.id,
+        customerId: sequence.customerId,
+        name: sequence.name,
+        description: sequence.description,
+        stepCount: sequence._count.steps,
+        createdAt: sequence.createdAt.toISOString(),
+        updatedAt: sequence.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -321,7 +356,8 @@ router.delete('/:id', async (req, res) => {
     await prisma.emailSequence.delete({
       where: { id },
     })
-    return res.json({ success: true })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: { success: true } })
   } catch (error) {
     console.error('Error deleting sequence:', error)
     return res.status(500).json({ error: 'Failed to delete sequence' })
@@ -388,15 +424,18 @@ router.post('/:id/steps', async (req, res) => {
       data: { updatedAt: new Date() },
     })
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     return res.status(201).json({
-      id: step.id,
-      stepOrder: step.stepOrder,
-      delayDaysFromPrevious: step.delayDaysFromPrevious,
-      subjectTemplate: step.subjectTemplate,
-      bodyTemplateHtml: step.bodyTemplateHtml,
-      bodyTemplateText: step.bodyTemplateText,
-      createdAt: step.createdAt.toISOString(),
-      updatedAt: step.updatedAt.toISOString(),
+      data: {
+        id: step.id,
+        stepOrder: step.stepOrder,
+        delayDaysFromPrevious: step.delayDaysFromPrevious,
+        subjectTemplate: step.subjectTemplate,
+        bodyTemplateHtml: step.bodyTemplateHtml,
+        bodyTemplateText: step.bodyTemplateText,
+        createdAt: step.createdAt.toISOString(),
+        updatedAt: step.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -438,15 +477,18 @@ router.put('/:id/steps/:stepId', async (req, res) => {
       data: { updatedAt: new Date() },
     })
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     return res.json({
-      id: step.id,
-      stepOrder: step.stepOrder,
-      delayDaysFromPrevious: step.delayDaysFromPrevious,
-      subjectTemplate: step.subjectTemplate,
-      bodyTemplateHtml: step.bodyTemplateHtml,
-      bodyTemplateText: step.bodyTemplateText,
-      createdAt: step.createdAt.toISOString(),
-      updatedAt: step.updatedAt.toISOString(),
+      data: {
+        id: step.id,
+        stepOrder: step.stepOrder,
+        delayDaysFromPrevious: step.delayDaysFromPrevious,
+        subjectTemplate: step.subjectTemplate,
+        bodyTemplateHtml: step.bodyTemplateHtml,
+        bodyTemplateText: step.bodyTemplateText,
+        createdAt: step.createdAt.toISOString(),
+        updatedAt: step.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -477,7 +519,8 @@ router.delete('/:id/steps/:stepId', async (req, res) => {
       where: { id },
       data: { updatedAt: new Date() },
     })
-    return res.json({ success: true })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: { success: true } })
   } catch (error) {
     console.error('Error deleting step:', error)
     return res.status(500).json({ error: 'Failed to delete step' })
@@ -624,12 +667,15 @@ router.post('/:id/enroll', async (req, res) => {
       },
     })
 
+    res.setHeader('x-odcrm-customer-id', getCustomerId(req))
     res.json({
-      enrolled: newContactIds.length,
-      skipped: existingContactIds.size,
-      suppressed: suppressionDetails.length,
-      total: contactIds.length,
-      suppressionDetails: suppressionDetails.length > 0 ? suppressionDetails : undefined,
+      data: {
+        enrolled: newContactIds.length,
+        skipped: existingContactIds.size,
+        suppressed: suppressionDetails.length,
+        total: contactIds.length,
+        suppressionDetails: suppressionDetails.length > 0 ? suppressionDetails : undefined,
+      },
     })
   } catch (error) {
     console.error('Error enrolling contacts:', error)

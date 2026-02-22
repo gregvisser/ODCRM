@@ -34,18 +34,11 @@ export interface ApiResponse<T> {
   }
 }
 
-/** Unwrap common response envelopes so callers always get payload (array/object), not wrapper. Backwards compatible. */
-export function unwrapResponsePayload<T = unknown>(parsed: unknown, endpoint: string): T {
+/** Unwrap normalized response envelope { data } so callers get payload (array/object). */
+export function unwrapResponsePayload<T = unknown>(parsed: unknown, _endpoint: string): T {
   if (parsed === null || typeof parsed !== 'object') return parsed as T
   const o = parsed as Record<string, unknown>
   if (Object.prototype.hasOwnProperty.call(o, 'data')) return o.data as T
-  const path = endpoint.replace(/^\//, '').split('?')[0].toLowerCase()
-  if (
-    (path === 'api/customers' || path.startsWith('api/customers?')) &&
-    Object.prototype.hasOwnProperty.call(o, 'customers')
-  ) {
-    return o.customers as T
-  }
   return parsed as T
 }
 
@@ -56,9 +49,6 @@ async function apiRequest<T>(
   try {
     const customerId = getCurrentCustomerId('prod-customer-1')
     const fullUrl = `${API_BASE_URL}${endpoint}`
-    
-    console.log(`[API] ${options.method || 'GET'} ${fullUrl}`)
-    
     const method = (options.method || 'GET').toUpperCase()
 
     // CRITICAL: Avoid cached 304 responses with empty bodies (breaks response.json()).
@@ -101,8 +91,6 @@ async function apiRequest<T>(
       console.warn(`[API] ${method} ${fullUrl} -> 304 (no body). Retrying with no-store...`)
       response = await fetch(fullUrl, buildRequestInit())
     }
-
-    console.log(`[API] ${options.method || 'GET'} ${fullUrl} -> ${response.status}`)
 
     if (!response.ok) {
       // Try to parse JSON error response with detailed structure
@@ -185,7 +173,6 @@ async function apiRequest<T>(
 
     const raw = await response.json()
     const data = unwrapResponsePayload<T>(raw, endpoint)
-    console.log(`[API SUCCESS] ${fullUrl}:`, data)
     return { data }
   } catch (error: any) {
     console.error(`[API EXCEPTION] ${endpoint}:`, error)

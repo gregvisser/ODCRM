@@ -293,8 +293,8 @@ router.get('/', async (req, res) => {
 
     if (customers.length === 0) {
       console.log(`[${correlationId}] No customers, returning empty wrapped response`)
-      // STABLE API CONTRACT: Always return { customers: [] } format (never bare array)
-      return res.json({ customers: [] })
+      // STABLE API CONTRACT: Always return { data: [] } (normalized envelope)
+      return res.json({ data: [] })
     }
 
     console.log(`[${correlationId}] Starting serialization with per-customer sandboxing...`)
@@ -418,17 +418,15 @@ router.get('/', async (req, res) => {
 
     console.log(`[${correlationId}] Serialization complete: ${successfulCustomers.length} successful, ${warnings.length} failed`)
     
-    // Return response
+    // Return response (normalized envelope: { data: array })
     const response: any = {
-      customers: successfulCustomers
+      data: successfulCustomers
     }
-    
     if (warnings.length > 0) {
       response.warnings = warnings
       console.error(`[${correlationId}] ⚠️ WARNINGS: ${warnings.length} customers failed serialization`)
     }
-    
-    // Return 200 if at least one customer succeeded, 500 only if ALL failed
+
     if (successfulCustomers.length === 0 && warnings.length > 0) {
       console.error(`[${correlationId}] ❌ ALL CUSTOMERS FAILED SERIALIZATION`)
       return res.status(500).json({
@@ -438,7 +436,7 @@ router.get('/', async (req, res) => {
         warnings
       })
     }
-    
+
     return res.json(response)
     
   } catch (error: any) {
@@ -650,7 +648,7 @@ router.get('/:id', async (req, res) => {
       res.setHeader('x-odcrm-linked-email-count', 'error')
     }
 
-    return res.json(serialized)
+    return res.json({ data: serialized })
   } catch (error: any) {
     console.error(`[${correlationId}] Error fetching customer:`, error.message)
     console.error(`[${correlationId}] Stack:`, error.stack)
@@ -694,7 +692,7 @@ router.get('/:id/email-identities', async (req, res) => {
       createdAt: identity.createdAt.toISOString(),
     }))
 
-    return res.json(serialized)
+    return res.json({ data: serialized })
   } catch (error) {
     console.error('Error fetching email identities:', error)
     return res.status(500).json({ error: 'Failed to fetch email identities' })

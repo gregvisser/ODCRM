@@ -56,13 +56,18 @@ export default function MarketingDashboard() {
       api.get<any[]>('/api/campaigns'),
     ])
 
+    const customersList = Array.isArray(customersRes.data) ? customersRes.data : []
+    const contactsList = Array.isArray(contactsRes.data) ? contactsRes.data : []
+    const listsList = Array.isArray(listsRes.data) ? listsRes.data : []
+    const sequencesList = Array.isArray(sequencesRes.data) ? sequencesRes.data : []
+    const campaignsList = Array.isArray(campaignsRes.data) ? campaignsRes.data : []
     const metrics: DashboardMetrics = {
-      totalCustomers: customersRes.data?.length || 0,
-      totalContacts: contactsRes.data?.length || 0,
-      totalLists: listsRes.data?.length || 0,
-      totalSequences: sequencesRes.data?.length || 0,
-      totalCampaigns: campaignsRes.data?.length || 0,
-      activeCampaigns: campaignsRes.data?.filter((c) => c.status === 'running').length || 0,
+      totalCustomers: customersList.length,
+      totalContacts: contactsList.length,
+      totalLists: listsList.length,
+      totalSequences: sequencesList.length,
+      totalCampaigns: campaignsList.length,
+      activeCampaigns: campaignsList.filter((c) => c.status === 'running').length,
       emailsSentToday: 0, // Would need events API
       emailsSentThisWeek: 0,
       emailsSentThisMonth: 0,

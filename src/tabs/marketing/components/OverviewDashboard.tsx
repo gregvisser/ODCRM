@@ -149,13 +149,14 @@ const OverviewDashboard: React.FC = () => {
           // Update contacts by source breakdown
           setContactsBySource(data.contactsBySource || {})
 
-          // Update employee stats
-          setEmployeeStats(data.employeeStats || [])
+          // Update employee stats (guard non-array)
+          setEmployeeStats(Array.isArray(data.employeeStats) ? data.employeeStats : [])
 
           // Calculate aggregate reply rate from employee stats
-          if (data.employeeStats && data.employeeStats.length > 0) {
-            const totalReplies = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
-            const totalSent = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
+          const empStats = Array.isArray(data.employeeStats) ? data.employeeStats : []
+          if (empStats.length > 0) {
+            const totalReplies = empStats.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
+            const totalSent = empStats.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
             const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0
 
             setStats(prev => ({
@@ -175,7 +176,7 @@ const OverviewDashboard: React.FC = () => {
 
         // Add campaign activity
         if (campaignsRes.status === 'fulfilled') {
-          const campaigns = campaignsRes.value?.data || []
+          const campaigns = Array.isArray(campaignsRes.value?.data) ? campaignsRes.value.data : []
           campaigns.forEach((campaign: any) => {
             if (campaign.createdAt) {
               const timeAgo = getTimeAgo(new Date(campaign.createdAt))
@@ -190,7 +191,7 @@ const OverviewDashboard: React.FC = () => {
 
         // Add inbox/reply activity
         if (inboxRes.status === 'fulfilled') {
-          const inboxItems = inboxRes.value?.data || []
+          const inboxItems = Array.isArray(inboxRes.value?.data) ? inboxRes.value.data : []
           inboxItems.forEach((item: any) => {
             if (item.receivedAt) {
               const timeAgo = getTimeAgo(new Date(item.receivedAt))
@@ -255,15 +256,13 @@ const OverviewDashboard: React.FC = () => {
           deliverability: 0, // Not implemented yet
         })
 
-        // Update employee stats
-        setEmployeeStats(data.employeeStats || [])
+        const empStatsArr = Array.isArray(data.employeeStats) ? data.employeeStats : []
+        setEmployeeStats(empStatsArr)
 
-        // Calculate aggregate reply rate from employee stats
-        if (data.employeeStats && data.employeeStats.length > 0) {
-          const totalReplies = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
-          const totalSent = data.employeeStats.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
+        if (empStatsArr.length > 0) {
+          const totalReplies = empStatsArr.reduce((sum: number, emp: any) => sum + emp.repliesToday, 0)
+          const totalSent = empStatsArr.reduce((sum: number, emp: any) => sum + emp.emailsSentToday, 0)
           const replyRate = totalSent > 0 ? (totalReplies / totalSent) * 100 : 0
-
           setStats(prev => ({
             ...prev,
             replyRate: Math.round(replyRate * 10) / 10,
@@ -281,7 +280,7 @@ const OverviewDashboard: React.FC = () => {
 
       // Add campaign activity
       if (campaignsRes.status === 'fulfilled') {
-        const campaigns = campaignsRes.value?.data || []
+        const campaigns = Array.isArray(campaignsRes.value?.data) ? campaignsRes.value.data : []
         campaigns.forEach((campaign: any) => {
           if (campaign.createdAt) {
             const timeAgo = getTimeAgo(new Date(campaign.createdAt))
@@ -294,9 +293,8 @@ const OverviewDashboard: React.FC = () => {
         })
       }
 
-      // Add inbox/reply activity
       if (inboxRes.status === 'fulfilled') {
-        const inboxItems = inboxRes.value?.data || []
+        const inboxItems = Array.isArray(inboxRes.value?.data) ? inboxRes.value.data : []
         inboxItems.forEach((item: any) => {
           if (item.receivedAt) {
             const timeAgo = getTimeAgo(new Date(item.receivedAt))

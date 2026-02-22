@@ -48,7 +48,8 @@ router.get('/', async (req, res, next) => {
       orderBy: [{ updatedAt: 'desc' }],
     })
 
-    return res.json(templates)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: templates })
   } catch (error) {
     next(error)
   }
@@ -77,7 +78,7 @@ router.post('/', async (req, res, next) => {
         stepNumber: data.stepNumber,
       },
     })
-    res.status(201).json(created)
+    res.status(201).json({ data: created })
   } catch (error) {
     next(error)
   }
@@ -105,7 +106,7 @@ router.patch('/:id', async (req, res, next) => {
         // customerId is immutable - never change it after creation
       },
     })
-    res.json(updated)
+    res.json({ data: updated })
   } catch (error) {
     next(error)
   }
@@ -126,7 +127,7 @@ router.delete('/:id', async (req, res, next) => {
     }
 
     await prisma.emailTemplate.delete({ where: { id } })
-    res.json({ success: true })
+    res.json({ data: { success: true } })
   } catch (error) {
     next(error)
   }
@@ -151,8 +152,10 @@ router.post('/preview', async (req, res) => {
       : previewTemplate(body || '')
 
     return res.json({
-      subject: previewedSubject,
-      body: previewedBody,
+      data: {
+        subject: previewedSubject,
+        body: previewedBody,
+      },
     })
   } catch (error) {
     console.error('Error previewing template:', error)

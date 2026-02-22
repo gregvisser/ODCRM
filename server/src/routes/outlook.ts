@@ -645,7 +645,8 @@ router.post('/identities', async (req, res, next) => {
       }
     })
 
-    res.json(identity)
+    res.setHeader('x-odcrm-customer-id', resolvedCustomerId)
+    res.json({ data: identity })
   } catch (error) {
     next(error)
   }
@@ -677,8 +678,11 @@ router.get('/identities', async (req, res, next) => {
     res.setHeader('x-odcrm-customer-source', source)
 
     const identities = await prisma.emailIdentity.findMany({
-      // Safety: ignore any legacy/invalid providers (e.g., "outlook_app_only").
-      where: { customerId, provider: { in: ['outlook', 'smtp'] } },
+      where: {
+        customerId,
+        isActive: true,
+        provider: { in: ['outlook', 'smtp'] },
+      },
       select: {
         id: true,
         emailAddress: true,
@@ -701,21 +705,21 @@ router.get('/identities', async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     })
 
-    res.json(
-      identities.map((i: any) => {
-        const delegatedReady = i.provider === 'outlook' ? Boolean(i.refreshToken) : true
-        const tokenExpired =
-          i.provider === 'outlook' && i.tokenExpiresAt ? new Date(i.tokenExpiresAt) < new Date() : false
-        // Strip secrets
-        delete i.refreshToken
-        delete i.tokenExpiresAt
-        return {
-          ...i,
-          delegatedReady,
-          tokenExpired,
-        }
-      }),
-    )
+    const list = identities.map((i: any) => {
+      const delegatedReady = i.provider === 'outlook' ? Boolean(i.refreshToken) : true
+      const tokenExpired =
+        i.provider === 'outlook' && i.tokenExpiresAt ? new Date(i.tokenExpiresAt) < new Date() : false
+      delete i.refreshToken
+      delete i.tokenExpiresAt
+      return {
+        ...i,
+        delegatedReady,
+        tokenExpired,
+      }
+    })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.setHeader('x-odcrm-identities-count', String(list.length))
+    res.json({ data: list })
   } catch (error) {
     next(error)
   }
@@ -754,7 +758,8 @@ router.patch('/identities/:id', async (req, res, next) => {
       data: data as any
     })
 
-    res.json(updated)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: updated })
   } catch (error) {
     next(error)
   }
@@ -779,7 +784,8 @@ router.delete('/identities/:id', async (req, res, next) => {
       data: { isActive: false } as any
     })
 
-    res.json({ message: 'Identity disconnected' })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { message: 'Identity disconnected' } })
   } catch (error) {
     next(error)
   }
@@ -952,12 +958,15 @@ router.post('/identities/:id/test-send', async (req, res, next) => {
       requestId
     })
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     res.json({
-      success: true,
-      message: `Test email sent from ${identity.emailAddress} to ${toEmail}`,
-      from: identity.emailAddress,
-      to: toEmail,
-      requestId
+      data: {
+        success: true,
+        message: `Test email sent from ${identity.emailAddress} to ${toEmail}`,
+        from: identity.emailAddress,
+        to: toEmail,
+        requestId,
+      },
     })
   } catch (error: any) {
     console.error('❌ Test send exception:', error)

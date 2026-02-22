@@ -103,7 +103,8 @@ router.post('/', async (req, res, next) => {
       }
     })
 
-    res.json(campaign)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.status(201).json({ data: campaign })
   } catch (error) {
     next(error)
   }
@@ -168,7 +169,8 @@ router.get('/', async (req, res, next) => {
       }
     }))
 
-    res.json(campaignsWithMetrics)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: campaignsWithMetrics })
   } catch (error) {
     next(error)
   }
@@ -203,7 +205,8 @@ router.get('/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
-    res.json(campaign)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: campaign })
   } catch (error) {
     next(error)
   }
@@ -230,7 +233,8 @@ router.patch('/:id', async (req, res, next) => {
       data
     })
 
-    res.json(campaign)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: campaign })
   } catch (error) {
     next(error)
   }
@@ -338,7 +342,8 @@ router.post('/:id/templates', async (req, res, next) => {
       orderBy: { stepNumber: 'asc' }
     })
 
-    res.json(templates)
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: templates })
   } catch (error) {
     next(error)
   }
@@ -404,7 +409,8 @@ router.post('/:id/prospects', async (req, res, next) => {
       include: { contacts: true }
     })
 
-    res.json({ attached: newContactIds.length, total: prospects.length })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { attached: newContactIds.length, total: prospects.length } })
   } catch (error) {
     next(error)
   }
@@ -491,7 +497,8 @@ router.post('/:id/start', async (req, res, next) => {
       }
     }
 
-    res.json({ message: 'Campaign started', scheduled: pendingProspects.length })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { message: 'Campaign started', scheduled: pendingProspects.length } })
   } catch (error) {
     next(error)
   }
@@ -508,7 +515,8 @@ router.post('/:id/pause', async (req, res, next) => {
       data: { status: 'paused' }
     })
 
-    res.json({ message: 'Campaign paused' })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { message: 'Campaign paused' } })
   } catch (error) {
     next(error)
   }
@@ -525,7 +533,8 @@ router.post('/:id/complete', async (req, res, next) => {
       data: { status: 'completed' }
     })
 
-    res.json({ message: 'Campaign completed' })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { message: 'Campaign completed' } })
   } catch (error) {
     next(error)
   }
@@ -576,7 +585,8 @@ router.delete('/:id', async (req, res, next) => {
       where: { id }
     })
 
-    res.json({ message: 'Campaign deleted successfully' })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({ data: { message: 'Campaign deleted successfully' } })
   } catch (error) {
     next(error)
   }

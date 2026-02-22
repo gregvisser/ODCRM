@@ -46,8 +46,6 @@ router.get('/', async (req, res, next) => {
       return acc
     }, {} as Record<string, number>)
 
-    console.log(`[Overview] Customer ${customerId}: Total contacts = ${totalContacts}, By source:`, contactsBySource)
-
     // Get active sequences (sequences with at least one active enrollment)
     const activeSequencesResult = await prisma.$queryRaw<{ count: number }[]>`
       SELECT COUNT(DISTINCT es.id) as count
@@ -158,14 +156,17 @@ router.get('/', async (req, res, next) => {
       repliesWeek: Number(stat.repliesWeek),
     }))
 
+    res.setHeader('x-odcrm-customer-id', customerId)
     res.json({
-      customerId,
-      totalContacts,
-      contactsBySource, // Breakdown by source (cognism, apollo, social)
-      activeSequences,
-      emailsSentToday,
-      employeeStats,
-      generatedAt: new Date().toISOString(),
+      data: {
+        customerId,
+        totalContacts,
+        contactsBySource,
+        activeSequences,
+        emailsSentToday,
+        employeeStats,
+        generatedAt: new Date().toISOString(),
+      },
     })
   } catch (error) {
     next(error)
