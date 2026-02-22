@@ -96,6 +96,8 @@ type SequenceCampaign = {
   status: 'draft' | 'scheduled' | 'sending' | 'sent' | 'paused' | 'running'
   listId?: string | null
   sequenceId?: string | null
+  /** When set, this row is linked to a campaign (Start/Pause use this). */
+  campaignId?: string | null
   senderIdentityId?: string | null
   createdAt: string
   updatedAt?: string
@@ -126,6 +128,13 @@ type SnapshotList = {
 
 type SnapshotOption = SnapshotList & {
   source: 'cognism' | 'apollo' | 'blackbook'
+}
+
+type LeadSourceBatchOption = {
+  batchKey: string
+  sourceType: string
+  displayLabel: string
+  count?: number
 }
 
 type EmailIdentity = {
@@ -170,6 +179,9 @@ const SequencesTab: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [snapshots, setSnapshots] = useState<SnapshotOption[]>([])
+  const [leadBatches, setLeadBatches] = useState<LeadSourceBatchOption[]>([])
+  const [leadBatchesLoading, setLeadBatchesLoading] = useState(false)
+  const [materializedBatchKey, setMaterializedBatchKey] = useState<string | null>(null)
   const [senderIdentities, setSenderIdentities] = useState<EmailIdentity[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -278,42 +290,85 @@ const SequencesTab: React.FC = () => {
     }
     setLoading(true)
     setError(null)
-    const sequencesRes = await api.get<Array<{
-      id: string
-      name: string
-      description?: string | null
-      stepCount: number
-      senderIdentityId?: string
-      senderIdentity?: { id: string; emailAddress: string; displayName?: string } | null
-      createdAt: string
-      updatedAt: string
-    }>>('/api/sequences', {
-      headers: { 'X-Customer-Id': selectedCustomerId },
-    })
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const [sequencesRes, campaignsRes] = await Promise.all([
+      api.get<Array<{
+        id: string
+        name: string
+        description?: string | null
+        stepCount: number
+        senderIdentityId?: string
+        senderIdentity?: { id: string; emailAddress: string; displayName?: string } | null
+        createdAt: string
+        updatedAt: string
+      }>>('/api/sequences', { headers }),
+      api.get<Array<{
+        id: string
+        name: string
+        description?: string | null
+        status: string
+        listId?: string | null
+        sequenceId?: string | null
+        senderIdentityId?: string | null
+        senderIdentity?: { id: string; emailAddress: string; displayName?: string } | null
+        createdAt: string
+        updatedAt?: string
+        metrics?: CampaignMetrics
+      }>>('/api/campaigns', { headers }),
+    ])
     if (sequencesRes.error) {
       setError(sequencesRes.error)
       setSequences([])
-    } else {
-      const list = sequencesRes.data || []
-      setSequences(list.map((seq) => ({
+      setLoading(false)
+      return
+    }
+    const seqList = sequencesRes.data || []
+    const campaigns = campaignsRes.data || []
+    const campaignBySequenceId = new Map<string, typeof campaigns[0]>()
+    for (const c of campaigns) {
+      if (c.sequenceId) campaignBySequenceId.set(c.sequenceId, c)
+    }
+    const rows: SequenceCampaign[] = seqList.map((seq) => {
+      const campaign = campaignBySequenceId.get(seq.id)
+      if (campaign) {
+        const status = campaign.status === 'running' ? 'sending' : campaign.status === 'completed' ? 'sent' : campaign.status as SequenceCampaign['status']
+        return {
+          id: seq.id,
+          name: seq.name,
+          description: seq.description ?? campaign.description ?? null,
+          status,
+          listId: campaign.listId ?? null,
+          sequenceId: seq.id,
+          campaignId: campaign.id,
+          senderIdentityId: campaign.senderIdentityId ?? seq.senderIdentityId ?? null,
+          createdAt: seq.createdAt,
+          updatedAt: campaign.updatedAt ?? seq.updatedAt,
+          senderIdentity: campaign.senderIdentity ?? seq.senderIdentity ?? null,
+          metrics: campaign.metrics,
+        }
+      }
+      return {
         id: seq.id,
         name: seq.name,
         description: seq.description ?? null,
         status: 'draft' as const,
         listId: null,
         sequenceId: seq.id,
+        campaignId: null,
         senderIdentityId: seq.senderIdentityId ?? null,
         createdAt: seq.createdAt,
         updatedAt: seq.updatedAt,
         senderIdentity: seq.senderIdentity ?? null,
         metrics: undefined,
-      })))
-    }
+      }
+    })
+    setSequences(rows)
     setLoading(false)
   }
 
   const loadFormOptions = async () => {
     setSnapshotsLoading(true)
+    setLeadBatchesLoading(true)
     setTemplatesLoading(true)
     setSendersLoading(true)
     setSnapshotsError(null)
@@ -321,8 +376,9 @@ const SequencesTab: React.FC = () => {
     setSendersError(null)
 
     const headers = selectedCustomerId?.startsWith('cust_') ? { 'X-Customer-Id': selectedCustomerId } : {}
-    const [snapshotsRes, templatesRes, sendersRes] = await Promise.all([
+    const [snapshotsRes, batchesRes, templatesRes, sendersRes] = await Promise.all([
       loadSnapshots(),
+      api.get<LeadSourceBatchOption[]>('/api/lead-sources/batches', { headers }),
       api.get<EmailTemplate[]>('/api/templates', { headers }),
       api.get<EmailIdentity[]>('/api/outlook/identities', { headers })
     ])
@@ -339,7 +395,14 @@ const SequencesTab: React.FC = () => {
       setSenderIdentities((sendersRes.data || []).filter((sender) => sender.isActive !== false))
     }
 
+    if (!batchesRes.error && Array.isArray(batchesRes.data)) {
+      setLeadBatches(batchesRes.data)
+    } else {
+      setLeadBatches([])
+    }
+
     setSnapshotsLoading(false)
+    setLeadBatchesLoading(false)
     setTemplatesLoading(false)
     setSendersLoading(false)
   }
@@ -424,6 +487,7 @@ const SequencesTab: React.FC = () => {
       return
     }
 
+    setMaterializedBatchKey(null)
     setEditingSequence({
       id: '',
       name: '',
@@ -538,6 +602,7 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleEditSequence = async (sequence: SequenceCampaign) => {
+    setMaterializedBatchKey(null)
     setEditingSequence({
       ...sequence,
       listId: sequence.listId || '',
@@ -734,8 +799,8 @@ const SequencesTab: React.FC = () => {
         throw new Error('Select a customer to save.')
       }
       const campaignHeaders = { 'X-Customer-Id': selectedCustomerId }
-      if (editingSequence.id) {
-        await api.patch(`/api/campaigns/${editingSequence.id}`, payload, { headers: campaignHeaders })
+      if (editingSequence.campaignId) {
+        await api.patch(`/api/campaigns/${editingSequence.campaignId}`, payload, { headers: campaignHeaders })
       } else {
         const response = await api.post<SequenceCampaign>('/api/campaigns', payload, { headers: campaignHeaders })
         if (response.error) {
@@ -763,8 +828,7 @@ const SequencesTab: React.FC = () => {
 
   const validateStartRequirements = (sequence: SequenceCampaign) => {
     if (!sequence.name.trim()) return 'Sequence name is required.'
-    if (snapshots.length === 0) return 'No snapshots available.'
-    if (!sequence.listId) return 'Select a lead snapshot.'
+    if (!sequence.listId) return leadBatches.length === 0 ? 'No lead batches yet. Go to Lead Sources and click Sync.' : 'Select a lead batch.'
     if (templates.length === 0) return 'No templates available.'
     if (!sequence.templateId) return 'Select a template.'
     if (senderIdentities.length === 0) return 'No senders available.'
@@ -785,13 +849,11 @@ const SequencesTab: React.FC = () => {
       return
     }
 
-    const snapshot = snapshots.find((item) => item.id === sequence.listId)
     const sender = senderIdentities.find((item) => item.id === sequence.senderIdentityId)
-
-    if (!snapshot || !sender || !sequence.steps || sequence.steps.length === 0) {
+    if (!sender || !sequence.steps || sequence.steps.length === 0) {
       toast({
         title: 'Cannot start sequence',
-        description: 'Snapshot, steps, or sender selection is invalid.',
+        description: 'Steps or sender selection is invalid.',
         status: 'error',
         duration: 4000,
       })
@@ -800,14 +862,14 @@ const SequencesTab: React.FC = () => {
 
     setStartPreviewCampaign(sequence)
     setStartPreview({
-      snapshot,
+      snapshot: undefined,
       sender,
       loading: true,
       error: null,
     })
     onStartOpen()
 
-    const listRes = await api.get<{ contacts: Array<{ id: string; email: string | null }> }>(`/api/lists/${snapshot.id}`)
+    const listRes = await api.get<{ name?: string; contacts: Array<{ id: string; email: string | null }> }>(`/api/lists/${sequence.listId}`, sequence.listId && selectedCustomerId?.startsWith('cust_') ? { headers: { 'X-Customer-Id': selectedCustomerId } } : undefined)
     if (listRes.error) {
       setStartPreview((prev) => ({
         ...prev,
@@ -819,6 +881,7 @@ const SequencesTab: React.FC = () => {
 
     const contacts = listRes.data?.contacts || []
     const missingEmailCount = contacts.filter((contact) => !contact.email).length
+    const listName = listRes.data?.name ?? 'List'
 
     // Check suppression
     const validEmails = contacts.filter((c) => c.email).map((c) => c.email!)
@@ -841,9 +904,17 @@ const SequencesTab: React.FC = () => {
       }
     }
 
+    const snapshot: SnapshotOption = {
+      id: sequence.listId!,
+      name: listName,
+      memberCount: contacts.length,
+      lastSyncAt: new Date().toISOString(),
+      source: 'cognism',
+    }
     setStartPreview((prev) => ({
       ...prev,
       loading: false,
+      snapshot,
       contactCount: contacts.length,
       missingEmailCount,
       suppressedCount,
@@ -856,6 +927,7 @@ const SequencesTab: React.FC = () => {
     const listId = sequence.listId
     const senderIdentityId = sequence.senderIdentityId
     const sequenceId = sequence.sequenceId
+    const campaignId = sequence.campaignId
 
     if (!listId || !senderIdentityId || !sequenceId) {
       toast({
@@ -868,7 +940,7 @@ const SequencesTab: React.FC = () => {
     }
 
     try {
-      if (!sequence.id) {
+      if (!campaignId) {
         toast({
           title: 'Save draft first',
           description: 'Save the draft before starting.',
@@ -889,9 +961,7 @@ const SequencesTab: React.FC = () => {
         throw new Error('Sequence has no steps. Save draft again.')
       }
 
-      let campaignId = sequence.id
-      if (campaignId) {
-        await api.patch(`/api/campaigns/${campaignId}`, {
+      await api.patch(`/api/campaigns/${campaignId}`, {
           name: sequence.name.trim(),
           description: sequence.description?.trim() || undefined,
           listId,
@@ -1296,13 +1366,13 @@ const SequencesTab: React.FC = () => {
                           <MenuItem icon={<EditIcon />} onClick={() => handleEditSequence(sequence)}>
                             Edit
                           </MenuItem>
-                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.listId && (
+                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.campaignId && (
                             <MenuItem icon={<EmailIcon />} onClick={() => handleEditSequence(sequence)}>
                               Start Sequence
                             </MenuItem>
                           )}
-                          {sequence.status === 'sending' && sequence.listId && (
-                            <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSequence(sequence.id)}>
+                          {sequence.status === 'sending' && sequence.campaignId && (
+                            <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSequence(sequence.campaignId!)}>
                               Pause Sequence
                             </MenuItem>
                           )}
@@ -1340,22 +1410,37 @@ const SequencesTab: React.FC = () => {
                 <FormControl isRequired>
                   <FormLabel>Leads Snapshot</FormLabel>
                   <Select
-                    value={editingSequence.listId || ''}
-                    onChange={(e) => setEditingSequence({
-                      ...editingSequence,
-                      listId: e.target.value || '',
-                    })}
-                    placeholder={snapshotsLoading ? 'Loading snapshots...' : 'Select a snapshot'}
+                    value={materializedBatchKey ?? ''}
+                    onChange={async (e) => {
+                      const batchKey = e.target.value || ''
+                      if (!batchKey || !selectedCustomerId?.startsWith('cust_')) return
+                      try {
+                        const { data, error: matError } = await api.post<{ listId: string; name: string }>(
+                          `/api/lead-sources/batches/${encodeURIComponent(batchKey)}/materialize-list`,
+                          {},
+                          { headers: { 'X-Customer-Id': selectedCustomerId } }
+                        )
+                        if (matError || !data?.listId) {
+                          toast({ title: 'Failed to load list', description: matError ?? 'No list returned', status: 'error' })
+                          return
+                        }
+                        setMaterializedBatchKey(batchKey)
+                        setEditingSequence((prev) => prev ? { ...prev, listId: data.listId } : prev)
+                      } catch (err) {
+                        toast({ title: 'Failed to load list', description: err instanceof Error ? err.message : 'Error', status: 'error' })
+                      }
+                    }}
+                    placeholder={leadBatchesLoading ? 'Loading lead batches...' : 'Select a lead batch'}
                   >
-                    {snapshots.map((snapshot) => (
-                      <option key={snapshot.id} value={snapshot.id}>
-                        {snapshot.name} ({snapshot.memberCount} leads)
+                    {leadBatches.map((b) => (
+                      <option key={b.batchKey} value={b.batchKey}>
+                        {b.displayLabel} ({(b.count ?? 0)} leads)
                       </option>
                     ))}
                   </Select>
-                  {snapshots.length === 0 && !snapshotsLoading && (
+                  {leadBatches.length === 0 && !leadBatchesLoading && (
                     <Text fontSize="sm" color="gray.500" mt={2}>
-                      No snapshots yet. Go to Lead Sources and click Sync.
+                      No lead batches yet. Go to Lead Sources and click Sync.
                     </Text>
                   )}
                 </FormControl>

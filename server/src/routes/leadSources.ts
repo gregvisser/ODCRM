@@ -144,6 +144,175 @@ router.get('/', async (req: Request, res: Response) => {
   }
 })
 
+/** Verify customer exists; throw if missing/invalid (400). */
+async function ensureCustomerExists(customerId: string): Promise<void> {
+  const customer = await prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } })
+  if (!customer) {
+    const err = new Error('Invalid customer context') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+}
+
+// GET /api/lead-sources/batches — all batches across source types for this customer (for Sequences Leads Snapshot)
+const BATCHES_AGGREGATE_TAKE = 200
+router.get('/batches', async (req: Request, res: Response) => {
+  try {
+    const customerId = getCustomerId(req)
+    await ensureCustomerExists(customerId)
+
+    type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
+    const allBatches: Array<GroupRow & { sourceType: LeadSourceType }> = []
+
+    for (const sourceType of SOURCE_TYPES) {
+      const config = await resolveLeadSourceConfig(customerId, sourceType)
+      if (!config?.spreadsheetId) continue
+      const grouped = await prisma.leadSourceRowSeen.groupBy({
+        by: ['batchKey'],
+        where: { customerId, sourceType },
+        _count: { _all: true },
+        _max: { firstSeenAt: true },
+      })
+      const typed = grouped as unknown as GroupRow[]
+      for (const g of typed) allBatches.push({ ...g, sourceType })
+    }
+
+    const sorted = allBatches
+      .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
+      .slice(0, BATCHES_AGGREGATE_TAKE)
+      .map((g) => {
+        const parsed = parseBatchKey(g.batchKey)
+        const label = `${g.sourceType} — ${parsed.date}${parsed.client ? ` · ${parsed.client}` : ''}${parsed.jobTitle ? ` · ${parsed.jobTitle}` : ''}`
+        return {
+          batchKey: g.batchKey,
+          sourceType: g.sourceType,
+          displayLabel: label.trim(),
+          count: g._count._all,
+        }
+      })
+
+    res.json(sorted)
+  } catch (e) {
+    const err = e as Error & { status?: number }
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to load batches' })
+  }
+})
+
+// POST /api/lead-sources/batches/:batchKey/materialize-list — create or reuse list from lead batch (idempotent)
+router.post('/batches/:batchKey/materialize-list', async (req: Request, res: Response) => {
+  try {
+    const customerId = getCustomerId(req)
+    await ensureCustomerExists(customerId)
+    const batchKey = (req.params.batchKey ?? '').trim()
+    if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
+
+    // Resolve which source type this batch belongs to (batchKey is unique per customer+sourceType in row_seen)
+    const anyRow = await prisma.leadSourceRowSeen.findFirst({
+      where: { customerId, batchKey },
+      select: { sourceType: true, spreadsheetId: true },
+    })
+    if (!anyRow) return res.status(404).json({ error: 'Batch not found' })
+    const sourceType = anyRow.sourceType
+    const config = await resolveLeadSourceConfig(customerId, sourceType)
+    if (!config?.spreadsheetId) return res.status(404).json({ error: 'Source not connected' })
+
+    const listName = `Lead batch: ${sourceType} — ${batchKey.slice(0, 120)}`
+    let list = await prisma.contactList.findFirst({
+      where: { customerId, name: listName },
+      select: { id: true, name: true },
+    })
+    if (list) {
+      return res.json({ listId: list.id, name: list.name })
+    }
+
+    // Get all rows in this batch (fingerprints)
+    const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
+      where: { customerId, sourceType, spreadsheetId: config.spreadsheetId, batchKey },
+      select: { fingerprint: true },
+    })
+    const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
+    if (fpSet.size === 0) return res.status(400).json({ error: 'Batch has no contacts' })
+
+    // Load CSV-derived rows (same as contacts endpoint)
+    let cached = getCachedContacts(customerId, sourceType)
+    if (!cached) {
+      const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
+      const csvText = await fetchCsvFromUrl(csvUrl)
+      const { columnKeys, rows } = csvToMappedRows(csvText)
+      const flat = rows.map((r) => {
+        const canonical = { ...r.canonical }
+        const fingerprint = computeFingerprint(canonical)
+        return { ...canonical, ...r.extraFields, __fp: fingerprint }
+      })
+      setCachedContacts(customerId, sourceType, columnKeys, flat)
+      cached = { columnKeys, rows: flat }
+    }
+    const filtered = cached.rows.filter((r: Record<string, string>) => {
+      const fp = r['__fp']
+      return typeof fp === 'string' && fpSet.has(fp)
+    }) as Array<Record<string, string>>
+
+    list = await prisma.contactList.create({
+      data: {
+        id: `list_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        customerId,
+        name: listName,
+        description: `Materialized from ${sourceType} batch`,
+        updatedAt: new Date(),
+      },
+      select: { id: true, name: true },
+    })
+
+    const sourceValue = sourceType.toLowerCase()
+    for (const row of filtered) {
+      const email = (row.email ?? row.Email ?? '').toString().trim()
+      if (!email) continue
+      const firstName = (row.firstName ?? row.first_name ?? '').toString().trim() || 'Unknown'
+      const lastName = (row.lastName ?? row.last_name ?? '').toString().trim() || 'Unknown'
+      const companyName = (row.companyName ?? row.company_name ?? '').toString().trim() || 'Unknown'
+      const jobTitle = (row.jobTitle ?? row.job_title ?? '').toString().trim() || null
+      const phone = (row.mobile ?? row.phone ?? row.directPhone ?? row.officePhone ?? '').toString().trim() || null
+
+      let contact = await prisma.contact.findFirst({
+        where: { customerId, email },
+        select: { id: true },
+      })
+      if (!contact) {
+        contact = await prisma.contact.create({
+          data: {
+            customerId,
+            email,
+            firstName,
+            lastName,
+            companyName,
+            jobTitle: jobTitle ?? undefined,
+            phone: phone ?? undefined,
+            source: sourceValue,
+            updatedAt: new Date(),
+          },
+          select: { id: true },
+        })
+      }
+      await prisma.contactListMember.upsert({
+        where: {
+          listId_contactId: { listId: list!.id, contactId: contact.id },
+        },
+        create: {
+          id: `member_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+          listId: list!.id,
+          contactId: contact.id,
+        },
+        update: {},
+      })
+    }
+
+    res.status(201).json({ listId: list.id, name: list.name })
+  } catch (e) {
+    const err = e as Error & { status?: number }
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to materialize list' })
+  }
+})
+
 // POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
 // TODO: In production, guard with admin/auth middleware; customerId is from getCustomerId(req) only.
 const connectSchema = z.object({
