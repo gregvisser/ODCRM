@@ -124,8 +124,17 @@ router.put('/:id', async (req, res, next) => {
 })
 
 // Delete a contact
+// Audit P0-2 (2026-02-22): verify tenant ownership before delete to prevent IDOR.
 router.delete('/:id', async (req, res, next) => {
   try {
+    const customerId = getCustomerId(req)
+    const existing = await prisma.contact.findFirst({
+      where: { id: req.params.id, customerId },
+      select: { id: true },
+    })
+    if (!existing) {
+      return res.status(404).json({ error: 'Contact not found' })
+    }
     await prisma.contact.delete({ where: { id: req.params.id } })
     res.json({ success: true })
   } catch (error) {

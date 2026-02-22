@@ -4,6 +4,19 @@ import { prisma } from '../lib/prisma.js'
 
 const router = Router()
 
+// Audit P0-1 (2026-02-22): All /:id operations now verify list.customerId matches the
+// resolved tenant. This prevents IDOR where any authenticated user could read, update,
+// or delete a contact list belonging to a different customer.
+const getCustomerId = (req: { headers: Record<string, string | string[] | undefined>; query: Record<string, string | string[] | undefined> }): string => {
+  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+  if (!customerId) {
+    const err = new Error('Customer ID required') as Error & { status?: number }
+    err.status = 400
+    throw err
+  }
+  return customerId
+}
+
 // Schema validation
 const createListSchema = z.object({
   customerId: z.string(),
@@ -58,12 +71,14 @@ router.get('/', async (req, res) => {
 })
 
 // GET /api/lists/:id - Get a single list with contacts
+// Audit P0-1: uses findFirst({ where: { id, customerId } }) to enforce tenant ownership.
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params
+    const customerId = getCustomerId(req as any)
 
-    const list = await prisma.contactList.findUnique({
-      where: { id },
+    const list = await prisma.contactList.findFirst({
+      where: { id, customerId },
       include: {
         contactListMembers: {
           include: {
@@ -96,7 +111,8 @@ router.get('/:id', async (req, res) => {
         addedAt: member.createdAt.toISOString(),
       })),
     })
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status === 400) return res.status(400).json({ error: error.message })
     console.error('Error fetching list:', error)
     return res.status(500).json({ error: 'Failed to fetch list' })
   }
@@ -135,10 +151,17 @@ router.post('/', async (req, res) => {
 })
 
 // PUT /api/lists/:id - Update a list
+// Audit P0-1: verifies ownership before update; returns 404 if not found for tenant.
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params
+    const customerId = getCustomerId(req as any)
     const validated = updateListSchema.parse(req.body)
+
+    const existing = await prisma.contactList.findFirst({ where: { id, customerId }, select: { id: true } })
+    if (!existing) {
+      return res.status(404).json({ error: 'List not found' })
+    }
 
     const list = await prisma.contactList.update({
       where: { id },
@@ -162,7 +185,8 @@ router.put('/:id', async (req, res) => {
       createdAt: list.createdAt.toISOString(),
       updatedAt: list.updatedAt.toISOString(),
     })
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status === 400) return res.status(400).json({ error: error.message })
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
@@ -172,31 +196,54 @@ router.put('/:id', async (req, res) => {
 })
 
 // DELETE /api/lists/:id - Delete a list
+// Audit P0-1: verifies ownership before delete; returns 404 if not found for tenant.
 router.delete('/:id', async (req, res) => {
   try {
     const { id } = req.params
+    const customerId = getCustomerId(req as any)
+
+    const existing = await prisma.contactList.findFirst({ where: { id, customerId }, select: { id: true } })
+    if (!existing) {
+      return res.status(404).json({ error: 'List not found' })
+    }
 
     await prisma.contactList.delete({
       where: { id },
     })
 
     return res.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status === 400) return res.status(400).json({ error: error.message })
     console.error('Error deleting list:', error)
     return res.status(500).json({ error: 'Failed to delete list' })
   }
 })
 
 // POST /api/lists/:id/contacts - Add contacts to a list
+// Audit P0-1: verifies list ownership AND that each contactId belongs to the same tenant.
 router.post('/:id/contacts', async (req, res) => {
   try {
     const { id } = req.params
+    const customerId = getCustomerId(req as any)
     const validated = addContactsSchema.parse(req.body)
 
-    // Verify list exists
-    const list = await prisma.contactList.findUnique({ where: { id } })
+    // Verify list belongs to this tenant
+    const list = await prisma.contactList.findFirst({ where: { id, customerId }, select: { id: true } })
     if (!list) {
       return res.status(404).json({ error: 'List not found' })
+    }
+
+    // Verify all contactIds belong to the same tenant (prevents cross-tenant member insertion)
+    if (validated.contactIds.length > 0) {
+      const ownedContacts = await prisma.contact.findMany({
+        where: { id: { in: validated.contactIds }, customerId },
+        select: { id: true },
+      })
+      const ownedIds = new Set(ownedContacts.map((c) => c.id))
+      const foreignIds = validated.contactIds.filter((cid) => !ownedIds.has(cid))
+      if (foreignIds.length > 0) {
+        return res.status(400).json({ error: 'One or more contacts do not belong to this customer' })
+      }
     }
 
     // Create list members (skip duplicates)
@@ -226,7 +273,8 @@ router.post('/:id/contacts', async (req, res) => {
     })
 
     return res.json({ success: true, added: validated.contactIds.length })
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status === 400) return res.status(400).json({ error: error.message })
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
@@ -236,9 +284,17 @@ router.post('/:id/contacts', async (req, res) => {
 })
 
 // DELETE /api/lists/:id/contacts/:contactId - Remove a contact from a list
+// Audit P0-1: verifies list ownership before removing member.
 router.delete('/:id/contacts/:contactId', async (req, res) => {
   try {
     const { id, contactId } = req.params
+    const customerId = getCustomerId(req as any)
+
+    // Verify list belongs to this tenant before touching its members
+    const list = await prisma.contactList.findFirst({ where: { id, customerId }, select: { id: true } })
+    if (!list) {
+      return res.status(404).json({ error: 'List not found' })
+    }
 
     await prisma.contactListMember.deleteMany({
       where: {
@@ -254,7 +310,8 @@ router.delete('/:id/contacts/:contactId', async (req, res) => {
     })
 
     return res.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
+    if (error.status === 400) return res.status(400).json({ error: error.message })
     console.error('Error removing contact from list:', error)
     return res.status(500).json({ error: 'Failed to remove contact from list' })
   }
