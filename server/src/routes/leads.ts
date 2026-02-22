@@ -254,12 +254,25 @@ router.get('/', async (req, res) => {
 })
 
 // Aggregations endpoint for detailed analytics
+// Audit P0-3 (2026-02-22): lock aggregations to tenant unless admin secret present.
+// Without customerId the endpoint previously leaked lead data for ALL customers.
+// Fix: require x-customer-id header (or query param), OR require x-admin-secret for
+// the cross-tenant "all accounts" view used only by internal dashboards.
 router.get('/aggregations', async (req, res) => {
   try {
-    const customerId = req.query.customerId as string | undefined
+    const customerId = (req.query.customerId as string | undefined) ||
+                       (req.headers['x-customer-id'] as string | undefined)
     const timeframe = req.query.timeframe as 'week' | 'month' | 'all' || 'all'
 
-    // Get all leads for the customer(s)
+    const adminSecret = process.env.ADMIN_SECRET
+    const isAdmin = adminSecret && req.headers['x-admin-secret'] === adminSecret
+
+    // Require customerId OR admin authentication for the cross-tenant view
+    if (!customerId && !isAdmin) {
+      return res.status(400).json({ error: 'Customer ID required' })
+    }
+
+    // Get leads for the customer(s)
     const where: any = {
       customer: {
         leadsReportingUrl: { not: null },
@@ -268,6 +281,7 @@ router.get('/aggregations', async (req, res) => {
     if (customerId) {
       where.customerId = customerId
     }
+    // If isAdmin and no customerId, no additional filter → all customers (admin view only)
 
     const leadRecords = await prisma.leadRecord.findMany({
       where,
@@ -1429,8 +1443,17 @@ router.get('/sync/status', async (req, res) => {
 })
 
 // Get sync status for all customers
+// Audit P0-4 (2026-02-22): this endpoint returns all customers' names and Google Sheet
+// URLs. It must be restricted to admin-authenticated callers only.
+// Gate: x-admin-secret header must match ADMIN_SECRET env var.
 router.get('/sync/status/all', async (req, res) => {
   try {
+    const adminSecret = process.env.ADMIN_SECRET
+    const isAdmin = adminSecret && req.headers['x-admin-secret'] === adminSecret
+    if (!isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' })
+    }
+
     const syncStates = await prisma.leadSyncState.findMany({
       include: {
         customer: {
