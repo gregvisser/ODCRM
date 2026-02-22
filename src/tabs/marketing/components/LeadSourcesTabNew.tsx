@@ -51,7 +51,8 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, AddIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore, leadSourceSelectionStore } from '../../../platform'
+import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
+import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import {
   getLeadSources,
   connectLeadSource,
@@ -452,7 +453,7 @@ export default function LeadSourcesTabNew({
     try {
       const list = normalizeCustomersListResponse(res.data) as Array<{ id: string; name: string }>
       setCustomers(list.map((c) => ({ id: c.id, name: c.name })))
-      const current = settingsStore.getCurrentCustomerId('')
+      const current = getCurrentCustomerId('')
       if (current && list.some((c: { id: string }) => c.id === current)) setCustomerId(current)
       else if (list.length) setCustomerId(list[0].id)
     } catch {
@@ -477,7 +478,7 @@ export default function LeadSourcesTabNew({
 
   useEffect(() => {
     loadCustomers()
-    const unsub = settingsStore.onSettingsUpdated((d) => {
+    const unsub = onSettingsUpdated((d) => {
       const id = (d as { currentCustomerId?: string })?.currentCustomerId
       if (typeof id === 'string') setCustomerId(id)
     })
@@ -569,7 +570,7 @@ export default function LeadSourcesTabNew({
   }, [customerId, contactsBatchKey, contactsPage, contactsPageSize, loadContacts])
 
   const handleCustomerChange = (id: string) => {
-    settingsStore.setCurrentCustomerId(id)
+    setCurrentCustomerId(id)
     setCustomerId(id)
     setViewBatchesSource(null)
     setContactsBatchKey(null)

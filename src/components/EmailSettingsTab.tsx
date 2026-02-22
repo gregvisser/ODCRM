@@ -37,7 +37,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 interface EmailIdentity {
   id: string
@@ -61,7 +61,7 @@ export default function EmailSettingsTab() {
   const fetchIdentities = useCallback(async () => {
     setLoading(true)
     // Use the same customerId that was used for OAuth connection
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
@@ -76,7 +76,7 @@ export default function EmailSettingsTab() {
   }, [fetchIdentities])
 
   const handleConnectOutlook = () => {
-    const customerId = settingsStore.getCurrentCustomerId('')
+    const customerId = getCurrentCustomerId('')
     
     // LOCKDOWN: Require valid customerId before connecting
     if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
@@ -96,7 +96,7 @@ export default function EmailSettingsTab() {
   }
   
   // Check if a valid customer is selected
-  const customerId = settingsStore.getCurrentCustomerId('')
+  const customerId = getCurrentCustomerId('')
   const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
 
   const handleEdit = (identity: EmailIdentity) => {

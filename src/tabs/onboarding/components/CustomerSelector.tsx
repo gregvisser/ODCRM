@@ -24,7 +24,7 @@ import {
 import { RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore } from '../../../platform'
+import { setCurrentCustomerId } from '../../../platform/stores/settings'
 import { on } from '../../../platform/events'
 import { onboardingDebug } from '../utils/debug'
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
@@ -78,7 +78,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
       const firstCustomer = apiCustomers[0]?.id || ''
       onCustomerChange(firstCustomer)
       if (firstCustomer) {
-        settingsStore.setCurrentCustomerId(firstCustomer)
+        setCurrentCustomerId(firstCustomer)
       }
     }
     setIsLoading(false)
@@ -104,7 +104,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
   // Persist customer selection
   useEffect(() => {
     if (selectedCustomerId) {
-      settingsStore.setCurrentCustomerId(selectedCustomerId)
+      setCurrentCustomerId(selectedCustomerId)
     }
   }, [selectedCustomerId])
 

@@ -52,7 +52,9 @@ import {
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { MdEmail } from 'react-icons/md'
 import { accounts } from './AccountsTab'
-import { accountsStore, campaignWorkflowsStore, settingsStore } from '../platform'
+import { getAccounts, onAccountsUpdated } from '../platform/stores/accounts'
+import { getCampaignWorkflows, setCampaignWorkflows } from '../platform/stores/campaignWorkflows'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
 
 type EmailTemplate = {
@@ -177,13 +179,13 @@ What will it take to get 10 minutes on your calendar in the next few days?`,
 }
 
 function loadWorkflowsFromStore(): CampaignWorkflow[] {
-  const parsed = campaignWorkflowsStore.getCampaignWorkflows<CampaignWorkflow>()
+  const parsed = getCampaignWorkflows<CampaignWorkflow>()
 
   // Ensure Legionella demo workflow exists
   const hasLegionellaWorkflow = parsed.some((w) => w?.id === 'legionella-demo-workflow')
   if (!hasLegionellaWorkflow) {
     const updated = [...parsed, createLegionellaWorkflow()]
-    campaignWorkflowsStore.setCampaignWorkflows(updated)
+    setCampaignWorkflows(updated)
     return updated
   }
 
@@ -191,7 +193,7 @@ function loadWorkflowsFromStore(): CampaignWorkflow[] {
 }
 
 function CampaignSequencesTab() {
-  const customerId = settingsStore.getCurrentCustomerId('prod-customer-1') || ''
+  const customerId = getCurrentCustomerId('prod-customer-1') || ''
   const [workflows, setWorkflows] = useState<CampaignWorkflow[]>(() => loadWorkflowsFromStore())
   const [templates, setTemplates] = useState<SavedEmailTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -234,20 +236,20 @@ function CampaignSequencesTab() {
 
   useEffect(() => {
     const compute = () => {
-      const storedAccounts = accountsStore.getAccounts<{ name: string }>()
+      const storedAccounts = getAccounts<{ name: string }>()
       const storedNames = storedAccounts.map((a) => a?.name).filter(Boolean) as string[]
       const defaultNames = accounts.map((acc) => acc.name)
       return Array.from(new Set([...storedNames, ...defaultNames])).sort((a, b) => a.localeCompare(b))
     }
 
     setAvailableAccounts(compute())
-    const off = accountsStore.onAccountsUpdated(() => setAvailableAccounts(compute()))
+    const off = onAccountsUpdated(() => setAvailableAccounts(compute()))
     return () => off()
   }, [])
 
   // Persist workflows immediately (and broadcast cross-tab)
   useEffect(() => {
-    campaignWorkflowsStore.setCampaignWorkflows(workflows)
+    setCampaignWorkflows(workflows)
   }, [workflows])
 
   // Load templates from DB when customer is selected (tenant-safe)

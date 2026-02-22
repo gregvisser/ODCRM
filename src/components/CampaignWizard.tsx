@@ -32,7 +32,8 @@ import {
 import { api } from '../utils/api'
 import { getItem, setItem } from '../platform/storage'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
-import { accountsStore, settingsStore } from '../platform'
+import { getAccounts } from '../platform/stores/accounts'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 /** Shape used for template picker; sourced from GET /api/templates (DB). */
 interface WizardEmailTemplate {
@@ -133,7 +134,7 @@ export default function CampaignWizard({
 
   const fetchIdentities = useCallback(async () => {
     // Use the same customerId that was used for OAuth connection
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
       console.error('Failed to fetch email identities:', error)
@@ -144,7 +145,7 @@ export default function CampaignWizard({
   }, [toast])
 
   const fetchSchedules = useCallback(async () => {
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     const { data, error } = await api.get<EmailSendSchedule[]>(`/api/schedules?customerId=${customerId}`)
     if (error) {
       console.error('Failed to fetch schedules:', error)
@@ -223,7 +224,7 @@ export default function CampaignWizard({
   }, [campaignId, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules])
 
   const availableAccounts = useMemo(() => {
-    const accounts = accountsStore.getAccounts<{ name: string }>()
+    const accounts = getAccounts<{ name: string }>()
     const names = accounts.map((a) => a?.name).filter(Boolean)
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
   }, [])
@@ -233,7 +234,7 @@ export default function CampaignWizard({
 
   const fetchTemplates = useCallback(async () => {
     setTemplatesLoading(true)
-    const customerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId('prod-customer-1')
     if (!customerId) {
       setTemplatesFromApi([])
       setTemplatesLoading(false)

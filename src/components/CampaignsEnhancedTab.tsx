@@ -38,7 +38,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, ViewIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 type Campaign = {
   id: string
@@ -80,7 +80,7 @@ export default function CampaignsEnhancedTab() {
 
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure()
   const toast = useToast()
-  const activeCustomerId = form.customerId || settingsStore.getCurrentCustomerId('prod-customer-1')
+  const activeCustomerId = form.customerId || getCurrentCustomerId('prod-customer-1')
 
   const listLookup = useMemo(() => {
     return Object.fromEntries(lists.map((list) => [list.id, list]))

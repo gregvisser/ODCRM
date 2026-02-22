@@ -36,7 +36,7 @@ import {
 } from '@chakra-ui/react'
 import { DeleteIcon, AttachmentIcon, CloseIcon, CheckIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { settingsStore } from '../../../platform'
+import { getCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
 
 type SuppressionEntry = {
   id: string
@@ -58,7 +58,7 @@ export default function ComplianceTab() {
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [customerId, setCustomerId] = useState<string>(
-    settingsStore.getCurrentCustomerId('prod-customer-1'),
+    getCurrentCustomerId('prod-customer-1'),
   )
   const [importing, setImporting] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)
@@ -104,7 +104,7 @@ export default function ComplianceTab() {
   }, [customerId, loadEntries])
 
   useEffect(() => {
-    const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
+    const unsubscribe = onSettingsUpdated((detail) => {
       const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
       if (next) setCustomerId(next)
     })

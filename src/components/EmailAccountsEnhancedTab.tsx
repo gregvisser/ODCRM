@@ -47,7 +47,7 @@ import {
   Code,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId, onSettingsUpdated } from '../platform/stores/settings'
 import { emit } from '../platform/events'
 import { api } from '../utils/api'
 
@@ -96,10 +96,10 @@ type EmailAccountsEnhancedTabProps = {
 export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, onBeforeConnectOutlook }: EmailAccountsEnhancedTabProps) {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>(customerIdProp || settingsStore.getCurrentCustomerId('prod-customer-1'))
+  const [customerId, setCustomerId] = useState<string>(customerIdProp || getCurrentCustomerId('prod-customer-1'))
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: customerIdProp || settingsStore.getCurrentCustomerId('prod-customer-1'),
+    customerId: customerIdProp || getCurrentCustomerId('prod-customer-1'),
     emailAddress: '',
     displayName: '',
     smtpHost: '',
@@ -140,7 +140,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
   useEffect(() => {
     // In embedded mode (prop-controlled), do not subscribe to global settingsStore.
     if (customerIdProp) return
-    const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
+    const unsubscribe = onSettingsUpdated((detail) => {
       const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
       if (next) {
         setCustomerId(next)

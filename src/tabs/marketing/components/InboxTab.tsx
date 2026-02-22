@@ -37,7 +37,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore } from '../../../platform'
+import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
 
 // Customer type
 type Customer = {
@@ -178,7 +178,7 @@ const InboxTab: React.FC = () => {
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      const defaultCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
       setSelectedCustomerId(defaultCustomerId)
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
       return
@@ -188,7 +188,7 @@ const InboxTab: React.FC = () => {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
 
-      const currentCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
       const currentCustomer = customerList.find(c => c.id === currentCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomerId)
@@ -197,7 +197,7 @@ const InboxTab: React.FC = () => {
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
-      const defaultCustomerId = settingsStore.getCurrentCustomerId('prod-customer-1')
+      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
       setSelectedCustomerId(defaultCustomerId)
       setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
     }
@@ -339,7 +339,7 @@ const InboxTab: React.FC = () => {
             value={selectedCustomerId}
             onChange={(e) => {
               setSelectedCustomerId(e.target.value)
-              settingsStore.setCurrentCustomerId(e.target.value)
+              setCurrentCustomerId(e.target.value)
             }}
             w="200px"
           >

@@ -46,7 +46,7 @@ import {
   Code,
 } from '@chakra-ui/react'
 import { AddIcon, EditIcon, ViewIcon, DeleteIcon } from '@chakra-ui/icons'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
 
 type SequenceStep = {
@@ -91,7 +91,7 @@ export default function MarketingSequencesTab() {
   const [editingSequence, setEditingSequence] = useState<Sequence | null>(null)
   const [sequenceToDelete, setSequenceToDelete] = useState<Sequence | null>(null)
   const [customerId, setCustomerId] = useState<string>(
-    settingsStore.getCurrentCustomerId('prod-customer-1')
+    getCurrentCustomerId('prod-customer-1')
   ) // TODO: Get from context
 
   const [sequenceForm, setSequenceForm] = useState<SequenceFormState>({

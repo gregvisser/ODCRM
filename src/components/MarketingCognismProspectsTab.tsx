@@ -26,7 +26,7 @@ import {
 } from '@chakra-ui/react'
 import { DeleteIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 type ParsedProspectRow = {
   firstName: string
@@ -246,7 +246,7 @@ export default function MarketingCognismProspectsTab() {
     const list = data || []
     setCustomers(list)
     const activeCustomerId =
-      settingsStore.getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+      getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
     if (activeCustomerId) {
       setSelectedCustomer(activeCustomerId)
     }

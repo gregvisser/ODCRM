@@ -38,7 +38,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
-import { settingsStore } from '../platform'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 
 type EmailTemplate = {
   id: string
@@ -114,7 +114,7 @@ export default function MarketingEmailTemplatesTab() {
       const list = data || []
       setCustomers(list)
       const activeCustomerId =
-        settingsStore.getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+        getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
       if (activeCustomerId) {
         await loadTemplates(activeCustomerId)
       }
@@ -165,7 +165,7 @@ export default function MarketingEmailTemplatesTab() {
     }
 
     const activeCustomerId =
-      settingsStore.getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+      getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
     if (!activeCustomerId) {
       toast({ title: 'Missing customer', description: 'Select a customer first.', status: 'error' })
       return
@@ -213,7 +213,7 @@ export default function MarketingEmailTemplatesTab() {
   const confirmDelete = async () => {
     if (!templateToDelete) return
     const activeCustomerId =
-      settingsStore.getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+      getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
     const { error } = await api.delete(`/api/templates/${templateToDelete.id}?customerId=${activeCustomerId}`)
     if (error) {
       toast({ title: 'Delete failed', description: error, status: 'error' })

@@ -52,7 +52,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore } from '../../../platform'
+import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
 import { GoogleSheetLink } from '../../../components/links/GoogleSheetLink'
 
 // Types
@@ -156,7 +156,7 @@ const LeadSourcesTab: React.FC = () => {
   const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [currentCustomerId, setCurrentCustomerId] = useState<string>(
-    settingsStore.getCurrentCustomerId('')
+    getCurrentCustomerId('')
   )
   const [rawRowsByListId, setRawRowsByListId] = useState<Record<string, { headers: string[]; rows: string[][] }>>({})
   const [rawRowsLoading, setRawRowsLoading] = useState<Record<string, boolean>>({})
@@ -186,10 +186,10 @@ const LeadSourcesTab: React.FC = () => {
       setCustomers(list)
 
       if (!currentCustomerId && list.length > 0) {
-        settingsStore.setCurrentCustomerId(list[0].id)
+        setCurrentCustomerId(list[0].id)
         setCurrentCustomerId(list[0].id)
       } else if (currentCustomerId && !list.some((c) => c.id === currentCustomerId) && list.length > 0) {
-        settingsStore.setCurrentCustomerId(list[0].id)
+        setCurrentCustomerId(list[0].id)
         setCurrentCustomerId(list[0].id)
       }
     } catch (err: any) {
@@ -206,7 +206,7 @@ const LeadSourcesTab: React.FC = () => {
   // Load customers on mount
   useEffect(() => {
     loadCustomers()
-    const unsubscribe = settingsStore.onSettingsUpdated((detail) => {
+    const unsubscribe = onSettingsUpdated((detail) => {
       const nextId = (detail as { currentCustomerId?: string | null })?.currentCustomerId
       if (typeof nextId === 'string') {
         setCurrentCustomerId(nextId)
@@ -268,7 +268,7 @@ const LeadSourcesTab: React.FC = () => {
   }
 
   const handleCustomerChange = (customerId: string) => {
-    settingsStore.setCurrentCustomerId(customerId)
+    setCurrentCustomerId(customerId)
     setCurrentCustomerId(customerId)
     setSyncResults({})
     setPreviewResults({})

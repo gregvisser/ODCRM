@@ -59,7 +59,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { settingsStore } from '../../../platform'
+import { getCurrentCustomerId } from '../../../platform/stores/settings'
 
 type EmailTemplate = {
   id: string
@@ -138,7 +138,7 @@ const TemplatesTab: React.FC = () => {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
       // Only use customer IDs that exist in the API response (real cust_*). Never use prod-customer-1.
-      const storeCustomerId = settingsStore.getCurrentCustomerId('')
+      const storeCustomerId = getCurrentCustomerId('')
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)
