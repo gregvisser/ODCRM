@@ -1,6 +1,7 @@
 import express from 'express'
 import path from 'node:path'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import { prisma } from './lib/prisma.js'
@@ -274,15 +275,19 @@ function getBuildInfo(): { sha: string; time: string } {
   const envSha = process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA
   const envTime = process.env.BUILD_TIME
   if (envSha && envTime) return { sha: envSha, time: envTime }
+  const cwd = process.cwd()
+  const dirFromModule = path.dirname(fileURLToPath(import.meta.url))
   const candidates = [
-    path.join(process.cwd(), 'buildInfo.generated.json'),
-    path.join(process.cwd(), 'dist', 'buildInfo.generated.json'),
+    path.join(cwd, 'buildInfo.generated.json'),
+    path.join(cwd, 'dist', 'buildInfo.generated.json'),
+    path.join(dirFromModule, 'buildInfo.generated.json'),
+    path.join(dirFromModule, '..', 'buildInfo.generated.json'),
   ]
   for (const p of candidates) {
     try {
       if (fs.existsSync(p)) {
         const data = JSON.parse(fs.readFileSync(p, 'utf8'))
-        return { sha: data.GIT_SHA || 'unknown', time: data.BUILD_TIME || 'unknown' }
+        return { sha: data.GIT_SHA ?? data.sha ?? 'unknown', time: data.BUILD_TIME ?? data.time ?? 'unknown' }
       }
     } catch {
       // ignore
@@ -327,9 +332,9 @@ app.get('/api/__routes', routesProbeHandler)
 app.get('/api/_build', buildProbeHandler)
 app.get('/api/_routes', routesProbeHandler)
 
-// API health check — include sha + buildTime so backend swap is verifiable
-const buildInfo = getBuildInfo()
+// API health check — include sha + buildTime so backend swap is verifiable (read per-request)
 app.get('/api/health', (_req, res) => {
+  const buildInfo = getBuildInfo()
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),

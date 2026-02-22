@@ -9,6 +9,11 @@ on:
       - 'server/**'
       - '.github/workflows/deploy-backend-azure.yml'
 
+env:
+  # Must match frontend VITE_API_URL / staticwebapp proxy — same App Service
+  BACKEND_DEPLOY_URL: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
+  APP_NAME_DISPLAY: odcrm-api-hkbsfbdzdvezedg8
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -142,9 +147,38 @@ jobs:
         cp buildInfo.generated.json dist/buildInfo.generated.json
         echo "buildInfo.generated.json in server/ and server/dist/ for artifact"
 
+    - name: Log deploy target (no secrets)
+      run: |
+        echo "Deploying backend to: ${{ env.APP_NAME_DISPLAY }} slot=none package=./server"
+        echo "Smoke test will hit: ${{ env.BACKEND_DEPLOY_URL }}"
+
+    # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
     - name: Deploy to Azure App Service
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
         publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         package: ./server
+
+    - name: Post-deploy smoke — verify same app frontend uses
+      run: |
+        echo "Waiting 45s for Azure swap..."
+        sleep 45
+        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/health ---"
+        status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/health")
+        cat /tmp/health.json | head -c 500
+        echo ""
+        echo "Health status: $status"
+        if [ "$status" != "200" ]; then
+          echo "FAIL: /api/health returned $status (expected 200)"
+          exit 1
+        fi
+        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/__build ---"
+        build_status=$(curl -s -o /tmp/build.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/__build")
+        cat /tmp/build.json
+        echo ""
+        echo "__build status: $build_status"
+        if [ "$build_status" != "200" ]; then
+          echo "WARN: /api/__build returned $build_status (deploy may still be rolling)"
+        fi
+        echo "Smoke complete: health=200 required, __build logged"
