@@ -60,6 +60,26 @@ No more localStorage for critical data. No more stale data issues. No more sync 
 
 ---
 
+## 🌐 Production Hosting Architecture
+
+```
+Browser
+  │
+  ├── Static assets (HTML/JS/CSS)
+  │     └── Azure Static Web Apps (odcrm.bidlow.co.uk)
+  │
+  └── API calls (/api/*)
+        └── Azure App Service (odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net)
+              └── Node/Express backend (server/)
+```
+
+**Key fact:** The frontend calls the backend **directly** via `VITE_API_URL`, which is baked into the
+production build as the App Service URL. Azure Static Web Apps does **not** proxy `/api/*` requests —
+SWA only serves static files. The `staticwebapp.config.json` has no `/api/*` backend routes; it only
+configures static-asset caching and the SPA navigation fallback.
+
+---
+
 ## 🔧 Implementation
 
 ### 1. Custom Hook: `useCustomersFromDatabase`
