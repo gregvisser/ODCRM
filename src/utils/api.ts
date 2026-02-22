@@ -1,4 +1,13 @@
-import { getCurrentCustomerId } from '../platform/stores/settings'
+import { getItem, setItem } from '../platform/storage'
+import { OdcrmStorageKeys } from '../platform/keys'
+
+// Local getCurrentCustomerId to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
+function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
+  const v = getItem(OdcrmStorageKeys.currentCustomerId)
+  if (v && String(v).trim()) return String(v)
+  if (fallback && String(fallback).trim()) setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
+  return fallback
+}
 
 // API utility for making requests to backend
 // VITE_API_URL MUST be set. In production, Azure SWA proxy handles /api/* routing.
