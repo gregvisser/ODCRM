@@ -2,11 +2,13 @@ import { getItem, setItem } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
 
 // Local getCurrentCustomerId to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
-function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
+// Audit P1-3 (2026-02-22): removed fallback default of 'prod-customer-1' and removed
+// write-back to localStorage. Returns empty string when no customer is selected so that
+// the X-Customer-Id header is NOT sent, causing the backend to return 400 (clear error)
+// rather than silently querying for a non-existent 'prod-customer-1' customer.
+function getCurrentCustomerId(): string {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
-  if (v && String(v).trim()) return String(v)
-  if (fallback && String(fallback).trim()) setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
-  return fallback
+  return (v && String(v).trim()) ? String(v).trim() : ''
 }
 
 // API utility for making requests to backend
@@ -47,7 +49,7 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const customerId = getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId()
     const fullUrl = `${API_BASE_URL}${endpoint}`
     const method = (options.method || 'GET').toUpperCase()
 
