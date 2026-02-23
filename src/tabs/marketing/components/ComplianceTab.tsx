@@ -232,8 +232,13 @@ export default function ComplianceTab() {
       }
 
       setImporting(true)
-      const { data, error } = await api.post(`/api/suppression/import-csv?customerId=${customerId}`, {
-        entries,
+      // Use typed upload endpoints based on current list type filter
+      const rawLines = csvData.split('\n')
+      const uploadEndpoint = listTypeFilter === 'domain'
+        ? `/api/suppression/domains/upload`
+        : `/api/suppression/emails/upload`
+      const { data, error } = await api.post(`${uploadEndpoint}?customerId=${customerId}`, {
+        rows: rawLines,
         sourceFileName: 'manual-import.csv',
       })
 
@@ -246,10 +251,13 @@ export default function ComplianceTab() {
       setCsvData('')
       loadEntries()
 
+      const inserted = (data as any)?.inserted ?? (data as any)?.imported ?? 0
+      const duplicates = (data as any)?.duplicates ?? 0
+      const errors = (data as any)?.errors ?? (data as any)?.invalid ?? []
       toast({
         title: 'Import completed',
-        description: `Imported ${data.imported} entries (${data.duplicates} duplicates, ${data.errors.length} errors)`,
-        status: data.errors.length > 0 ? 'warning' : 'success',
+        description: `Imported ${inserted} entries (${duplicates} duplicates, ${errors.length} errors)`,
+        status: errors.length > 0 ? 'warning' : 'success',
       })
     } catch (err) {
       toast({

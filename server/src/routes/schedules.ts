@@ -1,7 +1,5 @@
-// @ts-nocheck
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
-import { z } from 'zod'
 
 const router = express.Router()
 
@@ -15,17 +13,16 @@ const getCustomerId = (req: express.Request): string => {
   return customerId
 }
 
-// List active schedules (campaigns) with upcoming sends
+// GET /api/schedules — active campaigns with sender identity (used as "schedules")
 router.get('/', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
 
-    // Get active campaigns (running/scheduled) with their upcoming sends
     const campaigns = await prisma.emailCampaign.findMany({
       where: {
         customerId,
-        status: { in: ['scheduled', 'running', 'paused'] },
-        sequenceId: { not: null }, // Only sequence-based campaigns
+        status: { in: ['running', 'paused'] },
+        sequenceId: { not: null },
       },
       include: {
         senderIdentity: {
@@ -48,8 +45,7 @@ router.get('/', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     })
 
-    // Transform to schedule format
-    const schedules = campaigns.map(campaign => ({
+    const schedules = campaigns.map((campaign) => ({
       id: campaign.id,
       customerId: campaign.customerId,
       name: campaign.name,
@@ -66,21 +62,20 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-// Get upcoming scheduled emails for a customer
+// GET /api/schedules/emails — upcoming scheduled sends
 router.get('/emails', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const limit = parseInt(req.query.limit as string) || 50
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
 
-    // Get upcoming scheduled sends
-    const upcomingSends = await prisma.emailCampaignProspectStep.findMany({
+    const upcomingSends = await (prisma as any).emailCampaignProspectStep.findMany({
       where: {
         scheduledAt: { gte: new Date() },
         campaign: {
           customerId,
-          status: { in: ['scheduled', 'running'] },
+          status: { in: ['running', 'paused'] },
         },
-        sentAt: null, // Not yet sent
+        sentAt: null,
       },
       include: {
         campaign: {
@@ -111,18 +106,21 @@ router.get('/emails', async (req, res, next) => {
       take: limit,
     })
 
-    // Transform to scheduled email format
-    const scheduledEmails = upcomingSends.map(send => ({
-      id: send.id,
-      campaignId: send.campaignId,
-      campaignName: send.campaign?.name || 'Unknown Campaign',
-      prospectEmail: send.prospect?.contact?.email || '',
-      prospectName: `${send.prospect?.contact?.firstName || ''} ${send.prospect?.contact?.lastName || ''}`.trim() || 'Unknown',
-      scheduledFor: send.scheduledAt.toISOString(),
-      status: 'scheduled' as const,
-      senderIdentity: send.campaign?.senderIdentity,
-      stepNumber: send.stepNumber,
-    }))
+    const scheduledEmails = Array.isArray(upcomingSends)
+      ? upcomingSends.map((send: any) => ({
+          id: send.id,
+          campaignId: send.campaignId,
+          campaignName: send.campaign?.name || 'Unknown Campaign',
+          prospectEmail: send.prospect?.contact?.email || '',
+          prospectName:
+            `${send.prospect?.contact?.firstName || ''} ${send.prospect?.contact?.lastName || ''}`.trim() ||
+            'Unknown',
+          scheduledFor: send.scheduledAt?.toISOString(),
+          status: 'scheduled' as const,
+          senderIdentity: send.campaign?.senderIdentity,
+          stepNumber: send.stepNumber,
+        }))
+      : []
 
     res.json(scheduledEmails)
   } catch (error) {
@@ -130,7 +128,7 @@ router.get('/emails', async (req, res, next) => {
   }
 })
 
-// Pause a campaign schedule
+// POST /api/schedules/:id/pause
 router.post('/:id/pause', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
@@ -140,13 +138,8 @@ router.post('/:id/pause', async (req, res, next) => {
       where: { id, customerId },
     })
 
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' })
-    }
-
-    if (campaign.status !== 'running') {
-      return res.status(400).json({ error: 'Campaign is not running' })
-    }
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' })
+    if (campaign.status !== 'running') return res.status(400).json({ error: 'Campaign is not running' })
 
     const updated = await prisma.emailCampaign.update({
       where: { id },
@@ -159,7 +152,7 @@ router.post('/:id/pause', async (req, res, next) => {
   }
 })
 
-// Resume a campaign schedule
+// POST /api/schedules/:id/resume
 router.post('/:id/resume', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
@@ -169,13 +162,8 @@ router.post('/:id/resume', async (req, res, next) => {
       where: { id, customerId },
     })
 
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' })
-    }
-
-    if (campaign.status !== 'paused') {
-      return res.status(400).json({ error: 'Campaign is not paused' })
-    }
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' })
+    if (campaign.status !== 'paused') return res.status(400).json({ error: 'Campaign is not paused' })
 
     const updated = await prisma.emailCampaign.update({
       where: { id },
@@ -188,7 +176,7 @@ router.post('/:id/resume', async (req, res, next) => {
   }
 })
 
-// Get schedule statistics
+// GET /api/schedules/:id/stats
 router.get('/:id/stats', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
@@ -205,50 +193,44 @@ router.get('/:id/stats', async (req, res, next) => {
           },
         },
         _count: {
-          select: {
-            prospects: true,
-          },
+          select: { prospects: true },
         },
       },
     })
 
-    if (!campaign) {
-      return res.status(404).json({ error: 'Campaign not found' })
+    if (!campaign) return res.status(404).json({ error: 'Campaign not found' })
+
+    let upcomingCount = 0
+    try {
+      upcomingCount = await (prisma as any).emailCampaignProspectStep.count({
+        where: {
+          campaignId: id,
+          scheduledAt: { gte: new Date() },
+          sentAt: null,
+        },
+      })
+    } catch {
+      // ignore if table not migrated
     }
 
-    // Get upcoming sends count
-    const upcomingCount = await prisma.emailCampaignProspectStep.count({
-      where: {
-        campaignId: id,
-        scheduledAt: { gte: new Date() },
-        sentAt: null,
-      },
-    })
-
-    // Get sent count
     const sentCount = await prisma.emailEvent.count({
-      where: {
-        campaignId: id,
-        type: 'sent',
-      },
+      where: { campaignId: id, type: 'sent' },
     })
 
-    // Get today's sent count for this sender
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
 
-    const todaySentCount = await prisma.emailEvent.count({
-      where: {
-        senderIdentityId: campaign.senderIdentityId,
-        type: 'sent',
-        occurredAt: {
-          gte: today,
-          lt: tomorrow,
-        },
-      },
-    })
+    const todaySentCount = campaign.senderIdentityId
+      ? await prisma.emailEvent.count({
+          where: {
+            senderIdentityId: campaign.senderIdentityId,
+            type: 'sent',
+            occurredAt: { gte: today, lt: tomorrow },
+          },
+        })
+      : 0
 
     res.json({
       campaignId: id,
@@ -265,24 +247,24 @@ router.get('/:id/stats', async (req, res, next) => {
   }
 })
 
-// Delete schedule
+// DELETE /api/schedules/:id — cancel a campaign (sets to completed)
 router.delete('/:id', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
 
-    const existing = await prisma.emailSendSchedule.findFirst({ where: { id, customerId } })
+    const existing = await prisma.emailCampaign.findFirst({
+      where: { id, customerId },
+    })
     if (!existing) return res.status(404).json({ error: 'Schedule not found' })
 
-    // Set scheduleId null on any campaigns using it (safety).
-    // Skip sendSchedule updates - field doesn't exist in database
-    // await prisma.emailCampaign.updateMany({
-    //   where: { customerId },
-    //   data: {},
-    // })
+    // Cancel by setting status to completed (never delete — preserve history)
+    await prisma.emailCampaign.update({
+      where: { id },
+      data: { status: 'completed' },
+    })
 
-    // await prisma.emailSendSchedule.delete({ where: { id } })
-    res.json({ message: 'Schedule deleted' })
+    res.json({ success: true, message: 'Schedule cancelled' })
   } catch (error) {
     next(error)
   }

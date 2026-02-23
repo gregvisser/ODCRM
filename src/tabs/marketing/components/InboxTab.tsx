@@ -132,6 +132,8 @@ const InboxTab: React.FC = () => {
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [view, setView] = useState<'replies' | 'threads'>('threads')
   const [replyContent, setReplyContent] = useState('')
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [unreadOnly, setUnreadOnly] = useState(false)
 
   useEffect(() => {
     loadCustomers()
@@ -236,8 +238,11 @@ const InboxTab: React.FC = () => {
       return
     }
 
-    setSelectedThread(data?.messages || [])
+    const messages = data?.messages || []
+    setSelectedThread(messages)
     setSelectedThreadId(threadId)
+    // Mark inbound messages as read
+    if (messages.length > 0) markThreadRead(messages)
   }
 
   const sendReply = async () => {
@@ -273,6 +278,41 @@ const InboxTab: React.FC = () => {
     setReplyContent('')
     // Reload the thread to show the new message
     loadThreadMessages(selectedThreadId)
+  }
+
+  const handleRefresh = async () => {
+    if (!selectedCustomerId) return
+    setIsRefreshing(true)
+    try {
+      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const { data, error } = await api.post('/api/inbox/refresh', {}, { headers })
+      if (error) {
+        toast({ title: 'Refresh failed', description: error, status: 'error', duration: 3000 })
+      } else {
+        toast({
+          title: 'Inbox refreshed',
+          description: `Checked ${(data as any)?.identitiesChecked ?? 0} mailbox(es) for new messages`,
+          status: 'success',
+          duration: 3000,
+        })
+      }
+    } finally {
+      setIsRefreshing(false)
+      // Reload the thread list
+      if (view === 'threads') loadThreads()
+      else loadReplies()
+    }
+  }
+
+  const markThreadRead = async (messages: EmailMessage[]) => {
+    if (!selectedCustomerId) return
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const inbound = messages.filter((m) => m.direction === 'inbound')
+    for (const msg of inbound) {
+      if ((msg as any).isRead === false) {
+        await api.post(`/api/inbox/messages/${msg.id}/read`, { isRead: true }, { headers })
+      }
+    }
   }
 
   const filteredReplies = useMemo(() => {
@@ -368,10 +408,7 @@ const InboxTab: React.FC = () => {
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </Select>
-          <Button size="sm" onClick={() => {
-            if (view === 'replies') loadReplies()
-            else loadThreads()
-          }}>
+          <Button size="sm" isLoading={isRefreshing} onClick={handleRefresh}>
             Refresh
           </Button>
         </HStack>
@@ -385,10 +422,7 @@ const InboxTab: React.FC = () => {
             <AlertTitle>Failed to load inbox</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
-          <Button size="sm" onClick={() => {
-            if (view === 'replies') loadReplies()
-            else loadThreads()
-          }} ml={4}>
+          <Button size="sm" onClick={() => view === 'replies' ? loadReplies() : loadThreads()} ml={4}>
             Retry
           </Button>
         </Alert>
@@ -399,7 +433,17 @@ const InboxTab: React.FC = () => {
           {/* Thread List */}
           <Card>
             <CardHeader>
-              <Heading size="md">Email Threads</Heading>
+              <Flex justify="space-between" align="center">
+                <Heading size="md">Email Threads</Heading>
+                <Button
+                  size="xs"
+                  variant={unreadOnly ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setUnreadOnly((v) => !v)}
+                >
+                  {unreadOnly ? 'Unread only' : 'All'}
+                </Button>
+              </Flex>
             </CardHeader>
             <CardBody p={0}>
               {threadsLoading ? (

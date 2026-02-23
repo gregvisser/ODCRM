@@ -977,4 +977,50 @@ router.post('/identities/:id/test-send', async (req, res, next) => {
   }
 })
 
+// GET /api/outlook/identities/:id/signature — get signature for an identity
+router.get('/identities/:id/signature', async (req, res, next) => {
+  try {
+    const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+    if (!customerId) return res.status(400).json({ error: 'Customer ID required' })
+    const { id } = req.params
+
+    const identity = await prisma.emailIdentity.findFirst({
+      where: { id, customerId },
+      select: { id: true, emailAddress: true, signatureHtml: true },
+    })
+
+    if (!identity) return res.status(404).json({ error: 'Identity not found' })
+
+    res.json({ id: identity.id, emailAddress: identity.emailAddress, signatureHtml: (identity as any).signatureHtml || null })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// PUT /api/outlook/identities/:id/signature — update signature for an identity
+router.put('/identities/:id/signature', async (req, res, next) => {
+  try {
+    const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
+    if (!customerId) return res.status(400).json({ error: 'Customer ID required' })
+    const { id } = req.params
+    const { signatureHtml } = req.body as { signatureHtml?: string }
+
+    const identity = await prisma.emailIdentity.findFirst({
+      where: { id, customerId },
+      select: { id: true },
+    })
+
+    if (!identity) return res.status(404).json({ error: 'Identity not found' })
+
+    const updated = await prisma.emailIdentity.update({
+      where: { id },
+      data: { signatureHtml: signatureHtml || null } as any,
+    })
+
+    res.json({ success: true, id: updated.id, signatureHtml: (updated as any).signatureHtml || null })
+  } catch (error) {
+    next(error)
+  }
+})
+
 export default router

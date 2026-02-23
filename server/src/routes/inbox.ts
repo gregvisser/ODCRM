@@ -291,6 +291,202 @@ router.get('/threads/:threadId/messages', async (req, res, next) => {
   }
 })
 
+// GET /api/inbox/messages — paginated flat list of inbound messages (for list view)
+router.get('/messages', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
+    const offset = parseInt(req.query.offset as string) || 0
+    const unreadOnly = req.query.unreadOnly === 'true'
+
+    const messages = await prisma.emailMessageMetadata.findMany({
+      where: {
+        senderIdentity: { customerId },
+        direction: 'inbound',
+        ...(unreadOnly ? { isRead: false } : {}),
+      },
+      include: {
+        senderIdentity: {
+          select: { id: true, emailAddress: true, displayName: true },
+        },
+        campaignProspect: {
+          select: {
+            id: true,
+            contact: {
+              select: { id: true, firstName: true, lastName: true, companyName: true, email: true },
+            },
+            campaign: {
+              select: { id: true, name: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+    })
+
+    res.json({
+      messages: messages.map((m) => ({
+        id: m.id,
+        threadId: m.threadId,
+        direction: m.direction,
+        fromAddress: m.fromAddress,
+        toAddress: m.toAddress,
+        subject: m.subject,
+        bodyPreview: (m as any).bodyPreview || null,
+        isRead: (m as any).isRead ?? false,
+        createdAt: m.createdAt.toISOString(),
+        senderIdentity: m.senderIdentity,
+        contact: m.campaignProspect?.contact || null,
+        campaign: m.campaignProspect?.campaign || null,
+      })),
+      hasMore: messages.length === limit,
+      offset: offset + messages.length,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/inbox/messages/:id/read — mark message as read/unread
+router.post('/messages/:id/read', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+    const isRead: boolean = req.body?.isRead !== false // default true
+
+    // Verify message belongs to this customer
+    const message = await prisma.emailMessageMetadata.findFirst({
+      where: { id, senderIdentity: { customerId } },
+      select: { id: true },
+    })
+
+    if (!message) return res.status(404).json({ error: 'Message not found' })
+
+    await prisma.emailMessageMetadata.update({
+      where: { id },
+      data: { isRead } as any,
+    })
+
+    res.json({ success: true, id, isRead })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/inbox/messages/:id/optout — add sender email/domain to suppression list
+router.post('/messages/:id/optout', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+
+    const message = await prisma.emailMessageMetadata.findFirst({
+      where: { id, senderIdentity: { customerId } },
+      select: { id: true, fromAddress: true },
+    })
+
+    if (!message) return res.status(404).json({ error: 'Message not found' })
+
+    const email = message.fromAddress.trim().toLowerCase()
+    const domain = email.split('@')[1]
+
+    const { randomUUID } = await import('crypto')
+
+    await prisma.suppressionEntry.upsert({
+      where: { customerId_type_value: { customerId, type: 'email', value: email } },
+      update: { reason: 'Opted out via inbox', source: 'inbox-optout' },
+      create: {
+        id: randomUUID(),
+        customerId,
+        type: 'email',
+        value: email,
+        emailNormalized: email,
+        reason: 'Opted out via inbox',
+        source: 'inbox-optout',
+      },
+    })
+
+    res.json({ success: true, suppressedEmail: email, suppressedDomain: domain || null })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/inbox/refresh — trigger immediate reply detection poll for this customer
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+
+    // Get all active identities for this customer
+    const identities = await prisma.emailIdentity.findMany({
+      where: { customerId, isActive: true },
+      select: { id: true, emailAddress: true, lastCheckedAt: true },
+    })
+
+    if (identities.length === 0) {
+      return res.json({ success: true, message: 'No active identities to check', identitiesChecked: 0 })
+    }
+
+    // Trigger detection via the existing worker service if available
+    let refreshed = 0
+    try {
+      const { fetchRecentInboxMessages } = await import('../services/outlookEmailService.js')
+      const { PrismaClient } = await import('@prisma/client')
+
+      for (const identity of identities) {
+        try {
+          const messages = await fetchRecentInboxMessages(prisma, identity.id, 24)
+          if (Array.isArray(messages)) {
+            for (const msg of messages) {
+              // Check if already stored
+              const exists = await prisma.emailMessageMetadata.findUnique({
+                where: { providerMessageId: msg.messageId },
+                select: { id: true },
+              })
+              if (!exists) {
+                await prisma.emailMessageMetadata.create({
+                  data: {
+                    senderIdentityId: identity.id,
+                    providerMessageId: msg.messageId,
+                    threadId: msg.threadId || null,
+                    direction: 'inbound',
+                    fromAddress: msg.fromAddress || '',
+                    toAddress: msg.toAddress || '',
+                    subject: msg.subject || '',
+                    rawHeaders: msg.headers || null,
+                    isRead: false,
+                    bodyPreview: msg.bodyPreview ? msg.bodyPreview.substring(0, 500) : null,
+                  } as any,
+                })
+              }
+            }
+          }
+          // Update last checked time
+          await prisma.emailIdentity.update({
+            where: { id: identity.id },
+            data: { lastCheckedAt: new Date() } as any,
+          })
+          refreshed++
+        } catch (identityErr) {
+          console.error(`[inbox/refresh] Error refreshing identity ${identity.id}:`, identityErr)
+        }
+      }
+    } catch (importErr) {
+      console.error('[inbox/refresh] Could not import outlookEmailService:', importErr)
+    }
+
+    res.json({
+      success: true,
+      identitiesChecked: identities.length,
+      identitiesRefreshed: refreshed,
+      checkedAt: new Date().toISOString(),
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // Send reply in a thread
 router.post('/threads/:threadId/reply', async (req, res, next) => {
   try {

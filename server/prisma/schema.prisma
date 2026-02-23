@@ -220,6 +220,7 @@ model EmailIdentity {
   sendWindowTimeZone       String                     @default("UTC")
   isActive                 Boolean                    @default(true)
   lastCheckedAt            DateTime?
+  signatureHtml            String?                    @db.Text
   createdAt                DateTime                   @default(now())
   updatedAt                DateTime                   @updatedAt
   
@@ -445,6 +446,8 @@ model EmailMessageMetadata {
   fromAddress              String
   toAddress                String
   subject                  String
+  bodyPreview              String?
+  isRead                   Boolean                   @default(false)
   rawHeaders               Json?
   createdAt                DateTime                  @default(now())
   
