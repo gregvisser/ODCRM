@@ -1,0 +1,74 @@
+Fix: Marketing hardening — real backend implementations
+
+WHAT CHANGED:
+
+tracking.ts:
+- Added missing customerId and senderIdentityId to EmailEvent.create in
+  open tracking handler (events previously had no customerId so reports
+  showed 0 for opened counts)
+- Added click redirect endpoint: GET /api/email/click?cpid=&url=
+- Fixed unsubscribe to record type opted_out correctly
+
+schedules.ts:
+- Removed @ts-nocheck (full TypeScript safety restored)
+- Fixed DELETE /:id: replaced reference to non-existent prisma.emailSendSchedule
+  with prisma.emailCampaign (runtime crash on every delete fixed)
+- Removed invalid 'scheduled' from CampaignStatus filter
+- Cancel sets status=completed (preserves history, no hard delete)
+
+reports.ts:
+- Date boundaries now computed in Europe/London timezone via Intl.DateTimeFormat
+- Week = Monday-Sunday (was last 7 days UTC)
+- Month = 1st to last day of current month in London time
+
+suppression.ts:
+- Added /emails, /emails/upload, /domains, /domains/upload sub-routes
+- CSV upload accepts raw rows (string[]), no pre-parsing required
+- Batch DELETE /emails and /domains by ids[] arrays
+- Legacy /import-csv kept for backwards compat
+
+inbox.ts:
+- Added GET /messages (paginated inbound messages with unreadOnly filter)
+- Added POST /messages/:id/read (persist isRead to DB)
+- Added POST /messages/:id/optout (adds sender email to suppression)
+- Added POST /refresh (triggers Outlook poll for new messages)
+
+outlook.ts:
+- Added GET /identities/:id/signature
+- Added PUT /identities/:id/signature
+
+schema.prisma + migration 20260222120000:
+- EmailMessageMetadata: added isRead Boolean @default(false)
+- EmailMessageMetadata: added bodyPreview String?
+- EmailIdentity: added signatureHtml String? @db.Text
+- Migration uses IF NOT EXISTS (idempotent/safe)
+
+deploy-backend-azure.yml:
+- Added 20260220140000_add_lead_source_applies_to to baseline
+  resolve list to prevent migration drift blocking deployment
+
+ComplianceTab.tsx:
+- CSV import routes to typed /emails/upload or /domains/upload
+  based on current list type filter
+
+InboxTab.tsx:
+- Refresh button POSTs to /api/inbox/refresh then reloads UI
+- Opening a thread calls POST /api/inbox/messages/:id/read
+- Added Unread only toggle on thread list header
+
+WHY:
+- tracking.ts events had no customerId so reports always showed 0 opens
+- schedules.ts DELETE crashed on every request (non-existent model)
+- reports.ts UK date boundaries were wrong (UTC midnight != London midnight)
+- Inbox had no persistence for read/unread or real refresh
+
+TESTING:
+- Frontend build: PASS (1353 modules)
+- npx tsc --noEmit: PASS (0 errors)
+- Backend build: PASS (tsc)
+- No linter errors on all changed files
+
+IMPACT:
+- Additive migration only (IF NOT EXISTS guards)
+- No breaking changes to existing API contracts
+- No data loss possible
