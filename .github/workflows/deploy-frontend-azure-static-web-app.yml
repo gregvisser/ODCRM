@@ -38,6 +38,9 @@ jobs:
         VITE_AZURE_REDIRECT_URI: https://odcrm.bidlow.co.uk
         VITE_AUTH_ALLOWED_EMAILS: ${{ secrets.VITE_AUTH_ALLOWED_EMAILS }}
 
+    - name: Copy SWA config into dist
+      run: cp staticwebapp.config.json dist/staticwebapp.config.json
+
     - name: Deploy to Azure Static Web Apps
       uses: azure/static-web-apps-deploy@v1
       with:
