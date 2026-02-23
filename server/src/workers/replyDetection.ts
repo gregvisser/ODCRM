@@ -168,6 +168,7 @@ async function processReply(
 
       if (!existingEvent) {
         await prisma.emailEvent.create({ data: {
+            customerId: prospect.campaign?.customerId ?? '',
             campaignId: prospect.campaignId,
             campaignProspectId,
             type: 'replied',
@@ -198,6 +199,7 @@ async function processReply(
 
     // Record event
     await prisma.emailEvent.create({ data: {
+        customerId: prospect.campaign?.customerId ?? '',
         campaignId: prospect.campaignId,
         campaignProspectId,
         type: 'replied',

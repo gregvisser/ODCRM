@@ -132,6 +132,23 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       continue
     }
 
+    // Per-identity hourly cap: derived from daily limit ÷ EMAIL_HOURLY_SEND_FACTOR (default 8)
+    // e.g. 150/day ÷ 8 = ~18/hour. Configurable via env without schema changes.
+    const hourlyFactor = Math.max(1, parseInt(process.env.EMAIL_HOURLY_SEND_FACTOR || '8', 10))
+    const hourlyLimit = Math.ceil(dailyLimit / hourlyFactor)
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000)
+    const emailsSentThisHour = await prisma.emailEvent.count({
+      where: {
+        senderIdentityId: senderIdentity.id,
+        type: 'sent',
+        occurredAt: { gte: oneHourAgo },
+      },
+    })
+    if (emailsSentThisHour >= hourlyLimit) {
+      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Hourly limit reached for ${senderIdentity.emailAddress}: ${emailsSentThisHour}/${hourlyLimit}`)
+      continue
+    }
+
     // Customer-level safety: hard cap total sends per 24h (rolling).
     // This reduces blacklist/domain risk when multiple identities/campaigns run.
     const customerSentLast24h = await prisma.emailEvent.count({
@@ -591,20 +608,20 @@ async function sendCampaignEmail(
     })
 
     if (result.success) {
+      const sentAt = new Date()
+      const eventBase = {
+        customerId: campaign.customerId,
+        campaignId: campaign.id,
+        campaignProspectId: prospect.id,
+        senderIdentityId: campaign.senderIdentityId,
+        recipientEmail: prospect.contact.email,
+        metadata: { step: stepNumber, messageId: result.messageId, threadId: result.threadId, instanceId: SCHEDULER_INSTANCE_ID },
+        occurredAt: sentAt,
+      }
       // Record sent event
-      await prisma.emailEvent.create({ data: {
-          campaignId: campaign.id,
-          campaignProspectId: prospect.id,
-          type: 'sent',
-          metadata: {
-            step: stepNumber,
-            messageId: result.messageId,
-            threadId: result.threadId,
-            instanceId: SCHEDULER_INSTANCE_ID
-          },
-          occurredAt: new Date()
-        }
-      })
+      await prisma.emailEvent.create({ data: { ...eventBase, type: 'sent' } })
+      // Record delivered event — Graph API accepted the message (accepted-by-MTA = delivered)
+      await prisma.emailEvent.create({ data: { ...eventBase, type: 'delivered' } })
 
       // Update prospect - finalize with proper status
       const updateData: any = {
@@ -651,8 +668,11 @@ async function sendCampaignEmail(
       if (result.error?.toLowerCase().includes('bounce') || 
           result.error?.toLowerCase().includes('rejected')) {
         await prisma.emailEvent.create({ data: {
+            customerId: campaign.customerId,
             campaignId: campaign.id,
             campaignProspectId: prospect.id,
+            senderIdentityId: campaign.senderIdentityId,
+            recipientEmail: prospect.contact.email,
             type: 'bounced',
             metadata: { error: result.error, instanceId: SCHEDULER_INSTANCE_ID },
             occurredAt: new Date()
