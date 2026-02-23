@@ -3,7 +3,6 @@
  * Shows build info (bundle + __build.json + backend __build), last fatal, userAgent, location.
  */
 import React, { useCallback, useEffect, useState } from 'react'
-import * as React from 'react';
 import { Box, Button, Code, Heading, Text, VStack } from '@chakra-ui/react'
 import { BUILD_SHA, BUILD_TIME } from '../version'
 
@@ -22,10 +21,10 @@ type FetchState<T> = { status?: number; body?: T; error?: string }
 function ApiProbeSection() {
   const apiBase = (import.meta as any).env?.VITE_API_URL as (string | undefined);
 
-  const [apiBuildStatus, setApiBuildStatus] = React.useState<string>("checking...");
-  const [apiBuildBody, setApiBuildBody] = React.useState<string>("");
+  const [apiBuildStatus, setApiBuildStatus] = useState<string>("checking...");
+  const [apiBuildBody, setApiBuildBody] = useState<string>("");
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!apiBase) {
       setApiBuildStatus("VITE_API_URL is missing");
       setApiBuildBody("");
@@ -261,5 +260,7 @@ export default function DiagPage() {
     </Box>
   )
 }
+
+
 
 
