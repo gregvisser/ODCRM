@@ -5,9 +5,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import * as React from 'react';
 import { Box, Button, Code, Heading, Text, VStack } from '@chakra-ui/react'
-import * as React from 'react';
 import { BUILD_SHA, BUILD_TIME } from '../version'
-import * as React from 'react';
 
 const LAST_FATAL_KEY = 'odcrm:lastFatal'
 const PROD_BACKEND = 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
