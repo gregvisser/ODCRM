@@ -1,7 +1,7 @@
 name: Deploy Backend to Azure App Service
 
 # workflow_dispatch: run from GitHub Actions UI to redeploy backend on demand (no fake commits).
-# push: runs on every push to main; a check job skips deploy unless path filter matches OR ALWAYS_DEPLOY_BACKEND=true.
+# push: runs on every push to main; backend always deploys (no path filter gating).
 on:
   workflow_dispatch:
   push:
@@ -9,11 +9,10 @@ on:
       - main
 
 env:
+  ALWAYS_DEPLOY_BACKEND: true
   # Must match frontend VITE_API_URL / staticwebapp proxy — same App Service
   BACKEND_DEPLOY_URL: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
   APP_NAME_DISPLAY: odcrm-api-hkbsfbdzdvezedg8
-# Optional: set repository variable ALWAYS_DEPLOY_BACKEND=true to deploy on every push to main (default: path-filtered only).
-# ALWAYS_DEPLOY_BACKEND is read in the check job via vars.ALWAYS_DEPLOY_BACKEND.
 
 jobs:
   check:
@@ -31,25 +30,13 @@ jobs:
             echo "Reason: workflow_dispatch"
             exit 0
           fi
-          if [ "${{ vars.ALWAYS_DEPLOY_BACKEND }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "push" ]; then
             echo "run_deploy=true" >> $GITHUB_OUTPUT
-            echo "Reason: ALWAYS_DEPLOY_BACKEND=true"
+            echo "Reason: push to main — always deploy backend"
             exit 0
           fi
-          # Path filter: only deploy when server/** or this workflow file changed
-          BEFORE="${{ github.event.before }}"
-          SHA="${{ github.sha }}"
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            BEFORE="${SHA}^"
-          fi
-          FILES=$(git diff --name-only "$BEFORE" "$SHA" 2>/dev/null || true)
-          if echo "$FILES" | grep -qE '^server/|^\.github/workflows/deploy-backend-azure\.yml'; then
-            echo "run_deploy=true" >> $GITHUB_OUTPUT
-            echo "Reason: path filter matched"
-          else
-            echo "run_deploy=false" >> $GITHUB_OUTPUT
-            echo "Reason: path filter not matched (set ALWAYS_DEPLOY_BACKEND=true to deploy on every push)"
-          fi
+          echo "run_deploy=false" >> $GITHUB_OUTPUT
+          echo "Reason: unknown event"
 
   build-and-deploy:
     needs: check
@@ -57,171 +44,178 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '24'
-        cache: 'npm'
-        cache-dependency-path: server/package-lock.json
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
 
-    - name: Install dependencies
-      run: cd server && npm ci
+      - name: Install dependencies
+        run: cd server && npm ci
 
-    - name: Generate Prisma client
-      run: cd server && npm run prisma:generate
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Generate Prisma client
+        run: cd server && npm run prisma:generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Validate Prisma setup
-      run: |
-        cd server
-        # Fail build if critical paths are wrong
-        if [ ! -f "prisma/schema.prisma" ]; then
-          echo "❌ ERROR: prisma/schema.prisma not found in /server"
-          exit 1
-        fi
-        if [ ! -d "prisma/migrations" ]; then
-          echo "❌ ERROR: prisma/migrations folder not found in /server"
-          exit 1
-        fi
-        MIGRATION_COUNT=$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-        if [ "$MIGRATION_COUNT" -eq 0 ]; then
-          echo "❌ ERROR: No migrations found in prisma/migrations"
-          exit 1
-        fi
-        echo "✅ Validation passed:"
-        echo "   - Schema: prisma/schema.prisma exists"
-        echo "   - Migrations: $MIGRATION_COUNT migrations found"
+      - name: Validate Prisma setup
+        run: |
+          cd server
+          # Fail build if critical paths are wrong
+          if [ ! -f "prisma/schema.prisma" ]; then
+            echo "❌ ERROR: prisma/schema.prisma not found in /server"
+            exit 1
+          fi
+          if [ ! -d "prisma/migrations" ]; then
+            echo "❌ ERROR: prisma/migrations folder not found in /server"
+            exit 1
+          fi
+          MIGRATION_COUNT=$(find prisma/migrations -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
+          if [ "$MIGRATION_COUNT" -eq 0 ]; then
+            echo "❌ ERROR: No migrations found in prisma/migrations"
+            exit 1
+          fi
+          echo "✅ Validation passed:"
+          echo "   - Schema: prisma/schema.prisma exists"
+          echo "   - Migrations: $MIGRATION_COUNT migrations found"
 
-    - name: Log DB connection info (sanitized)
-      run: |
-        cd server
-        # Extract hostname (never password)
-        DB_HOST=$(echo "$DATABASE_URL" | grep -oP '(?<=@)[^:/]+' || echo "PARSE_FAILED")
-        echo "✅ DB Host: $DB_HOST"
-        
-        # Extract database name (path segment after hostname, before query string)
-        DB_NAME=$(echo "$DATABASE_URL" | grep -oP '(?<=\/)[^?]+(?=\?|$)' || echo "PARSE_FAILED")
-        echo "✅ DB Name: $DB_NAME"
-        
-        if [ "$DB_HOST" = "PARSE_FAILED" ] || [ "$DB_NAME" = "PARSE_FAILED" ]; then
-          echo "⚠️  WARNING: Could not parse DB connection details from DATABASE_URL"
-        fi
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Log DB connection info (sanitized)
+        run: |
+          cd server
+          # Extract hostname (never password)
+          DB_HOST=$(echo "$DATABASE_URL" | grep -oP '(?<=@)[^:/]+' || echo "PARSE_FAILED")
+          echo "✅ DB Host: $DB_HOST"
+          
+          # Extract database name (path segment after hostname, before query string)
+          DB_NAME=$(echo "$DATABASE_URL" | grep -oP '(?<=\/)[^?]+(?=\?|$)' || echo "PARSE_FAILED")
+          echo "✅ DB Name: $DB_NAME"
+          
+          if [ "$DB_HOST" = "PARSE_FAILED" ] || [ "$DB_NAME" = "PARSE_FAILED" ]; then
+            echo "⚠️  WARNING: Could not parse DB connection details from DATABASE_URL"
+          fi
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Baseline existing migrations (if needed)
-      run: |
-        cd server
-        # Mark all existing migrations as applied (skip errors if already tracked)
-        npx prisma migrate resolve --applied "20251210132629_init" || true
-        npx prisma migrate resolve --applied "20260115000000_add_lists_sequences_and_enhanced_customers" || true
-        npx prisma migrate resolve --applied "20260117000000_add_prospect_steps_and_update_status" || true
-        npx prisma migrate resolve --applied "20260120000000_add_leads_tables" || true
-        npx prisma migrate resolve --applied "20260120090000_add_customer_account_data" || true
-        npx prisma migrate resolve --applied "20260124000000_add_job_taxonomy" || true
-        npx prisma migrate resolve --applied "20260125000000_add_suppression_entries" || true
-        npx prisma migrate resolve --applied "20260125000001_add_prospect_status_suppressed" || true
-        npx prisma migrate resolve --applied "20260125000002_add_email_templates" || true
-        npx prisma migrate resolve --applied "20260130000000_add_checksum_to_lead_sync" || true
-        npx prisma migrate resolve --applied "20260202000000_add_lead_status_scoring_conversion" || true
-        npx prisma migrate resolve --applied "20260202120000_add_sync_metrics_and_controls" || true
-        npx prisma migrate resolve --applied "20260202160000_add_user_model" || true
-        npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
-        # Drift migrations — mark as applied so they don't block deploy
-        npx prisma migrate resolve --applied "20260220140000_add_lead_source_applies_to" || true
-        echo "Baseline complete - existing migrations marked as applied"
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Baseline existing migrations (if needed)
+        run: |
+          cd server
+          # Mark all existing migrations as applied (skip errors if already tracked)
+          npx prisma migrate resolve --applied "20251210132629_init" || true
+          npx prisma migrate resolve --applied "20260115000000_add_lists_sequences_and_enhanced_customers" || true
+          npx prisma migrate resolve --applied "20260117000000_add_prospect_steps_and_update_status" || true
+          npx prisma migrate resolve --applied "20260120000000_add_leads_tables" || true
+          npx prisma migrate resolve --applied "20260120090000_add_customer_account_data" || true
+          npx prisma migrate resolve --applied "20260124000000_add_job_taxonomy" || true
+          npx prisma migrate resolve --applied "20260125000000_add_suppression_entries" || true
+          npx prisma migrate resolve --applied "20260125000001_add_prospect_status_suppressed" || true
+          npx prisma migrate resolve --applied "20260125000002_add_email_templates" || true
+          npx prisma migrate resolve --applied "20260130000000_add_checksum_to_lead_sync" || true
+          npx prisma migrate resolve --applied "20260202000000_add_lead_status_scoring_conversion" || true
+          npx prisma migrate resolve --applied "20260202120000_add_sync_metrics_and_controls" || true
+          npx prisma migrate resolve --applied "20260202160000_add_user_model" || true
+          npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
+          # Drift migrations — mark as applied so they don't block deploy
+          npx prisma migrate resolve --applied "20260220140000_add_lead_source_applies_to" || true
+          echo "Baseline complete - existing migrations marked as applied"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Apply database migrations
-      run: cd server && npx prisma migrate deploy
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Apply database migrations
+        run: cd server && npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Verify migration status
-      run: |
-        cd server
-        npx prisma migrate status
-        echo "✅ Database schema is up to date!"
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Verify migration status
+        run: |
+          cd server
+          npx prisma migrate status
+          echo "✅ Database schema is up to date!"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Verify required columns exist
-      run: cd server && node scripts/verify-columns.cjs
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Verify required columns exist
+        run: cd server && node scripts/verify-columns.cjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Regenerate Prisma client after migrations
-      run: cd server && npm run prisma:generate
-      env:
-        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Regenerate Prisma client after migrations
+        run: cd server && npm run prisma:generate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
-    - name: Set build env for deploy verification
-      run: echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+      - name: Set build env for deploy verification
+        run: |
+          echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+          echo "BUILD_SHA=${{ github.sha }}" >> $GITHUB_ENV
 
-    - name: Write buildInfo.generated.json
-      run: |
-        cd server
-        node -e "
-        const fs = require('fs');
-        const payload = JSON.stringify({
-          GIT_SHA: process.env.GIT_SHA || 'unknown',
-          BUILD_TIME: process.env.BUILD_TIME || 'unknown'
-        });
-        fs.writeFileSync('buildInfo.generated.json', payload);
-        "
-      env:
-        GIT_SHA: ${{ github.sha }}
-        BUILD_TIME: ${{ env.BUILD_TIME }}
+      - name: Write buildInfo.generated.json
+        run: |
+          cd server
+          node -e "
+          const fs = require('fs');
+          const sha = process.env.BUILD_SHA || process.env.GIT_SHA || 'unknown';
+          const t = process.env.BUILD_TIME || 'unknown';
+          const payload = JSON.stringify({ GIT_SHA: sha, BUILD_SHA: sha, BUILD_TIME: t });
+          fs.writeFileSync('buildInfo.generated.json', payload);
+          "
+        env:
+          BUILD_SHA: ${{ github.sha }}
+          GIT_SHA: ${{ github.sha }}
+          BUILD_TIME: ${{ env.BUILD_TIME }}
 
-    - name: Build application
-      run: cd server && npm run build
+      - name: Build application
+        run: cd server && npm run build
 
-    - name: Copy buildInfo into dist for deploy artifact
-      run: |
-        cd server
-        cp buildInfo.generated.json dist/buildInfo.generated.json
-        echo "buildInfo.generated.json in server/ and server/dist/ for artifact"
+      - name: Copy buildInfo into dist for deploy artifact
+        run: |
+          cd server
+          cp buildInfo.generated.json dist/buildInfo.generated.json
+          echo "buildInfo.generated.json in server/ and server/dist/ for artifact"
 
-    - name: Log deploy target (no secrets)
-      run: |
-        echo "Deploying backend to: ${{ env.APP_NAME_DISPLAY }} slot=none package=./server"
-        echo "Smoke test will hit: ${{ env.BACKEND_DEPLOY_URL }}"
+      - name: Log deploy target (no secrets)
+        run: |
+          echo "Deploying backend to: ${{ env.APP_NAME_DISPLAY }} slot=none package=./server"
+          echo "Smoke test will hit: ${{ env.BACKEND_DEPLOY_URL }}"
 
-    # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
-    - name: Deploy to Azure App Service
-      uses: azure/webapps-deploy@v3
-      with:
-        app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: ./server
+      # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./server
 
-    - name: Post-deploy smoke — verify same app frontend uses
-      run: |
-        echo "Waiting 45s for Azure swap..."
-        sleep 45
-        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/health ---"
-        status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/health")
-        cat /tmp/health.json | head -c 500
-        echo ""
-        echo "Health status: $status"
-        if [ "$status" != "200" ]; then
-          echo "FAIL: /api/health returned $status (expected 200)"
-          exit 1
-        fi
-        echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/__build ---"
-        build_status=$(curl -s -o /tmp/build.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/__build")
-        cat /tmp/build.json
-        echo ""
-        echo "__build status: $build_status"
-        if [ "$build_status" != "200" ]; then
-          echo "WARN: /api/__build returned $build_status (deploy may still be rolling)"
-        fi
-        echo "Smoke complete: health=200 required, __build logged"
-    - name: Post-deploy prod check
-      run: node scripts/prod-check.cjs
+      - name: Post-deploy smoke — verify same app frontend uses
+        run: |
+          echo "Waiting 45s for Azure swap..."
+          sleep 45
+          echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/health ---"
+          status=$(curl -s -o /tmp/health.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/health")
+          cat /tmp/health.json | head -c 500
+          echo ""
+          echo "Health status: $status"
+          if [ "$status" != "200" ]; then
+            echo "FAIL: /api/health returned $status (expected 200)"
+            exit 1
+          fi
+          echo "--- GET ${{ env.BACKEND_DEPLOY_URL }}/api/__build ---"
+          build_status=$(curl -s -o /tmp/build.json -w "%{http_code}" "${{ env.BACKEND_DEPLOY_URL }}/api/__build")
+          cat /tmp/build.json
+          echo ""
+          echo "__build status: $build_status"
+          if [ "$build_status" != "200" ]; then
+            echo "WARN: /api/__build returned $build_status (deploy may still be rolling)"
+          fi
+          echo "Smoke complete: health=200 required, __build logged"
 
+      - name: Wait for backend to serve new SHA
+        run: sleep 20
+
+      - name: Post-deploy prod check (backend SHA must equal github.sha)
+        run: EXPECT_BACKEND_SHA=${{ github.sha }} node scripts/prod-check.cjs
+        env:
+          PROD_BACKEND: ${{ env.BACKEND_DEPLOY_URL }}

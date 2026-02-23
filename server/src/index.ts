@@ -41,6 +41,36 @@ const envLocalPath = path.join(serverDir, '.env.local')
 
 dotenv.config({ path: envPath })
 
+// Load BUILD_SHA/BUILD_TIME from deployed artifact if not set (production parity without Azure app settings)
+if (!process.env.BUILD_SHA || !process.env.BUILD_TIME) {
+  const candidates = [
+    path.join(serverDir, 'dist', 'buildInfo.generated.json'),
+    path.join(serverDir, 'buildInfo.generated.json'),
+  ]
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf8'))
+        if (!process.env.BUILD_SHA) process.env.BUILD_SHA = data.BUILD_SHA ?? data.GIT_SHA ?? data.sha ?? ''
+        if (!process.env.BUILD_TIME) process.env.BUILD_TIME = data.BUILD_TIME ?? data.time ?? ''
+        break
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// Guard: production must have BUILD_SHA for verifiable deploys
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.BUILD_SHA) {
+    console.error('FATAL: NODE_ENV=production but BUILD_SHA is not set. Set BUILD_SHA (or deploy with buildInfo.generated.json).')
+    process.exit(1)
+  }
+} else if (!process.env.BUILD_SHA) {
+  console.warn('⚠️ BUILD_SHA not set (non-production); build headers and /api/_build will show "unknown"')
+}
+
 let dbSource: string = '.env'
 if (fs.existsSync(envLocalPath)) {
   if (process.env.ALLOW_ENV_LOCAL === 'true') {
@@ -136,11 +166,13 @@ app.use((req, res, next) => {
   next()
 })
 
-// Deployment fingerprint: all responses carry server version for verification
+// Build headers on every response (observational; for deploy verification)
 app.use((_req, res, next) => {
+  res.setHeader('x-odcrm-build-sha', process.env.BUILD_SHA || 'unknown')
+  res.setHeader('x-odcrm-build-time', process.env.BUILD_TIME || 'unknown')
   res.setHeader(
     'x-odcrm-server-version',
-    process.env.GIT_SHA || process.env.WEBSITE_INSTANCE_ID || 'unknown'
+    process.env.BUILD_SHA || process.env.GIT_SHA || process.env.WEBSITE_INSTANCE_ID || 'unknown'
   )
   next()
 })
@@ -272,7 +304,7 @@ app.get('/health', (req, res) => {
 // Public build + route probes (NO auth) — registered early, no auth/tenant
 // ============================================================================
 function getBuildInfo(): { sha: string; time: string } {
-  const envSha = process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA
+  const envSha = process.env.BUILD_SHA || process.env.GIT_SHA || process.env.WEBSITE_COMMIT_HASH || process.env.GITHUB_SHA
   const envTime = process.env.BUILD_TIME
   if (envSha && envTime) return { sha: envSha, time: envTime }
   const cwd = process.cwd()
@@ -298,7 +330,13 @@ function getBuildInfo(): { sha: string; time: string } {
 
 const buildProbeHandler = (_req: express.Request, res: express.Response) => {
   const { sha, time } = getBuildInfo()
-  res.json({ sha, time, service: 'odcrm-api' })
+  res.json({
+    sha,
+    time,
+    node: process.version,
+    env: process.env.NODE_ENV || 'development',
+    service: 'odcrm-api',
+  })
 }
 
 const routesProbeHandler = async (req: express.Request, res: express.Response) => {
@@ -453,6 +491,14 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 })
 
 const PORT = process.env.PORT || 3001
+
+// Boot marker (after env load, before listening)
+console.log('========================================')
+console.log('🚀 ODCRM Backend Boot')
+console.log('  Build SHA:  ', process.env.BUILD_SHA || 'unknown')
+console.log('  Build Time: ', process.env.BUILD_TIME || 'unknown')
+console.log('  Node:       ', process.version)
+console.log('========================================')
 
 // Start server
 app.listen(PORT, async () => {
