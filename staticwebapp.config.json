@@ -1,10 +1,6 @@
 {
   "routes": [
     {
-      "route": "/api/*",
-      "rewrite": "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/:splat"
-    },
-    {
       "route": "/*.{css,js,json,ico,png,jpg,jpeg,gif,svg,woff,woff2,ttf,eot}",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"
@@ -18,8 +14,7 @@
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "strict-origin-when-cross-origin",
-    "X-ODCRM-SWA-CONFIG": "enabled"
+    "Referrer-Policy": "strict-origin-when-cross-origin"
   },
   "mimeTypes": {
     ".json": "application/json"
