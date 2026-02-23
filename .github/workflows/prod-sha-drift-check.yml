@@ -1,0 +1,69 @@
+# Runs only after BOTH frontend and backend deploy workflows succeed for the same commit.
+# Compares prod frontend __build.json SHA to backend /api/_build SHA (Mode B); fails if mismatch.
+name: Prod SHA drift check
+
+on:
+  workflow_run:
+    workflows:
+      - Deploy Frontend to Azure Static Web Apps
+      - Deploy Backend to Azure App Service
+    types:
+      - completed
+    branches:
+      - main
+
+jobs:
+  drift-check:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Check both deploy workflows succeeded for this SHA
+        id: both
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const headSha = '${{ github.event.workflow_run.head_sha }}';
+            const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: headSha,
+              status: 'completed',
+              per_page: 50
+            });
+            const frontendName = 'Deploy Frontend to Azure Static Web Apps';
+            const backendName = 'Deploy Backend to Azure App Service';
+            const frontendSuccess = data.workflow_runs.some(r => r.name === frontendName && r.conclusion === 'success');
+            const backendSuccess = data.workflow_runs.some(r => r.name === backendName && r.conclusion === 'success');
+            const both = frontendSuccess && backendSuccess;
+            core.setOutput('both_success', both);
+            core.setOutput('frontend_ok', frontendSuccess);
+            core.setOutput('backend_ok', backendSuccess);
+            if (!both) {
+              console.log('Waiting for other deploy workflow; skipping drift check for now.');
+              console.log('  Frontend success:', frontendSuccess, '| Backend success:', backendSuccess);
+            } else {
+              console.log('Both workflows succeeded for SHA', headSha.substring(0, 7) + ', running drift check.');
+            }
+
+      - name: Run prod drift check (Mode B)
+        if: steps.both.outputs.both_success == 'true'
+        run: node scripts/prod-check.cjs
+        env:
+          PROD_FRONTEND: https://odcrm.bidlow.co.uk
+          PROD_BACKEND: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
+
+      - name: Skip drift check (other workflow not complete)
+        if: steps.both.outputs.both_success != 'true'
+        run: echo "Skipping drift check; both deploy workflows must succeed for this commit first."
