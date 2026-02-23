@@ -3,8 +3,11 @@
  * Shows build info (bundle + __build.json + backend __build), last fatal, userAgent, location.
  */
 import React, { useCallback, useEffect, useState } from 'react'
+import * as React from 'react';
 import { Box, Button, Code, Heading, Text, VStack } from '@chakra-ui/react'
+import * as React from 'react';
 import { BUILD_SHA, BUILD_TIME } from '../version'
+import * as React from 'react';
 
 const LAST_FATAL_KEY = 'odcrm:lastFatal'
 const PROD_BACKEND = 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
@@ -18,6 +21,61 @@ type FatalPayload = {
 } | null
 
 type FetchState<T> = { status?: number; body?: T; error?: string }
+function ApiProbeSection() {
+  const apiBase = (import.meta as any).env?.VITE_API_URL as (string | undefined);
+
+  const [apiBuildStatus, setApiBuildStatus] = React.useState<string>("checking...");
+  const [apiBuildBody, setApiBuildBody] = React.useState<string>("");
+
+  React.useEffect(() => {
+    if (!apiBase) {
+      setApiBuildStatus("VITE_API_URL is missing");
+      setApiBuildBody("");
+      return;
+    }
+
+    const url = new URL("/api/_build", apiBase).toString();
+
+    fetch(url)
+      .then(async (res) => {
+        const text = await res.text();
+        setApiBuildStatus(`HTTP ${res.status}`);
+        setApiBuildBody(text);
+      })
+      .catch((err) => {
+        setApiBuildStatus("ERROR");
+        setApiBuildBody(String(err));
+      });
+  }, [apiBase]);
+
+  // Chakra components (Box/Heading/Text) are already used in this file,
+  // so we rely on existing imports.
+  return (
+    <Box mt={6} p={4} borderWidth="1px" borderRadius="md">
+      <Heading size="sm" mb={2}>API Base (VITE_API_URL)</Heading>
+      <Text fontSize="sm" wordBreak="break-all">
+        {apiBase ?? "(missing)"}
+      </Text>
+
+      <Heading size="sm" mt={4} mb={2}>Backend /api/_build probe</Heading>
+      <Text fontSize="sm">
+        Status: {apiBuildStatus}
+      </Text>
+
+      <Box
+        mt={2}
+        p={2}
+        bg="gray.50"
+        fontSize="xs"
+        fontFamily="mono"
+        whiteSpace="pre-wrap"
+        borderRadius="md"
+      >
+        {apiBuildBody}
+      </Box>
+    </Box>
+  );
+}
 
 export default function DiagPage() {
   const [lastFatal, setLastFatal] = useState<FatalPayload>(null)
@@ -103,6 +161,7 @@ export default function DiagPage() {
   return (
     <Box p={6} maxW="800px" mx="auto" fontFamily="sans-serif">
       <Heading size="md" mb={4}>ODCRM diagnostics</Heading>
+      <ApiProbeSection />
       <VStack align="stretch" spacing={4}>
         <Box>
           <Text fontWeight="bold" fontSize="sm" color="gray.600">Build (from bundle / window.__ODCRM_BUILD__)</Text>
@@ -204,3 +263,5 @@ export default function DiagPage() {
     </Box>
   )
 }
+
+
