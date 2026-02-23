@@ -20,7 +20,8 @@
     "deploy:update-neon": "node scripts/update-neon-env.js",
     "deploy:update-azure": "node scripts/update-azure-env.js",
     "health-check": "node scripts/system-health-check.cjs",
-    "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1"
+    "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1",
+    "prod:check": "node scripts/prod-check.cjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
