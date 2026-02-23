@@ -222,3 +222,6 @@ jobs:
           echo "WARN: /api/__build returned $build_status (deploy may still be rolling)"
         fi
         echo "Smoke complete: health=200 required, __build logged"
+    - name: Post-deploy prod check
+      run: node scripts/prod-check.cjs
+
