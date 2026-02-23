@@ -1,6 +1,10 @@
 {
   "routes": [
     {
+      "route": "/api/*",
+      "rewrite": "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/:splat"
+    },
+    {
       "route": "/*.{css,js,json,ico,png,jpg,jpeg,gif,svg,woff,woff2,ttf,eot}",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"
