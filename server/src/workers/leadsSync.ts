@@ -1,4 +1,3 @@
-// @ts-nocheck
 import cron from 'node-cron'
 import crypto from 'crypto'
 import type { PrismaClient } from '@prisma/client'

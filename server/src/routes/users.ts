@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Users Management API
  * Migrated from localStorage to database

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Quarterly About Section Enrichment Worker
  * Re-enriches company About data for customers whose lastEnrichedAt is older than 90 days

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'

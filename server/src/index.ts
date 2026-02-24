@@ -32,6 +32,7 @@ import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
 import liveLeadsRouter from './routes/liveLeads.js'
 import leadSourcesRouter from './routes/leadSources.js'
+import { generalRateLimiter, strictRateLimiter, bulkRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
 // process.env.DATABASE_URL is not overridden after this block.
@@ -281,6 +282,10 @@ console.log('🔒 CORS Allowed Headers:', corsOptions.allowedHeaders.join(', '))
 
 // Middleware
 app.use(cors(corsOptions))
+
+// Rate limiting - protect API from abuse (Audit Fix 2026-02-24)
+app.use('/api/', generalRateLimiter)
+console.log('🛡️ Rate limiting enabled: 100 req/min general limit')
 
 // Handle OPTIONS preflight requests explicitly (fast path)
 app.options('/api/*', cors(corsOptions))

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
