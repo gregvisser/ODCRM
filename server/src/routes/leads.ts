@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'

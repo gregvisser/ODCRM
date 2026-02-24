@@ -1,4 +1,3 @@
-// @ts-nocheck
 import express from 'express'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { fetchRecentInboxMessages } from '../services/outlookEmailService.js'

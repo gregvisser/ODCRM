@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Customers/Clients Management API
  * Ported from OpensDoorsV2 clients/actions.ts
