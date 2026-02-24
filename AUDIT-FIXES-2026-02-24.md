@@ -64,6 +64,22 @@ This commit addresses security and code quality issues identified during a compr
 
 Applied general rate limiter to all `/api/*` routes.
 
+### 6. Gemini AI Integration for Email Tweaking ✅ (NEW)
+
+**Feature:** Added AI-powered email template optimization using Google Gemini.
+
+**New Files:**
+- `server/src/services/aiEmailService.ts` - Core AI service
+
+**New API Endpoints:**
+- `POST /api/templates/ai/tweak` - Tweak email body/subject with AI
+- `POST /api/templates/ai/analyze` - Analyze template effectiveness (1-10 score)
+- `POST /api/templates/ai/variations` - Generate A/B test variations
+- `POST /api/templates/:id/ai/tweak` - Tweak specific template by ID
+
+**Configuration Required:**
+Set `GEMINI_API_KEY` or `EMERGENT_LLM_KEY` in your environment.
+
 ## Breaking Changes
 
 ### TypeScript Strict Mode
@@ -111,6 +127,13 @@ After deploying:
    ```bash
    curl https://your-api.com/api/health
    curl https://your-api.com/api/customers
+   ```
+
+4. **Test AI email tweaking:**
+   ```bash
+   curl -X POST https://your-api.com/api/templates/ai/tweak \
+     -H "Content-Type: application/json" \
+     -d '{"templateBody": "Hi {{firstName}}, I wanted to reach out..."}'
    ```
 
 ## Future Recommendations
