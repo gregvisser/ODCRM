@@ -114,7 +114,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     const todayEnd = new Date(senderTime)
     todayEnd.setHours(23, 59, 59, 999)
 
-    const emailsSentToday = await prisma.emailEvent.count({
+    let emailsSentToday = await prisma.emailEvent.count({
       where: {
         senderIdentityId: senderIdentity.id,
         type: 'sent',

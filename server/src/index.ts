@@ -32,7 +32,7 @@ import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
 import liveLeadsRouter from './routes/liveLeads.js'
 import leadSourcesRouter from './routes/leadSources.js'
-import { generalRateLimiter, strictRateLimiter, bulkRateLimiter } from './middleware/rateLimiter.js'
+import { generalRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
 // process.env.DATABASE_URL is not overridden after this block.
@@ -218,7 +218,7 @@ const allowedOrigins = parseAllowedOrigins()
 
 // Define CORS options for reuse
 const corsOptions = {
-  origin(origin, callback) {
+  origin(origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
     // Allow requests with no origin (e.g., mobile apps, Postman, curl)
     if (!origin) {
       console.log('✅ CORS: Allowed (no origin)')
@@ -407,10 +407,11 @@ app.get('/api/version', (req, res) => {
 })
 
 // Debug routes endpoint (DEV only or DEBUG=true)
-app.get('/api/routes', (req, res) => {
+app.get('/api/routes', (req, res): void => {
   const isDebug = process.env.DEBUG === 'true' || process.env.NODE_ENV !== 'production'
   if (!isDebug) {
-    return res.status(403).json({ error: 'Debug endpoint not available in production' })
+    res.status(403).json({ error: 'Debug endpoint not available in production' })
+    return
   }
   
   // List all mounted route prefixes

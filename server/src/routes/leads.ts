@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
+import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
 
 const router = Router()
 
@@ -285,8 +286,9 @@ router.get('/aggregations', async (req, res) => {
       if (!acc[record.customerId]) {
         acc[record.customerId] = []
       }
+      const recordData = (record.data && typeof record.data === 'object') ? record.data as Record<string, string> : {}
       acc[record.customerId].push({
-        ...record.data,
+        ...recordData,
         accountName: record.accountName,
       } as LeadRow)
       return acc
@@ -462,14 +464,14 @@ function buildWhereWithOccurredAt (customerId: string, start: Date, end: Date) {
     customerId,
     OR: [
       { occurredAt: { gte: start, lt: end } },
-      { AND: [{ occurredAt: { equals: null } }, { createdAt: { gte: start, lt: end } }] },
+      { AND: [{ occurredAt: { equals: null as unknown as Date } }, { createdAt: { gte: start, lt: end } }] },
     ],
-  } as const
+  }
 }
 
 /** Where clause for "lead createdAt in [start, end)" only. Used when occurredAt is missing in schema. */
 function buildWhereCreatedAtOnly (customerId: string, start: Date, end: Date) {
-  return { customerId, createdAt: { gte: start, lt: end } } as const
+  return { customerId, createdAt: { gte: start, lt: end } }
 }
 
 function isInvalidGroupByFieldError (err: unknown): boolean {
@@ -1333,8 +1335,8 @@ router.get('/sync/validate', async (req, res) => {
       if (result.httpStatus !== undefined) payload.httpStatus = result.httpStatus
       if (result.contentType !== undefined) payload.contentType = result.contentType
       if (result.firstBytes !== undefined) payload.firstBytes = result.firstBytes
-      payload.error = result.error
-      if (result.hint) payload.hint = result.hint
+      if ('error' in result) payload.error = result.error
+      if ('hint' in result && result.hint) payload.hint = result.hint
     }
     return res.json(payload)
   } catch (error) {

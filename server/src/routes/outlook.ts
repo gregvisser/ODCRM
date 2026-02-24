@@ -865,7 +865,7 @@ router.post('/identities/:id/test-send', async (req, res, next) => {
         })
       }
 
-      const tokenData = await tokenResponse.json()
+      const tokenData = await tokenResponse.json() as { access_token: string; refresh_token?: string; expires_in: number }
       accessToken = tokenData.access_token
 
       // Update tokens in database

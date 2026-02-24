@@ -373,7 +373,7 @@ router.post('/', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation error', details: error.errors })
     }
-    if (error.code === 'P2002') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       // Unique constraint violation
       return res.status(409).json({ error: 'User with this email or userId already exists' })
     }
@@ -431,7 +431,7 @@ router.put('/:id', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation error', details: error.errors })
     }
-    if (error.code === 'P2002') {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
       return res.status(409).json({ error: 'User with this email or userId already exists' })
     }
     console.error('Error updating user:', error)

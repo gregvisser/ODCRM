@@ -187,13 +187,13 @@ router.get('/:id', async (req, res, next) => {
         customerId
       },
       include: {
-        email_identities: true,
-        email_campaign_templates: {
+        senderIdentity: true,
+        templates: {
           orderBy: { stepNumber: 'asc' }
         },
-        email_campaign_prospects: {
+        prospects: {
           include: {
-            contacts: true
+            contact: true
           },
           orderBy: { createdAt: 'desc' }
         }
@@ -405,7 +405,7 @@ router.post('/:id/prospects', async (req, res, next) => {
 
     const prospects = await prisma.emailCampaignProspect.findMany({
       where: { campaignId: id },
-      include: { contacts: true }
+      include: { contact: true }
     })
 
     res.setHeader('x-odcrm-customer-id', customerId)
@@ -423,14 +423,14 @@ router.post('/:id/start', async (req, res, next) => {
 
     const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId },
-      include: { email_campaign_templates: true }
+      include: { templates: true }
     })
 
     if (!campaign) {
       return res.status(404).json({ error: 'Campaign not found' })
     }
 
-    const hasStep1 = campaign.email_campaign_templates.some((t) => t.stepNumber === 1)
+    const hasStep1 = campaign.templates.some((t) => t.stepNumber === 1)
     if (!hasStep1) {
       return res.status(400).json({ error: 'Campaign must have a Step 1 template before starting' })
     }

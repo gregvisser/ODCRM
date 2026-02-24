@@ -8,6 +8,7 @@ import { z } from 'zod'
 import multer from 'multer'
 import * as XLSX from 'xlsx'
 import { prisma } from '../lib/prisma.js'
+import { PrismaClient, Prisma } from '@prisma/client'
 import { getActorIdentity } from '../utils/auth.js'
 import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/audit.js'
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
@@ -731,7 +732,7 @@ router.post('/', async (req, res) => {
         id: `cust_${Date.now()}_${Math.random().toString(36).substring(7)}`,
         name: validated.name,
         domain: validated.domain,
-        accountData: validated.accountData ?? null,
+        accountData: (validated.accountData ?? null) as object | null,
         website: validated.website,
         whatTheyDo: validated.whatTheyDo,
         accreditations: validated.accreditations,
@@ -741,7 +742,7 @@ router.post('/', async (req, res) => {
         companySize: validated.companySize,
         headquarters: validated.headquarters,
         foundingYear: validated.foundingYear,
-        socialPresence: validated.socialPresence ?? null,
+        socialPresence: (validated.socialPresence ?? null) as object | null,
         leadsReportingUrl: validated.leadsReportingUrl,
         leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
         sector: validated.sector,
@@ -1563,10 +1564,10 @@ router.put('/:id', async (req, res) => {
       },
     })
 
-    const updateData = {
+    const updateData: Record<string, unknown> = {
       name: validated.name,
       domain: validated.domain,
-      accountData: validated.accountData ?? null,
+      accountData: (validated.accountData ?? null) as object | null,
       website: validated.website,
       whatTheyDo: validated.whatTheyDo,
       accreditations: validated.accreditations,
@@ -1576,7 +1577,7 @@ router.put('/:id', async (req, res) => {
       companySize: validated.companySize,
       headquarters: validated.headquarters,
       foundingYear: validated.foundingYear,
-      socialPresence: validated.socialPresence ?? undefined,
+      socialPresence: (validated.socialPresence ?? undefined) as object | undefined,
       leadsReportingUrl: validated.leadsReportingUrl,
       leadsGoogleSheetLabel: validated.leadsGoogleSheetLabel,
       sector: validated.sector,
@@ -1712,9 +1713,9 @@ router.put('/:id', async (req, res) => {
             customerStatus: existingForAudit.clientStatus,
             metadata: {
               route: 'PUT /api/customers/:id',
-              changes: diff.changes,
+              changes: JSON.parse(JSON.stringify(diff.changes)),
               actor: { email: actor.emailNormalized || actor.email, userId: actor.userId, source: actor.source, claimUsed: actor.claimUsed },
-            },
+            } as Prisma.InputJsonValue,
           })
         }
       }
@@ -2593,11 +2594,11 @@ router.put('/:id/onboarding-progress', async (req, res) => {
 
       // Best-effort audit (never blocks success)
       try {
-        await safeCustomerAuditEvent(tx as any, {
+        await safeCustomerAuditEvent({
+          prisma: tx as unknown as PrismaClient,
           customerId: id,
           action: 'update_onboarding_progress',
-          note: `Updated onboarding progress (${percentComplete}%)`,
-          meta: { percentComplete, isComplete },
+          metadata: { note: `Updated onboarding progress (${percentComplete}%)`, percentComplete, isComplete } as Prisma.InputJsonValue,
         })
       } catch {
         // ignore
@@ -2694,11 +2695,11 @@ router.put('/:id/progress-tracker', async (req, res) => {
 
       // Best-effort audit
       try {
-        await safeCustomerAuditEvent(tx as any, {
+        await safeCustomerAuditEvent({
+          prisma: tx as unknown as PrismaClient,
           customerId: id,
           action: 'update_progress_tracker',
-          note: `Updated progress tracker: ${group}.${itemKey}=${checked}`,
-          meta: { group, itemKey, checked },
+          metadata: { note: `Updated progress tracker: ${group}.${itemKey}=${checked}`, group, itemKey, checked } as Prisma.InputJsonValue,
         })
       } catch {
         // ignore
@@ -3307,18 +3308,19 @@ router.post('/:id/attachments', (req, res) => {
 
         // Best-effort audit
         try {
-          await safeCustomerAuditEvent(tx as any, {
+          await safeCustomerAuditEvent({
+            prisma: tx as unknown as PrismaClient,
             customerId: id,
             action: 'upload_attachment',
-            note: `Uploaded attachment (${attachmentType}): ${file.originalname}`,
-            meta: {
+            metadata: {
+              note: `Uploaded attachment (${attachmentType}): ${file.originalname}`,
               attachmentId,
               attachmentType,
               fileName: file.originalname,
               blobName: uploadResult.blobName,
               containerName: uploadResult.containerName,
               mimeType,
-            },
+            } as Prisma.InputJsonValue,
           })
         } catch {
           // ignore audit failures
