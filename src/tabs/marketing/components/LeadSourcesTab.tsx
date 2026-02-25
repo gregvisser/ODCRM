@@ -903,22 +903,20 @@ const LeadSourcesTab: React.FC = () => {
     )
   }
 
-  if (loading) {
-    return (
-      <RequireActiveClient>
+  const cognism = sources.find(s => s.source === 'cognism')
+  const apollo = sources.find(s => s.source === 'apollo')
+  const blackbook = sources.find(s => s.source === 'blackbook')
+
+  return (
+    <RequireActiveClient>
+      {loading ? (
         <Flex justify="center" align="center" minH="400px">
           <VStack spacing={4}>
             <Spinner size="xl" color="blue.500" />
             <Text color="gray.500">Loading lead sources...</Text>
           </VStack>
         </Flex>
-      </RequireActiveClient>
-    )
-  }
-
-  if (error) {
-    return (
-      <RequireActiveClient>
+      ) : error ? (
         <Alert status="error">
           <AlertIcon />
           <Box>
@@ -929,16 +927,7 @@ const LeadSourcesTab: React.FC = () => {
             Retry
           </Button>
         </Alert>
-      </RequireActiveClient>
-    )
-  }
-
-  const cognism = sources.find(s => s.source === 'cognism')
-  const apollo = sources.find(s => s.source === 'apollo')
-  const blackbook = sources.find(s => s.source === 'blackbook')
-
-  return (
-    <RequireActiveClient>
+      ) : (
     <Box>
       {/* Header */}
       <Flex mb={6} align="center" justify="space-between">
@@ -1036,6 +1025,7 @@ const LeadSourcesTab: React.FC = () => {
       </Tabs>
 
     </Box>
+      )}
     </RequireActiveClient>
   )
 }

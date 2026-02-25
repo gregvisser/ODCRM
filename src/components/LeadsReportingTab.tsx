@@ -90,48 +90,38 @@ function LeadsReportingTab() {
     }
   }, [refetch, toast])
 
+  let content: ReactNode
   if (loading) {
-    return (
-      <RequireActiveClient>
-        <Box textAlign="center" py={12}>
-          <Spinner size="xl" color="brand.500" thickness="4px" />
-          <Text mt={4} color="gray.600">
-            Loading leads data from the server...
-          </Text>
+    content = (
+      <Box textAlign="center" py={12}>
+        <Spinner size="xl" color="brand.500" thickness="4px" />
+        <Text mt={4} color="gray.600">
+          Loading leads data from the server...
+        </Text>
+      </Box>
+    )
+  } else if (error) {
+    content = (
+      <Alert status="error" borderRadius="lg">
+        <AlertIcon />
+        <Box>
+          <AlertTitle>Error loading leads</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
         </Box>
-      </RequireActiveClient>
+      </Alert>
     )
-  }
-
-  if (error) {
-    return (
-      <RequireActiveClient>
-        <Alert status="error" borderRadius="lg">
-          <AlertIcon />
-          <Box>
-            <AlertTitle>Error loading leads</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Box>
-        </Alert>
-      </RequireActiveClient>
+  } else if (leads.length === 0) {
+    content = (
+      <Box textAlign="center" py={12}>
+        <Text fontSize="lg" color="gray.600">
+          No leads data available
+        </Text>
+        <Text fontSize="sm" color="gray.500" mt={2}>
+          Configure Client Leads sheets in account settings to view leads data
+        </Text>
+      </Box>
     )
-  }
-
-  if (leads.length === 0) {
-    return (
-      <RequireActiveClient>
-        <Box textAlign="center" py={12}>
-          <Text fontSize="lg" color="gray.600">
-            No leads data available
-          </Text>
-          <Text fontSize="sm" color="gray.500" mt={2}>
-            Configure Client Leads sheets in account settings to view leads data
-          </Text>
-        </Box>
-      </RequireActiveClient>
-    )
-  }
-
+  } else {
   // Define the specific column order
   const columnOrder = [
     'Account',
@@ -275,8 +265,7 @@ function LeadsReportingTab() {
     return value
   }
 
-  return (
-    <RequireActiveClient>
+  content = (
     <Stack spacing={6}>
       <HStack justify="space-between" align="flex-start">
         <Box>
@@ -450,8 +439,9 @@ function LeadsReportingTab() {
         </Box>
       )}
     </Stack>
-    </RequireActiveClient>
   )
+  }
+  return <RequireActiveClient>{content}</RequireActiveClient>
 }
 
 export default LeadsReportingTab

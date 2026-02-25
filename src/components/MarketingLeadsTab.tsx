@@ -1156,22 +1156,16 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     })
   }, [toast])
 
-  if (loading && leads.length === 0) {
-    return (
-      <RequireActiveClient>
+  return (
+    <RequireActiveClient>
+      {loading && leads.length === 0 ? (
         <Box textAlign="center" py={12}>
           <Spinner size="xl" color="brand.700" thickness="4px" />
           <Text mt={4} color="gray.600">
             Loading leads data from the server...
           </Text>
         </Box>
-      </RequireActiveClient>
-    )
-  }
-
-  if (error && leads.length === 0) {
-    return (
-      <RequireActiveClient>
+      ) : error && leads.length === 0 ? (
         <Alert status="error" borderRadius="lg">
           <AlertIcon />
           <Box>
@@ -1179,12 +1173,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
             <AlertDescription>{error}</AlertDescription>
           </Box>
         </Alert>
-      </RequireActiveClient>
-    )
-  }
-
-  return (
-    <RequireActiveClient>
+      ) : (
     <Stack spacing={{ base: 4, md: 6, lg: 8 }} px={{ base: 0, md: 0 }} pb={8}>
       {leads.length === 0 && syncStatusForEmpty && (
         <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
@@ -2473,6 +2462,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         </Alert>
       )}
     </Stack>
+      )}
     </RequireActiveClient>
   )
 }
