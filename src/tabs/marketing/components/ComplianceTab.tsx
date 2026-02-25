@@ -290,7 +290,7 @@ export default function ComplianceTab() {
         <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
           <HStack justify="space-between" align="flex-start" flexWrap="wrap" spacing={4}>
             <Box>
-              <Heading size="sm" mb={1}>Customer-scoped DNC</Heading>
+              <Heading size="sm" mb={1}>Client-scoped DNC</Heading>
               <Text fontSize="sm" color="gray.600">
                 {summary ? (
                   <>

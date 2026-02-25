@@ -333,9 +333,9 @@ const EmailAccountsTab: React.FC = () => {
       <Box>
         <VStack align="start" spacing={1} mb={4}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
-          <Text color="gray.600">Connect Outlook accounts to send campaigns (max 5 per customer)</Text>
+          <Text color="gray.600">Connect Outlook accounts to send campaigns (max 5 per client)</Text>
           <FormControl w="300px" mt={2}>
-            <FormLabel fontSize="sm">Customer</FormLabel>
+            <FormLabel fontSize="sm">Client</FormLabel>
             <Select
               value=""
               onChange={(e) => {
@@ -360,7 +360,7 @@ const EmailAccountsTab: React.FC = () => {
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
             <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to view email accounts</Text>
             <Text color="gray.600">
-              Choose a customer from the dropdown above to see their connected email accounts, or connect new ones.
+              Choose a client from the dropdown above to see their connected email accounts, or connect new ones.
             </Text>
           </CardBody>
         </Card>
@@ -398,11 +398,11 @@ const EmailAccountsTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
-            Connect Outlook accounts to send campaigns (max 5 per customer)
+            Connect Outlook accounts to send campaigns (max 5 per client)
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
-              <FormLabel fontSize="sm">Customer</FormLabel>
+              <FormLabel fontSize="sm">Client</FormLabel>
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => {

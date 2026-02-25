@@ -278,7 +278,7 @@ export default function MarketingEmailTemplatesTab() {
         <HStack spacing={3}>
           <FormControl maxW="360px">
             <FormLabel fontSize="sm" mb={1}>
-              Customer filter
+              Client filter
             </FormLabel>
             <Select value={filterAccount} onChange={(e) => setFilterAccount(e.target.value)} size="sm">
               <option value="__all__">All templates</option>
@@ -301,7 +301,7 @@ export default function MarketingEmailTemplatesTab() {
           <Thead bg="gray.50">
             <Tr>
               <Th>Name</Th>
-              <Th>Customer</Th>
+              <Th>Client</Th>
               <Th>Step</Th>
               <Th>Subject</Th>
               <Th>Updated</Th>
@@ -400,7 +400,7 @@ export default function MarketingEmailTemplatesTab() {
 
               <HStack spacing={4} align="flex-start">
                 <FormControl>
-                  <FormLabel>Customer (optional)</FormLabel>
+                  <FormLabel>Client (optional)</FormLabel>
                   <Select
                     value={draft.customerId || ''}
                     onChange={(e) => setDraft({ ...draft, customerId: e.target.value || null, isGlobal: !e.target.value })}

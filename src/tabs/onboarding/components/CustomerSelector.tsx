@@ -151,7 +151,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
       return
     }
 
-    toast({ title: 'Customer created', status: 'success', duration: 2000 })
+    toast({ title: 'Client created', status: 'success', duration: 2000 })
     setCreateForm({ name: '', domainOrWebsite: '' })
     onClose()
 
@@ -172,7 +172,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
       <VStack align="stretch" spacing={3}>
         <FormControl>
           <FormLabel fontSize="sm" fontWeight="semibold" mb={2}>
-            Customer
+            Client
           </FormLabel>
           {isLoading ? (
             <HStack spacing={2}>
@@ -237,7 +237,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
           <ModalBody>
             <VStack align="stretch" spacing={4}>
               <FormControl isRequired>
-                <FormLabel fontSize="sm">Customer Name</FormLabel>
+                <FormLabel fontSize="sm">Client Name</FormLabel>
                 <Input
                   value={createForm.name}
                   onChange={(e) => setCreateForm((p) => ({ ...p, name: e.target.value }))}

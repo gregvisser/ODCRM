@@ -1177,7 +1177,7 @@ const SequencesTab: React.FC = () => {
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
-              <FormLabel fontSize="sm">Customer</FormLabel>
+              <FormLabel fontSize="sm">Client</FormLabel>
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => {

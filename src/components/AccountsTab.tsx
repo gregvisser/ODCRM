@@ -5547,7 +5547,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
               window.dispatchEvent(event)
             }}
           >
-            Create New Customer (via Onboarding)
+            Create New Client (via Onboarding)
           </Button>
         </HStack>
       </HStack>
@@ -6115,7 +6115,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                             DEFCON {selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
                           </Badge>
                         )}
-                        <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono" title="Customer ID">
+                        <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono" title="Client ID">
                           ID: {selectedCustomerId || '—'}
                         </Badge>
                       </HStack>
@@ -6245,7 +6245,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                     await applyCustomerPatchAndRefresh({ customerId, patch: { name: next } })
                                     stopEditing(accountName, 'drawer.details.name')
                                   }}
-                                  placeholder="Customer name"
+                                  placeholder="Client name"
                                 />
 
                                 <EditableField
@@ -7666,7 +7666,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         
                         return (
                           <Text fontSize="sm" color="gray.500">
-                            No agreement uploaded yet. Upload in Customer Onboarding tab.
+                            No agreement uploaded yet. Upload in Client Onboarding tab.
                           </Text>
                         )
                       })()}
@@ -7829,7 +7829,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         if (contactRows.length === 0) {
                           return (
                             <Text fontSize="sm" color="gray.500">
-                              No client contacts saved yet. Add them in Customer Onboarding.
+                              No client contacts saved yet. Add them in Client Onboarding.
                             </Text>
                           )
                         }

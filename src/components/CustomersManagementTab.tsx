@@ -342,7 +342,7 @@ export default function CustomersManagementTab() {
       })
     } else {
       toast({
-        title: 'Customer Restored',
+        title: 'Client Restored',
         description: `"${customerName}" has been unarchived and is now active.`,
         status: 'success',
         duration: 3000,
@@ -802,7 +802,7 @@ export default function CustomersManagementTab() {
                 <Input
                   value={form.leadsGoogleSheetLabel}
                   onChange={(e) => setForm({ ...form, leadsGoogleSheetLabel: e.target.value })}
-                  placeholder="e.g. Customer Lead Sheet"
+                  placeholder="e.g. Client Lead Sheet"
                 />
               </FormControl>
             </VStack>

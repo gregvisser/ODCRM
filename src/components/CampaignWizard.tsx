@@ -535,7 +535,7 @@ export default function CampaignWizard({
         <WizardStep step={2} currentStep={step} title="Select Client & Settings">
           <VStack spacing={4} align="stretch">
             <FormControl isRequired>
-              <FormLabel>Customer account</FormLabel>
+              <FormLabel>Client account</FormLabel>
               <Select
                 value={formData.customerAccountName}
                 onChange={(e) => {
@@ -824,7 +824,7 @@ export default function CampaignWizard({
                         <strong>{selectedProspectSet.size}</strong>
                       </Text>
                       <Text fontSize="xs" color="gray.500">
-                        Customer: <strong>{formData.customerAccountName}</strong>
+                        Client: <strong>{formData.customerAccountName}</strong>
                       </Text>
                     </Box>
                     <HStack>
@@ -930,7 +930,7 @@ export default function CampaignWizard({
             <Box p={4} borderWidth={1} borderRadius="md">
               <Text><strong>Campaign Name:</strong> {formData.name}</Text>
               <Text><strong>Sender:</strong> {identities.find(i => i.id === formData.senderIdentityId)?.emailAddress}</Text>
-              <Text><strong>Customer:</strong> {formData.customerAccountName || '(not set)'}</Text>
+              <Text><strong>Client:</strong> {formData.customerAccountName || '(not set)'}</Text>
               <Text><strong>Send Window:</strong> {formData.sendWindowHoursStart}:00 - {formData.sendWindowHoursEnd}:00</Text>
               <Text><strong>Follow-up Delay:</strong> {formData.followUpDelayDaysMin}-{formData.followUpDelayDaysMax} days</Text>
             </Box>
