@@ -31,6 +31,7 @@ import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../utils/liveLeadsApi'
 
@@ -89,6 +90,9 @@ function LeadsReportingTab() {
     }
   }, [refetch, toast])
 
+  if (!customerId) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading) {
     return (
       <Box textAlign="center" py={12}>

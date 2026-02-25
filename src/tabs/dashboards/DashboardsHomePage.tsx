@@ -29,6 +29,7 @@ import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../components/NoActiveClientEmptyState'
 import { useLiveLeadsPolling } from '../../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../../utils/liveLeadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
@@ -669,6 +670,9 @@ export default function DashboardsHomePage() {
   const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const weekNumber = Math.ceil((now.getDate() + startOfToday.getDay()) / 7)
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading && leads.length === 0) {
     return (
       <Box textAlign="center" py={12}>

@@ -60,6 +60,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
 
 type EmailTemplate = {
   id: string
@@ -142,8 +143,6 @@ const TemplatesTab: React.FC = () => {
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)
-      } else if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id)
       } else {
         setSelectedCustomerId('')
       }
@@ -397,6 +396,9 @@ const TemplatesTab: React.FC = () => {
     }
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <Box textAlign="center" py={10}>

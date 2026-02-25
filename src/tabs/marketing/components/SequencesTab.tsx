@@ -68,6 +68,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
 import { visibleColumns } from '../../../utils/visibleColumns'
@@ -268,8 +269,6 @@ const SequencesTab: React.FC = () => {
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)
-      } else if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id)
       } else {
         setSelectedCustomerId('')
       }
@@ -1082,6 +1081,9 @@ const SequencesTab: React.FC = () => {
     setEditingSequence((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <Box textAlign="center" py={10}>

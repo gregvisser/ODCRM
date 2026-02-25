@@ -40,6 +40,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, EditIcon, ViewIcon, DeleteIcon } from '@chakra-ui/icons'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 import { api } from '../utils/api'
 
 type ContactList = {
@@ -264,6 +265,9 @@ export default function MarketingListsTab() {
     onAddContactsOpen()
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading) {
     return (
       <Box textAlign="center" py={10}>

@@ -56,6 +56,7 @@ import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 import { getSyncStatus, type SyncStatus } from '../utils/leadsApi'
 import { fetchAllCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
@@ -1155,6 +1156,9 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     })
   }, [toast])
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading && leads.length === 0) {
     return (
       <Box textAlign="center" py={12}>

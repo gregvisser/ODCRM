@@ -64,6 +64,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -328,6 +329,9 @@ const EmailAccountsTab: React.FC = () => {
     })
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (!selectedCustomerId) {
     return (
       <Box>
