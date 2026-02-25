@@ -1,85 +1,68 @@
-# ODCRM Navigation Contract
+# Navigation Contract — Repo Truth
 
-## Purpose
-Define the correct information architecture for ODCRM as an **Agency-mode outbound CRM** that can later support **Client self-serve mode** without rebuilding.
+**Purpose:** Single source of truth for top-level navigation and tab IDs. All Cursor work and UI must align with this contract.
 
-## Definitions (critical)
-- **Client (UI term):** An OpenDoors-managed tenant. Backend entity may remain named `Customer`.
-- **Prospect Account (CRM term):** A target company you sell to (not a Client).
-- **Prospect Person / Contact (CRM term):** An individual at a Prospect Account.
-- **Active Client Context:** The currently selected tenant (agency mode) or fixed tenant (client mode). All API calls must be scoped to this.
+---
 
-## Modes
-### Agency Mode (now)
-- Users can manage multiple **Clients**.
-- UI shows a **Client switcher** and a **Clients** tab.
-- Onboarding/admin tools exist and are accessible only to agency roles.
+## Canonical source
 
-### Client Self-Serve Mode (later)
-- Users are locked to a single **Client**.
-- UI hides **Clients** tab and hides client switcher.
-- Same CRM/Engagement/Inbox/Analytics/Settings modules remain.
+**File:** `src/contracts/nav.ts`
 
-## Top-level navigation (Agency Mode)
-1. **Clients**
-   - Client list & selection
-   - Client health checklist (senders linked, domains configured, suppression, lead source)
-   - Onboarding status (agency-only)
-2. **Prospects**
-   - People (contacts/prospects)
-   - Companies (prospect accounts)
-   - Lists/Segments
-   - Activity timeline
-3. **Engagement**
-   - Templates
-   - Sequences (multi-step; later multi-channel)
-   - Enrollments / Queue
-   - Schedules (if applicable)
-4. **Inbox**
-   - Replies/threads
-   - Dispositions
-   - Auto-pause on reply rules (later)
-5. **Analytics**
-   - Sequence performance
-   - Deliverability (bounce/opt-out)
-   - Team performance (later)
-6. **Settings**
-   - Senders (Email accounts/identities)
-   - Compliance (Suppression)
-   - Tracking domain / email config
-   - Integrations (Sheets etc.)
-   - Users/Roles (later)
-   - Billing (later)
+- Defines `CRM_TOP_TABS`, `CrmTopTabId`, `CRM_CATEGORY_HOME_TAB`, `getCrmTopTab`, `getCrmCategoryHomeTab`.
+- Runtime guardrails: `assertUnique` on tab ids and paths (throws on duplicate).
 
-## Visibility rules
-- **Agency operator role**
-  - Sees Clients tab + client switcher
-  - Sees onboarding/admin tools
-- **Client user role**
-  - Does not see Clients tab
-  - No client switcher
-  - No onboarding/admin tools
+---
 
-## Active Client Context rules (must be true everywhere)
-### Frontend
-- Exactly one source of active client (store/state).
-- API requests must carry `x-customer-id` header derived from active client.
-- No silent fallbacks like `prod-customer-1`.
+## Top-level tabs (exact from repo)
 
-### Backend
-- Tenant-scoped endpoints resolve tenant from:
-  1) `x-customer-id` header (primary)
-  2) explicit query/body only where documented
-- Must validate tenant exists and enforce row-level scoping.
-- Never accept tenant identifiers from unsafe locations (e.g., arbitrary body spread).
+Quoted from `src/contracts/nav.ts`:
 
-## Naming rules
-- UI uses "Client(s)" for the tenant concept.
-- UI uses "Account/Company" only for prospect companies.
-- "Customer" is backend/model naming only unless later refactor.
+```ts
+export const CRM_TOP_TABS: readonly CrmTopTab[] = [
+  { id: 'dashboards-home', label: 'Dashboards', ownerAgent: 'UI Agent', path: '/dashboards' },
+  { id: 'customers-home', label: 'OpenDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
+  { id: 'marketing-home', label: 'OpenDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
+  { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },
+  { id: 'settings-home', label: 'Settings', ownerAgent: 'Settings Agent', path: '/settings' },
+] as const
+```
 
-## Stage gates
-Stage 0 must produce a repo-verified mapping of:
-- Current nav → Contract nav
-- Current tenant context flow → Contract rules
-- Current backend routes → Tenant enforcement status
+| Tab id | Label | Path |
+|--------|--------|------|
+| dashboards-home | Dashboards | /dashboards |
+| customers-home | OpenDoors Clients | /customers |
+| marketing-home | OpenDoors Marketing | /marketing |
+| onboarding-home | Onboarding | /onboarding |
+| settings-home | Settings | /settings |
+
+---
+
+## Category → home tab
+
+From `src/contracts/nav.ts`:
+
+```ts
+export const CRM_CATEGORY_HOME_TAB: Readonly<Record<CrmCategoryId, CrmTopTabId>> = {
+  customers: 'customers-home',
+  marketing: 'marketing-home',
+  onboarding: 'onboarding-home',
+} as const
+```
+
+---
+
+## Tab → component mapping (App.tsx)
+
+- **dashboards-home** → `<DashboardsHomePage />`
+- **customers-home** → `<CustomersHomePage />` (sub-views: accounts, contacts, leads-reporting)
+- **marketing-home** → `<MarketingHomePage />` (sub-views: reports, lead-sources, compliance, email-accounts, templates, sequences, schedules, inbox)
+- **onboarding-home** → `<OnboardingHomePage />`
+- **settings-home** → `<SettingsHomePage />`
+
+---
+
+## Contract rules
+
+1. **Labels:** User-facing tab labels are defined only in `CRM_TOP_TABS`. Use "Client(s)" for tenant/customer-facing UI; backend/API may keep "Customer" in names.
+2. **Paths:** Optional URL paths are stable; do not change without updating this doc and nav contract.
+3. **Ids:** Tab ids are type-checked (`CrmTopTabId`); no ad-hoc strings in navigation.

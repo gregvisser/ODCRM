@@ -1,269 +1,149 @@
 # MODE B Reality Check — What Exists RIGHT NOW
 
 **Generated:** 2026-02-25  
-**Purpose:** Single source of truth for current state (file paths, routes, nav, tenant behavior). Repo-verified mapping for Navigation Contract and MODE B Stage 0.
+**Purpose:** Single source of truth for current state (file paths, routes, nav, tenant behavior). Repo-verified. Every claim backed by file path or quoted snippet.
 
 ---
 
-## A) Current top nav + sub nav
-
-**Canonical nav file:** `src/contracts/nav.ts` — defines `CRM_TOP_TABS`, `CrmTopTabId`, `CRM_CATEGORY_HOME_TAB`.
-
-**Current tabs and labels:**
-
-| Tab id | Label (current) | Path |
-|--------|------------------|------|
-| dashboards-home | Dashboards | /dashboards |
-| customers-home | OpenDoors Customers | /customers |
-| marketing-home | OpenDoors Marketing | /marketing |
-| onboarding-home | Onboarding | /onboarding |
-| settings-home | Settings | /settings |
-
-**Tab → component (file:** `src/App.tsx`): dashboards-home → `<DashboardsHomePage />`; customers-home → `<CustomersHomePage />`; marketing-home → `<MarketingHomePage />`; onboarding-home → `<OnboardingHomePage />`; settings-home → `<SettingsHomePage />`.
-
-**Customers home (tenant list / client management):** `src/tabs/customers/CustomersHomePage.tsx` — sub-views: Accounts, Contacts, Leads (Leads-reporting). Title currently "Customers" (SubNavigation title prop). Client list and CRUD live in `src/components/CustomersManagementTab.tsx` (used from Settings or onboarding flows; see Settings nav).
-
-**Marketing home + subviews:** `src/tabs/marketing/MarketingHomePage.tsx`. Sub-views: Reports, Lead Sources, Suppression List (Compliance), Email Accounts, Templates, Sequences, Schedules, Inbox. Default nav items list: reports, lists (Lead Sources), compliance (Suppression List), email-accounts, templates, sequences, schedules, inbox.
-
-**Client selector (where it lives):** No single global "client switcher" in top nav. Per-tab selectors: (1) Onboarding: `src/tabs/onboarding/components/CustomerSelector.tsx` — dropdown of customers, `selectedCustomerId` / `onCustomerChange`; used in `OnboardingHomePage.tsx`. (2) Marketing sub-tabs (Inbox, Reports, Templates, Sequences, Email Accounts, Lead Sources, etc.) each have their own "Select customer" dropdown setting `selectedCustomerId` and often calling `setCurrentCustomerId`. (3) Settings/customer management: `CustomersManagementTab` for list/create/edit/archive. Active client for API calls comes from localStorage key `currentCustomerId` (see B).
-
----
-
-## B) Tenant context flow
-
-**Single source of "active customer/client":** localStorage key `currentCustomerId` (legacy key, see `src/platform/keys.ts` L32). Read/write via `src/platform/stores/settings.ts`: `getCurrentCustomerId`, `setCurrentCustomerId`, `clearCurrentCustomerId`. Emits `settingsUpdated` on change.
-
-**localStorage fallbacks (exact file + line):**
-
-- `src/utils/api.ts` L5–9: `getCurrentCustomerId(fallback = 'prod-customer-1')` — if storage empty, writes fallback and returns it. So **silent fallback to `prod-customer-1`** when no client selected.
-- `src/utils/api.ts` L49: every `apiRequest` uses `getCurrentCustomerId('prod-customer-1')`; L75–76: sets `X-Customer-Id` from that value when not already in headers.
-
-**How x-customer-id is set:** `src/utils/api.ts` — in `buildRequestInit`, if request headers do not have `X-Customer-Id`, `headers.set('X-Customer-Id', customerId)` where `customerId = getCurrentCustomerId('prod-customer-1')`. Callers can override by passing `headers: { 'X-Customer-Id': id }` (e.g. Templates tab, Inbox tab).
-
----
-
-## C) Backend route map
-
-**File:** `server/src/index.ts`. Each mounted router and tenant-scoping note:
-
-| Mount path | Router | Tenant-scoped? | How customerId resolved |
-|------------|--------|----------------|--------------------------|
-| /api/campaigns | campaignRoutes | Yes | x-customer-id header / query (see routes/campaigns.ts) |
-| /api/contacts | contactsRoutes | Yes | Header/query in route handlers |
-| /api/outlook | outlookRoutes | Yes | Per-handler |
-| /api/email | trackingRoutes | Yes | Per-handler |
-| /api/schedules | schedulesRoutes | Yes | Per-handler |
-| /api/reports | reportsRoutes | Yes | Per-handler |
-| /api/inbox | inboxRoutes | Yes | x-customer-id |
-| /api/lists | listsRoutes | Yes | Header + row-level scoping |
-| /api/sequences | sequencesRoutes | Yes | x-customer-id |
-| /api/customers | customersRoutes | Yes | Param :id or list; no tenant from body |
-| /api/leads | leadsRoutes | Yes | Per-handler |
-| /api/live | liveLeadsRouter | Yes | getCustomerId(req) — header or query |
-| /api/lead-sources | leadSourcesRouter | Yes | getCustomerId(req) |
-| /api/templates | templatesRoutes | Yes | x-customer-id |
-| /api/company-data | companyDataRoutes | Varies | Per-handler |
-| /api/admin | adminRoutes | No (admin) | X-Admin-Secret |
-| /api/job-sectors | jobSectorsRoutes | No (reference) | — |
-| /api/job-roles | jobRolesRoutes | No (reference) | — |
-| /api/places | placesRoutes | No (reference) | — |
-| /api/uploads | uploadsRoutes | Varies | — |
-| /api/suppression | suppressionRoutes | Yes | x-customer-id / query |
-| /api/users | usersRoutes | Varies | Per-handler |
-| /api/user-preferences | userPreferencesRoutes | Per-user (not tenant) | — |
-| /api/sheets | sheetsRoutes | Yes | Per-handler |
-| /api/_diag | diagRoutes | No (diag) | X-Admin-Diag-Key |
-| /api/overview | overviewRoutes | Yes | x-customer-id |
-
----
-
-## D) Prisma inventory (major models, CRM/outreach)
-
-**File:** `server/prisma/schema.prisma`. Major models: Customer, Contact, EmailIdentity, EmailCampaign, EmailCampaignTemplate, EmailTemplate, EmailCampaignProspect, EmailCampaignProspectStep, EmailEvent, SuppressionEntry, EmailMessageMetadata, CustomerContact, ContactList, ContactSourceRow, ContactListMember, EmailSequence, EmailSequenceStep, SequenceEnrollment, LeadRecord, LeadSyncState, Workspace, JobSector, JobRole, User, UserPreferences, CustomerAuditEvent, SheetSourceConfig, LeadSourceSheetConfig, LeadSourceRowSeen.
-
-**Drift (migrate status):** Two migrations not applied: `20260220140000_add_lead_source_applies_to`, `20260222120000_add_inbox_read_signature`. Run: `npx prisma migrate status --schema=./prisma/schema.prisma` (exit 1). See Gate 0 in MODE_B_ROADMAP.md.
-
----
-
-## PR2 Tenant Fallback Findings (pre-PR2)
-
-**Search:** `Select-String -Path "src\**\*.ts","src\**\*.tsx" -Pattern "prod-customer-1|getCurrentCustomerId|x-customer-id|X-Customer-Id"` (and DEFAULT_*CUSTOMER/CLIENT).
-
-| File | Line(s) | What it does today | Why it violates Active Client Context |
-|------|--------|--------------------|--------------------------------------|
-| `src/utils/api.ts` | 5–9, 49, 75–76 | Local `getCurrentCustomerId(fallback = 'prod-customer-1')`; every request gets that; sets X-Customer-Id from it when not in headers. | Silently sends a fake tenant id when none selected; backend may 200 with wrong scope. |
-| `src/platform/stores/settings.ts` | 5–13 | `getCurrentCustomerId(fallback = 'prod-customer-1')` — if storage empty, writes fallback and returns it. | Creates/writes a default tenant id; no explicit user selection. |
-| `src/tabs/marketing/components/EmailAccountsTab.tsx` | 71, 170, 180, 189 | Local `getCurrentCustomerId(fallback = 'prod-customer-1')`; used for default/current selection. | UI can show/make requests as if a client is selected when none is. |
-| `src/components/EmailAccountsEnhancedTab.tsx` | 99, 102, 155, 182 | `getCurrentCustomerId('prod-customer-1')` for initial state; treats `prod-customer-1` as invalid for connect. | Still assumes a default id for initial state. |
-| `src/components/MarketingDashboard.tsx` | 50 | `getCurrentCustomerId('prod-customer-1')` for metrics. | Tenant-scoped API call with assumed client. |
-| `src/components/CampaignWizard.tsx` | 137, 148, 237 | `getCurrentCustomerId('prod-customer-1')` for customerId. | Wizard runs under assumed tenant. |
-| `src/components/CampaignsEnhancedTab.tsx` | 83 | `form.customerId \|\| getCurrentCustomerId('prod-customer-1')`. | Form falls back to assumed client. |
-| `src/components/EmailSettingsTab.tsx` | 64, 79, 82, 99–100 | `getCurrentCustomerId('prod-customer-1')` and `getCurrentCustomerId('')`; treats prod-customer-1 as invalid. | Mixed: some paths use default, some empty. |
-| `src/components/MarketingEmailTemplatesTab.tsx` | 127, 178, 226, 243 | `getCurrentCustomerId('prod-customer-1') || list[0]?.id` etc. | Default id or first list item without user choice. |
-| `src/components/CampaignSequencesTab.tsx` | 196, 264, 511, 568, 620 | `getCurrentCustomerId('prod-customer-1') || ''`; passes as X-Customer-Id. | Requests sent with empty or fake tenant. |
-| `src/components/MarketingCognismProspectsTab.tsx` | 249 | `getCurrentCustomerId('prod-customer-1') \|\| list[0]?.id`. | Same as above. |
-| `src/components/MarketingListsTab.tsx` | 101 | `setCustomerId(getCurrentCustomerId('prod-customer-1'))`. | Initial state from default id. |
-| `src/components/MarketingSequencesTab.tsx` | 146 | `getCurrentCustomerId('prod-customer-1')`. | Tenant-scoped under assumed client. |
-| `src/components/AccountsTab.tsx` | 956, 1049, 1055, 5484 | `DEFAULT_CLIENT_PROFILE` (form default; not tenant id). `getCurrentCustomerId('')` at 5484. | 5484: no fallback but may still need empty-state; DEFAULT_CLIENT_PROFILE is UI form default, not fallback tenant. |
-| `src/tabs/dashboards/DashboardsHomePage.tsx` | 217 | `getCurrentCustomerId('')`. | No fallback; may need empty-state when null. |
-| `src/tabs/marketing/components/SequencesTab.tsx` | 267 | `getCurrentCustomerId('')`. | Syncs from store; OK if we return null. |
-| `src/tabs/marketing/components/TemplatesTab.tsx` | 141 | `getCurrentCustomerId('')`. | Same. |
-| `src/tabs/marketing/components/InboxTab.tsx` | 197 | `getCurrentCustomerId('')`. | Same. |
-| `src/tabs/onboarding/OnboardingHomePage.tsx` | 27 | `getCurrentCustomerId('')` for initial state. | OK when store returns null. |
-| `src/tabs/marketing/components/LeadSourcesTab.tsx`, `LeadSourcesTabNew.tsx` | 159, 456 | `getCurrentCustomerId('')`. | OK when null. |
-| `src/components/MarketingLeadsTab.tsx` | 174, 296 | `getCurrentCustomerId('')`. | OK when null. |
-| `src/components/LeadsReportingTab.tsx` | 53 | `getCurrentCustomerId('')`. | OK when null. |
-| `src/tabs/marketing/components/ComplianceTab.tsx` | 61 | `getCurrentCustomerId('')`. | OK when null. |
-
-**Summary:** Canonical source is `settings.ts` + local copy in `api.ts`. Both must return null when nothing stored and never write a default. All call sites that passed `'prod-customer-1'` must instead handle null and show "Select a client to continue" (no tenant-scoped API calls).
-
----
-
-## After PR2 (tenant fallback removed)
-
-- **getCurrentCustomerId()** (`src/platform/stores/settings.ts`): returns `string | null`. No fallback param; no write when empty.
-- **api.ts:** local `getActiveClientId()` returns `string | null`. X-Customer-Id header set only when value is non-null.
-- **Empty state:** `src/components/NoActiveClientEmptyState.tsx` — "Select a client to continue", CTA "Go to Clients" (dispatches navigateToAccount).
-- **Regression:** `npm run test:no-tenant-fallback` — fails if `prod-customer-1` appears in src/ or server/src, or if getCurrentCustomerId/getActiveClientId called with DEFAULT_*CUSTOMER/CLIENT constant.
-
----
-
-## 1. Repo state (as of run)
-
-- **Branch:** main  
-- **Divergence:** Local and origin/main have diverged (15 local commits, 3 remote).  
-- **Untracked:** `.github.zip`, `prisma.zip`, `server.zip`, `server/prisma.zip`, `src.zip`, `t Restored DATABASE_URL env for Generate Prisma client step.`  
-- **Last 5 commits (local):**  
-  - f329e64 test(regression): prevent onboarding unhandled rejections + querystring auth bypass  
-  - 040a876 test(regression): guard admin/diag bypass and onboarding completion error handling  
-  - 0397080 chore(verification): Phase D checklist + server typecheck fix  
-  - 070d770 fix(ui): resolve OnboardingHomePage lint (useCallback deps)  
-  - 3dc3892 fix(security): require auth for API mutations  
-
----
-
-## 2. Server: mounted API routes
-
-**File:** `server/src/index.ts`
-
-All routes are under `/api`. Mount order and prefixes:
-
-| Mount order | Prefix | Notes |
-|-------------|--------|--------|
-| (before routes) | `/api/__build`, `/api/_build`, `/api/__routes`, `/api/_routes`, `/api/health`, `/api/version`, `/api/routes` | No auth; probes / health |
-| 1 | `/api` | `requireAuthForMutations` applied to all /api |
-| 2 | `/api/campaigns` | observabilityHeaders + campaignRoutes |
-| 3 | `/api/contacts` | contactsRoutes |
-| 4 | `/api/outlook` | observabilityHeaders + outlookRoutes |
-| 5 | `/api/email` | trackingRoutes |
-| 6 | `/api/schedules` | schedulesRoutes |
-| 7 | `/api/reports` | reportsRoutes |
-| 8 | `/api/inbox` | observabilityHeaders + inboxRoutes |
-| 9 | `/api/lists` | listsRoutes |
-| 10 | `/api/sequences` | observabilityHeaders + sequencesRoutes |
-| 11 | `/api/customers` | customersRoutes (includes /:id/email-identities) |
-| 12 | `/api/leads` | leadsRoutes |
-| 13 | `/api/live` | liveLeadsRouter |
-| 14 | `/api/lead-sources` | leadSourcesRouter |
-| 15 | `/api/templates` | observabilityHeaders + templatesRoutes |
-| 16 | `/api/company-data` | companyDataRoutes |
-| 17 | `/api/admin` | adminRoutes |
-| 18 | `/api/job-sectors` | jobSectorsRoutes |
-| 19 | `/api/job-roles` | jobRolesRoutes |
-| 20 | `/api/places` | placesRoutes |
-| 21 | `/api/uploads` | uploadsRoutes |
-| 22 | `/api/suppression` | suppressionRoutes |
-| 23 | `/api/users` | usersRoutes |
-| 24 | `/api/user-preferences` | userPreferencesRoutes |
-| 25 | `/api/sheets` | sheetsRoutes |
-| 26 | `/api/_diag` | diagRoutes |
-| 27 | `/api/overview` | observabilityHeaders + overviewRoutes |
-
-**Auth:** Mutation methods (POST/PUT/PATCH/DELETE) require Bearer JWT via `requireAuthForMutations` except: GET, `gemini-enhance`, `/api/admin`, `/api/_diag`. Admin/diag use header-based auth (X-Admin-Secret, X-Admin-Diag-Key). CORS allows `X-Customer-Id`, `x-customer-id`.
-
----
-
-## 3. Frontend: top nav and tab home pages
+## A) Current top nav (repo truth)
 
 **File:** `src/contracts/nav.ts`
 
-| Tab id | Label | Path (future) | Owner |
-|--------|--------|----------------|-------|
-| dashboards-home | Dashboards | /dashboards | UI Agent |
-| customers-home | OpenDoors Customers | /customers | Customers Agent |
-| marketing-home | OpenDoors Marketing | /marketing | Marketing Agent |
-| onboarding-home | Onboarding | /onboarding | Onboarding Agent |
-| settings-home | Settings | /settings | Settings Agent |
+```ts
+export const CRM_TOP_TABS: readonly CrmTopTab[] = [
+  { id: 'dashboards-home', label: 'Dashboards', ownerAgent: 'UI Agent', path: '/dashboards' },
+  { id: 'customers-home', label: 'OpenDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
+  { id: 'marketing-home', label: 'OpenDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
+  { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },
+  { id: 'settings-home', label: 'Settings', ownerAgent: 'Settings Agent', path: '/settings' },
+] as const
+```
 
-**File:** `src/App.tsx` (switch on `activeTab`)
-
-| Tab id | Component |
-|--------|-----------|
-| dashboards-home | `<DashboardsHomePage />` |
-| customers-home | `<CustomersHomePage view={...} focusAccountName={...} onNavigate={...} />` |
-| marketing-home | `<MarketingHomePage view={...} focusAccountName={...} onNavigate={...} />` |
-| onboarding-home | `<OnboardingHomePage view={...} onNavigate={...} />` |
-| settings-home | `<SettingsHomePage view={...} onNavigate={...} />` |
-| default | `<DashboardsHomePage />` |
-
-Sub-views (e.g. accounts, contacts, inbox, reports) are driven by `activeView` and route-like state in App.tsx (e.g. accounts → customers-home/accounts).
+Tab → component: `src/App.tsx` switches on `activeTab`; customers-home → `CustomersHomePage`, marketing-home → `MarketingHomePage`, etc. Sub-views (accounts, contacts, inbox, …) driven by `activeView` / route-like state.
 
 ---
 
-## 4. Tenant selection and X-Customer-Id behavior
+## B) Tenant context flow (repo truth)
 
-**File:** `src/utils/api.ts`
+**Active client getter/store:** `src/platform/stores/settings.ts`
 
-- `getCurrentCustomerId(fallback = 'prod-customer-1')` is implemented locally in api.ts (to avoid TDZ with marketing chunk). It reads from storage key `OdcrmStorageKeys.currentCustomerId`.
-- Every `apiRequest` calls `getCurrentCustomerId('prod-customer-1')` and, if the request headers do not already have `X-Customer-Id`, sets `headers.set('X-Customer-Id', customerId)`.
-- So: **tenant for API calls = localStorage `currentCustomerId` with fallback `prod-customer-1`**. Caller can override by passing headers with `X-Customer-Id`.
+```ts
+export function getCurrentCustomerId(): string | null {
+  const v = getItem(OdcrmStorageKeys.currentCustomerId)
+  if (v && String(v).trim()) return String(v).trim()
+  return null
+}
+export function setCurrentCustomerId(customerId: string): void {
+  setItem(OdcrmStorageKeys.currentCustomerId, String(customerId || '').trim())
+  emit('settingsUpdated', { currentCustomerId: String(customerId || '').trim() })
+}
+```
 
-**File:** `src/platform/stores/settings.ts`
+**API header:** `src/utils/api.ts` — local helper `getActiveClientId()` (no fallback), then in `buildRequestInit`:
 
-- `getCurrentCustomerId(fallback = 'prod-customer-1')`: reads `OdcrmStorageKeys.currentCustomerId` from storage; if empty and fallback provided, writes fallback and returns it.
-- `setCurrentCustomerId(customerId)`: writes to same key and emits `settingsUpdated`.
-- `clearCurrentCustomerId()`: removes key and emits.
+```ts
+// Caller-provided X-Customer-Id wins. Only set from store when we have an active client (no silent fallback).
+if (!headers.has('X-Customer-Id') && customerId) headers.set('X-Customer-Id', customerId)
+```
 
-**File:** `src/platform/keys.ts`
+So: X-Customer-Id is set only when `getActiveClientId()` returns non-null; no silent default tenant.
 
-- `OdcrmStorageKeys.currentCustomerId = 'currentCustomerId'` (unprefixed legacy key).
+**Storage key:** `src/platform/keys.ts` — `OdcrmStorageKeys.currentCustomerId = 'currentCustomerId'`.
 
-**Implication:** Tenant is chosen from **localStorage** (key `currentCustomerId`) with a **hardcoded default** `prod-customer-1`. DB is source of truth for data, but **which tenant** is selected for the session is UI/storage-driven. No server-side session binding to tenant.
-
----
-
-## 5. Prisma / migrations
-
-- **Schema:** `server/prisma/schema.prisma` (valid per `npx prisma validate --schema=./prisma/schema.prisma`).
-- **Database (from migrate status):** PostgreSQL at `odcrm-postgres.postgres.database.azure.com`, schema `public`.
-- **Migrations:** 42 in `prisma/migrations`. **Two not applied:**
-  - `20260220140000_add_lead_source_applies_to`
-  - `20260222120000_add_inbox_read_signature`
-- **Status:** Migration drift. Production/DB may be ahead or behind; must be reconciled before further schema-dependent work.
+**Empty state:** `src/components/NoActiveClientEmptyState.tsx` — "Select a client to continue", CTA "Go to Clients" (dispatches `navigateToAccount`).
 
 ---
 
-## 6. Startup checks (commands run 2026-02-25)
+## C) Backend route map (repo truth)
 
-| Check | Command | Result |
-|-------|---------|--------|
-| Git status | `cd c:\CodeProjects\Clients\Opensdoors\ODCRM; git status` | Diverged (15 local, 3 remote); untracked zip files + one file |
-| Git log | `git log --oneline -10` | Listed above |
-| Frontend lint | `npm run lint` | eslint . (started; may have been slow/long) |
-| Frontend TypeScript | `npx tsc --noEmit` | Exit 0, no output |
-| Prisma validate | `npx prisma validate --schema=./prisma/schema.prisma` | "The schema at prisma\schema.prisma is valid" |
-| Prisma migrate status | `npx prisma migrate status --schema=./prisma/schema.prisma` | Exit 1; 2 migrations not applied (see above) |
-| Server tsc | `cd server; npx tsc --noEmit` | Run in background (no final exit in captured output) |
-| Server build | `cd server; npm run build` | Run in background (tsc; no final exit in captured output) |
+**File:** `server/src/index.ts`. Mount path → router variable → source file:
+
+| Mount path | Router | Source file |
+|------------|--------|-------------|
+| /api/campaigns | campaignRoutes | server/src/routes/campaigns.js |
+| /api/contacts | contactsRoutes | server/src/routes/contacts.js |
+| /api/outlook | outlookRoutes | server/src/routes/outlook.js |
+| /api/email | trackingRoutes | server/src/routes/tracking.js |
+| /api/schedules | schedulesRoutes | server/src/routes/schedules.js |
+| /api/reports | reportsRoutes | server/src/routes/reports.js |
+| /api/inbox | inboxRoutes | server/src/routes/inbox.js |
+| /api/lists | listsRoutes | server/src/routes/lists.js |
+| /api/sequences | sequencesRoutes | server/src/routes/sequences.js |
+| /api/customers | customersRoutes | server/src/routes/customers.js |
+| /api/leads | leadsRoutes | server/src/routes/leads.js |
+| /api/live | liveLeadsRouter | server/src/routes/liveLeads.js |
+| /api/lead-sources | leadSourcesRouter | server/src/routes/leadSources.js |
+| /api/templates | templatesRoutes | server/src/routes/templates.js |
+| /api/company-data | companyDataRoutes | server/src/routes/companyData.js |
+| /api/admin | adminRoutes | server/src/routes/admin.js |
+| /api/job-sectors | jobSectorsRoutes | server/src/routes/jobSectors.js |
+| /api/job-roles | jobRolesRoutes | server/src/routes/jobRoles.js |
+| /api/places | placesRoutes | server/src/routes/places.js |
+| /api/uploads | uploadsRoutes | server/src/routes/uploads.js |
+| /api/suppression | suppressionRoutes | server/src/routes/suppression.js |
+| /api/users | usersRoutes | server/src/routes/users.js |
+| /api/user-preferences | userPreferencesRoutes | server/src/routes/userPreferences.js |
+| /api/sheets | sheetsRoutes | server/src/routes/sheets.js |
+| /api/_diag | diagRoutes | server/src/routes/diag.js |
+| /api/overview | overviewRoutes | server/src/routes/overview.js |
+
+Probes (before routes): `/api/__build`, `/api/_build`, `/api/__routes`, `/api/_routes`, `/api/health`, `/api/version`; no auth. Rate limiting and CORS in index.ts.
 
 ---
 
-## 7. Files referenced in this doc
+## D) Prisma inventory (repo truth)
 
-- `server/src/index.ts` — route mounting, auth, CORS
-- `server/src/middleware/requireAuth.ts` — requireAuthForMutations, bypass rules
+**File:** `server/prisma/schema.prisma`. Models (from `Select-String -Path "server\prisma\schema.prisma" -Pattern "^model\s"`):
+
+Customer, Contact, EmailIdentity, EmailCampaign, EmailCampaignTemplate, EmailTemplate, EmailCampaignProspect, EmailCampaignProspectStep, EmailEvent, SuppressionEntry, EmailMessageMetadata, CustomerContact, ContactList, ContactSourceRow, ContactListMember, EmailSequence, EmailSequenceStep, SequenceEnrollment, LeadRecord, LeadSyncState, JobSector, JobRole, User, UserPreferences, CustomerAuditEvent, SheetSourceConfig, LeadSourceSheetConfig, LeadSourceRowSeen.
+
+**Migrate status (command:** `cd server; npx prisma migrate status --schema=.\prisma\schema.prisma` **):**
+
+```
+40 migrations found in prisma/migrations
+Your local migration history and the migrations table from your database are different:
+The last common migration is: 20260219120000_add_lead_source_sheet_config_and_row_seen
+The migrations have not yet been applied:
+  20260220140000_add_lead_source_applies_to
+  20260222120000_add_inbox_read_signature
+The migrations from the database are not found locally in prisma/migrations:
+  20260218120000_add_lead_record_occurred_source_owner_external_id
+  20260218180000_add_workspaces_table
+```
+
+(Exit code 1.)
+
+---
+
+## E) Remaining UI strings that say "Customer" (should be "Client")
+
+**Command:** `Select-String -Path "src\**\*.tsx","src\**\*.ts" -Pattern "\bCustomer(s)?\b" -AllMatches`
+
+Top 10 hits (file path + line or context):
+
+| # | File | Line / context |
+|---|------|----------------|
+| 1 | src/components/AccountsTab.tsx | 3734, 4051, 4056, 5550 "Create New Customer (via Onboarding)", 6072, 6118 "Customer ID", 6160, 6248 "Customer name", 7669 "Customer Onboarding", 7832 "Customer Onboarding" |
+| 2 | src/tabs/onboarding/components/CustomerSelector.tsx | 98 "Customer created", 154 "Customer created", 175 "Customer", 240 "Customer Name" |
+| 3 | src/components/MarketingEmailTemplatesTab.tsx | 55 type Customer, 281 "Customer filter", 304 \<Th>Customer\</Th>, 403 "Customer (optional)" |
+| 4 | src/components/ContactsTab.tsx | 186 "Customer", 266 "Customer" |
+| 5 | src/tabs/marketing/components/ComplianceTab.tsx | 293 "Customer-scoped DNC" |
+| 6 | src/tabs/onboarding/ProgressTrackerTab.tsx | 64 "Ideal Customer Profile", 88 "Customer Onboarding" |
+| 7 | src/tabs/marketing/components/EmailAccountsTab.tsx | 88 type Customer, 338 "Customer", 405 "Customer" |
+| 8 | src/components/MigrateAccountsPanel.tsx | 5 "Customers page" |
+| 9 | src/components/MarketingCognismProspectsTab.tsx | 52 type Customer, 364 "Customer account" |
+| 10 | src/components/CampaignsEnhancedTab.tsx | 308 "Customer" (FormLabel) |
+
+(Many other files use "Customer" in types or API names; above focuses on user-visible or prominent strings. Full audit: run the Select-String command above and filter for labels, placeholders, toasts, headings.)
+
+---
+
+## Files referenced in this doc
+
 - `src/contracts/nav.ts` — CRM_TOP_TABS, tab ids/paths
-- `src/App.tsx` — activeTab → page component mapping
-- `src/utils/api.ts` — getCurrentCustomerId, X-Customer-Id header
+- `src/App.tsx` — activeTab → page component
+- `src/utils/api.ts` — getActiveClientId, X-Customer-Id header
 - `src/platform/stores/settings.ts` — get/set/clear currentCustomerId
 - `src/platform/keys.ts` — OdcrmStorageKeys.currentCustomerId
+- `src/components/NoActiveClientEmptyState.tsx` — empty state when no client selected
+- `server/src/index.ts` — route mounting, imports from ./routes/*.js

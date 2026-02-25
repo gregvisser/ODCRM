@@ -1,44 +1,44 @@
-# MODE B Next Actions — Next 5 PRs (Concrete Tasks)
+# MODE B Next Actions — Next 5 PRs (Concrete, Small, Sequential)
 
 **Generated:** 2026-02-25  
-**Rule:** Execute in order. Each PR is a concrete task. PR1 (UI rename Customer → Client) is done in this run (commit 2).
+**Rule:** Execute in order. Each PR is one concrete task; docs-only or code as specified.
 
 ---
 
-## PR1: Rename UI "Customer(s)" → "Client(s)" (labels only) — DONE THIS RUN
+## PR1 (docs): MODE B Stage 0 reality check and navigation contract — THIS PR
 
-- **Scope:** Navigation tab label, headings, buttons, placeholders, toasts, modal titles, and any other user-visible text that says "Customer" or "Customers". 
-- **Out of scope:** Backend routes, Prisma model names, API contracts, internal types/variable names (e.g. `customerId`, `selectedCustomerId`).
-- **Files (examples):** `src/contracts/nav.ts` (tab label), `src/tabs/customers/CustomersHomePage.tsx` (title), `src/components/CustomersManagementTab.tsx` (headings, modals, toasts), Marketing sub-tabs (placeholders "Select customer" → "Select client"), Onboarding/ProgressTracker (labels), etc.
-- **Verification:** `npm run lint`, `npx tsc --noEmit`; manual smoke test of Clients tab and client dropdowns.
-
----
-
-## PR2: Remove silent tenant fallback(s) + add explicit empty-state UX when no active client selected — DONE
-
-- **Goal:** No silent fallback to `prod-customer-1`. When no client is selected, show explicit empty state and do not send arbitrary tenant id.
-- **Done:** getCurrentCustomerId() returns `string | null`; api.ts only sets X-Customer-Id when active client present; NoActiveClientEmptyState used in tenant-scoped areas; regression script `npm run test:no-tenant-fallback`.
+- **Scope:** Create/update docs only: `docs/product/NAVIGATION_CONTRACT.md`, `docs/build/MODE_B_REALITY_CHECK.md`, `docs/build/MODE_B_GAP_MATRIX.md`, `docs/build/MODE_B_ROADMAP.md`, `docs/build/MODE_B_NEXT_ACTIONS.md`.
+- **Goal:** Repo-truth docs; shared contract for Cursor work; stop drift.
+- **Verification:** Lint, tsc, server build (gates); no code changes.
 
 ---
 
-## PR3: Backend requireTenant middleware rollout across all tenant routes
+## PR2: Rename remaining UI "Customer" → "Client" (labels only)
 
-- **Goal:** Central middleware that resolves tenant from `x-customer-id` (and documented query where applicable), validates tenant exists, attaches to `req`; all tenant-scoped routes use it. No ad-hoc header reads in handlers.
-- **References:** `server/src/index.ts` (mounts); `server/src/routes/*` (current per-handler customerId resolution).
+- **Scope:** User-visible text only: headings, placeholders, toasts, modal titles, buttons that say "Customer" or "Customers". Not backend, API, or internal types/vars (e.g. customerId).
+- **Refs:** MODE_B_REALITY_CHECK §E (top 10 files); CustomerSelector, AccountsTab, ContactsTab, MarketingEmailTemplatesTab, ComplianceTab, EmailAccountsTab, CampaignsEnhancedTab, etc.
+- **Verification:** Lint, tsc; manual smoke of Clients tab and client dropdowns.
+
+---
+
+## PR3: Backend requireTenant middleware rollout
+
+- **Goal:** Central middleware: resolve tenant from x-customer-id (and documented query where applicable), validate tenant exists, attach to req; migrate tenant-scoped routes to use it.
+- **Refs:** `server/src/index.ts` (mounts); `server/src/routes/*` (current per-handler customerId).
 - **Deliverable:** requireTenant middleware; list of routes migrated; MODE_B_GAP_MATRIX updated.
 
 ---
 
-## PR4: Create Prospect Accounts entity + link Contacts + add activity timeline stub
+## PR4: Resolve migration drift (Gate 0)
 
-- **Goal:** Dedicated Prospect Account (company) model/table; Contacts linked to Prospect Accounts; activity timeline stub (e.g. table or API stub) for future events. Additive schema only.
-- **References:** `server/prisma/schema.prisma` (Customer, Contact, etc.); NAVIGATION_CONTRACT (Prospects = People + Companies + Lists + Activity).
-- **Deliverable:** Migration(s); API stubs or minimal endpoints; MODE_B_REALITY_CHECK updated.
+- **Goal:** Written plan + apply or document. `prisma migrate status` clean or documented.
+- **Refs:** MODE_B_REALITY_CHECK §D; MODE_B_ROADMAP Gate 0.
+- **Deliverable:** Plan in docs; migrate status output; MODE_B_REALITY_CHECK updated.
 
 ---
 
-## PR5: Multi-channel step types (EMAIL/CALL/LINKEDIN/TASK/WAIT) design + migration plan
+## PR5: Prospect Accounts entity + Contacts link + activity timeline stub
 
-- **Goal:** Design step type enum (or equivalent) for sequence steps: EMAIL, CALL, LINKEDIN, TASK, WAIT. Write migration plan (additive only); no implementation in this PR.
-- **References:** `server/prisma/schema.prisma` (EmailSequenceStep, etc.); MODE_B_ROADMAP Stage 4.
-- **Deliverable:** Design doc + migration plan in docs/build or docs/product.
+- **Goal:** Dedicated Prospect Account (company) model/table; Contacts linked to Prospect Accounts; activity timeline stub (table or API stub). Additive schema only.
+- **Refs:** `server/prisma/schema.prisma`; NAVIGATION_CONTRACT; MODE_B_ROADMAP Stage 1.
+- **Deliverable:** Migration(s); API stubs or minimal endpoints; docs updated.
