@@ -34,7 +34,7 @@ import { getItem, setItem } from '../platform/storage'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
 import { getAccounts } from '../platform/stores/accounts'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 
 /** Shape used for template picker; sourced from GET /api/templates (DB). */
 interface WizardEmailTemplate {
@@ -489,15 +489,8 @@ export default function CampaignWizard({
     setFormData((prev) => ({ ...prev, selectedProspectEmails: Array.from(next) }))
   }
 
-  if (!getCurrentCustomerId()) {
-    return (
-      <Box>
-        <NoActiveClientEmptyState />
-      </Box>
-    )
-  }
-
   return (
+    <RequireActiveClient>
     <Box>
       <VStack spacing={4} align="stretch">
         <WizardStep step={1} currentStep={step} title="Select Your Name">
@@ -978,5 +971,6 @@ export default function CampaignWizard({
         </HStack>
       </VStack>
     </Box>
+    </RequireActiveClient>
   )
 }

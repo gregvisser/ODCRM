@@ -56,7 +56,7 @@ import { getAccounts, onAccountsUpdated } from '../platform/stores/accounts'
 import { getCampaignWorkflows, setCampaignWorkflows } from '../platform/stores/campaignWorkflows'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 
 type EmailTemplate = {
   id: string
@@ -637,15 +637,8 @@ function CampaignSequencesTab() {
     })
   }
 
-  if (!customerId) {
-    return (
-      <Box>
-        <NoActiveClientEmptyState />
-      </Box>
-    )
-  }
-
   return (
+    <RequireActiveClient>
     <Stack spacing={6}>
       <Box>
         <Heading size="lg" mb={2}>
@@ -1243,6 +1236,7 @@ function CampaignSequencesTab() {
         </AlertDialogOverlay>
       </AlertDialog>
     </Stack>
+    </RequireActiveClient>
   )
 }
 

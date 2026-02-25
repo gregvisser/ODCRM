@@ -38,7 +38,7 @@ import {
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 
 interface EmailIdentity {
   id: string
@@ -132,23 +132,13 @@ export default function EmailSettingsTab() {
     }
   }
 
-  if (loading) {
-    return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="xl" />
-      </Box>
-    )
-  }
-
-  if (!customerId) {
-    return (
-      <Box>
-        <NoActiveClientEmptyState />
-      </Box>
-    )
-  }
-
   return (
+    <RequireActiveClient>
+  {loading ? (
+    <Box textAlign="center" py={10}>
+      <Spinner size="xl" />
+    </Box>
+  ) : (
     <Box>
       <HStack justify="space-between" mb={6}>
         <Heading size="lg">Email Accounts</Heading>
@@ -277,5 +267,7 @@ export default function EmailSettingsTab() {
         </ModalContent>
       </Modal>
     </Box>
+  )}
+    </RequireActiveClient>
   )
 }
