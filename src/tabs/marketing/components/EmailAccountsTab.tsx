@@ -161,9 +161,9 @@ const EmailAccountsTab: React.FC = () => {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
       const storedId = getCurrentCustomerId()
-      const current = customerList.find(c => c.id === storedId)
-      if (current) setSelectedCustomerId(storedId as string)
-      else setSelectedCustomerId('')
+      // PR2: No implicit default client selection.
+      const current = storedId != null ? customerList.find(c => c.id === storedId) : undefined
+      setSelectedCustomerId(current ? (storedId as string) : '')
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in EmailAccountsTab:', err)
       setCustomers([])
