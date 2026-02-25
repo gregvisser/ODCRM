@@ -34,6 +34,7 @@ import { getItem, setItem } from '../platform/storage'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
 import { getAccounts } from '../platform/stores/accounts'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 /** Shape used for template picker; sourced from GET /api/templates (DB). */
 interface WizardEmailTemplate {
@@ -133,9 +134,9 @@ export default function CampaignWizard({
   })
 
   const fetchIdentities = useCallback(async () => {
-    // Use the same customerId that was used for OAuth connection
-    const customerId = getCurrentCustomerId('prod-customer-1')
-    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
+    const customerId = getCurrentCustomerId()
+    if (!customerId) return
+    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${encodeURIComponent(customerId)}`)
     if (error) {
       console.error('Failed to fetch email identities:', error)
       toast({ title: 'Error', description: 'Failed to load email accounts', status: 'error' })
@@ -145,8 +146,9 @@ export default function CampaignWizard({
   }, [toast])
 
   const fetchSchedules = useCallback(async () => {
-    const customerId = getCurrentCustomerId('prod-customer-1')
-    const { data, error } = await api.get<EmailSendSchedule[]>(`/api/schedules?customerId=${customerId}`)
+    const customerId = getCurrentCustomerId()
+    if (!customerId) return
+    const { data, error } = await api.get<EmailSendSchedule[]>(`/api/schedules?customerId=${encodeURIComponent(customerId)}`)
     if (error) {
       console.error('Failed to fetch schedules:', error)
       // Non-blocking
@@ -234,7 +236,7 @@ export default function CampaignWizard({
 
   const fetchTemplates = useCallback(async () => {
     setTemplatesLoading(true)
-    const customerId = getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId()
     if (!customerId) {
       setTemplatesFromApi([])
       setTemplatesLoading(false)
@@ -485,6 +487,14 @@ export default function CampaignWizard({
 
   const setSelectedProspects = (next: Set<string>) => {
     setFormData((prev) => ({ ...prev, selectedProspectEmails: Array.from(next) }))
+  }
+
+  if (!getCurrentCustomerId()) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
+      </Box>
+    )
   }
 
   return (

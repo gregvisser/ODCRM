@@ -214,7 +214,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 export default function DashboardsHomePage() {
   const toast = useToast()
-  const customerId = getCurrentCustomerId('')
+  const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()

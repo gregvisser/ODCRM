@@ -14,11 +14,10 @@
 
 ---
 
-## PR2: Remove silent tenant fallback(s) + add explicit empty-state UX when no active client selected
+## PR2: Remove silent tenant fallback(s) + add explicit empty-state UX when no active client selected — DONE
 
-- **Goal:** No silent fallback to `prod-customer-1`. When no client is selected, show explicit empty state (e.g. "Select a client" or "No client selected") and do not send arbitrary tenant id.
-- **References:** `src/utils/api.ts` L5–9, L49 (getCurrentCustomerId('prod-customer-1')); `src/platform/stores/settings.ts`.
-- **Deliverable:** Remove or gate fallback; add UX when `currentCustomerId` is missing so user must choose a client before tenant-scoped actions.
+- **Goal:** No silent fallback to `prod-customer-1`. When no client is selected, show explicit empty state and do not send arbitrary tenant id.
+- **Done:** getCurrentCustomerId() returns `string | null`; api.ts only sets X-Customer-Id when active client present; NoActiveClientEmptyState used in tenant-scoped areas; regression script `npm run test:no-tenant-fallback`.
 
 ---
 

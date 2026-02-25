@@ -264,7 +264,7 @@ const SequencesTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      const storeCustomerId = getCurrentCustomerId('')
+      const storeCustomerId = getCurrentCustomerId()
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)

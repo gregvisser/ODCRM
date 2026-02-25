@@ -25,6 +25,7 @@ import {
 } from '@chakra-ui/react'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 type DashboardMetrics = {
   totalCustomers: number
@@ -45,14 +46,17 @@ export default function MarketingDashboard() {
 
   const fetchMetrics = async () => {
     setLoading(true)
-
-    // Fetch data from multiple endpoints
-    const customerId = getCurrentCustomerId('prod-customer-1')
+    const customerId = getCurrentCustomerId()
+    if (!customerId) {
+      setMetrics(null)
+      setLoading(false)
+      return
+    }
     const [customersRes, contactsRes, listsRes, sequencesRes, campaignsRes] = await Promise.all([
       api.get<any[]>('/api/customers'),
       api.get<any[]>('/api/contacts'),
-      api.get<any[]>(`/api/lists?customerId=${customerId}`),
-      api.get<any[]>(`/api/sequences?customerId=${customerId}`),
+      api.get<any[]>(`/api/lists?customerId=${encodeURIComponent(customerId)}`),
+      api.get<any[]>(`/api/sequences?customerId=${encodeURIComponent(customerId)}`),
       api.get<any[]>('/api/campaigns'),
     ])
 
@@ -85,6 +89,14 @@ export default function MarketingDashboard() {
     return (
       <Box textAlign="center" py={10}>
         <Spinner size="xl" />
+      </Box>
+    )
+  }
+
+  if (!getCurrentCustomerId()) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
       </Box>
     )
   }

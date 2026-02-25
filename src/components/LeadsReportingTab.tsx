@@ -50,7 +50,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 }
 
 function LeadsReportingTab() {
-  const customerId = getCurrentCustomerId('')
+  const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt

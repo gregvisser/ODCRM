@@ -37,7 +37,7 @@ async function httpJson(method, path, body) {
     headers: {
       'Content-Type': 'application/json',
       // Keep consistent with app behavior; not auth, just tenant/customer context if needed.
-      'x-customer-id': 'prod-customer-1',
+      'x-customer-id': 'test-customer-1',
     },
     body: body ? JSON.stringify(body) : undefined,
   })
