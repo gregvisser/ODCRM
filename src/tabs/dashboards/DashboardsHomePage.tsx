@@ -29,7 +29,7 @@ import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../components/RequireActiveClient'
 import { useLiveLeadsPolling } from '../../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../../utils/liveLeadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
@@ -670,21 +670,21 @@ export default function DashboardsHomePage() {
   const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const weekNumber = Math.ceil((now.getDate() + startOfToday.getDay()) / 7)
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading && leads.length === 0) {
     return (
-      <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="brand.700" thickness="4px" />
-        <Text mt={4} color="gray.600">
-          Loading live lead performance...
-        </Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={12}>
+          <Spinner size="xl" color="brand.700" thickness="4px" />
+          <Text mt={4} color="gray.600">
+            Loading live lead performance...
+          </Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <VStack spacing={3} align="stretch">
       {/* Header Stats */}
       <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
@@ -986,5 +986,6 @@ export default function DashboardsHomePage() {
         Last synced: {lastRefresh.toLocaleString('en-GB')} | Data from Google Sheets via automated sync
       </Text>
     </VStack>
+    </RequireActiveClient>
   )
 }

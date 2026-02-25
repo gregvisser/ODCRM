@@ -53,7 +53,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 import { GoogleSheetLink } from '../../../components/links/GoogleSheetLink'
 
 // Types
@@ -903,40 +903,31 @@ const LeadSourcesTab: React.FC = () => {
     )
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
-  if (loading) {
-    return (
-      <Flex justify="center" align="center" minH="400px">
-        <VStack spacing={4}>
-          <Spinner size="xl" color="blue.500" />
-          <Text color="gray.500">Loading lead sources...</Text>
-        </VStack>
-      </Flex>
-    )
-  }
-
-  if (error) {
-    return (
-      <Alert status="error">
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Failed to load lead sources</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Box>
-        <Button ml="auto" onClick={loadSources}>
-          Retry
-        </Button>
-      </Alert>
-    )
-  }
-
   const cognism = sources.find(s => s.source === 'cognism')
   const apollo = sources.find(s => s.source === 'apollo')
   const blackbook = sources.find(s => s.source === 'blackbook')
 
   return (
+    <RequireActiveClient>
+      {loading ? (
+        <Flex justify="center" align="center" minH="400px">
+          <VStack spacing={4}>
+            <Spinner size="xl" color="blue.500" />
+            <Text color="gray.500">Loading lead sources...</Text>
+          </VStack>
+        </Flex>
+      ) : error ? (
+        <Alert status="error">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Failed to load lead sources</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+          <Button ml="auto" onClick={loadSources}>
+            Retry
+          </Button>
+        </Alert>
+      ) : (
     <Box>
       {/* Header */}
       <Flex mb={6} align="center" justify="space-between">
@@ -1034,6 +1025,8 @@ const LeadSourcesTab: React.FC = () => {
       </Tabs>
 
     </Box>
+      )}
+    </RequireActiveClient>
   )
 }
 

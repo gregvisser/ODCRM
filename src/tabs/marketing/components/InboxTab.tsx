@@ -43,7 +43,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Customer type
 type Customer = {
@@ -355,19 +355,19 @@ const InboxTab: React.FC = () => {
     return date.toLocaleDateString()
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading) {
     return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="lg" />
-        <Text mt={4}>Loading inbox...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Spinner size="lg" />
+          <Text mt={4}>Loading inbox...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
@@ -728,6 +728,7 @@ const InboxTab: React.FC = () => {
         </>
       )}
     </Box>
+    </RequireActiveClient>
   )
 }
 

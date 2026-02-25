@@ -66,8 +66,7 @@ import {
   TimeIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -606,18 +605,18 @@ const CampaignsTab: React.FC = () => {
     }
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading && campaigns.length === 0) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Loading campaigns...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Loading campaigns...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Error Banner */}
       {error && (
@@ -1070,6 +1069,7 @@ const CampaignsTab: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
     </Box>
+    </RequireActiveClient>
   )
 }
 

@@ -64,7 +64,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -329,11 +329,9 @@ const EmailAccountsTab: React.FC = () => {
     })
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (!selectedCustomerId) {
     return (
+      <RequireActiveClient>
       <Box>
         <VStack align="start" spacing={1} mb={4}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
@@ -369,19 +367,23 @@ const EmailAccountsTab: React.FC = () => {
           </CardBody>
         </Card>
       </Box>
+      </RequireActiveClient>
     )
   }
 
   if (loading && identities.length === 0) {
     return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="lg" mb={4} />
-        <Text>Loading email accounts...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Spinner size="lg" mb={4} />
+          <Text>Loading email accounts...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Error Banner */}
       {error && (
@@ -703,6 +705,7 @@ const EmailAccountsTab: React.FC = () => {
         </ModalContent>
       </Modal>
     </Box>
+    </RequireActiveClient>
   )
 }
 

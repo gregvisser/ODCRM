@@ -66,8 +66,7 @@ import {
   SettingsIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type Prospect = {
   id: string
@@ -222,18 +221,18 @@ const CognismProspectsTab: React.FC = () => {
     }
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Loading prospects...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Loading prospects...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
@@ -525,6 +524,7 @@ const CognismProspectsTab: React.FC = () => {
         </ModalContent>
       </Modal>
     </Box>
+    </RequireActiveClient>
   )
 }
 

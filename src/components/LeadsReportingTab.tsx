@@ -31,7 +31,7 @@ import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../utils/liveLeadsApi'
 
@@ -90,11 +90,9 @@ function LeadsReportingTab() {
     }
   }, [refetch, toast])
 
-  if (!customerId) {
-    return <NoActiveClientEmptyState />
-  }
+  let content: ReactNode
   if (loading) {
-    return (
+    content = (
       <Box textAlign="center" py={12}>
         <Spinner size="xl" color="brand.500" thickness="4px" />
         <Text mt={4} color="gray.600">
@@ -102,10 +100,8 @@ function LeadsReportingTab() {
         </Text>
       </Box>
     )
-  }
-
-  if (error) {
-    return (
+  } else if (error) {
+    content = (
       <Alert status="error" borderRadius="lg">
         <AlertIcon />
         <Box>
@@ -114,10 +110,8 @@ function LeadsReportingTab() {
         </Box>
       </Alert>
     )
-  }
-
-  if (leads.length === 0) {
-    return (
+  } else if (leads.length === 0) {
+    content = (
       <Box textAlign="center" py={12}>
         <Text fontSize="lg" color="gray.600">
           No leads data available
@@ -127,8 +121,7 @@ function LeadsReportingTab() {
         </Text>
       </Box>
     )
-  }
-
+  } else {
   // Define the specific column order
   const columnOrder = [
     'Account',
@@ -272,7 +265,7 @@ function LeadsReportingTab() {
     return value
   }
 
-  return (
+  content = (
     <Stack spacing={6}>
       <HStack justify="space-between" align="flex-start">
         <Box>
@@ -447,6 +440,8 @@ function LeadsReportingTab() {
       )}
     </Stack>
   )
+  }
+  return <RequireActiveClient>{content}</RequireActiveClient>
 }
 
 export default LeadsReportingTab

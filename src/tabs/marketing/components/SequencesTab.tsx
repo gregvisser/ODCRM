@@ -68,7 +68,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
 import { visibleColumns } from '../../../utils/visibleColumns'
@@ -1081,26 +1081,28 @@ const SequencesTab: React.FC = () => {
     setEditingSequence((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Please select a client to view sequences.</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Please select a client to view sequences.</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   if (loading && sequences.length === 0) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Loading sequences...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Loading sequences...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {error && (
         <Alert status="error" mb={4}>
@@ -1801,6 +1803,7 @@ const SequencesTab: React.FC = () => {
         </ModalContent>
       </Modal>
     </Box>
+    </RequireActiveClient>
   )
 }
 
