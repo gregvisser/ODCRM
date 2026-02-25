@@ -89,7 +89,7 @@ export default function CustomersHomePage({
       activeId={activeView}
       onChange={(id) => onNavigate?.(id as CustomersViewId)}
       onReorder={handleNavReorder}
-      title="Customers"
+      title="Clients"
       enableDragDrop={true}
     />
   )

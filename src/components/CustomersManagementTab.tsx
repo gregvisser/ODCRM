@@ -261,7 +261,7 @@ export default function CustomersManagementTab() {
     } else {
       toast({
         title: 'Success',
-        description: isEditing ? 'Customer updated' : 'Customer created',
+        description: isEditing ? 'Client updated' : 'Client created',
         status: 'success',
       })
       onFormClose()
@@ -288,7 +288,7 @@ export default function CustomersManagementTab() {
       })
     } else {
       toast({
-        title: 'Customer Archived',
+        title: 'Client Archived',
         description: `"${customerToDelete.name}" has been archived. All data preserved.`,
         status: 'success',
         duration: 3000,
@@ -368,14 +368,14 @@ export default function CustomersManagementTab() {
     <Box>
       <HStack justify="space-between" mb={4} flexWrap="wrap" gap={4}>
         <Box>
-          <Heading size="lg">Customers / Clients</Heading>
+          <Heading size="lg">Clients</Heading>
           <Text fontSize="sm" color="gray.600">
             Manage your client companies and their key contacts
           </Text>
         </Box>
         <HStack spacing={4}>
           <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={handleCreate}>
-            New Customer
+            New Client
           </Button>
         </HStack>
       </HStack>
@@ -412,7 +412,7 @@ export default function CustomersManagementTab() {
           </HStack>
           
           <Tooltip 
-            label="Archive all customers for a clean slate. All data (contacts, sequences, campaigns) will be preserved." 
+            label="Archive all clients for a clean slate. All data (contacts, sequences, campaigns) will be preserved." 
             placement="top"
           >
             <Button 
@@ -450,8 +450,8 @@ export default function CustomersManagementTab() {
                 <Td colSpan={showArchived ? 9 : 8} textAlign="center" py={8}>
                   <Text color="gray.500">
                     {showArchived 
-                      ? 'No customers found (including archived).' 
-                      : 'No customers yet. Create your first customer to get started.'}
+? 'No clients found (including archived).'
+                      : 'No clients yet. Create your first client to get started.'}
                   </Text>
                 </Td>
               </Tr>
@@ -523,7 +523,7 @@ export default function CustomersManagementTab() {
                       <HStack spacing={1}>
                         {customer.isArchived ? (
                           // Archived customer: show Unarchive button
-                          <Tooltip label="Restore this customer to active">
+                          <Tooltip label="Restore this client to active">
                             <IconButton
                               aria-label="Unarchive"
                               icon={<RepeatIcon />}
@@ -544,7 +544,7 @@ export default function CustomersManagementTab() {
                               variant="ghost"
                               onClick={() => handleEdit(customer)}
                             />
-                            <Tooltip label="Archive this customer (data preserved)">
+                            <Tooltip label="Archive this client (data preserved)">
                               <IconButton
                                 aria-label="Archive"
                                 icon={<DeleteIcon />}
@@ -564,7 +564,7 @@ export default function CustomersManagementTab() {
                       <Td colSpan={showArchived ? 9 : 8} bg="gray.50" p={4}>
                         <VStack align="stretch" spacing={3}>
                           <Text fontWeight="bold" fontSize="sm">
-                            Customer Details
+                            Client Details
                           </Text>
                           <Grid templateColumns="repeat(3, 1fr)" gap={4}>
                             <Box>
@@ -614,7 +614,7 @@ export default function CustomersManagementTab() {
                               <GoogleSheetLink
                                 url={customer.leadsReportingUrl}
                                 label={customer.leadsGoogleSheetLabel}
-                                fallbackLabel="Customer Lead Sheet"
+                                fallbackLabel="Client Lead Sheet"
                               />
                             </Box>
                           </Grid>
@@ -623,7 +623,7 @@ export default function CustomersManagementTab() {
                             <>
                               <Divider my={2} />
                               <Text fontWeight="bold" fontSize="sm">
-                                Customer Contacts ({customer.customerContacts.length})
+                                Client Contacts ({customer.customerContacts.length})
                               </Text>
                               <VStack align="stretch" spacing={2}>
                                 {customer.customerContacts.map((contact) => (
@@ -665,11 +665,11 @@ export default function CustomersManagementTab() {
         </Table>
       </Box>
 
-      {/* Create/Edit Customer Modal */}
+      {/* Create/Edit Client Modal */}
       <Modal isOpen={isFormOpen} onClose={onFormClose} size="2xl">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{isEditing ? 'Edit Customer' : 'Create Customer'}</ModalHeader>
+          <ModalHeader>{isEditing ? 'Edit Client' : 'Create Client'}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <VStack spacing={4} align="stretch">
@@ -679,7 +679,7 @@ export default function CustomersManagementTab() {
               </Text>
               <Grid templateColumns="repeat(2, 1fr)" gap={4}>
                 <FormControl isRequired>
-                  <FormLabel fontSize="sm">Customer Name</FormLabel>
+                  <FormLabel fontSize="sm">Client Name</FormLabel>
                   <Input
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -812,7 +812,7 @@ export default function CustomersManagementTab() {
               Cancel
             </Button>
             <Button colorScheme="teal" onClick={handleSave}>
-              {isEditing ? 'Update' : 'Create'} Customer
+              {isEditing ? 'Update' : 'Create'} Client
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -822,7 +822,7 @@ export default function CustomersManagementTab() {
       <AlertDialog isOpen={isDeleteOpen} leastDestructiveRef={cancelRef} onClose={onDeleteClose}>
         <AlertDialogOverlay>
           <AlertDialogContent>
-            <AlertDialogHeader>Archive Customer</AlertDialogHeader>
+            <AlertDialogHeader>Archive Client</AlertDialogHeader>
             <AlertDialogBody>
               <VStack align="start" spacing={3}>
                 <Text>
@@ -844,7 +844,7 @@ export default function CustomersManagementTab() {
                 Cancel
               </Button>
               <Button colorScheme="orange" onClick={handleDeleteConfirm} ml={3}>
-                Archive Customer
+                Archive Client
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -858,7 +858,7 @@ export default function CustomersManagementTab() {
             <AlertDialogHeader>
               <HStack>
                 <WarningIcon color="orange.500" />
-                <Text>Archive All Customers</Text>
+                <Text>Archive All Clients</Text>
               </HStack>
             </AlertDialogHeader>
             <AlertDialogBody>
@@ -881,7 +881,7 @@ export default function CustomersManagementTab() {
                       • Historical analytics data remains intact
                     </Text>
                     <Text fontSize="sm" color="orange.600">
-                      • Customers can be restored individually at any time
+                      • Clients can be restored individually at any time
                     </Text>
                   </VStack>
                 </Box>
@@ -901,7 +901,7 @@ export default function CustomersManagementTab() {
                 isLoading={archivingAll}
                 loadingText="Archiving..."
               >
-                Archive All Customers
+                Archive All Clients
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

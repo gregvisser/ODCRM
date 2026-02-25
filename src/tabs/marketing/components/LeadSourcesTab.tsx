@@ -957,7 +957,7 @@ const LeadSourcesTab: React.FC = () => {
             <Select
               value={currentCustomerId}
               onChange={(e) => handleCustomerChange(e.target.value)}
-              placeholder={customers.length === 0 ? 'No customers' : 'Select customer'}
+              placeholder={customers.length === 0 ? 'No clients' : 'Select client'}
             >
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>

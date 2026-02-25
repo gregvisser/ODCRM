@@ -652,7 +652,7 @@ export default function LeadSourcesTabNew({
             maxW="280px"
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
-            placeholder="Select customer"
+            placeholder="Select client"
           >
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
@@ -667,7 +667,7 @@ export default function LeadSourcesTabNew({
             <CardBody>
               <VStack py={8} spacing={2}>
                 <Text color="gray.600" fontSize="md">
-                  Select a customer to view Lead Sources
+                  Select a client to view Lead Sources
                 </Text>
                 <Text fontSize="sm" color="gray.500">
                   Choose a customer from the dropdown above to connect sheets and view batches and contacts.

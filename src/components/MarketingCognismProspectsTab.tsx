@@ -281,7 +281,7 @@ export default function MarketingCognismProspectsTab() {
 
   const importParsed = async () => {
     if (!selectedCustomer) {
-      toast({ title: 'Select a customer first', description: 'Pick the customer account this list belongs to.', status: 'error' })
+      toast({ title: 'Select a client first', description: 'Pick the client account this list belongs to.', status: 'error' })
       return
     }
     if (parsed.length === 0) {
@@ -367,7 +367,7 @@ export default function MarketingCognismProspectsTab() {
             onChange={(e) => {
               setSelectedCustomer(e.target.value)
             }}
-            placeholder="Select customer"
+            placeholder="Select client"
           >
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>{customer.name}</option>
@@ -399,7 +399,7 @@ export default function MarketingCognismProspectsTab() {
         <Alert status="warning">
           <AlertIcon />
           <AlertDescription>
-            No customer accounts found. Add customers in Customers → Accounts first.
+            No client accounts found. Add clients in Clients → Accounts first.
           </AlertDescription>
         </Alert>
       )}
@@ -453,7 +453,7 @@ export default function MarketingCognismProspectsTab() {
 
         <HStack spacing={2}>
           <IconButton
-            aria-label="Delete customer list"
+            aria-label="Delete client list"
             icon={<DeleteIcon />}
             size="sm"
             colorScheme="gray"

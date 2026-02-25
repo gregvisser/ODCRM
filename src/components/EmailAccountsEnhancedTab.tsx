@@ -154,7 +154,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     // LOCKDOWN: Require valid customerId before connecting
     if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
       toast({
-        title: 'Select a customer first',
+        title: 'Select a client first',
         description: 'You must select a valid customer before connecting an Outlook account.',
         status: 'error',
         duration: 5000,
@@ -390,7 +390,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
             isDisabled={!isValidCustomer || identities.length >= 5}
             title={
               !isValidCustomer 
-                ? 'Select a customer first' 
+                ? 'Select a client first' 
                 : identities.length >= 5 
                   ? 'Limit reached (5). Disconnect one to add another.'
                   : 'Connect Outlook account'
@@ -430,7 +430,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                   </Text>
                   {!isValidCustomer && (
                     <Text color="orange.500" fontSize="sm" mb={3}>
-                      Select a customer first to connect email accounts.
+                      Select a client first to connect email accounts.
                     </Text>
                   )}
                   <HStack justify="center" spacing={3}>

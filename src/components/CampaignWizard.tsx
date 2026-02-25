@@ -522,7 +522,7 @@ export default function CampaignWizard({
           </VStack>
         </WizardStep>
 
-        <WizardStep step={2} currentStep={step} title="Select Customer & Settings">
+        <WizardStep step={2} currentStep={step} title="Select Client & Settings">
           <VStack spacing={4} align="stretch">
             <FormControl isRequired>
               <FormLabel>Customer account</FormLabel>
@@ -538,7 +538,7 @@ export default function CampaignWizard({
                   }))
                   setProspectSearch('')
                 }}
-                placeholder="Select customer"
+                placeholder="Select client"
               >
                 {availableAccounts.map((name) => (
                   <option key={name} value={name}>
@@ -550,7 +550,7 @@ export default function CampaignWizard({
                 <Alert status="warning" mt={2}>
                   <AlertIcon />
                   <AlertDescription>
-                    No customer accounts found. Add accounts in Customers → Accounts first.
+                    No client accounts found. Add accounts in Clients → Accounts first.
                   </AlertDescription>
                 </Alert>
               )}
@@ -909,7 +909,7 @@ export default function CampaignWizard({
             ) : (
               <Alert status="warning">
                 <AlertIcon />
-                <AlertDescription fontSize="sm">Select a customer in the previous step first.</AlertDescription>
+                <AlertDescription fontSize="sm">Select a client in the previous step first.</AlertDescription>
               </Alert>
             )}
           </VStack>
