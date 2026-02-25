@@ -25,7 +25,7 @@ import {
 } from '@chakra-ui/react'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 
 type DashboardMetrics = {
   totalCustomers: number
@@ -85,23 +85,13 @@ export default function MarketingDashboard() {
     fetchMetrics()
   }, [])
 
-  if (loading) {
-    return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="xl" />
-      </Box>
-    )
-  }
-
-  if (!getCurrentCustomerId()) {
-    return (
-      <Box>
-        <NoActiveClientEmptyState />
-      </Box>
-    )
-  }
-
   return (
+    <RequireActiveClient>
+  {loading ? (
+    <Box textAlign="center" py={10}>
+      <Spinner size="xl" />
+    </Box>
+  ) : (
     <Box>
       <VStack align="stretch" spacing={6}>
         <Box>
@@ -232,5 +222,7 @@ export default function MarketingDashboard() {
         </Card>
       </VStack>
     </Box>
+  )}
+    </RequireActiveClient>
   )
 }

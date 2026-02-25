@@ -39,7 +39,7 @@ import {
 import { AddIcon, ViewIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 
 type Campaign = {
   id: string
@@ -192,23 +192,13 @@ export default function CampaignsEnhancedTab() {
     }
   }
 
-  if (loading) {
-    return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="xl" />
-      </Box>
-    )
-  }
-
-  if (!activeCustomerId) {
-    return (
-      <Box>
-        <NoActiveClientEmptyState />
-      </Box>
-    )
-  }
-
   return (
+    <RequireActiveClient>
+  {loading ? (
+    <Box textAlign="center" py={10}>
+      <Spinner size="xl" />
+    </Box>
+  ) : (
     <Box>
       <HStack justify="space-between" mb={4}>
         <Box>
@@ -388,5 +378,7 @@ export default function CampaignsEnhancedTab() {
         </ModalContent>
       </Modal>
     </Box>
+  )}
+    </RequireActiveClient>
   )
 }

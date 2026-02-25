@@ -23,7 +23,8 @@
     "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1",
     "prod:check": "node scripts/prod-check.cjs",
     "test:no-tenant-fallback": "node scripts/self-test-no-tenant-fallback.mjs",
-    "test:tenant-guard": "node scripts/self-test-no-tenant-api-without-client.mjs"
+    "test:tenant-guard": "node scripts/self-test-no-tenant-api-without-client.mjs",
+    "test:require-active-client": "node scripts/self-test-require-active-client-wrapper.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
