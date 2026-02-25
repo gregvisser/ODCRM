@@ -1,0 +1,51 @@
+# After each push to main, poll prod until frontend and backend both serve the pushed SHA.
+name: Prod parity after merge
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: prod-parity-after-merge
+  cancel-in-progress: true
+
+jobs:
+  parity-poller:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Poll until prod frontend and backend match push SHA
+        run: |
+          EXPECT_SHA="${{ github.sha }}"
+          echo "Expecting prod to serve SHA: $EXPECT_SHA"
+          for i in $(seq 1 60); do
+            echo "--- Attempt $i/60 ---"
+            if EXPECT_SHA="$EXPECT_SHA" node scripts/prod-check.cjs; then
+              echo "Prod parity reached."
+              exit 0
+            fi
+            if [ "$i" -lt 60 ]; then
+              echo "Sleeping 10s..."
+              sleep 10
+            fi
+          done
+          echo "Prod did not reach parity within 60 attempts."
+          exit 1
+        env:
+          PROD_FRONTEND: https://odcrm.bidlow.co.uk
+          PROD_BACKEND: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net

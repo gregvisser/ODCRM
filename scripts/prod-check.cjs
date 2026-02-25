@@ -4,7 +4,8 @@
  * Mode B (drift check): compare frontend __build.json sha to backend /api/_build sha; exit 1 on mismatch.
  * No new dependencies; safe for CI (no interactive).
  *
- * Env: PROD_FRONTEND, PROD_BACKEND (optional); EXPECT_BACKEND_SHA (optional, enables Mode A).
+ * Env: PROD_FRONTEND, PROD_BACKEND (optional); EXPECT_BACKEND_SHA (optional, enables Mode A);
+ *       EXPECT_SHA (optional): in Mode B, require both frontend and backend SHA to equal this value.
  */
 
 const https = require("https");
@@ -151,6 +152,19 @@ async function modeB() {
   if (!frontendSha || !backendSha) {
     console.error("\n❌ Could not read SHA from one or both build endpoints.");
     process.exit(1);
+  }
+
+  const expectSha = process.env.EXPECT_SHA ? process.env.EXPECT_SHA.trim() : null;
+  if (expectSha) {
+    if (frontendSha !== expectSha || backendSha !== expectSha) {
+      console.error("\n❌ Prod parity gate: frontend and/or backend SHA do not match expected.");
+      console.error("   Expected SHA:   ", expectSha);
+      console.error("   FRONTEND SHA:  ", frontendSha);
+      console.error("   BACKEND SHA:   ", backendSha);
+      process.exit(1);
+    }
+    console.log("\n✅ FRONTEND and BACKEND SHAs match expected:", expectSha);
+    process.exit(0);
   }
 
   console.log("\n✅ FRONTEND and BACKEND SHAs match:", frontendSha);
