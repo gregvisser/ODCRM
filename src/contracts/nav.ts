@@ -16,7 +16,7 @@ export type CrmTopTab = {
 
 export const CRM_TOP_TABS: readonly CrmTopTab[] = [
   { id: 'dashboards-home', label: 'Dashboards', ownerAgent: 'UI Agent', path: '/dashboards' },
-  { id: 'customers-home', label: 'OpenDoors Customers', ownerAgent: 'Customers Agent', path: '/customers' },
+  { id: 'customers-home', label: 'OpenDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
   { id: 'marketing-home', label: 'OpenDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
   { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },
   { id: 'settings-home', label: 'Settings', ownerAgent: 'Settings Agent', path: '/settings' },

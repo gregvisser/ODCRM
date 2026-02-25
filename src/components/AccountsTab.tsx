@@ -4493,7 +4493,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const handleConnectOutlook = useCallback(() => {
     if (!selectedAccount) {
       toast({
-        title: 'Select a customer first',
+        title: 'Select a client first',
         description: 'You must select a customer before connecting an Outlook account.',
         status: 'error',
         duration: 5000,
@@ -6233,7 +6233,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                             <Stack spacing={6}>
                               <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}>
                                 <EditableField
-                                  label="Customer Name"
+                                  label="Client Name"
                                   value={c?.name || selectedAccount.name}
                                   isEditing={isFieldEditing(accountName, 'drawer.details.name')}
                                   onEdit={() => startEditing(accountName, 'drawer.details.name')}
@@ -7686,7 +7686,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           if (!file) return
                           if (!customer?.id) {
                             toast({
-                              title: 'No customer selected',
+                              title: 'No client selected',
                               description: 'Unable to upload document without a database customer ID.',
                               status: 'error',
                               duration: 5000,

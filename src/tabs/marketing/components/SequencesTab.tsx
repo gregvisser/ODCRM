@@ -651,7 +651,7 @@ const SequencesTab: React.FC = () => {
     sequenceId?: string | null
   ) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
-      throw new Error('Select a customer to save sequences.')
+      throw new Error('Select a client to save sequences.')
     }
     const headers = { 'X-Customer-Id': selectedCustomerId }
 
@@ -798,7 +798,7 @@ const SequencesTab: React.FC = () => {
       }
 
       if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
-        throw new Error('Select a customer to save.')
+        throw new Error('Select a client to save.')
       }
       const campaignHeaders = { 'X-Customer-Id': selectedCustomerId }
       if (editingSequence.campaignId) {
@@ -953,7 +953,7 @@ const SequencesTab: React.FC = () => {
       }
 
       if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
-        toast({ title: 'Select a customer to start sequence', status: 'error' })
+        toast({ title: 'Select a client to start sequence', status: 'error' })
         return
       }
       const startHeaders = { 'X-Customer-Id': selectedCustomerId }
@@ -1085,7 +1085,7 @@ const SequencesTab: React.FC = () => {
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <Box textAlign="center" py={10}>
-        <Text>Please select a customer to view sequences.</Text>
+        <Text>Please select a client to view sequences.</Text>
       </Box>
     )
   }
@@ -1186,7 +1186,7 @@ const SequencesTab: React.FC = () => {
                   // Update the global settings store so API calls use the correct customer
                   setCurrentCustomerId(newCustomerId)
                 }}
-                placeholder="Select customer"
+                placeholder="Select client"
               >
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>

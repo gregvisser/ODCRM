@@ -103,7 +103,7 @@ export default function MarketingDashboard() {
           <Card>
             <CardBody>
               <Stat>
-                <StatLabel>Total Customers</StatLabel>
+                <StatLabel>Total Clients</StatLabel>
                 <StatNumber>{metrics?.totalCustomers || 0}</StatNumber>
                 <StatHelpText>Client accounts</StatHelpText>
               </Stat>

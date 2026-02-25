@@ -154,7 +154,7 @@ const ReportsTab: React.FC = () => {
         <CardBody>
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
             <FormControl>
-              <FormLabel>Select Customer</FormLabel>
+              <FormLabel>Select Client</FormLabel>
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => setSelectedCustomerId(e.target.value)}
@@ -415,12 +415,12 @@ const ReportsTab: React.FC = () => {
         </>
       )}
 
-      {/* No customer selected */}
+      {/* No client selected */}
       {!selectedCustomerId && customers.length > 0 && (
         <Card>
           <CardBody textAlign="center" py={12}>
             <Text fontSize="lg" color="gray.600">
-              Select a customer from the dropdown above to view their email reports
+              Select a client from the dropdown above to view their email reports
             </Text>
           </CardBody>
         </Card>

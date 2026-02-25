@@ -114,7 +114,7 @@ export default function ContactsTab() {
 
   const handleCreate = async () => {
     if (!newContact.customerId) {
-      toast({ title: 'Select a customer', status: 'warning', duration: 2500 })
+      toast({ title: 'Select a client', status: 'warning', duration: 2500 })
       return
     }
     if (!newContact.name.trim()) {
@@ -268,7 +268,7 @@ export default function ContactsTab() {
                   value={newContact.customerId}
                   onChange={(e) => setNewContact((p) => ({ ...p, customerId: e.target.value }))}
                 >
-                  <option value="">Select customer</option>
+                  <option value="">Select client</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}

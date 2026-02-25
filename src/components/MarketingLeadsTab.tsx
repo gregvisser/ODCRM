@@ -1308,7 +1308,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                 <Alert status="info" mt={2} borderRadius="md">
                   <AlertIcon />
                   <Box>
-                    <AlertTitle>No customers have a Leads reporting URL configured</AlertTitle>
+                    <AlertTitle>No clients have a Leads reporting URL configured</AlertTitle>
                     <AlertDescription>Add a Google Sheet URL in Settings → Accounts to see combined metrics here.</AlertDescription>
                   </Box>
                 </Alert>

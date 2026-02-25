@@ -265,8 +265,8 @@ const TemplatesTab: React.FC = () => {
     }
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       toast({
-        title: 'No customer selected',
-        description: 'Select a customer to create or update templates.',
+        title: 'No client selected',
+        description: 'Select a client to create or update templates.',
         status: 'error',
         duration: 3000,
       })
@@ -315,8 +315,8 @@ const TemplatesTab: React.FC = () => {
   const handleDuplicateTemplate = async (template: EmailTemplate) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       toast({
-        title: 'No customer selected',
-        description: 'Select a customer to duplicate templates.',
+        title: 'No client selected',
+        description: 'Select a client to duplicate templates.',
         status: 'error',
         duration: 3000,
       })
@@ -369,7 +369,7 @@ const TemplatesTab: React.FC = () => {
 
   const handleDeleteTemplate = async (templateId: string) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
-      toast({ title: 'No customer selected', status: 'error', duration: 3000 })
+      toast({ title: 'No client selected', status: 'error', duration: 3000 })
       return
     }
     try {
@@ -400,7 +400,7 @@ const TemplatesTab: React.FC = () => {
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <Box textAlign="center" py={10}>
-        <Text>Please select a customer to view templates.</Text>
+        <Text>Please select a client to view templates.</Text>
       </Box>
     )
   }
@@ -428,7 +428,7 @@ const TemplatesTab: React.FC = () => {
             <Select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
-              placeholder="Select Customer"
+              placeholder="Select Client"
             >
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>

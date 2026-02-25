@@ -220,8 +220,8 @@ const EmailAccountsTab: React.FC = () => {
   const handleConnectOutlook = () => {
     if (!selectedCustomerId) {
       toast({
-        title: 'No customer selected',
-        description: 'Please select a customer first',
+        title: 'No client selected',
+        description: 'Please select a client first',
         status: 'error',
         duration: 3000,
       })
@@ -367,7 +367,7 @@ const EmailAccountsTab: React.FC = () => {
                   setCurrentCustomerId(id)
                 }
               }}
-              placeholder="Select customer"
+              placeholder="Select client"
             >
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
@@ -380,7 +380,7 @@ const EmailAccountsTab: React.FC = () => {
         <Card>
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
-            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a customer to view email accounts</Text>
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to view email accounts</Text>
             <Text color="gray.600">
               Choose a customer from the dropdown above to see their connected email accounts, or connect new ones.
             </Text>
@@ -432,7 +432,7 @@ const EmailAccountsTab: React.FC = () => {
                   setSelectedCustomerId(id)
                   setCurrentCustomerId(id)
                 }}
-                placeholder="Select customer"
+                placeholder="Select client"
               >
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>

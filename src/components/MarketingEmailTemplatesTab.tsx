@@ -167,7 +167,7 @@ export default function MarketingEmailTemplatesTab() {
     const activeCustomerId =
       getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
     if (!activeCustomerId) {
-      toast({ title: 'Missing customer', description: 'Select a customer first.', status: 'error' })
+      toast({ title: 'Missing client', description: 'Select a client first.', status: 'error' })
       return
     }
 
@@ -223,6 +223,44 @@ export default function MarketingEmailTemplatesTab() {
     await loadTemplates(activeCustomerId)
     setTemplateToDelete(null)
     onDeleteClose()
+  }
+
+  const runGeminiEnhance = async () => {
+    if (!enhanceGoal.trim() || !enhanceTone.trim()) {
+      toast({ title: 'Required', description: 'Goal and tone are required.', status: 'warning' })
+      return
+    }
+    const activeCustomerId = getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+    if (!activeCustomerId) {
+      toast({ title: 'Select client', description: 'Choose a client first.', status: 'warning' })
+      return
+    }
+    setEnhanceLoading(true)
+    setEnhanceError(null)
+    const { data, error } = await api.post<{ enhancedSubject: string; enhancedBodyHtml: string; modelUsed: string }>(
+      `/api/templates/gemini-enhance?customerId=${activeCustomerId}`,
+      {
+        goal: enhanceGoal.trim(),
+        tone: enhanceTone.trim(),
+        audience: enhanceAudience.trim() || undefined,
+        subject: draft.subject || undefined,
+        bodyHtml: draft.body || undefined,
+      }
+    )
+    setEnhanceLoading(false)
+    if (error) {
+      setEnhanceError(error)
+      if (error.includes('501') || error.includes('not configured')) {
+        toast({ title: 'Feature not configured', description: 'Gemini API key is not set on the server.', status: 'info' })
+      } else {
+        toast({ title: 'Enhancement failed', description: error, status: 'error' })
+      }
+      return
+    }
+    if (data?.enhancedSubject != null) setDraft((d) => ({ ...d, subject: data.enhancedSubject }))
+    if (data?.enhancedBodyHtml != null) setDraft((d) => ({ ...d, body: data.enhancedBodyHtml }))
+    toast({ title: 'Enhanced', description: 'Subject and body updated. Review and save when ready.', status: 'success', duration: 2500 })
+    onEnhanceClose()
   }
 
   return (

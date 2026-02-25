@@ -186,7 +186,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => handleSelectChange(e.target.value)}
-                placeholder={customers.length ? 'Select customer' : 'No customers found'}
+                placeholder={customers.length ? 'Select client' : 'No clients found'}
                 size="sm"
                 flex="1"
               >
@@ -195,10 +195,10 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
                     {customer.name}
                   </option>
                 ))}
-                <option value={CREATE_NEW_VALUE}>+ Create new customer…</option>
+                <option value={CREATE_NEW_VALUE}>+ Create new client…</option>
               </Select>
               <IconButton
-                aria-label="Refresh customers"
+                aria-label="Refresh clients"
                 icon={<RepeatIcon />}
                 size="sm"
                 variant="outline"
@@ -210,7 +210,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
                   })
                   void fetchCustomers()
                 }}
-                title="Refresh customer list"
+                title="Refresh client list"
               />
             </HStack>
           )}
@@ -224,7 +224,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
 
         {!isLoading && customers.length === 0 ? (
           <Text fontSize="xs" color="gray.500">
-            No customers found yet. Use “+ Create new customer…” to start onboarding.
+            No clients found yet. Use “+ Create new client…” to start onboarding.
           </Text>
         ) : null}
       </VStack>
@@ -232,7 +232,7 @@ export default function CustomerSelector({ selectedCustomerId, onCustomerChange 
       <Modal isOpen={isOpen} onClose={onClose}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Create new customer</ModalHeader>
+          <ModalHeader>Create new client</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <VStack align="stretch" spacing={4}>

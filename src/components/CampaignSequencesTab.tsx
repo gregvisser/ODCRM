@@ -504,7 +504,7 @@ function CampaignSequencesTab() {
       return
     }
     if (!customerId) {
-      toast({ title: 'No customer selected', description: 'Select a customer to create templates.', status: 'error' })
+      toast({ title: 'No client selected', description: 'Select a client to create templates.', status: 'error' })
       return
     }
 
@@ -561,7 +561,7 @@ function CampaignSequencesTab() {
       return
     }
     if (!customerId) {
-      toast({ title: 'No customer selected', description: 'Select a customer to update templates.', status: 'error' })
+      toast({ title: 'No client selected', description: 'Select a client to update templates.', status: 'error' })
       return
     }
 
@@ -614,7 +614,7 @@ function CampaignSequencesTab() {
   const handleDeleteTemplateConfirm = async () => {
     if (!templateToDelete) return
     if (!customerId) {
-      toast({ title: 'No customer selected', description: 'Select a customer to delete templates.', status: 'error' })
+      toast({ title: 'No client selected', description: 'Select a client to delete templates.', status: 'error' })
       return
     }
     const headers = { 'X-Customer-Id': customerId }
@@ -796,7 +796,7 @@ function CampaignSequencesTab() {
             <Stack spacing={6}>
               {!customerId && (
                 <Box p={4} bg="orange.50" borderRadius="md" borderWidth="1px" borderColor="orange.200">
-                  <Text>Select a customer to view and manage templates.</Text>
+                  <Text>Select a client to view and manage templates.</Text>
                 </Box>
               )}
               <HStack justify="flex-end">
@@ -819,7 +819,7 @@ function CampaignSequencesTab() {
                     No templates yet
                   </Text>
                   <Text fontSize="sm" color="gray.500" mb={4}>
-                    {customerId ? 'Create your first email template to get started' : 'Select a customer first.'}
+                    {customerId ? 'Create your first email template to get started' : 'Select a client first.'}
                   </Text>
                   {customerId && (
                     <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={onTemplateModalOpen}>

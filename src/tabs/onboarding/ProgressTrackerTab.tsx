@@ -197,7 +197,7 @@ export default function ProgressTrackerTab() {
     setSelectedCustomerId(next)
     toast({
       title: 'Onboarding complete',
-      description: next ? 'Auto-selected next incomplete customer.' : 'Select another customer.',
+      description: next ? 'Auto-selected next incomplete client.' : 'Select another client.',
       status: 'success',
       duration: 5000,
       isClosable: true,
@@ -270,7 +270,7 @@ export default function ProgressTrackerTab() {
   if (loading) {
     return (
       <Box p={6}>
-        <Text>Loading customers…</Text>
+        <Text>Loading clients…</Text>
       </Box>
     )
   }
@@ -279,7 +279,7 @@ export default function ProgressTrackerTab() {
     return (
       <Box p={6}>
         <Text color="red.500" fontSize="sm">
-          Failed to load customers: {error}
+          Failed to load clients: {error}
         </Text>
       </Box>
     )
@@ -290,17 +290,17 @@ export default function ProgressTrackerTab() {
       <Stack spacing={4} mb={4}>
         <Heading size="md">Progress Tracker</Heading>
         <Text color="gray.600" fontSize="sm">
-          Track onboarding progress across Sales, Operations, and Account Management teams. Checklist state is saved per customer.
+          Track onboarding progress across Sales, Operations, and Account Management teams. Checklist state is saved per client.
         </Text>
 
         <Flex gap={4} align="center" wrap="wrap">
           <Box minW={{ base: '100%', md: '360px' }}>
             <Text fontSize="sm" fontWeight="semibold" color="gray.700" mb={1}>
-              Customer
+              Client
             </Text>
             <Select
               value={selectedCustomerId}
-              placeholder={filteredCustomers.length || showCompleted ? 'Select customer' : 'No incomplete onboardings'}
+              placeholder={filteredCustomers.length || showCompleted ? 'Select client' : 'No incomplete onboardings'}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               size="sm"
             >
@@ -324,7 +324,7 @@ export default function ProgressTrackerTab() {
       {!selectedCustomerId ? (
         <Box p={6} border="1px solid" borderColor="gray.200" borderRadius="xl" bg="white">
           <Text color="gray.600" fontSize="sm">
-            Select a customer to view and update progress.
+            Select a client to view and update progress.
           </Text>
         </Box>
       ) : isLoadingProgress ? (

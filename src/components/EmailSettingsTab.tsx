@@ -81,7 +81,7 @@ export default function EmailSettingsTab() {
     // LOCKDOWN: Require valid customerId before connecting
     if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
       toast({
-        title: 'Select a customer first',
+        title: 'Select a client first',
         description: 'You must select a valid customer before connecting an Outlook account.',
         status: 'error',
         duration: 5000,
@@ -150,7 +150,7 @@ export default function EmailSettingsTab() {
           colorScheme="gray"
           onClick={handleConnectOutlook}
           isDisabled={!isValidCustomer}
-          title={!isValidCustomer ? 'Select a customer first' : 'Connect Outlook account'}
+          title={!isValidCustomer ? 'Select a client first' : 'Connect Outlook account'}
         >
           Connect Outlook Account
         </Button>
@@ -168,7 +168,7 @@ export default function EmailSettingsTab() {
           <Text color="gray.500" mb={4}>No email accounts connected yet.</Text>
           {!isValidCustomer && (
             <Text color="orange.500" fontSize="sm" mb={4}>
-              Select a customer first to connect email accounts.
+              Select a client first to connect email accounts.
             </Text>
           )}
           <Button

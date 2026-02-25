@@ -73,7 +73,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       items.push(
         {
           id: 'customer-onboarding',
-          label: 'Customer Onboarding',
+          label: 'Client Onboarding',
           icon: EditIcon,
           content: <CustomerOnboardingTab customerId={selectedCustomerId} />,
           sortOrder: 1,
@@ -94,7 +94,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         {!selectedCustomerId ? (
           <Box mb={4} p={4} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
             <Text fontSize="sm" color="gray.700">
-              Select a customer (or create one from the dropdown) to begin onboarding.
+              Select a client (or create one from the dropdown) to begin onboarding.
             </Text>
           </Box>
         ) : null}
