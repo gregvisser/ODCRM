@@ -53,6 +53,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
 import { GoogleSheetLink } from '../../../components/links/GoogleSheetLink'
 
 // Types
@@ -185,11 +186,7 @@ const LeadSourcesTab: React.FC = () => {
 
       setCustomers(list)
 
-      if (!currentCustomerId && list.length > 0) {
-        setCurrentCustomerId(list[0].id)
-        setCurrentCustomerId(list[0].id)
-      } else if (currentCustomerId && !list.some((c) => c.id === currentCustomerId) && list.length > 0) {
-        setCurrentCustomerId(list[0].id)
+      if (currentCustomerId && !list.some((c) => c.id === currentCustomerId) && list.length > 0) {
         setCurrentCustomerId(list[0].id)
       }
     } catch (err: any) {
@@ -906,6 +903,9 @@ const LeadSourcesTab: React.FC = () => {
     )
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading) {
     return (
       <Flex justify="center" align="center" minH="400px">

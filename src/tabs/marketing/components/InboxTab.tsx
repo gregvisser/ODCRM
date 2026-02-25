@@ -43,6 +43,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
 
 // Customer type
 type Customer = {
@@ -198,8 +199,6 @@ const InboxTab: React.FC = () => {
       const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(storedCustomerId)
-      } else if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id)
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
@@ -356,6 +355,9 @@ const InboxTab: React.FC = () => {
     return date.toLocaleDateString()
   }
 
+  if (!getCurrentCustomerId()) {
+    return <NoActiveClientEmptyState />
+  }
   if (loading) {
     return (
       <Box textAlign="center" py={10}>
