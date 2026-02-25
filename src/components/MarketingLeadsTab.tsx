@@ -56,7 +56,7 @@ import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 import { getSyncStatus, type SyncStatus } from '../utils/leadsApi'
 import { fetchAllCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
@@ -1156,33 +1156,35 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     })
   }, [toast])
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading && leads.length === 0) {
     return (
-      <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="brand.700" thickness="4px" />
-        <Text mt={4} color="gray.600">
-          Loading leads data from the server...
-        </Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={12}>
+          <Spinner size="xl" color="brand.700" thickness="4px" />
+          <Text mt={4} color="gray.600">
+            Loading leads data from the server...
+          </Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   if (error && leads.length === 0) {
     return (
-      <Alert status="error" borderRadius="lg">
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Box>
-      </Alert>
+      <RequireActiveClient>
+        <Alert status="error" borderRadius="lg">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Error loading leads</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+        </Alert>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Stack spacing={{ base: 4, md: 6, lg: 8 }} px={{ base: 0, md: 0 }} pb={8}>
       {leads.length === 0 && syncStatusForEmpty && (
         <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
@@ -2471,6 +2473,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         </Alert>
       )}
     </Stack>
+    </RequireActiveClient>
   )
 }
 

@@ -37,7 +37,7 @@ import {
 import { DeleteIcon, AttachmentIcon, CloseIcon, CheckIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { getCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type SuppressionEntry = {
   id: string
@@ -271,10 +271,8 @@ export default function ComplianceTab() {
     }
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   return (
+    <RequireActiveClient>
     <Box>
       <VStack align="stretch" spacing={6}>
         <Box>
@@ -544,5 +542,6 @@ gmail.com,Domain block`}
         </Tabs>
       </VStack>
     </Box>
+    </RequireActiveClient>
   )
 }

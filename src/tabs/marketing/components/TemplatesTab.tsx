@@ -60,7 +60,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
-import NoActiveClientEmptyState from '../../../components/NoActiveClientEmptyState'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type EmailTemplate = {
   id: string
@@ -396,26 +396,28 @@ const TemplatesTab: React.FC = () => {
     }
   }
 
-  if (!getCurrentCustomerId()) {
-    return <NoActiveClientEmptyState />
-  }
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Please select a client to view templates.</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Please select a client to view templates.</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   if (loading) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Loading templates...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Loading templates...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
@@ -793,6 +795,7 @@ const TemplatesTab: React.FC = () => {
         </ModalContent>
       </Modal>
     </Box>
+    </RequireActiveClient>
   )
 }
 

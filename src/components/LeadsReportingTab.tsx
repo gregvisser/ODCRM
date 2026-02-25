@@ -31,7 +31,7 @@ import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { getCurrentCustomerId } from '../platform/stores/settings'
-import NoActiveClientEmptyState from './NoActiveClientEmptyState'
+import RequireActiveClient from './RequireActiveClient'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../utils/liveLeadsApi'
 
@@ -90,42 +90,45 @@ function LeadsReportingTab() {
     }
   }, [refetch, toast])
 
-  if (!customerId) {
-    return <NoActiveClientEmptyState />
-  }
   if (loading) {
     return (
-      <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="brand.500" thickness="4px" />
-        <Text mt={4} color="gray.600">
-          Loading leads data from the server...
-        </Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={12}>
+          <Spinner size="xl" color="brand.500" thickness="4px" />
+          <Text mt={4} color="gray.600">
+            Loading leads data from the server...
+          </Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   if (error) {
     return (
-      <Alert status="error" borderRadius="lg">
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Box>
-      </Alert>
+      <RequireActiveClient>
+        <Alert status="error" borderRadius="lg">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Error loading leads</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Box>
+        </Alert>
+      </RequireActiveClient>
     )
   }
 
   if (leads.length === 0) {
     return (
-      <Box textAlign="center" py={12}>
-        <Text fontSize="lg" color="gray.600">
-          No leads data available
-        </Text>
-        <Text fontSize="sm" color="gray.500" mt={2}>
-          Configure Client Leads sheets in account settings to view leads data
-        </Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={12}>
+          <Text fontSize="lg" color="gray.600">
+            No leads data available
+          </Text>
+          <Text fontSize="sm" color="gray.500" mt={2}>
+            Configure Client Leads sheets in account settings to view leads data
+          </Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
@@ -273,6 +276,7 @@ function LeadsReportingTab() {
   }
 
   return (
+    <RequireActiveClient>
     <Stack spacing={6}>
       <HStack justify="space-between" align="flex-start">
         <Box>
@@ -446,6 +450,7 @@ function LeadsReportingTab() {
         </Box>
       )}
     </Stack>
+    </RequireActiveClient>
   )
 }
 
