@@ -1,5 +1,5 @@
 export const CUSTOMERS_PLANNED_AREAS = [
-  'Customer records',
+  'Client records',
   'Accounts',
   'Contacts',
   'Services',

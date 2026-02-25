@@ -207,7 +207,7 @@ export async function migrateAccountsToDatabase(options?: {
   if (dryRun) {
     console.log('\n💡 This was a DRY RUN. Run with { dryRun: false } to apply changes.')
   } else if (results.success > 0) {
-    console.log('\n✅ Migration complete! Refresh the Customers page to see your data.')
+    console.log('\n✅ Migration complete! Refresh the Clients page to see your data.')
   }
   
   return results

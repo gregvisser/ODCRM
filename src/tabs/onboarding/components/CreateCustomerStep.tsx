@@ -46,7 +46,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
 
     // Validate required fields
     if (!formData.name.trim()) {
-      setFormError('Customer name is required')
+      setFormError('Client name is required')
       return
     }
 
@@ -90,7 +90,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
     emit('customerCreated', { id, name: formData.name })
     
     toast({
-      title: 'Customer created',
+      title: 'Client created',
       description: `${formData.name} has been added. Continue with onboarding details.`,
       status: 'success',
       duration: 3000,
@@ -115,7 +115,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
       <VStack spacing={6} align="stretch">
         <Box textAlign="center">
           <Heading size="lg" mb={2}>
-            Create New Customer
+            Create New Client
           </Heading>
           <Text color="gray.600" fontSize="md">
             Start the onboarding process by creating a new customer account.
@@ -136,7 +136,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
         <form onSubmit={handleSubmit}>
           <VStack spacing={5} align="stretch">
             <FormControl isRequired isInvalid={!!formError && !formData.name.trim()}>
-              <FormLabel fontWeight="semibold">Customer Name</FormLabel>
+              <FormLabel fontWeight="semibold">Client Name</FormLabel>
               <Input
                 placeholder="e.g., Acme Corporation Ltd"
                 value={formData.name}
@@ -144,7 +144,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
                 size="lg"
                 autoFocus
               />
-              <FormErrorMessage>Customer name is required</FormErrorMessage>
+              <FormErrorMessage>Client name is required</FormErrorMessage>
             </FormControl>
 
             <FormControl>
@@ -169,7 +169,7 @@ export default function CreateCustomerStep({ onCustomerCreated }: CreateCustomer
               width="100%"
               mt={4}
             >
-              Create Customer & Continue
+              Create Client & Continue
             </Button>
           </VStack>
         </form>

@@ -183,7 +183,7 @@ export default function ContactsTab() {
         <HStack spacing={3}>
           <FormControl>
             <FormLabel fontSize="xs" mb={1}>
-              Customer
+              Client
             </FormLabel>
             <Select
               size="sm"
@@ -191,7 +191,7 @@ export default function ContactsTab() {
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               minW={{ base: '220px', md: '280px' }}
             >
-              <option value="all">All customers</option>
+              <option value="all">All clients</option>
               {customers.map((c: DatabaseCustomer) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -263,7 +263,7 @@ export default function ContactsTab() {
           <ModalBody>
             <Stack spacing={4}>
               <FormControl isRequired>
-                <FormLabel>Customer</FormLabel>
+                <FormLabel>Client</FormLabel>
                 <Select
                   value={newContact.customerId}
                   onChange={(e) => setNewContact((p) => ({ ...p, customerId: e.target.value }))}

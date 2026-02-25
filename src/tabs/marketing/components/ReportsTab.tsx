@@ -142,7 +142,7 @@ const ReportsTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Customer Email Reports</Heading>
+          <Heading size="lg">Client Email Reports</Heading>
           <Text color="gray.600">
             Detailed analytics for individual OpenDoors customers
           </Text>

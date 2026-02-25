@@ -305,7 +305,7 @@ export default function CampaignsEnhancedTab() {
           <ModalBody>
             <VStack spacing={4} align="stretch">
               <FormControl isRequired>
-                <FormLabel fontSize="sm">Customer</FormLabel>
+                <FormLabel fontSize="sm">Client</FormLabel>
                 <Select
                   value={form.customerId}
                   onChange={(e) => setForm({ ...form, customerId: e.target.value })}

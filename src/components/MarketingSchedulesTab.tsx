@@ -193,7 +193,7 @@ export default function MarketingSchedulesTab() {
 
       <HStack justify="space-between" flexWrap="wrap" gap={3}>
         <Text fontSize="sm" color="gray.600">
-          Customer-wide cap: <strong>160 emails / 24h</strong> across all 5 sender accounts.
+          Client-wide cap: <strong>160 emails / 24h</strong> across all 5 sender accounts.
         </Text>
         <Button leftIcon={<AddIcon />} colorScheme="gray" onClick={openCreate} size="sm">
           Create schedule

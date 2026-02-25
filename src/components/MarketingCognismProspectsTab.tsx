@@ -361,7 +361,7 @@ export default function MarketingCognismProspectsTab() {
 
       <HStack spacing={4} align="flex-end" flexWrap="wrap">
         <FormControl maxW="420px" isRequired>
-          <FormLabel>Customer account</FormLabel>
+          <FormLabel>Client account</FormLabel>
           <Select
             value={selectedCustomer}
             onChange={(e) => {
@@ -472,7 +472,7 @@ export default function MarketingCognismProspectsTab() {
               <Th>Email</Th>
               <Th>Company</Th>
               <Th>Title</Th>
-              <Th>Customer</Th>
+              <Th>Client</Th>
             </Tr>
           </Thead>
           <Tbody>

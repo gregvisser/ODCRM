@@ -953,7 +953,7 @@ const LeadSourcesTab: React.FC = () => {
         </Box>
         <HStack spacing={3}>
           <FormControl minW="240px">
-            <FormLabel fontSize="sm" mb={1}>Current Customer</FormLabel>
+            <FormLabel fontSize="sm" mb={1}>Current Client</FormLabel>
             <Select
               value={currentCustomerId}
               onChange={(e) => handleCustomerChange(e.target.value)}
