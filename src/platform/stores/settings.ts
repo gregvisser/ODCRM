@@ -2,15 +2,14 @@ import { emit, on } from '../events'
 import { OdcrmStorageKeys } from '../keys'
 import { getItem, removeItem, setItem } from '../storage'
 
-export function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
+/**
+ * Returns the currently selected client (tenant) id, or null if none selected.
+ * No silent fallback. Only setCurrentCustomerId / user selection establishes active client.
+ */
+export function getCurrentCustomerId(): string | null {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
-  if (v && String(v).trim()) {
-    return String(v)
-  }
-  if (fallback && String(fallback).trim()) {
-    setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
-  }
-  return fallback
+  if (v && String(v).trim()) return String(v).trim()
+  return null
 }
 
 export function setCurrentCustomerId(customerId: string): void {

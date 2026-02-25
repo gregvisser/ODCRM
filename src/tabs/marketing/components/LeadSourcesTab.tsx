@@ -156,7 +156,7 @@ const LeadSourcesTab: React.FC = () => {
   const [snapshotLists, setSnapshotLists] = useState<Record<string, SnapshotList[]>>({})
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [currentCustomerId, setCurrentCustomerId] = useState<string>(
-    getCurrentCustomerId('')
+    getCurrentCustomerId()
   )
   const [rawRowsByListId, setRawRowsByListId] = useState<Record<string, { headers: string[]; rows: string[][] }>>({})
   const [rawRowsLoading, setRawRowsLoading] = useState<Record<string, boolean>>({})

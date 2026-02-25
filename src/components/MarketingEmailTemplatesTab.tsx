@@ -114,7 +114,7 @@ export default function MarketingEmailTemplatesTab() {
       const list = data || []
       setCustomers(list)
       const activeCustomerId =
-        getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+        getCurrentCustomerId() ?? list[0]?.id ?? ''
       if (activeCustomerId) {
         await loadTemplates(activeCustomerId)
       }
@@ -165,7 +165,7 @@ export default function MarketingEmailTemplatesTab() {
     }
 
     const activeCustomerId =
-      getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+      getCurrentCustomerId() ?? customers[0]?.id ?? ''
     if (!activeCustomerId) {
       toast({ title: 'Missing client', description: 'Select a client first.', status: 'error' })
       return
@@ -213,7 +213,7 @@ export default function MarketingEmailTemplatesTab() {
   const confirmDelete = async () => {
     if (!templateToDelete) return
     const activeCustomerId =
-      getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+      getCurrentCustomerId() ?? customers[0]?.id ?? ''
     const { error } = await api.delete(`/api/templates/${templateToDelete.id}?customerId=${activeCustomerId}`)
     if (error) {
       toast({ title: 'Delete failed', description: error, status: 'error' })
@@ -230,7 +230,7 @@ export default function MarketingEmailTemplatesTab() {
       toast({ title: 'Required', description: 'Goal and tone are required.', status: 'warning' })
       return
     }
-    const activeCustomerId = getCurrentCustomerId('prod-customer-1') || customers[0]?.id || ''
+    const activeCustomerId = getCurrentCustomerId() ?? customers[0]?.id ?? ''
     if (!activeCustomerId) {
       toast({ title: 'Select client', description: 'Choose a client first.', status: 'warning' })
       return

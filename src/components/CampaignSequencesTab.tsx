@@ -56,6 +56,7 @@ import { getAccounts, onAccountsUpdated } from '../platform/stores/accounts'
 import { getCampaignWorkflows, setCampaignWorkflows } from '../platform/stores/campaignWorkflows'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 type EmailTemplate = {
   id: string
@@ -193,7 +194,7 @@ function loadWorkflowsFromStore(): CampaignWorkflow[] {
 }
 
 function CampaignSequencesTab() {
-  const customerId = getCurrentCustomerId('prod-customer-1') || ''
+  const customerId = getCurrentCustomerId() ?? ''
   const [workflows, setWorkflows] = useState<CampaignWorkflow[]>(() => loadWorkflowsFromStore())
   const [templates, setTemplates] = useState<SavedEmailTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(false)
@@ -634,6 +635,14 @@ function CampaignSequencesTab() {
       duration: 3000,
       isClosable: true,
     })
+  }
+
+  if (!customerId) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
+      </Box>
+    )
   }
 
   return (

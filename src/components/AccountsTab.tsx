@@ -5481,7 +5481,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     setLeadsError(null)
 
     try {
-      const customerId = getCurrentCustomerId('')
+      const customerId = getCurrentCustomerId()
       if (!customerId) {
         console.warn('Missing customerId – leads fetch skipped')
         setLeadsLoading(false)

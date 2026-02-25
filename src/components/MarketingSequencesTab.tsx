@@ -143,7 +143,7 @@ export default function MarketingSequencesTab() {
   const [editingSequence, setEditingSequence] = useState<Sequence | null>(null)
   const [sequenceToDelete, setSequenceToDelete] = useState<Sequence | null>(null)
   const [customerId, setCustomerId] = useState<string>(
-    getCurrentCustomerId('prod-customer-1')
+    getCurrentCustomerId() ?? ''
   ) // TODO: Get from context
 
   const [sequenceForm, setSequenceForm] = useState<SequenceFormState>({

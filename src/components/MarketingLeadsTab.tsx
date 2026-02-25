@@ -171,7 +171,7 @@ const DEFAULT_FILTERS: FilterState = {
 }
 
 function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountName?: string; enabled?: boolean }) {
-  const customerId = getCurrentCustomerId('')
+  const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, { enabled })
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
@@ -293,7 +293,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   // When leads are empty, fetch sync status so we can show lastError / lastSyncAt
   useEffect(() => {
     if (leads.length > 0) { setSyncStatusForEmpty(null); return }
-    const customerId = getCurrentCustomerId('')
+    const customerId = getCurrentCustomerId()
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
   }, [leads.length])

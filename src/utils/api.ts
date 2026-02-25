@@ -1,12 +1,12 @@
 import { getItem, setItem } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
 
-// Local getCurrentCustomerId to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
-function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
+// Local getter to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
+// Returns null when no client selected; no silent fallback (PR2).
+function getActiveClientId(): string | null {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
-  if (v && String(v).trim()) return String(v)
-  if (fallback && String(fallback).trim()) setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
-  return fallback
+  if (v && String(v).trim()) return String(v).trim()
+  return null
 }
 
 // API utility for making requests to backend
@@ -47,7 +47,7 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const customerId = getCurrentCustomerId('prod-customer-1')
+    const customerId = getActiveClientId()
     const fullUrl = `${API_BASE_URL}${endpoint}`
     const method = (options.method || 'GET').toUpperCase()
 
@@ -73,7 +73,7 @@ async function apiRequest<T>(
       if (!headers.has('Cache-Control')) headers.set('Cache-Control', 'no-cache')
       if (!headers.has('Pragma')) headers.set('Pragma', 'no-cache')
 
-      // Caller-provided X-Customer-Id wins (e.g. Templates tab dropdown); only fall back to store when not set.
+      // Caller-provided X-Customer-Id wins. Only set from store when we have an active client (no silent fallback).
       if (!headers.has('X-Customer-Id') && customerId) headers.set('X-Customer-Id', customerId)
 
       return {

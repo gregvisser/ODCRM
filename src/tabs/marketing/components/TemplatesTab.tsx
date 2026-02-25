@@ -137,8 +137,8 @@ const TemplatesTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      // Only use customer IDs that exist in the API response (real cust_*). Never use prod-customer-1.
-      const storeCustomerId = getCurrentCustomerId('')
+      // Only use customer IDs that exist in the API response (real cust_*). No silent default tenant.
+      const storeCustomerId = getCurrentCustomerId()
       const currentCustomer = customerList.find(c => c.id === storeCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(currentCustomer.id)

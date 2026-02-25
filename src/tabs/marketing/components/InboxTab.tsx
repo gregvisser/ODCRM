@@ -194,7 +194,7 @@ const InboxTab: React.FC = () => {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
 
-      const storedCustomerId = getCurrentCustomerId('')
+      const storedCustomerId = getCurrentCustomerId()
       const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(storedCustomerId)

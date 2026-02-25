@@ -85,6 +85,49 @@
 
 ---
 
+## PR2 Tenant Fallback Findings (pre-PR2)
+
+**Search:** `Select-String -Path "src\**\*.ts","src\**\*.tsx" -Pattern "prod-customer-1|getCurrentCustomerId|x-customer-id|X-Customer-Id"` (and DEFAULT_*CUSTOMER/CLIENT).
+
+| File | Line(s) | What it does today | Why it violates Active Client Context |
+|------|--------|--------------------|--------------------------------------|
+| `src/utils/api.ts` | 5–9, 49, 75–76 | Local `getCurrentCustomerId(fallback = 'prod-customer-1')`; every request gets that; sets X-Customer-Id from it when not in headers. | Silently sends a fake tenant id when none selected; backend may 200 with wrong scope. |
+| `src/platform/stores/settings.ts` | 5–13 | `getCurrentCustomerId(fallback = 'prod-customer-1')` — if storage empty, writes fallback and returns it. | Creates/writes a default tenant id; no explicit user selection. |
+| `src/tabs/marketing/components/EmailAccountsTab.tsx` | 71, 170, 180, 189 | Local `getCurrentCustomerId(fallback = 'prod-customer-1')`; used for default/current selection. | UI can show/make requests as if a client is selected when none is. |
+| `src/components/EmailAccountsEnhancedTab.tsx` | 99, 102, 155, 182 | `getCurrentCustomerId('prod-customer-1')` for initial state; treats `prod-customer-1` as invalid for connect. | Still assumes a default id for initial state. |
+| `src/components/MarketingDashboard.tsx` | 50 | `getCurrentCustomerId('prod-customer-1')` for metrics. | Tenant-scoped API call with assumed client. |
+| `src/components/CampaignWizard.tsx` | 137, 148, 237 | `getCurrentCustomerId('prod-customer-1')` for customerId. | Wizard runs under assumed tenant. |
+| `src/components/CampaignsEnhancedTab.tsx` | 83 | `form.customerId \|\| getCurrentCustomerId('prod-customer-1')`. | Form falls back to assumed client. |
+| `src/components/EmailSettingsTab.tsx` | 64, 79, 82, 99–100 | `getCurrentCustomerId('prod-customer-1')` and `getCurrentCustomerId('')`; treats prod-customer-1 as invalid. | Mixed: some paths use default, some empty. |
+| `src/components/MarketingEmailTemplatesTab.tsx` | 127, 178, 226, 243 | `getCurrentCustomerId('prod-customer-1') || list[0]?.id` etc. | Default id or first list item without user choice. |
+| `src/components/CampaignSequencesTab.tsx` | 196, 264, 511, 568, 620 | `getCurrentCustomerId('prod-customer-1') || ''`; passes as X-Customer-Id. | Requests sent with empty or fake tenant. |
+| `src/components/MarketingCognismProspectsTab.tsx` | 249 | `getCurrentCustomerId('prod-customer-1') \|\| list[0]?.id`. | Same as above. |
+| `src/components/MarketingListsTab.tsx` | 101 | `setCustomerId(getCurrentCustomerId('prod-customer-1'))`. | Initial state from default id. |
+| `src/components/MarketingSequencesTab.tsx` | 146 | `getCurrentCustomerId('prod-customer-1')`. | Tenant-scoped under assumed client. |
+| `src/components/AccountsTab.tsx` | 956, 1049, 1055, 5484 | `DEFAULT_CLIENT_PROFILE` (form default; not tenant id). `getCurrentCustomerId('')` at 5484. | 5484: no fallback but may still need empty-state; DEFAULT_CLIENT_PROFILE is UI form default, not fallback tenant. |
+| `src/tabs/dashboards/DashboardsHomePage.tsx` | 217 | `getCurrentCustomerId('')`. | No fallback; may need empty-state when null. |
+| `src/tabs/marketing/components/SequencesTab.tsx` | 267 | `getCurrentCustomerId('')`. | Syncs from store; OK if we return null. |
+| `src/tabs/marketing/components/TemplatesTab.tsx` | 141 | `getCurrentCustomerId('')`. | Same. |
+| `src/tabs/marketing/components/InboxTab.tsx` | 197 | `getCurrentCustomerId('')`. | Same. |
+| `src/tabs/onboarding/OnboardingHomePage.tsx` | 27 | `getCurrentCustomerId('')` for initial state. | OK when store returns null. |
+| `src/tabs/marketing/components/LeadSourcesTab.tsx`, `LeadSourcesTabNew.tsx` | 159, 456 | `getCurrentCustomerId('')`. | OK when null. |
+| `src/components/MarketingLeadsTab.tsx` | 174, 296 | `getCurrentCustomerId('')`. | OK when null. |
+| `src/components/LeadsReportingTab.tsx` | 53 | `getCurrentCustomerId('')`. | OK when null. |
+| `src/tabs/marketing/components/ComplianceTab.tsx` | 61 | `getCurrentCustomerId('')`. | OK when null. |
+
+**Summary:** Canonical source is `settings.ts` + local copy in `api.ts`. Both must return null when nothing stored and never write a default. All call sites that passed `'prod-customer-1'` must instead handle null and show "Select a client to continue" (no tenant-scoped API calls).
+
+---
+
+## After PR2 (tenant fallback removed)
+
+- **getCurrentCustomerId()** (`src/platform/stores/settings.ts`): returns `string | null`. No fallback param; no write when empty.
+- **api.ts:** local `getActiveClientId()` returns `string | null`. X-Customer-Id header set only when value is non-null.
+- **Empty state:** `src/components/NoActiveClientEmptyState.tsx` — "Select a client to continue", CTA "Go to Clients" (dispatches navigateToAccount).
+- **Regression:** `npm run test:no-tenant-fallback` — fails if `prod-customer-1` appears in src/ or server/src, or if getCurrentCustomerId/getActiveClientId called with DEFAULT_*CUSTOMER/CLIENT constant.
+
+---
+
 ## 1. Repo state (as of run)
 
 - **Branch:** main  

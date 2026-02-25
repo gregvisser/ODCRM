@@ -246,7 +246,7 @@ export default function MarketingCognismProspectsTab() {
     const list = data || []
     setCustomers(list)
     const activeCustomerId =
-      getCurrentCustomerId('prod-customer-1') || list[0]?.id || ''
+      getCurrentCustomerId() ?? list[0]?.id ?? ''
     if (activeCustomerId) {
       setSelectedCustomer(activeCustomerId)
     }
