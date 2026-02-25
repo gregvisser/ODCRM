@@ -97,10 +97,10 @@ type EmailAccountsEnhancedTabProps = {
 export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, onBeforeConnectOutlook }: EmailAccountsEnhancedTabProps) {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>(customerIdProp || getCurrentCustomerId() ?? '')
+  const [customerId, setCustomerId] = useState<string>(customerIdProp || (getCurrentCustomerId() ?? ''))
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: customerIdProp || getCurrentCustomerId() ?? '',
+    customerId: customerIdProp || (getCurrentCustomerId() ?? ''),
     emailAddress: '',
     displayName: '',
     smtpHost: '',
