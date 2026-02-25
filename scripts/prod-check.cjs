@@ -10,8 +10,8 @@
 const https = require("https");
 const { execSync } = require("child_process");
 
-const RETRY_COUNT = 10;
-const RETRY_DELAY_MS = 6000;
+const RETRY_COUNT = 60;
+const RETRY_DELAY_MS = 10000;
 
 function get(url) {
   return new Promise((resolve, reject) => {
@@ -50,13 +50,13 @@ async function modeA(expectedSha, backendUrl) {
     try {
       const r = await get(buildUrl);
       if (r.status < 200 || r.status >= 300) {
-        console.log(`  Attempt ${attempt}/${RETRY_COUNT}: HTTP ${r.status}`);
+        console.log(`  Attempt ${attempt}/${RETRY_COUNT}: HTTP ${r.status} (expected SHA: ${expectedSha})`);
         if (attempt < RETRY_COUNT) await sleep(RETRY_DELAY_MS);
         continue;
       }
       const json = JSON.parse(r.data);
       const observedSha = json.sha || json.GIT_SHA || null;
-      console.log(`  Attempt ${attempt}/${RETRY_COUNT}: BACKEND SHA = ${observedSha || "(missing)"}`);
+      console.log(`  Attempt ${attempt}/${RETRY_COUNT}: observed SHA = ${observedSha || "(missing)"}, expected SHA = ${expectedSha}`);
       if (observedSha === expectedSha) {
         console.log("");
         console.log("✅ Backend is serving the expected SHA:", expectedSha);
@@ -64,7 +64,7 @@ async function modeA(expectedSha, backendUrl) {
       }
       if (attempt < RETRY_COUNT) await sleep(RETRY_DELAY_MS);
     } catch (e) {
-      console.log(`  Attempt ${attempt}/${RETRY_COUNT}: Error -`, e.message || e);
+      console.log(`  Attempt ${attempt}/${RETRY_COUNT}: Error -`, e.message || e, `(expected SHA: ${expectedSha})`);
       if (attempt < RETRY_COUNT) await sleep(RETRY_DELAY_MS);
     }
   }
