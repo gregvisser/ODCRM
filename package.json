@@ -21,7 +21,8 @@
     "deploy:update-azure": "node scripts/update-azure-env.js",
     "health-check": "node scripts/system-health-check.cjs",
     "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1",
-    "prod:check": "node scripts/prod-check.cjs"
+    "prod:check": "node scripts/prod-check.cjs",
+    "test:no-tenant-fallback": "node scripts/self-test-no-tenant-fallback.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
