@@ -157,7 +157,7 @@ app.use((req, res, next) => {
     // Disable all caching for API routes (browser + proxy/CDN)
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
     res.setHeader('Pragma', 'no-cache')
-    res.setHeader('Expires', '0')
+    res.setHeader('Expires', new Date(0).toUTCString())
     res.setHeader('Surrogate-Control', 'no-store')
 
     // Ensure no ETag is present (Express ETag disabled above, but be explicit)
