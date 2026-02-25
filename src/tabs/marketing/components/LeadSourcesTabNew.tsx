@@ -453,7 +453,7 @@ export default function LeadSourcesTabNew({
     try {
       const list = normalizeCustomersListResponse(res.data) as Array<{ id: string; name: string }>
       setCustomers(list.map((c) => ({ id: c.id, name: c.name })))
-      const current = getCurrentCustomerId('')
+      const current = getCurrentCustomerId()
       if (current && list.some((c: { id: string }) => c.id === current)) setCustomerId(current)
       else if (list.length) setCustomerId(list[0].id)
     } catch {

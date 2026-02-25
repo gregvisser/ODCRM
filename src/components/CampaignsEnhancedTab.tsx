@@ -39,6 +39,7 @@ import {
 import { AddIcon, ViewIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 type Campaign = {
   id: string
@@ -80,7 +81,7 @@ export default function CampaignsEnhancedTab() {
 
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure()
   const toast = useToast()
-  const activeCustomerId = form.customerId || getCurrentCustomerId('prod-customer-1')
+  const activeCustomerId = form.customerId || getCurrentCustomerId() ?? ''
 
   const listLookup = useMemo(() => {
     return Object.fromEntries(lists.map((list) => [list.id, list]))
@@ -91,12 +92,14 @@ export default function CampaignsEnhancedTab() {
   }, [sequences])
 
   const fetchData = useCallback(async () => {
+    if (!activeCustomerId) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    
-    // Fetch all necessary data
     const [customersRes, campaignsRes] = await Promise.all([
       api.get<any[]>('/api/customers'),
-      api.get<Campaign[]>(`/api/campaigns?customerId=${activeCustomerId}`),
+      api.get<Campaign[]>(`/api/campaigns?customerId=${encodeURIComponent(activeCustomerId)}`),
     ])
 
     if ((customersRes.data || [])) {
@@ -193,6 +196,14 @@ export default function CampaignsEnhancedTab() {
     return (
       <Box textAlign="center" py={10}>
         <Spinner size="xl" />
+      </Box>
+    )
+  }
+
+  if (!activeCustomerId) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
       </Box>
     )
   }

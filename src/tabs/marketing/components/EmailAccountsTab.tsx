@@ -63,21 +63,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getItem, setItem } from '../../../platform/storage'
-import { OdcrmStorageKeys } from '../../../platform/keys'
-import { emit } from '../../../platform/events'
-
-// Leaf helpers to avoid circular dependency with platform/stores/settings (TDZ crash when loading marketing tab).
-function getCurrentCustomerId(fallback = 'prod-customer-1'): string {
-  const v = getItem(OdcrmStorageKeys.currentCustomerId)
-  if (v && String(v).trim()) return String(v)
-  if (fallback && String(fallback).trim()) setItem(OdcrmStorageKeys.currentCustomerId, String(fallback).trim())
-  return fallback
-}
-function setCurrentCustomerId(customerId: string): void {
-  setItem(OdcrmStorageKeys.currentCustomerId, String(customerId || '').trim())
-  emit('settingsUpdated', { currentCustomerId: String(customerId || '').trim() })
-}
+import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -167,28 +153,20 @@ const EmailAccountsTab: React.FC = () => {
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
       return
     }
 
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-
-      const currentCustomerId = getCurrentCustomerId('prod-customer-1')
-      const currentCustomer = customerList.find(c => c.id === currentCustomerId)
-      if (currentCustomer) {
-        setSelectedCustomerId(currentCustomerId)
-      } else if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id)
-      }
+      const storedId = getCurrentCustomerId()
+      const current = customerList.find(c => c.id === storedId)
+      if (current) setSelectedCustomerId(storedId as string)
+      else setSelectedCustomerId('')
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in EmailAccountsTab:', err)
-      const defaultCustomerId = getCurrentCustomerId('prod-customer-1')
-      setSelectedCustomerId(defaultCustomerId)
-      setCustomers([{ id: defaultCustomerId, name: 'Default Customer' }])
+      setCustomers([])
     }
   }
 

@@ -50,6 +50,7 @@ import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { getCurrentCustomerId, onSettingsUpdated } from '../platform/stores/settings'
 import { emit } from '../platform/events'
 import { api } from '../utils/api'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 interface EmailIdentity {
   id: string
@@ -96,10 +97,10 @@ type EmailAccountsEnhancedTabProps = {
 export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, onBeforeConnectOutlook }: EmailAccountsEnhancedTabProps) {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>(customerIdProp || getCurrentCustomerId('prod-customer-1'))
+  const [customerId, setCustomerId] = useState<string>(customerIdProp || getCurrentCustomerId() ?? '')
   
   const [smtpForm, setSmtpForm] = useState<SmtpFormState>({
-    customerId: customerIdProp || getCurrentCustomerId('prod-customer-1'),
+    customerId: customerIdProp || getCurrentCustomerId() ?? '',
     emailAddress: '',
     displayName: '',
     smtpHost: '',
@@ -151,11 +152,10 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
   }, [customerIdProp])
 
   const handleConnectOutlook = async () => {
-    // LOCKDOWN: Require valid customerId before connecting
-    if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
+    if (!customerId || customerId.startsWith('test-')) {
       toast({
         title: 'Select a client first',
-        description: 'You must select a valid customer before connecting an Outlook account.',
+        description: 'You must select a client before connecting an Outlook account.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -178,8 +178,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     window.location.href = `${apiUrl}/api/outlook/auth?customerId=${encodeURIComponent(customerId)}&returnTo=${encodeURIComponent(returnTo)}`
   }
   
-  // Check if a valid customer is selected
-  const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
+  const isValidCustomer = !!customerId && !customerId.startsWith('test-')
 
   // After returning from OAuth, show a toast + refresh identities, then clear URL flag.
   useEffect(() => {
@@ -363,6 +362,14 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     return (
       <Box textAlign="center" py={10}>
         <Spinner size="xl" />
+      </Box>
+    )
+  }
+
+  if (!customerIdProp && !customerId) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
       </Box>
     )
   }

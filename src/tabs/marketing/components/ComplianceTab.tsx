@@ -58,7 +58,7 @@ export default function ComplianceTab() {
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [customerId, setCustomerId] = useState<string>(
-    getCurrentCustomerId(''),
+    getCurrentCustomerId(),
   )
   const [importing, setImporting] = useState(false)
   const [uploadingFile, setUploadingFile] = useState(false)

@@ -38,6 +38,7 @@ import {
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { api } from '../utils/api'
 import { getCurrentCustomerId } from '../platform/stores/settings'
+import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 interface EmailIdentity {
   id: string
@@ -58,46 +59,44 @@ export default function EmailSettingsTab() {
   const [dailyLimit, setDailyLimit] = useState(150)
   const toast = useToast()
 
+  const customerId = getCurrentCustomerId()
+
   const fetchIdentities = useCallback(async () => {
+    if (!customerId) {
+      setIdentities([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    // Use the same customerId that was used for OAuth connection
-    const customerId = getCurrentCustomerId('prod-customer-1')
-    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
+    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${encodeURIComponent(customerId)}`)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
     } else if (data) {
       setIdentities(data)
     }
     setLoading(false)
-  }, [toast])
+  }, [customerId, toast])
 
   useEffect(() => {
     fetchIdentities()
   }, [fetchIdentities])
 
   const handleConnectOutlook = () => {
-    const customerId = getCurrentCustomerId('')
-    
-    // LOCKDOWN: Require valid customerId before connecting
-    if (!customerId || customerId === 'prod-customer-1' || customerId.startsWith('test-')) {
+    if (!customerId || customerId.startsWith('test-')) {
       toast({
         title: 'Select a client first',
-        description: 'You must select a valid customer before connecting an Outlook account.',
+        description: 'You must select a client before connecting an Outlook account.',
         status: 'error',
         duration: 5000,
         isClosable: true,
       })
       return
     }
-    
-    // Use centralized API URL from environment
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
-    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${customerId}`
+    window.location.href = `${apiUrl}/api/outlook/auth?customerId=${encodeURIComponent(customerId)}`
   }
-  
-  // Check if a valid customer is selected
-  const customerId = getCurrentCustomerId('')
-  const isValidCustomer = customerId && customerId !== 'prod-customer-1' && !customerId.startsWith('test-')
+
+  const isValidCustomer = !!customerId && !customerId.startsWith('test-')
 
   const handleEdit = (identity: EmailIdentity) => {
     setEditingIdentity(identity)
@@ -137,6 +136,14 @@ export default function EmailSettingsTab() {
     return (
       <Box textAlign="center" py={10}>
         <Spinner size="xl" />
+      </Box>
+    )
+  }
+
+  if (!customerId) {
+    return (
+      <Box>
+        <NoActiveClientEmptyState />
       </Box>
     )
   }

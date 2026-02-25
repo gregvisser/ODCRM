@@ -24,7 +24,7 @@ interface OnboardingHomePageProps {
 export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
   const activeView = coerceViewId(view)
   // Use canonical settingsStore for customer selection (SINGLE SOURCE OF TRUTH)
-  const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId(''))
+  const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId() ?? '')
 
   // Sync with settingsStore on mount and when settings change globally
   useEffect(() => {
