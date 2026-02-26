@@ -43,12 +43,12 @@ function App() {
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
   // Client mode: hide Clients tab from nav; use first visible tab for content when Clients would be selected.
-  const visibleTopTabs = useMemo(
-    () => (isClientUI() ? CRM_TOP_TABS.filter((t) => t.id !== 'customers-home') : [...CRM_TOP_TABS]),
-    [],
-  )
+  const clientMode = isClientUI()
+  const visibleTopTabs = clientMode
+    ? CRM_TOP_TABS.filter((t) => t.id !== 'customers-home')
+    : CRM_TOP_TABS
   const effectiveTab: CrmTopTabId =
-    isClientUI() && activeTab === 'customers-home'
+    clientMode && activeTab === 'customers-home'
       ? (visibleTopTabs[0]?.id ?? 'dashboards-home')
       : activeTab
   const tabIndex = Math.max(
