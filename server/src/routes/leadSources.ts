@@ -10,6 +10,7 @@ import { prisma } from '../lib/prisma.js'
 import { csvToMappedRows, detectDelimiter } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
 
@@ -25,16 +26,6 @@ const SOURCE_TYPES: LeadSourceType[] = [
 
 function isValidSourceType(value: string): value is LeadSourceType {
   return SOURCE_TYPES.includes(value as LeadSourceType)
-}
-
-function getCustomerId(req: Request): string {
-  const id = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
-  if (!id?.trim()) {
-    const err = new Error('Customer ID required') as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-  return id.trim()
 }
 
 const PUBLISHED_LINK_REJECT_MESSAGE =
@@ -121,7 +112,8 @@ async function resolveAllLeadSourceConfigs(customerId: string): Promise<Array<{ 
 // GET /api/lead-sources — list 4 source configs (respects inheritance)
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const resolved = await resolveAllLeadSourceConfigs(customerId)
     const sources = SOURCE_TYPES.map((sourceType) => {
       const r = resolved.find((x) => x.sourceType === sourceType)
@@ -158,7 +150,8 @@ async function ensureCustomerExists(customerId: string): Promise<void> {
 const BATCHES_AGGREGATE_TAKE = 200
 router.get('/batches', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     await ensureCustomerExists(customerId)
 
     type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
@@ -201,7 +194,8 @@ router.get('/batches', async (req: Request, res: Response) => {
 // POST /api/lead-sources/batches/:batchKey/materialize-list — create or reuse list from lead batch (idempotent)
 router.post('/batches/:batchKey/materialize-list', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     await ensureCustomerExists(customerId)
     const batchKey = (req.params.batchKey ?? '').trim()
     if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
@@ -314,7 +308,7 @@ router.post('/batches/:batchKey/materialize-list', async (req: Request, res: Res
 })
 
 // POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
-// TODO: In production, guard with admin/auth middleware; customerId is from getCustomerId(req) only.
+// TODO: In production, guard with admin/auth middleware; customerId is from requireCustomerId(req, res) only.
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
   displayName: z.string().trim().min(1),
@@ -328,7 +322,8 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
       return res.status(400).json({ error: PUBLISHED_LINK_REJECT_MESSAGE })
     }
 
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
@@ -391,7 +386,8 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
 // POST /api/lead-sources/:sourceType/poll — fetch sheet, normalize, upsert LeadSourceRowSeen
 router.post('/:sourceType/poll', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
@@ -444,7 +440,8 @@ router.post('/:sourceType/poll', async (req: Request, res: Response) => {
       lastFetchAt: now.toISOString(),
     })
   } catch (e) {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const sourceTypeRaw = req.params.sourceType
     if (isValidSourceType(sourceTypeRaw)) {
       await prisma.leadSourceSheetConfig.updateMany({
@@ -463,7 +460,8 @@ const BATCHES_NO_DATE_TAKE = 200
 
 router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     const dateRaw = String(req.query.date ?? '').trim()
     const isIsoDate = ISO_DATE_REGEX.test(dateRaw)
@@ -538,7 +536,8 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
 // GET /api/lead-sources/:sourceType/open-sheet — redirect to sheet (spreadsheetId is always an ID)
 router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     if (!isValidSourceType(sourceTypeRaw)) {
       return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
@@ -573,7 +572,8 @@ function normalizeRowKeepKeys(
 // GET /api/lead-sources/:sourceType/contacts?batchKey=...&page=1&pageSize=50
 router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     const batchKey = (req.query.batchKey as string)?.trim()
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1)

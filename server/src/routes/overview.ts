@@ -1,23 +1,15 @@
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = express.Router()
-
-const getCustomerId = (req: express.Request): string => {
-  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
-  if (!customerId) {
-    const err = new Error('Customer ID required') as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-  return customerId
-}
 
 // GET /api/overview - Get overview stats for a customer
 router.get('/', async (req, res, next) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     // Get total contacts (active only, deduped by email)
     const totalContacts = await prisma.contact.count({

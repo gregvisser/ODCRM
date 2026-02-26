@@ -12,6 +12,8 @@ import {
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVisibility'
+import { isClientUI } from './platform/mode'
+import { getMe, type MeResponse } from './platform/me'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
@@ -41,6 +43,16 @@ function App() {
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
+
+  // Client UI: block app until /api/me returns client mode with fixedCustomerId
+  const [me, setMe] = useState<MeResponse | null>(null)
+  const [meError, setMeError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isClientUI()) return
+    getMe()
+      .then(setMe)
+      .catch((err) => setMeError(err?.message ?? 'Failed to load client configuration'))
+  }, [])
 
   // Client mode: hide Clients tab from nav; use first visible tab for content when Clients would be selected.
   const visibleTopTabs = getVisibleCrmTopTabs()
@@ -219,6 +231,31 @@ function App() {
         return <DashboardsHomePage />
     }
   })()
+
+  // Client UI: block until /api/me says client mode with fixedCustomerId
+  if (isClientUI()) {
+    if (meError) {
+      return (
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
+          <Text color="red.600">{meError}</Text>
+        </Flex>
+      )
+    }
+    if (!me) {
+      return (
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
+          <Text>Loading...</Text>
+        </Flex>
+      )
+    }
+    if (me.uiMode !== 'client' || !me.fixedCustomerId) {
+      return (
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
+          <Text>Client mode is not configured yet. Contact admin.</Text>
+        </Flex>
+      )
+    }
+  }
 
   return (
     <Flex minH="100vh" bg={semanticColor.bgCanvas} direction="column" position="relative">

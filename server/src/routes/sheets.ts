@@ -19,19 +19,9 @@ import {
   getCredentialDiagnostics,
   hasValue,
 } from '../services/googleSheetsService.js'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
-
-// Helper to get customerId from request
-const getCustomerId = (req: Request): string => {
-  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
-  if (!customerId) {
-    const err = new Error('Customer ID required') as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-  return customerId
-}
 
 // Validate source parameter
 const validSources = ['cognism', 'apollo', 'blackbook'] as const
@@ -72,7 +62,8 @@ const getSnapshotListName = (source: ValidSource, sheetName: string, date: Date)
  */
 router.get('/sources', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     // Get existing configs
     const configs = await prisma.sheetSourceConfig.findMany({
@@ -125,7 +116,8 @@ const connectSchema = z.object({
 
 router.post('/sources/:source/connect', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { source } = req.params
 
     if (!isValidSource(source)) {
@@ -188,7 +180,8 @@ router.post('/sources/:source/connect', async (req: Request, res: Response, next
  */
 router.post('/sources/:source/sync', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { source } = req.params
 
     if (!isValidSource(source)) {
@@ -475,7 +468,8 @@ router.post('/sources/:source/sync', async (req: Request, res: Response, next: N
  */
 router.get('/sources/:source/lists', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { source } = req.params
 
     if (!isValidSource(source)) {
@@ -517,7 +511,8 @@ router.get('/sources/:source/lists', async (req: Request, res: Response, next: N
  */
 router.get('/sources/:source/lists/:listId/rows', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { source, listId } = req.params
 
     if (!isValidSource(source)) {
@@ -562,7 +557,8 @@ router.get('/sources/:source/lists/:listId/rows', async (req: Request, res: Resp
  */
 router.get('/sources/:source/preview', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { source } = req.params
 
     if (!isValidSource(source)) {
