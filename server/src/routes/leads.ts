@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
 import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
 
@@ -107,10 +108,8 @@ router.get('/health', async (req, res) => {
 
 // Schema check: confirm LeadRecord has occurredAt/source/owner/externalId (no secrets, dev-only diagnostic)
 router.get('/schema-check', async (req, res) => {
-  const customerId = (req.query.customerId as string)?.trim()
-  if (!customerId) {
-    return res.status(400).json({ error: 'customerId is required' })
-  }
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
   try {
     await prisma.leadRecord.findFirst({
       where: { customerId },
@@ -135,13 +134,8 @@ router.get('/schema-check', async (req, res) => {
 })
 
 router.get('/', async (req, res) => {
-  const queryCustomerId = (req.query.customerId as string)?.trim()
-  const headerCustomerId = (req.header('x-customer-id') || '').trim()
-  const customerId = headerCustomerId || queryCustomerId
-
-  if (!customerId) {
-    return res.status(400).json({ error: 'customerId is required' })
-  }
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
 
   const since = req.query.since ? new Date(String(req.query.since)) : null
 
@@ -493,14 +487,9 @@ function isInvalidGroupByFieldError (err: unknown): boolean {
  *   Unknown customerId -> 404 { error: "Customer not found" }
  */
 router.get('/metrics', async (req, res) => {
-  const headerCustomerId = (req.header('x-customer-id') || '').trim()
-  const queryCustomerId = typeof req.query.customerId === 'string' ? req.query.customerId.trim() : undefined
-  const customerId = headerCustomerId || queryCustomerId
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
   const reqId = `${Date.now()}_${Math.random().toString(16).slice(2)}`
-
-  if (!customerId) {
-    return res.status(400).json({ error: 'Customer ID required (query customerId or header x-customer-id)' })
-  }
 
   function logErr (stage: string, err: unknown): void {
     const e = err && typeof err === 'object' && err instanceof Error ? err : new Error(String(err))
@@ -661,13 +650,8 @@ router.get('/metrics', async (req, res) => {
 // Convert lead to contact
 router.post('/:id/convert', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const { id } = req.params
     const { sequenceId } = req.body // Optional: auto-enroll in sequence
@@ -823,13 +807,8 @@ router.post('/:id/convert', async (req, res) => {
 // Bulk convert leads to contacts
 router.post('/bulk-convert', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const { leadIds, sequenceId } = req.body
 
@@ -991,13 +970,8 @@ router.post('/bulk-convert', async (req, res) => {
 // Calculate lead score
 router.post('/:id/score', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const { id } = req.params
 
@@ -1077,13 +1051,8 @@ router.post('/:id/score', async (req, res) => {
 // Update lead status
 router.patch('/:id/status', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const { id } = req.params
     const { status } = req.body
@@ -1289,13 +1258,8 @@ router.get('/analytics/sequence-performance', async (req, res) => {
 // Validate a customer's sheet URL (no DB writes). Returns headers + row count + sample row.
 router.get('/sync/validate', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ ok: false, error: 'Customer ID required (query customerId or header x-customer-id)' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
@@ -1352,13 +1316,8 @@ router.get('/sync/validate', async (req, res) => {
 // Get sync status for a customer
 router.get('/sync/status', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const syncState = await prisma.leadSyncState.findUnique({
       where: { customerId },
@@ -1483,13 +1442,8 @@ router.get('/sync/status/all', async (req, res) => {
 // Manual sync trigger
 router.post('/sync/trigger', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     // Check if sync is already running
     const syncState = await prisma.leadSyncState.findUnique({
@@ -1520,13 +1474,8 @@ router.post('/sync/trigger', async (req, res) => {
 // Pause sync
 router.post('/sync/pause', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     await prisma.leadSyncState.upsert({
       where: { customerId },
@@ -1554,13 +1503,8 @@ router.post('/sync/pause', async (req, res) => {
 // Resume sync
 router.post('/sync/resume', async (req, res) => {
   try {
-    const queryCustomerId = req.query.customerId as string | undefined
-    const headerCustomerId = req.header('x-customer-id') || undefined
-    const customerId = queryCustomerId || headerCustomerId
-
-    if (!customerId) {
-      return res.status(400).json({ error: 'Customer ID required' })
-    }
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     await prisma.leadSyncState.upsert({
       where: { customerId },

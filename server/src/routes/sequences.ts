@@ -2,18 +2,9 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
-
-const getCustomerId = (req: any): string => {
-  const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
-  if (!customerId) {
-    const err = new Error('customerId is required') as Error & { status?: number }
-    err.status = 400
-    throw err
-  }
-  return customerId
-}
 
 // Schema validation
 const MAX_SEQUENCE_STEPS = 8
@@ -49,7 +40,8 @@ const createStepSchema = z.object({
 // GET /api/sequences - Get all sequences for a customer
 router.get('/', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
 
     const sequences = await prisma.emailSequence.findMany({
       where: { customerId },
@@ -92,10 +84,12 @@ router.get('/', async (req, res) => {
 // GET /api/sequences/:id - Get a single sequence with steps
 router.get('/:id', async (req, res) => {
   try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
 
     const sequence = await prisma.emailSequence.findFirst({
-      where: { id, customerId: getCustomerId(req) },
+      where: { id, customerId },
       include: {
         steps: {
           orderBy: { stepOrder: 'asc' },
@@ -114,7 +108,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Sequence not found' })
     }
 
-    res.setHeader('x-odcrm-customer-id', getCustomerId(req))
+    res.setHeader('x-odcrm-customer-id', customerId)
     return res.json({
       data: {
       id: sequence.id,
@@ -146,7 +140,8 @@ router.get('/:id', async (req, res) => {
 // POST /api/sequences - Create a new sequence (with optional steps)
 router.post('/', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const existingCustomer = await prisma.customer.findUnique({ where: { id: customerId } })
     if (!existingCustomer) {
       return res.status(400).json({ error: 'Invalid customer context' })
@@ -285,7 +280,8 @@ router.post('/', async (req, res) => {
 // PUT /api/sequences/:id - Update a sequence (metadata only, not steps)
 router.put('/:id', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
     const validated = updateSequenceSchema.parse(req.body)
 
@@ -334,7 +330,8 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/sequences/:id - Delete a sequence
 router.delete('/:id', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
 
     const existing = await prisma.emailSequence.findFirst({
@@ -367,7 +364,8 @@ router.delete('/:id', async (req, res) => {
 // POST /api/sequences/:id/steps - Add a step to a sequence
 router.post('/:id/steps', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
     const validated = createStepSchema.parse(req.body)
 
@@ -449,7 +447,8 @@ router.post('/:id/steps', async (req, res) => {
 // PUT /api/sequences/:id/steps/:stepId - Update a step
 router.put('/:id/steps/:stepId', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id, stepId } = req.params
     const validated = createStepSchema.partial().parse(req.body)
 
@@ -502,7 +501,8 @@ router.put('/:id/steps/:stepId', async (req, res) => {
 // DELETE /api/sequences/:id/steps/:stepId - Delete a step
 router.delete('/:id/steps/:stepId', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id, stepId } = req.params
 
     const sequence = await prisma.emailSequence.findFirst({
@@ -530,9 +530,10 @@ router.delete('/:id/steps/:stepId', async (req, res) => {
 // POST /api/sequences/:id/enroll - Enroll contacts in a sequence
 router.post('/:id/enroll', async (req, res) => {
   try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
     const { contactIds } = req.body
-    const customerId = getCustomerId(req)
 
     if (!Array.isArray(contactIds) || contactIds.length === 0) {
       return res.status(400).json({ error: 'contactIds must be a non-empty array' })
@@ -667,7 +668,7 @@ router.post('/:id/enroll', async (req, res) => {
       },
     })
 
-    res.setHeader('x-odcrm-customer-id', getCustomerId(req))
+    res.setHeader('x-odcrm-customer-id', customerId)
     res.json({
       data: {
         enrolled: newContactIds.length,
@@ -694,7 +695,8 @@ router.post('/:id/enroll', async (req, res) => {
 //   No email is sent from this dry-run endpoint.
 router.post('/:id/dry-run', async (req, res) => {
   try {
-    const customerId = getCustomerId(req)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
     const { id } = req.params
     const { contactIds, limit, asOf } = req.body || {}
 

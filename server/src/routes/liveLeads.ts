@@ -6,6 +6,7 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { fetchAndParseLiveLeads, resolveCsvUrl } from '../utils/liveSheets.js'
+import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
 const METRICS_TIMEZONE = process.env.LEADS_METRICS_TIMEZONE || 'Europe/London'
@@ -76,22 +77,13 @@ function getMetricsTimeRangesUtc(): {
   return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd }
 }
 
-function getCustomerId(req: { query: Record<string, unknown>; header: (name: string) => string | undefined }): string | null {
-  const header = (req.header('x-customer-id') || '').trim()
-  const query = typeof req.query.customerId === 'string' ? req.query.customerId.trim() : ''
-  const id = header || query
-  return id || null
-}
-
 /**
  * GET /api/live/leads?customerId=...
  * Requires customerId (query or x-customer-id). Returns leads from customer's leadsReportingUrl CSV. No DB writes.
  */
 router.get('/leads', async (req, res) => {
-  const customerId = getCustomerId(req)
-  if (!customerId) {
-    return res.status(400).json({ error: 'customerId is required (query or x-customer-id header)' })
-  }
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
 
   try {
     const customer = await prisma.customer.findUnique({
@@ -129,10 +121,8 @@ router.get('/leads', async (req, res) => {
  * Same validation. Computes totalLeads, todayLeads, weekLeads, monthLeads, breakdownBySource, breakdownByOwner (Europe/London).
  */
 router.get('/leads/metrics', async (req, res) => {
-  const customerId = getCustomerId(req)
-  if (!customerId) {
-    return res.status(400).json({ error: 'customerId is required (query or x-customer-id header)' })
-  }
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
 
   try {
     const customer = await prisma.customer.findUnique({

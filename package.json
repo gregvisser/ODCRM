@@ -25,7 +25,8 @@
     "test:no-tenant-fallback": "node scripts/self-test-no-tenant-fallback.mjs",
     "test:tenant-guard": "node scripts/self-test-no-tenant-api-without-client.mjs",
     "test:require-active-client": "node scripts/self-test-require-active-client-wrapper.mjs",
-    "test:client-mode-ui": "node scripts/self-test-client-mode-hides-clients-ui.mjs"
+    "test:client-mode-ui": "node scripts/self-test-client-mode-hides-clients-ui.mjs",
+    "test:client-mode-enforcement": "node scripts/self-test-client-mode-enforcement.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",

@@ -1,12 +1,26 @@
-import { getItem, setItem } from '../platform/storage'
+import { getItem } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
+import { isClientUI } from '../platform/mode'
+import { getFixedCustomerIdOrNull } from '../platform/me'
 
 // Local getter to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
-// Returns null when no client selected; no silent fallback (PR2).
+// Returns null when no client selected; no silent fallback (PR2). Agency mode only.
 function getActiveClientId(): string | null {
   const v = getItem(OdcrmStorageKeys.currentCustomerId)
   if (v && String(v).trim()) return String(v).trim()
   return null
+}
+
+/** Effective customer id for X-Customer-Id header: client UI uses fixed id from /api/me; agency uses active client (no silent default). */
+function getCustomerIdForRequest(): string | null {
+  if (isClientUI()) {
+    const fixed = getFixedCustomerIdOrNull()
+    if (!fixed) {
+      throw new Error('Client mode: fixedCustomerId not loaded. App should block until /api/me is ready.')
+    }
+    return fixed
+  }
+  return getActiveClientId()
 }
 
 // API utility for making requests to backend
@@ -47,7 +61,7 @@ async function apiRequest<T>(
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   try {
-    const customerId = getActiveClientId()
+    const customerId = getCustomerIdForRequest()
     const fullUrl = `${API_BASE_URL}${endpoint}`
     const method = (options.method || 'GET').toUpperCase()
 

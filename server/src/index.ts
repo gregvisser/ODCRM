@@ -32,6 +32,7 @@ import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
 import liveLeadsRouter from './routes/liveLeads.js'
 import leadSourcesRouter from './routes/leadSources.js'
+import meRoutes from './routes/me.js'
 import { generalRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
@@ -408,6 +409,9 @@ app.get('/api/version', (req, res) => {
     deployedAt: new Date().toISOString()
   })
 })
+
+// GET /api/me — UI mode and fixed tenant (client mode)
+app.use('/api/me', meRoutes)
 
 // Debug routes endpoint (DEV only or DEBUG=true)
 app.get('/api/routes', (req, res): void => {
