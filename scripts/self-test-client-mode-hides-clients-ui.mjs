@@ -1,6 +1,6 @@
 /**
- * Static self-test: codebase references isClientUI() in the files that
- * hide the Clients nav entry and the client switcher in client mode.
+ * Static self-test: codebase uses centralized client-mode visibility helper
+ * and still hides the client switcher in client mode.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -16,13 +16,16 @@ function mustContain(file, needles) {
 
 mustContain("src/platform/mode.ts", ["getUIMode", "isClientUI"]);
 
-// Nav: App.tsx defines/renders top-level tabs (including Clients).
-mustContain("src/App.tsx", ["isClientUI", "customers-home"]);
+// Helper: single source of truth for visible CRM top tabs in client mode.
+mustContain("src/utils/crmTopTabsVisibility.ts", ["customers-home", "getVisibleCrmTopTabs"]);
 
-// Nav: CrmTopTabs also renders top-level tabs (sidebar).
-mustContain("src/components/nav/CrmTopTabs.tsx", ["isClientUI", "customers-home"]);
+// Nav: App.tsx uses helper for visible tabs and tab resolution.
+mustContain("src/App.tsx", ["getVisibleCrmTopTabs", "resolveClientModeTab"]);
 
-// Client switcher: OnboardingHomePage renders CustomerSelector (client switcher).
+// Nav: CrmTopTabs uses helper for visible tabs.
+mustContain("src/components/nav/CrmTopTabs.tsx", ["getVisibleCrmTopTabs"]);
+
+// Client switcher: OnboardingHomePage still hides CustomerSelector in client mode.
 mustContain("src/tabs/onboarding/OnboardingHomePage.tsx", ["isClientUI", "CustomerSelector"]);
 
 console.log("✅ client mode UI guard self-test passed");

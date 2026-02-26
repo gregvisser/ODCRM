@@ -7,8 +7,8 @@ import {
   SettingsIcon,
   ViewIcon,
 } from '@chakra-ui/icons'
-import { CRM_TOP_TABS, type CrmTopTabId } from '../../contracts/nav'
-import { isClientUI } from '../../platform/mode'
+import { type CrmTopTabId } from '../../contracts/nav'
+import { getVisibleCrmTopTabs } from '../../utils/crmTopTabsVisibility'
 import type { ComponentType } from 'react'
 
 // Icon mapping for each tab
@@ -31,7 +31,7 @@ export function CrmTopTabs({
 }) {
   const showLabels = useBreakpointValue({ base: false, md: true })
 
-  const visibleTabs = isClientUI() ? CRM_TOP_TABS.filter((t) => t.id !== 'customers-home') : CRM_TOP_TABS
+  const visibleTabs = getVisibleCrmTopTabs()
   return (
     <VStack align="stretch" spacing={1} w="100%">
       {visibleTabs.map((tab) => {
