@@ -11,7 +11,7 @@ import {
 } from '@chakra-ui/react'
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
-import { isClientUI } from './platform/mode'
+import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVisibility'
 import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
@@ -43,14 +43,8 @@ function App() {
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
 
   // Client mode: hide Clients tab from nav; use first visible tab for content when Clients would be selected.
-  const clientMode = isClientUI()
-  const visibleTopTabs = clientMode
-    ? CRM_TOP_TABS.filter((t) => t.id !== 'customers-home')
-    : CRM_TOP_TABS
-  const effectiveTab: CrmTopTabId =
-    clientMode && activeTab === 'customers-home'
-      ? (visibleTopTabs[0]?.id ?? 'dashboards-home')
-      : activeTab
+  const visibleTopTabs = getVisibleCrmTopTabs()
+  const effectiveTab: CrmTopTabId = resolveClientModeTab(activeTab)
   const tabIndex = Math.max(
     0,
     visibleTopTabs.findIndex((t) => t.id === effectiveTab),
@@ -94,9 +88,7 @@ function App() {
 
     if (!tab) {
       if (fromPath) {
-        const resolved =
-          isClientUI() && fromPath === 'customers-home' ? 'dashboards-home' : fromPath
-        setActiveTab(resolved)
+        setActiveTab(resolveClientModeTab(fromPath))
         if (view) setActiveView(view)
         return
       }
@@ -105,8 +97,7 @@ function App() {
       return
     }
     if (isCrmTopTabId(tab)) {
-      const resolved = isClientUI() && tab === 'customers-home' ? 'dashboards-home' : tab
-      setActiveTab(resolved)
+      setActiveTab(resolveClientModeTab(tab))
       if (view) setActiveView(view)
       return
     }
@@ -114,9 +105,7 @@ function App() {
     // Legacy: ?tab=accounts etc → map into top-tab + view.
     const legacy = legacyTabMap[tab as keyof typeof legacyTabMap]
     if (legacy) {
-      const resolved =
-        isClientUI() && legacy.tab === 'customers-home' ? 'dashboards-home' : legacy.tab
-      setActiveTab(resolved)
+      setActiveTab(resolveClientModeTab(legacy.tab))
       setActiveView(legacy.view)
     }
     // Run once on mount only
