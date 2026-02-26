@@ -28,6 +28,11 @@ function toEnrollmentListItem(e: { id: string; sequenceId: string; customerId: s
   }
 }
 
+const ENROLLMENTS_UNAVAILABLE_MSG = {
+  error: 'Enrollments storage is not available in this environment',
+  hint: 'Stage 1A migration may not be applied',
+}
+
 /** GET /api/sequences/:id/enrollments — list enrollments for sequence (mount in sequences) */
 export async function listEnrollmentsForSequence(req: Request, res: Response): Promise<void> {
   const customerId = requireCustomerId(req, res)
@@ -37,34 +42,39 @@ export async function listEnrollmentsForSequence(req: Request, res: Response): P
     res.status(400).json({ error: 'sequenceId required' })
     return
   }
-  const sequence = await prisma.emailSequence.findFirst({
-    where: { id: sequenceId, customerId },
-    select: { id: true },
-  })
-  if (!sequence) {
-    res.status(404).json({ error: 'Sequence not found' })
-    return
+  try {
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ error: 'Sequence not found' })
+      return
+    }
+    const enrollments = await prisma.enrollment.findMany({
+      where: { sequenceId },
+      include: {
+        _count: { select: { recipients: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: enrollments.map((e) => ({
+        id: e.id,
+        sequenceId: e.sequenceId,
+        customerId: e.customerId,
+        name: e.name,
+        status: e.status,
+        createdAt: e.createdAt.toISOString(),
+        updatedAt: e.updatedAt.toISOString(),
+        recipientCount: e._count.recipients,
+      })),
+    })
+  } catch (err) {
+    console.error('GET /api/sequences/:id/enrollments error:', err)
+    res.status(400).json(ENROLLMENTS_UNAVAILABLE_MSG)
   }
-  const enrollments = await prisma.enrollment.findMany({
-    where: { sequenceId },
-    include: {
-      _count: { select: { recipients: true } },
-    },
-    orderBy: { createdAt: 'desc' },
-  })
-  res.setHeader('x-odcrm-customer-id', customerId)
-  res.json({
-    data: enrollments.map((e) => ({
-      id: e.id,
-      sequenceId: e.sequenceId,
-      customerId: e.customerId,
-      name: e.name,
-      status: e.status,
-      createdAt: e.createdAt.toISOString(),
-      updatedAt: e.updatedAt.toISOString(),
-      recipientCount: e._count.recipients,
-    })),
-  })
 }
 
 /** POST /api/sequences/:id/enrollments — create enrollment + recipients (mount in sequences) */
@@ -103,41 +113,46 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
     res.status(400).json({ error: 'Every recipient must have an email' })
     return
   }
-  const enrollment = await prisma.$transaction(async (tx) => {
-    const e = await tx.enrollment.create({
+  try {
+    const enrollment = await prisma.$transaction(async (tx) => {
+      const e = await tx.enrollment.create({
+        data: {
+          sequenceId,
+          customerId,
+          name,
+          status: EnrollmentStatus.ACTIVE,
+        },
+      })
+      await tx.enrollmentRecipient.createMany({
+        data: normalized.map((r) => ({
+          enrollmentId: e.id,
+          email: r.email,
+          firstName: r.firstName,
+          lastName: r.lastName,
+          company: r.company,
+          externalId: r.externalId,
+        })),
+      })
+      const count = await tx.enrollmentRecipient.count({ where: { enrollmentId: e.id } })
+      return { enrollment: e, recipientCount: count }
+    })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.status(201).json({
       data: {
-        sequenceId,
-        customerId,
-        name,
-        status: EnrollmentStatus.ACTIVE,
+        id: enrollment.enrollment.id,
+        sequenceId: enrollment.enrollment.sequenceId,
+        customerId: enrollment.enrollment.customerId,
+        name: enrollment.enrollment.name,
+        status: enrollment.enrollment.status,
+        createdAt: enrollment.enrollment.createdAt.toISOString(),
+        updatedAt: enrollment.enrollment.updatedAt.toISOString(),
+        recipientCount: enrollment.recipientCount,
       },
     })
-    await tx.enrollmentRecipient.createMany({
-      data: normalized.map((r) => ({
-        enrollmentId: e.id,
-        email: r.email,
-        firstName: r.firstName,
-        lastName: r.lastName,
-        company: r.company,
-        externalId: r.externalId,
-      })),
-    })
-    const count = await tx.enrollmentRecipient.count({ where: { enrollmentId: e.id } })
-    return { enrollment: e, recipientCount: count }
-  })
-  res.setHeader('x-odcrm-customer-id', customerId)
-  res.status(201).json({
-    data: {
-      id: enrollment.enrollment.id,
-      sequenceId: enrollment.enrollment.sequenceId,
-      customerId: enrollment.enrollment.customerId,
-      name: enrollment.enrollment.name,
-      status: enrollment.enrollment.status,
-      createdAt: enrollment.enrollment.createdAt.toISOString(),
-      updatedAt: enrollment.enrollment.updatedAt.toISOString(),
-      recipientCount: enrollment.recipientCount,
-    },
-  })
+  } catch (err) {
+    console.error('POST /api/sequences/:id/enrollments error:', err)
+    res.status(400).json(ENROLLMENTS_UNAVAILABLE_MSG)
+  }
 }
 
 /** GET /api/enrollments — list enrollments for current tenant (Stage 1B). Optional ?sequenceId= & ?status=, order newest first. */
