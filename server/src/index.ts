@@ -33,6 +33,7 @@ import overviewRoutes from './routes/overview.js'
 import liveLeadsRouter from './routes/liveLeads.js'
 import leadSourcesRouter from './routes/leadSources.js'
 import meRoutes from './routes/me.js'
+import enrollmentsRoutes from './routes/enrollments.js'
 import { generalRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
@@ -474,6 +475,7 @@ app.use('/api/reports', reportsRoutes)
 app.use('/api/inbox', observabilityHeaders, inboxRoutes)
 app.use('/api/lists', listsRoutes)
 app.use('/api/sequences', observabilityHeaders, sequencesRoutes)
+app.use('/api/enrollments', observabilityHeaders, enrollmentsRoutes)
 app.use('/api/customers', customersRoutes)
 console.log('  ✓ Mounted: /api/customers (includes /:id/email-identities)')
 app.use('/api/leads', leadsRoutes)

@@ -80,6 +80,14 @@ enum ProspectStatus {
   completed
 }
 
+enum EnrollmentStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CANCELLED
+  COMPLETED
+}
+
 // ============================================================================
 // MODELS (PascalCase with @@map to snake_case tables)
 // ============================================================================
@@ -155,6 +163,7 @@ model Customer {
   contactSourceRows     ContactSourceRow[]
   leadSourceSheetConfigs LeadSourceSheetConfig[]
   leadSourceRowSeen      LeadSourceRowSeen[]
+  enrollments            Enrollment[]
 
   @@index([id])
   @@index([domain])
@@ -557,6 +566,7 @@ model EmailSequence {
   steps            EmailSequenceStep[]
   campaigns        EmailCampaign[]          @relation("CampaignToSequence")
   enrollments      SequenceEnrollment[]
+  enrollmentBatches Enrollment[]
 
   @@index([customerId])
   @@index([customerId, senderIdentityId])
@@ -609,6 +619,43 @@ model SequenceEnrollment {
   @@index([status])
   @@index([nextStepScheduledAt])
   @@map("sequence_enrollments")
+}
+
+// Stage 1A: Enrollment batch (recipients by email; no sending in this PR)
+model Enrollment {
+  id          String           @id @default(cuid())
+  sequenceId  String
+  customerId  String
+  name        String?
+  status      EnrollmentStatus @default(ACTIVE)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  sequence    EmailSequence    @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+  customer    Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  recipients  EnrollmentRecipient[]
+
+  @@index([customerId])
+  @@index([sequenceId])
+  @@index([status])
+  @@map("enrollments")
+}
+
+model EnrollmentRecipient {
+  id           String    @id @default(cuid())
+  enrollmentId String
+  email        String
+  firstName    String?
+  lastName     String?
+  company      String?
+  externalId   String?
+  createdAt    DateTime  @default(now())
+
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  @@unique([enrollmentId, email])
+  @@index([enrollmentId])
+  @@map("enrollment_recipients")
 }
 
 // Marketing leads imported from customer Google Sheets
