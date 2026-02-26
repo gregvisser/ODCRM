@@ -86,34 +86,34 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
     res.status(400).json({ error: 'sequenceId required' })
     return
   }
-  const sequence = await prisma.emailSequence.findFirst({
-    where: { id: sequenceId, customerId },
-    select: { id: true },
-  })
-  if (!sequence) {
-    res.status(404).json({ error: 'Sequence not found' })
-    return
-  }
-  const body = (req.body || {}) as { name?: string; recipients?: Array<{ email: string; firstName?: string; lastName?: string; company?: string; externalId?: string }> }
-  const recipients = Array.isArray(body.recipients) ? body.recipients : []
-  if (recipients.length === 0) {
-    res.status(400).json({ error: 'recipients must be a non-empty array' })
-    return
-  }
-  const name = typeof body.name === 'string' ? body.name.trim() || null : null
-  const normalized = recipients.map((r) => ({
-    email: String(r?.email ?? '').trim().toLowerCase(),
-    firstName: typeof r?.firstName === 'string' ? r.firstName.trim() || null : null,
-    lastName: typeof r?.lastName === 'string' ? r.lastName.trim() || null : null,
-    company: typeof r?.company === 'string' ? r.company.trim() || null : null,
-    externalId: typeof r?.externalId === 'string' ? r.externalId.trim() || null : null,
-  }))
-  const invalid = normalized.find((r) => !r.email)
-  if (invalid) {
-    res.status(400).json({ error: 'Every recipient must have an email' })
-    return
-  }
   try {
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ error: 'Sequence not found' })
+      return
+    }
+    const body = (req.body || {}) as { name?: string; recipients?: Array<{ email: string; firstName?: string; lastName?: string; company?: string; externalId?: string }> }
+    const recipients = Array.isArray(body.recipients) ? body.recipients : []
+    if (recipients.length === 0) {
+      res.status(400).json({ error: 'recipients must be a non-empty array' })
+      return
+    }
+    const name = typeof body.name === 'string' ? body.name.trim() || null : null
+    const normalized = recipients.map((r) => ({
+      email: String(r?.email ?? '').trim().toLowerCase(),
+      firstName: typeof r?.firstName === 'string' ? r.firstName.trim() || null : null,
+      lastName: typeof r?.lastName === 'string' ? r.lastName.trim() || null : null,
+      company: typeof r?.company === 'string' ? r.company.trim() || null : null,
+      externalId: typeof r?.externalId === 'string' ? r.externalId.trim() || null : null,
+    }))
+    const invalid = normalized.find((r) => !r.email)
+    if (invalid) {
+      res.status(400).json({ error: 'Every recipient must have an email' })
+      return
+    }
     const enrollment = await prisma.$transaction(async (tx) => {
       const e = await tx.enrollment.create({
         data: {
