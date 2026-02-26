@@ -42,7 +42,7 @@ Single source of truth for the engagement pipeline: Templates → Sequences → 
 ### Today (existing endpoints)
 
 - **Templates:** `GET /api/templates`, `POST /api/templates`, `PATCH /api/templates/:id`, `DELETE /api/templates/:id`, `POST /api/templates/preview`, `POST /api/templates/ai/*`.
-- **Sequences:** `GET /api/sequences`, `GET /api/sequences/:id`, `POST /api/sequences`, `PUT /api/sequences/:id`, `DELETE /api/sequences/:id`, `POST /api/sequences/:id/steps`, `PUT /api/sequences/:id/steps/:stepId`, `DELETE /api/sequences/:id/steps/:stepId`, `POST /api/sequences/:id/enroll`, `POST /api/sequences/:id/dry-run`.
+- **Sequences:** `GET /api/sequences`, `GET /api/sequences/:id`, `POST /api/sequences`, `PUT /api/sequences/:id`, `DELETE /api/sequences/:id`, `POST /api/sequences/:id/steps`, `PUT /api/sequences/:id/steps/:stepId`, `DELETE /api/sequences/:id/steps/:stepId`, `POST /api/sequences/:id/enroll`, `POST /api/sequences/:id/dry-run`. **Stage 1A shipped:** `GET /api/sequences/:sequenceId/enrollments`, `POST /api/sequences/:sequenceId/enrollments`, `GET /api/enrollments/:enrollmentId` (enrollment batch + recipients; persistence only, no sending).
 - **Campaigns:** `POST /api/campaigns`, `GET /api/campaigns`, `GET /api/campaigns/:id`, `PATCH /api/campaigns/:id`, `POST /api/campaigns/:id/start`, `POST /api/campaigns/:id/pause`, `POST /api/campaigns/:id/complete`, `DELETE /api/campaigns/:id`, plus templates/prospects sub-routes.
 - **Suppression:** `POST /api/suppression/check`, `GET /api/suppression`, `POST /api/suppression`, etc.
 - **Outlook/identities:** `GET/POST /api/outlook/identities`, etc.
@@ -51,14 +51,14 @@ Enrollments today are created only via `POST /api/sequences/:id/enroll`; there i
 
 ### Target (TODOs)
 
-- **Enrollments:** `GET /api/sequences/:id/enrollments` (or equivalent) to list enrollments for a sequence; optional `GET /api/enrollments` scoped by customer. (Future PR.)
+- **Enrollments:** Stage 1A shipped (list/create batch enrollments + recipients, get by id). Optional: `GET /api/enrollments` scoped by customer (future PR).
 - **Queue:** Observability and/or control endpoints for the send queue (e.g. queue depth, retries). (Future PR.)
 
 ---
 
 ## Rollout plan
 
-- **Stage 1:** Define enrollments schema + endpoints (list enrollments, get enrollment by id, optional pause/resume). Future PR; no behavior change in this contract doc.
+- **Stage 0:** Contract doc + `npm run test:engagement-contract` (done).
+- **Stage 1A (shipped):** Enrollments schema (Enrollment, EnrollmentRecipient) + endpoints: `GET/POST /api/sequences/:sequenceId/enrollments`, `GET /api/enrollments/:enrollmentId`. Persistence only; no sending.
+- **Stage 1 (future):** Optional pause/resume, list by customer. (Future PR.)
 - **Stage 2:** Queue worker + observability (send queue consumer, metrics, alerts). Future PR.
-
-This document and the self-test `npm run test:engagement-contract` are Stage 0: contract and regression guard only.

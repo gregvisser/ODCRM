@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requireCustomerId } from '../utils/tenantId.js'
+import { listEnrollmentsForSequence, createEnrollmentForSequence } from './enrollments.js'
 
 const router = Router()
 
@@ -80,6 +81,11 @@ router.get('/', async (req, res) => {
     return res.status(500).json({ error: 'Failed to fetch sequences' })
   }
 })
+
+// GET /api/sequences/:id/enrollments - List enrollment batches for sequence (Stage 1A)
+router.get('/:id/enrollments', listEnrollmentsForSequence)
+// POST /api/sequences/:id/enrollments - Create enrollment batch + recipients (Stage 1A)
+router.post('/:id/enrollments', createEnrollmentForSequence)
 
 // GET /api/sequences/:id - Get a single sequence with steps
 router.get('/:id', async (req, res) => {
