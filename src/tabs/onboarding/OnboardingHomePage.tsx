@@ -3,6 +3,7 @@ import { Box, Flex, Text } from '@chakra-ui/react'
 import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
+import { isClientUI } from '../../platform/mode'
 import CustomerSelector from './components/CustomerSelector'
 import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
@@ -86,9 +87,11 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
   return (
     <Flex direction="column" h="100%">
-      <Box mb={4}>
-        <CustomerSelector selectedCustomerId={selectedCustomerId} onCustomerChange={handleCustomerChange} />
-      </Box>
+      {!isClientUI() && (
+        <Box mb={4}>
+          <CustomerSelector selectedCustomerId={selectedCustomerId} onCustomerChange={handleCustomerChange} />
+        </Box>
+      )}
 
       <Box flex="1">
         {!selectedCustomerId ? (
