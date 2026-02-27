@@ -6,6 +6,9 @@
  * - GET /api/enrollments/:enrollmentId
  * - POST /api/enrollments/:enrollmentId/pause (Stage 1B)
  * - POST /api/enrollments/:enrollmentId/resume (Stage 1B)
+ * Stage 2A: dry-run + audit (no send)
+ * - POST /api/enrollments/:enrollmentId/dry-run
+ * - GET /api/enrollments/:enrollmentId/audit
  */
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
@@ -178,6 +181,214 @@ router.get('/', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('GET /api/enrollments error:', err)
     res.status(400).json({ error: 'An error occurred' })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Stage 2A: dry-run + audit (no send; tenant-safe; contract-aligned)
+// ---------------------------------------------------------------------------
+
+/** POST /api/enrollments/:enrollmentId/dry-run — plan what would be sent; persist audit events; no send */
+router.post('/:enrollmentId/dry-run', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const enrollmentId = req.params.enrollmentId
+    if (!enrollmentId) {
+      res.status(400).json({ error: 'enrollmentId required' })
+      return
+    }
+    const enrollment = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
+      include: {
+        recipients: true,
+        sequence: {
+          select: {
+            id: true,
+            senderIdentityId: true,
+            steps: { orderBy: { stepOrder: 'asc' } },
+          },
+        },
+      },
+    })
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' })
+      return
+    }
+    const plannedAt = new Date()
+    const tx = prisma
+
+    // Active identity check (sequence has senderIdentityId; verify identity exists and is active)
+    const hasActiveIdentity = enrollment.sequence.senderIdentityId
+      ? await prisma.emailIdentity.findFirst({
+          where: {
+            id: enrollment.sequence.senderIdentityId,
+            customerId,
+            isActive: true,
+          },
+          select: { id: true },
+        })
+      : null
+
+    // Load suppression (emails + domains) for customer
+    const suppressionEntries = await tx.suppressionEntry.findMany({
+      where: { customerId },
+      select: { type: true, value: true, emailNormalized: true, reason: true },
+    })
+    const getSuppressionReason = (email: string): string | null => {
+      const normalized = email.toLowerCase().trim()
+      const domain = email.includes('@') ? email.split('@')[1] : ''
+      const emailEntry = suppressionEntries.find(
+        (s) => s.type === 'email' && (s.emailNormalized ?? s.value) === normalized
+      )
+      if (emailEntry) return emailEntry.reason ?? 'suppressed'
+      const domainEntry = suppressionEntries.find((s) => s.type === 'domain' && s.value === domain)
+      if (domainEntry) return domainEntry.reason ?? 'suppressed'
+      return null
+    }
+
+    const templateId = enrollment.sequence.steps[0]?.id ?? null
+    const identityId = enrollment.sequence.senderIdentityId ?? null
+    const stepOrder = 1
+
+    const items: Array<{
+      recipientId: string
+      email: string
+      stepOrder: number
+      status: 'WouldSend' | 'Skipped'
+      templateId?: string | null
+      identityId?: string | null
+      suppressionResult?: string
+      reason?: string
+    }> = []
+
+    for (const r of enrollment.recipients) {
+      if (!hasActiveIdentity) {
+        items.push({
+          recipientId: r.id,
+          email: r.email,
+          stepOrder,
+          status: 'Skipped',
+          reason: 'SKIP_NO_IDENTITY',
+        })
+        continue
+      }
+      const suppressionReason = getSuppressionReason(r.email)
+      if (suppressionReason) {
+        items.push({
+          recipientId: r.id,
+          email: r.email,
+          stepOrder,
+          status: 'Skipped',
+          reason: 'suppressed',
+        })
+        continue
+      }
+      items.push({
+        recipientId: r.id,
+        email: r.email,
+        stepOrder,
+        status: 'WouldSend',
+        templateId: templateId ?? undefined,
+        identityId: identityId ?? undefined,
+        suppressionResult: 'allowed',
+      })
+    }
+
+    // Persist audit events (append-only; no secrets in meta)
+    await tx.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        eventType: 'dry_run_started',
+        message: `Dry run started; ${enrollment.recipients.length} recipient(s)`,
+        meta: { recipientCount: enrollment.recipients.length },
+      },
+    })
+    const wouldSendCount = items.filter((i) => i.status === 'WouldSend').length
+    const skippedCount = items.filter((i) => i.status === 'Skipped').length
+    for (const item of items) {
+      await tx.enrollmentAuditEvent.create({
+        data: {
+          customerId,
+          enrollmentId,
+          recipientEmail: item.email,
+          eventType: 'dry_run_recipient',
+          message: item.status === 'Skipped' ? item.reason : 'would_send',
+          meta: {
+            recipientId: item.recipientId,
+            stepOrder: item.stepOrder,
+            status: item.status,
+            ...(item.reason && { reason: item.reason }),
+          },
+        },
+      })
+    }
+    await tx.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        eventType: 'dry_run_completed',
+        message: `Dry run completed; wouldSend=${wouldSendCount}, skipped=${skippedCount}`,
+        meta: { wouldSendCount, skippedCount, totalItems: items.length },
+      },
+    })
+
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: {
+        enrollmentId: enrollment.id,
+        plannedAt: plannedAt.toISOString(),
+        items,
+      },
+    })
+  } catch (err) {
+    console.error('POST /api/enrollments/:enrollmentId/dry-run error:', err)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
+/** GET /api/enrollments/:enrollmentId/audit — audit log entries for enrollment (most recent first) */
+router.get('/:enrollmentId/audit', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const enrollmentId = req.params.enrollmentId
+    if (!enrollmentId) {
+      res.status(400).json({ error: 'enrollmentId required' })
+      return
+    }
+    const enrollment = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
+      select: { id: true },
+    })
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' })
+      return
+    }
+    const limit = Math.min(Math.max(1, Number(req.query.limit) || 50), 200)
+    const events = await prisma.enrollmentAuditEvent.findMany({
+      where: { enrollmentId, customerId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    const entries = events.map((e) => ({
+      id: e.id,
+      eventType: e.eventType,
+      timestamp: e.createdAt.toISOString(),
+      customerId: e.customerId,
+      payload: (e.meta as Record<string, unknown>) ?? {},
+    }))
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: {
+        enrollmentId,
+        entries,
+      },
+    })
+  } catch (err) {
+    console.error('GET /api/enrollments/:enrollmentId/audit error:', err)
+    res.status(500).json({ error: 'An error occurred' })
   }
 })
 

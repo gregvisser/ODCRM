@@ -658,6 +658,22 @@ model EnrollmentRecipient {
   @@map("enrollment_recipients")
 }
 
+// Stage 2A: Append-only audit log for enrollment dry-run and send events (tenant-scoped)
+model EnrollmentAuditEvent {
+  id             String   @id @default(cuid())
+  customerId     String
+  enrollmentId   String
+  recipientEmail String?
+  eventType      String   // e.g. dry_run_started, dry_run_recipient, dry_run_completed
+  message        String?
+  meta           Json?    // dry-run result fragments; no secrets
+  createdAt      DateTime @default(now())
+
+  @@index([customerId, enrollmentId, createdAt])
+  @@index([customerId, recipientEmail])
+  @@map("enrollment_audit_events")
+}
+
 // Marketing leads imported from customer Google Sheets
 model LeadRecord {
   id         String   @id @default(cuid())
