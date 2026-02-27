@@ -81,3 +81,140 @@ window.__ODCRM_BUILD__
 // 2) After navigating to Marketing → Email Accounts, if error:
 // Copy the first error's message, stack, and script URL (chunk name).
 ```
+
+---
+
+## PowerShell: Enrollments smoke scripts (copy/paste)
+
+### A) Route verification
+
+- **Router:** `server/src/routes/enrollments.ts`
+- **Mount:** `server/src/index.ts` → `app.use('/api/enrollments', …, enrollmentsRoutes)`
+- **Endpoints:**
+  - GET /api/enrollments
+  - POST /api/enrollments/:enrollmentId/pause
+  - POST /api/enrollments/:enrollmentId/resume
+
+### B) Why "POST /api/…" fails in PowerShell
+
+PowerShell has no `POST` command. Use **Invoke-WebRequest** or **Invoke-RestMethod** with **-Method POST** and **-Uri "..."**. Use **-SkipHttpErrorCheck** so 4xx/5xx responses do not throw; you can read `StatusCode` and `Content` from the response object.
+
+### C) Script A (list then pause/resume first if any)
+
+```powershell
+# Script A — List enrollments, then pause/resume the first one (if any)
+# Only edit: $cid = "PASTE_REAL_CUSTOMER_ID"
+
+$base = "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+$cid  = "PASTE_REAL_CUSTOMER_ID"
+$hdr  = @{ "x-customer-id" = $cid }
+
+function Get-HttpStatusAndSnippet {
+  param([object]$Response, [int]$MaxBody = 280)
+
+  if (-not $Response) {
+    return [PSCustomObject]@{ StatusCode = 0; Snippet = "(no response)" }
+  }
+
+  $code = [int]$Response.StatusCode
+  $body = ""
+
+  if ($null -ne $Response.Content) {
+    $body = [string]$Response.Content
+    if ($body.Length -gt $MaxBody) { $body = $body.Substring(0, $MaxBody) + "..." }
+  }
+
+  [PSCustomObject]@{ StatusCode = $code; Snippet = $body }
+}
+
+# 1) GET /api/enrollments
+try {
+  $r = Invoke-WebRequest -Uri "$base/api/enrollments" -Method GET -Headers $hdr -SkipHttpErrorCheck
+} catch {
+  Write-Host "GET /api/enrollments: exception — $($_.Exception.Message)"
+  exit 1
+}
+
+$res = Get-HttpStatusAndSnippet -Response $r
+Write-Host "GET /api/enrollments: $($res.StatusCode) — $($res.Snippet)"
+
+if ($r.StatusCode -ne 200) { exit 1 }
+
+$payload = $r.Content | ConvertFrom-Json
+$list    = $payload.data
+$count   = if ($list) { $list.Count } else { 0 }
+
+Write-Host "Enrollments count: $count"
+
+if ($count -eq 0) {
+  Write-Host "No enrollments found; create one in UI (Marketing → Sequences → open sequence → Create enrollment), then rerun."
+  exit 0
+}
+
+$enrId = $list[0].id
+Write-Host "Using first enrollment id: $enrId"
+
+# 2) POST pause
+try {
+  $rPause = Invoke-WebRequest -Uri "$base/api/enrollments/$enrId/pause" -Method POST -Headers $hdr -SkipHttpErrorCheck
+} catch {
+  Write-Host "POST pause: exception — $($_.Exception.Message)"
+  exit 1
+}
+
+$resPause = Get-HttpStatusAndSnippet -Response $rPause
+Write-Host "POST /api/enrollments/$enrId/pause: $($resPause.StatusCode) — $($resPause.Snippet)"
+
+# 3) POST resume
+try {
+  $rResume = Invoke-WebRequest -Uri "$base/api/enrollments/$enrId/resume" -Method POST -Headers $hdr -SkipHttpErrorCheck
+} catch {
+  Write-Host "POST resume: exception — $($_.Exception.Message)"
+  exit 1
+}
+
+$resResume = Get-HttpStatusAndSnippet -Response $rResume
+Write-Host "POST /api/enrollments/$enrId/resume: $($resResume.StatusCode) — $($resResume.Snippet)"
+```
+
+### D) Script B (manual enrollment id)
+
+```powershell
+# Script B — Pause/resume a specific enrollment (manual $enrId)
+# Only edit: $cid and $enrId
+
+$base  = "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net"
+$cid   = "PASTE_REAL_CUSTOMER_ID"
+$enrId = "PASTE_ENROLLMENT_ID"
+$hdr   = @{ "x-customer-id" = $cid }
+
+function Get-HttpStatusAndSnippet {
+  param([object]$Response, [int]$MaxBody = 280)
+
+  if (-not $Response) {
+    return [PSCustomObject]@{ StatusCode = 0; Snippet = "(no response)" }
+  }
+
+  $code = [int]$Response.StatusCode
+  $body = ""
+
+  if ($null -ne $Response.Content) {
+    $body = [string]$Response.Content
+    if ($body.Length -gt $MaxBody) { $body = $body.Substring(0, $MaxBody) + "..." }
+  }
+
+  [PSCustomObject]@{ StatusCode = $code; Snippet = $body }
+}
+
+foreach ($action in @("pause", "resume")) {
+  try {
+    $r = Invoke-WebRequest -Uri "$base/api/enrollments/$enrId/$action" -Method POST -Headers $hdr -SkipHttpErrorCheck
+  } catch {
+    Write-Host "POST $action: exception — $($_.Exception.Message)"
+    continue
+  }
+
+  $res = Get-HttpStatusAndSnippet -Response $r
+  Write-Host "POST /api/enrollments/$enrId/$action: $($res.StatusCode) — $($res.Snippet)"
+}
+```
