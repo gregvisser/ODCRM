@@ -51,7 +51,7 @@ Enrollments today are created only via `POST /api/sequences/:id/enroll`; there i
 
 ### Target (TODOs)
 
-- **Enrollments:** Stage 1A shipped (list/create batch enrollments + recipients, get by id). Optional: `GET /api/enrollments` scoped by customer (future PR).
+- **Enrollments:** Stage 1A + 1B shipped. List/create batch enrollments + recipients, get by id; pause/resume; `GET /api/enrollments` scoped by customer (optional `?sequenceId=`, `?status=`).
 - **Queue:** Observability and/or control endpoints for the send queue (e.g. queue depth, retries). (Future PR.)
 
 ---
@@ -60,5 +60,5 @@ Enrollments today are created only via `POST /api/sequences/:id/enroll`; there i
 
 - **Stage 0:** Contract doc + `npm run test:engagement-contract` (done).
 - **Stage 1A (shipped):** Enrollments schema (Enrollment, EnrollmentRecipient) + endpoints: `GET/POST /api/sequences/:sequenceId/enrollments`, `GET /api/enrollments/:enrollmentId`. Persistence only; no sending.
-- **Stage 1 (future):** Optional pause/resume, list by customer. (Future PR.)
+- **Stage 1B (shipped):** Pause/resume + list by customer: `POST /api/enrollments/:enrollmentId/pause`, `POST /api/enrollments/:enrollmentId/resume`, `GET /api/enrollments` (tenant-scoped, optional `?sequenceId=`, `?status=`). No sending/queue logic.
 - **Stage 2:** Queue worker + observability (send queue consumer, metrics, alerts). Future PR.
