@@ -146,6 +146,17 @@ type EmailIdentity = {
   isActive?: boolean
 }
 
+type EnrollmentListItem = {
+  id: string
+  sequenceId: string
+  customerId: string
+  name: string | null
+  status: string
+  createdAt: string
+  updatedAt: string
+  recipientCount: number
+}
+
 type StartPreview = {
   snapshot?: SnapshotOption
   template?: EmailTemplate
@@ -207,11 +218,82 @@ const SequencesTab: React.FC = () => {
   const [previewContacts, setPreviewContacts] = useState<Record<string, string>[]>([])
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [enrollments, setEnrollments] = useState<EnrollmentListItem[]>([])
+  const [enrollmentsLoading, setEnrollmentsLoading] = useState(false)
+  const [enrollmentsError, setEnrollmentsError] = useState<string | null>(null)
+  const [enrollmentActionId, setEnrollmentActionId] = useState<string | null>(null)
 
   useEffect(() => {
     const unsub = leadSourceSelectionStore.onLeadSourceBatchSelectionChanged(setLeadSourceSelection)
     return unsub
   }, [])
+
+  const loadEnrollmentsForSequence = async (sequenceId: string) => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    setEnrollmentsLoading(true)
+    setEnrollmentsError(null)
+    const { data, error } = await api.get<EnrollmentListItem[]>(
+      `/api/sequences/${sequenceId}/enrollments`,
+      { headers: { 'X-Customer-Id': selectedCustomerId } }
+    )
+    setEnrollmentsLoading(false)
+    if (error) {
+      setEnrollmentsError(error)
+      setEnrollments([])
+      return
+    }
+    setEnrollments(Array.isArray(data) ? data : [])
+  }
+
+  useEffect(() => {
+    if (isOpen && editingSequence?.id && selectedCustomerId?.startsWith('cust_')) {
+      loadEnrollmentsForSequence(editingSequence.id)
+    } else {
+      setEnrollments([])
+      setEnrollmentsError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load only when modal/sequence/customer change
+  }, [isOpen, editingSequence?.id, selectedCustomerId])
+
+  const handleEnrollmentPause = async (enrollmentId: string) => {
+    if (!selectedCustomerId || !editingSequence?.id) return
+    setEnrollmentActionId(enrollmentId)
+    try {
+      const { error } = await api.post(
+        `/api/enrollments/${enrollmentId}/pause`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        toast({ title: 'Pause failed', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Enrollment paused', status: 'success' })
+      await loadEnrollmentsForSequence(editingSequence.id)
+    } finally {
+      setEnrollmentActionId(null)
+    }
+  }
+
+  const handleEnrollmentResume = async (enrollmentId: string) => {
+    if (!selectedCustomerId || !editingSequence?.id) return
+    setEnrollmentActionId(enrollmentId)
+    try {
+      const { error } = await api.post(
+        `/api/enrollments/${enrollmentId}/resume`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        toast({ title: 'Resume failed', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Enrollment resumed', status: 'success' })
+      await loadEnrollmentsForSequence(editingSequence.id)
+    } finally {
+      setEnrollmentActionId(null)
+    }
+  }
 
   const handlePreviewRecipients = async () => {
     const sel = leadSourceSelectionStore.getLeadSourceBatchSelection()
@@ -1405,6 +1487,7 @@ const SequencesTab: React.FC = () => {
           <ModalCloseButton />
           <ModalBody p={0}>
             {editingSequence && (
+              <>
               <SimpleGrid columns={{ base: 1, lg: 2 }} minH="0" h="full">
                 {/* LEFT COLUMN — Sequence steps */}
                 <Box
@@ -1634,6 +1717,78 @@ const SequencesTab: React.FC = () => {
                   </VStack>
                 </Box>
               </SimpleGrid>
+
+              {editingSequence.id && (
+                <Box borderTop="1px solid" borderColor="gray.200" p={6}>
+                  <Heading size="sm" mb={4}>Enrollments</Heading>
+                  {enrollmentsError && (
+                    <Alert status="error" mb={4}>
+                      <AlertIcon />
+                      <AlertDescription>{enrollmentsError}</AlertDescription>
+                    </Alert>
+                  )}
+                  {enrollmentsLoading ? (
+                    <Text color="gray.500" fontSize="sm">Loading enrollments…</Text>
+                  ) : enrollments.length === 0 && !enrollmentsError ? (
+                    <Text color="gray.500" fontSize="sm">No enrollments yet.</Text>
+                  ) : (
+                    <Box overflowX="auto">
+                      <Table size="sm">
+                        <Thead>
+                          <Tr>
+                            <Th>Name</Th>
+                            <Th>Status</Th>
+                            <Th>Recipients</Th>
+                            <Th>Created</Th>
+                            <Th>Actions</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {enrollments.map((e) => (
+                            <Tr key={e.id}>
+                              <Td>{e.name || e.id}</Td>
+                              <Td>
+                                <Badge colorScheme={e.status === 'ACTIVE' ? 'green' : e.status === 'PAUSED' ? 'yellow' : 'gray'} size="sm">
+                                  {e.status}
+                                </Badge>
+                              </Td>
+                              <Td>{e.recipientCount}</Td>
+                              <Td fontSize="xs" color="gray.600">
+                                {e.createdAt ? new Date(e.createdAt).toLocaleString() : '—'}
+                              </Td>
+                              <Td>
+                                <HStack gap={2}>
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    colorScheme="yellow"
+                                    isDisabled={e.status !== 'DRAFT' && e.status !== 'ACTIVE'}
+                                    isLoading={enrollmentActionId === e.id}
+                                    onClick={() => handleEnrollmentPause(e.id)}
+                                  >
+                                    Pause
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    colorScheme="green"
+                                    isDisabled={e.status !== 'PAUSED'}
+                                    isLoading={enrollmentActionId === e.id}
+                                    onClick={() => handleEnrollmentResume(e.id)}
+                                  >
+                                    Resume
+                                  </Button>
+                                </HStack>
+                              </Td>
+                            </Tr>
+                          ))}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                  )}
+                </Box>
+              )}
+              </>
             )}
           </ModalBody>
 
