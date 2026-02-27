@@ -65,6 +65,7 @@ import {
   CheckCircleIcon,
   SettingsIcon,
   TimeIcon,
+  ViewIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
@@ -227,6 +228,16 @@ const SequencesTab: React.FC = () => {
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
   const [createEnrollmentSubmitting, setCreateEnrollmentSubmitting] = useState(false)
+  const { isOpen: isRecipientsModalOpen, onOpen: onRecipientsModalOpen, onClose: onRecipientsModalClose } = useDisclosure()
+  const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null)
+  const [selectedEnrollment, setSelectedEnrollment] = useState<{
+    id: string
+    name: string | null
+    status: string
+    recipients?: { email: string }[]
+  } | null>(null)
+  const [recipientsLoading, setRecipientsLoading] = useState(false)
+  const [recipientsError, setRecipientsError] = useState<string | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -331,6 +342,53 @@ const SequencesTab: React.FC = () => {
       await loadEnrollmentsForSequence(editingSequence.id)
     } finally {
       setEnrollmentActionId(null)
+    }
+  }
+
+  const loadEnrollmentRecipients = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setRecipientsLoading(true)
+    setRecipientsError(null)
+    setSelectedEnrollment(null)
+    try {
+      const { data, error } = await api.get<{
+        id: string
+        name: string | null
+        status: string
+        recipients?: { email: string }[]
+      }>(`/api/enrollments/${enrollmentId}`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+      if (error) {
+        setRecipientsError(error)
+        toast({ title: 'Failed to load recipients', description: error, status: 'error' })
+        return
+      }
+      setSelectedEnrollment(data ?? null)
+    } finally {
+      setRecipientsLoading(false)
+    }
+  }
+
+  const openRecipientsModal = (enrollmentId: string) => {
+    setSelectedEnrollmentId(enrollmentId)
+    onRecipientsModalOpen()
+    loadEnrollmentRecipients(enrollmentId)
+  }
+
+  const closeRecipientsModal = () => {
+    onRecipientsModalClose()
+    setSelectedEnrollmentId(null)
+    setSelectedEnrollment(null)
+    setRecipientsError(null)
+  }
+
+  const handleCopyAllRecipients = async () => {
+    if (!selectedEnrollment?.recipients?.length) return
+    const emails = selectedEnrollment.recipients.map((r) => r.email).filter(Boolean).join('\n')
+    try {
+      await navigator.clipboard.writeText(emails)
+      toast({ title: 'Copied', description: `${selectedEnrollment.recipients.length} email(s) copied to clipboard`, status: 'success' })
+    } catch {
+      toast({ title: 'Copy failed', status: 'error' })
     }
   }
 
@@ -1804,6 +1862,14 @@ const SequencesTab: React.FC = () => {
                                 <HStack gap={2}>
                                   <Button
                                     size="xs"
+                                    variant="ghost"
+                                    leftIcon={<ViewIcon />}
+                                    onClick={() => openRecipientsModal(e.id)}
+                                  >
+                                    View recipients
+                                  </Button>
+                                  <Button
+                                    size="xs"
                                     variant="outline"
                                     colorScheme="yellow"
                                     isDisabled={e.status !== 'DRAFT' && e.status !== 'ACTIVE'}
@@ -1901,6 +1967,58 @@ const SequencesTab: React.FC = () => {
                 Create
               </Button>
             </Flex>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isRecipientsModalOpen} onClose={closeRecipientsModal} size="md">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Enrollment recipients</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {recipientsLoading ? (
+              <Text color="gray.500">Loading…</Text>
+            ) : recipientsError ? (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertDescription>{recipientsError}</AlertDescription>
+              </Alert>
+            ) : selectedEnrollment ? (
+              <VStack align="stretch" spacing={4}>
+                <Flex align="center" gap={2}>
+                  <Text fontWeight="medium">{selectedEnrollment.name || selectedEnrollment.id}</Text>
+                  <Badge colorScheme={selectedEnrollment.status === 'ACTIVE' ? 'green' : selectedEnrollment.status === 'PAUSED' ? 'yellow' : 'gray'} size="sm">
+                    {selectedEnrollment.status}
+                  </Badge>
+                </Flex>
+                {!selectedEnrollment.recipients?.length ? (
+                  <Text color="gray.500" fontSize="sm">No recipients found.</Text>
+                ) : (
+                  <>
+                    <Box overflowY="auto" maxH="300px">
+                      <Table size="sm">
+                        <Thead>
+                          <Tr>
+                            <Th>Email</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {selectedEnrollment.recipients.map((r, i) => (
+                            <Tr key={r.email ?? i}>
+                              <Td fontSize="sm">{r.email || '—'}</Td>
+                            </Tr>
+                          ))}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                    <Button size="sm" leftIcon={<EmailIcon />} onClick={handleCopyAllRecipients}>
+                      Copy all
+                    </Button>
+                  </>
+                )}
+              </VStack>
+            ) : null}
           </ModalBody>
         </ModalContent>
       </Modal>
