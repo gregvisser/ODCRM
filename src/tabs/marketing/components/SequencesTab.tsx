@@ -66,6 +66,8 @@ import {
   SettingsIcon,
   TimeIcon,
   ViewIcon,
+  RepeatIcon,
+  InfoIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
@@ -238,6 +240,32 @@ const SequencesTab: React.FC = () => {
   } | null>(null)
   const [recipientsLoading, setRecipientsLoading] = useState(false)
   const [recipientsError, setRecipientsError] = useState<string | null>(null)
+  const { isOpen: isDryRunOpen, onOpen: onDryRunOpen, onClose: onDryRunClose } = useDisclosure()
+  const [dryRunEnrollmentId, setDryRunEnrollmentId] = useState<string | null>(null)
+  const [dryRunLoading, setDryRunLoading] = useState(false)
+  const [dryRunError, setDryRunError] = useState<string | null>(null)
+  const [dryRunData, setDryRunData] = useState<{
+    enrollmentId: string
+    plannedAt: string
+    items: Array<{
+      recipientId: string
+      email: string
+      stepOrder: number
+      status: 'WouldSend' | 'Skipped'
+      templateId?: string
+      identityId?: string
+      suppressionResult?: string
+      reason?: string
+    }>
+  } | null>(null)
+  const { isOpen: isAuditOpen, onOpen: onAuditOpen, onClose: onAuditClose } = useDisclosure()
+  const [auditEnrollmentId, setAuditEnrollmentId] = useState<string | null>(null)
+  const [auditLoading, setAuditLoading] = useState(false)
+  const [auditError, setAuditError] = useState<string | null>(null)
+  const [auditData, setAuditData] = useState<{
+    enrollmentId: string
+    entries: Array<{ id: string; eventType: string; timestamp: string; customerId: string; payload: Record<string, unknown> }>
+  } | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -379,6 +407,77 @@ const SequencesTab: React.FC = () => {
     setSelectedEnrollmentId(null)
     setSelectedEnrollment(null)
     setRecipientsError(null)
+  }
+
+  const runDryRun = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setDryRunLoading(true)
+    setDryRunError(null)
+    try {
+      const { data, error } = await api.post<{ enrollmentId: string; plannedAt: string; items: unknown[] }>(
+        `/api/enrollments/${enrollmentId}/dry-run`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        setDryRunError(error)
+        setDryRunData(null)
+        return
+      }
+      setDryRunData(data ?? null)
+    } finally {
+      setDryRunLoading(false)
+    }
+  }
+
+  const openDryRunModal = (enrollmentId: string) => {
+    setDryRunEnrollmentId(enrollmentId)
+    setDryRunData(null)
+    setDryRunError(null)
+    onDryRunOpen()
+    runDryRun(enrollmentId)
+  }
+
+  const closeDryRunModal = () => {
+    onDryRunClose()
+    setDryRunEnrollmentId(null)
+    setDryRunData(null)
+    setDryRunError(null)
+  }
+
+  const loadAudit = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setAuditLoading(true)
+    setAuditError(null)
+    try {
+      const { data, error } = await api.get<{ enrollmentId: string; entries: Array<{ id: string; eventType: string; timestamp: string; customerId: string; payload: Record<string, unknown> }> }>(
+        `/api/enrollments/${enrollmentId}/audit`,
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        setAuditError(error)
+        setAuditData(null)
+        return
+      }
+      setAuditData(data ?? null)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  const openAuditModal = (enrollmentId: string) => {
+    setAuditEnrollmentId(enrollmentId)
+    setAuditData(null)
+    setAuditError(null)
+    onAuditOpen()
+    loadAudit(enrollmentId)
+  }
+
+  const closeAuditModal = () => {
+    onAuditClose()
+    setAuditEnrollmentId(null)
+    setAuditData(null)
+    setAuditError(null)
   }
 
   const handleCopyAllRecipients = async () => {
@@ -1859,7 +1958,7 @@ const SequencesTab: React.FC = () => {
                                 {e.createdAt ? new Date(e.createdAt).toLocaleString() : '—'}
                               </Td>
                               <Td>
-                                <HStack gap={2}>
+                                <HStack gap={2} wrap="wrap">
                                   <Button
                                     size="xs"
                                     variant="ghost"
@@ -1867,6 +1966,22 @@ const SequencesTab: React.FC = () => {
                                     onClick={() => openRecipientsModal(e.id)}
                                   >
                                     View recipients
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    leftIcon={<RepeatIcon />}
+                                    onClick={() => openDryRunModal(e.id)}
+                                  >
+                                    Dry run
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    leftIcon={<InfoIcon />}
+                                    onClick={() => openAuditModal(e.id)}
+                                  >
+                                    Audit
                                   </Button>
                                   <Button
                                     size="xs"
@@ -2017,6 +2132,132 @@ const SequencesTab: React.FC = () => {
                     </Button>
                   </>
                 )}
+              </VStack>
+            ) : null}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isDryRunOpen} onClose={closeDryRunModal} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Dry-run plan</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {dryRunLoading ? (
+              <Text color="gray.500">Loading dry-run…</Text>
+            ) : dryRunError ? (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertDescription>{dryRunError}</AlertDescription>
+              </Alert>
+            ) : dryRunData ? (
+              <VStack align="stretch" spacing={4}>
+                <Flex gap={4} flexWrap="wrap">
+                  <Stat size="sm">
+                    <StatLabel>Would send</StatLabel>
+                    <StatNumber>{dryRunData.items.filter((i) => i.status === 'WouldSend').length}</StatNumber>
+                  </Stat>
+                  <Stat size="sm">
+                    <StatLabel>Skipped</StatLabel>
+                    <StatNumber>{dryRunData.items.filter((i) => i.status === 'Skipped').length}</StatNumber>
+                  </Stat>
+                  <Stat size="sm">
+                    <StatLabel>Planned at</StatLabel>
+                    <StatHelpText>{new Date(dryRunData.plannedAt).toLocaleString()}</StatHelpText>
+                  </Stat>
+                </Flex>
+                <Box overflowX="auto" maxH="300px">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Email</Th>
+                        <Th>Action</Th>
+                        <Th>Reason</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {dryRunData.items.map((item) => (
+                        <Tr key={item.recipientId}>
+                          <Td fontSize="sm">{item.email}</Td>
+                          <Td>
+                            <Badge colorScheme={item.status === 'WouldSend' ? 'green' : 'yellow'} size="sm">
+                              {item.status}
+                            </Badge>
+                          </Td>
+                          <Td fontSize="sm">{item.reason ?? item.suppressionResult ?? '—'}</Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                </Box>
+                <Button
+                  size="sm"
+                  leftIcon={<RepeatIcon />}
+                  onClick={() => dryRunEnrollmentId && runDryRun(dryRunEnrollmentId)}
+                  isLoading={dryRunLoading}
+                >
+                  Refresh
+                </Button>
+              </VStack>
+            ) : null}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isAuditOpen} onClose={closeAuditModal} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Enrollment audit</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {auditLoading ? (
+              <Text color="gray.500">Loading audit…</Text>
+            ) : auditError ? (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertDescription>{auditError}</AlertDescription>
+              </Alert>
+            ) : auditData ? (
+              <VStack align="stretch" spacing={4}>
+                <Box overflowX="auto" maxH="400px">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Time</Th>
+                        <Th>Event</Th>
+                        <Th>Details</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {auditData.entries.map((entry) => (
+                        <Tr key={entry.id}>
+                          <Td fontSize="xs" whiteSpace="nowrap">
+                            {new Date(entry.timestamp).toLocaleString()}
+                          </Td>
+                          <Td>
+                            <Badge size="sm" variant="outline">
+                              {entry.eventType}
+                            </Badge>
+                          </Td>
+                          <Td fontSize="xs">
+                            {Object.keys(entry.payload).length > 0
+                              ? JSON.stringify(entry.payload)
+                              : '—'}
+                          </Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                </Box>
+                <Button
+                  size="sm"
+                  leftIcon={<RepeatIcon />}
+                  onClick={() => auditEnrollmentId && loadAudit(auditEnrollmentId)}
+                  isLoading={auditLoading}
+                >
+                  Refresh
+                </Button>
               </VStack>
             ) : null}
           </ModalBody>
