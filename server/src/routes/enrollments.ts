@@ -52,7 +52,7 @@ export async function listEnrollmentsForSequence(req: Request, res: Response): P
       return
     }
     const enrollments = await prisma.enrollment.findMany({
-      where: { sequenceId },
+      where: { sequenceId, customerId },
       include: {
         _count: { select: { recipients: true } },
       },
@@ -234,7 +234,7 @@ router.get('/:enrollmentId', async (req: Request, res: Response) => {
 const PAUSABLE_STATUSES: EnrollmentStatus[] = [EnrollmentStatus.DRAFT, EnrollmentStatus.ACTIVE]
 const RESUMABLE_STATUS = EnrollmentStatus.PAUSED
 
-/** POST /api/enrollments/:enrollmentId/pause — set status to PAUSED (only when PENDING or ACTIVE) */
+/** POST /api/enrollments/:enrollmentId/pause — set status to PAUSED (only when DRAFT or ACTIVE) */
 router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -244,23 +244,30 @@ router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'enrollmentId required' })
       return
     }
-    const enrollment = await prisma.enrollment.findFirst({
-      where: { id: enrollmentId, customerId },
-      select: { id: true, status: true, sequenceId: true, customerId: true, name: true, createdAt: true, updatedAt: true, _count: { select: { recipients: true } } },
-    })
-    if (!enrollment) {
-      res.status(404).json({ error: 'Enrollment not found' })
-      return
-    }
-    if (!PAUSABLE_STATUSES.includes(enrollment.status as EnrollmentStatus)) {
-      res.status(400).json({ error: 'Enrollment can only be paused when status is DRAFT or ACTIVE', currentStatus: enrollment.status })
-      return
-    }
-    const updated = await prisma.enrollment.update({
-      where: { id: enrollmentId },
+    const { count } = await prisma.enrollment.updateMany({
+      where: { id: enrollmentId, customerId, status: { in: PAUSABLE_STATUSES } },
       data: { status: EnrollmentStatus.PAUSED },
+    })
+    if (count === 0) {
+      const existing = await prisma.enrollment.findFirst({
+        where: { id: enrollmentId, customerId },
+        select: { status: true },
+      })
+      if (!existing) {
+        res.status(404).json({ error: 'Enrollment not found' })
+        return
+      }
+      res.status(400).json({ error: 'Enrollment can only be paused when status is DRAFT or ACTIVE', currentStatus: existing.status })
+      return
+    }
+    const updated = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
       include: { _count: { select: { recipients: true } } },
     })
+    if (!updated) {
+      res.status(400).json({ error: 'An error occurred' })
+      return
+    }
     res.setHeader('x-odcrm-customer-id', customerId)
     res.json({ data: toEnrollmentListItem(updated) })
   } catch (err) {
@@ -279,23 +286,30 @@ router.post('/:enrollmentId/resume', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'enrollmentId required' })
       return
     }
-    const enrollment = await prisma.enrollment.findFirst({
-      where: { id: enrollmentId, customerId },
-      select: { id: true, status: true },
-    })
-    if (!enrollment) {
-      res.status(404).json({ error: 'Enrollment not found' })
-      return
-    }
-    if ((enrollment.status as EnrollmentStatus) !== RESUMABLE_STATUS) {
-      res.status(400).json({ error: 'Enrollment can only be resumed when status is PAUSED', currentStatus: enrollment.status })
-      return
-    }
-    const updated = await prisma.enrollment.update({
-      where: { id: enrollmentId },
+    const { count } = await prisma.enrollment.updateMany({
+      where: { id: enrollmentId, customerId, status: RESUMABLE_STATUS },
       data: { status: EnrollmentStatus.ACTIVE },
+    })
+    if (count === 0) {
+      const existing = await prisma.enrollment.findFirst({
+        where: { id: enrollmentId, customerId },
+        select: { status: true },
+      })
+      if (!existing) {
+        res.status(404).json({ error: 'Enrollment not found' })
+        return
+      }
+      res.status(400).json({ error: 'Enrollment can only be resumed when status is PAUSED', currentStatus: existing.status })
+      return
+    }
+    const updated = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
       include: { _count: { select: { recipients: true } } },
     })
+    if (!updated) {
+      res.status(400).json({ error: 'An error occurred' })
+      return
+    }
     res.setHeader('x-odcrm-customer-id', customerId)
     res.json({ data: toEnrollmentListItem(updated) })
   } catch (err) {
