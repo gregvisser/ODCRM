@@ -46,6 +46,7 @@ import {
   ModalCloseButton,
   FormControl,
   FormLabel,
+  Textarea,
   useToast,
   AlertDialog,
   AlertDialogBody,
@@ -222,6 +223,44 @@ const SequencesTab: React.FC = () => {
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false)
   const [enrollmentsError, setEnrollmentsError] = useState<string | null>(null)
   const [enrollmentActionId, setEnrollmentActionId] = useState<string | null>(null)
+  const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
+  const [createEnrollmentName, setCreateEnrollmentName] = useState('')
+  const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
+  const [createEnrollmentSubmitting, setCreateEnrollmentSubmitting] = useState(false)
+
+  function parseRecipientEmails(raw: string): string[] {
+    const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+    const unique = Array.from(new Set(split))
+    return unique.filter((email) => email.includes('@') && email.includes('.', email.indexOf('@')))
+  }
+
+  const handleCreateEnrollment = async () => {
+    if (!editingSequence?.id || !selectedCustomerId?.startsWith('cust_')) return
+    const emails = parseRecipientEmails(createEnrollmentRecipients)
+    if (emails.length === 0) {
+      toast({ title: 'Invalid or missing recipients', description: 'Enter at least one valid email (e.g. user@example.com).', status: 'error' })
+      return
+    }
+    setCreateEnrollmentSubmitting(true)
+    try {
+      const { error } = await api.post<unknown>(
+        `/api/sequences/${editingSequence.id}/enrollments`,
+        { name: createEnrollmentName.trim() || undefined, recipients: emails.map((email) => ({ email })) },
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        toast({ title: 'Create enrollment failed', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Enrollment created', status: 'success' })
+      onCreateEnrollmentClose()
+      setCreateEnrollmentName('')
+      setCreateEnrollmentRecipients('')
+      await loadEnrollmentsForSequence(editingSequence.id)
+    } finally {
+      setCreateEnrollmentSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     const unsub = leadSourceSelectionStore.onLeadSourceBatchSelectionChanged(setLeadSourceSelection)
@@ -1720,7 +1759,12 @@ const SequencesTab: React.FC = () => {
 
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
-                  <Heading size="sm" mb={4}>Enrollments</Heading>
+                  <Flex justify="space-between" align="center" mb={4}>
+                    <Heading size="sm">Enrollments</Heading>
+                    <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
+                      Create enrollment
+                    </Button>
+                  </Flex>
                   {enrollmentsError && (
                     <Alert status="error" mb={4}>
                       <AlertIcon />
@@ -1820,6 +1864,44 @@ const SequencesTab: React.FC = () => {
               Start Sequence
             </Button>
           </Flex>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isCreateEnrollmentOpen} onClose={onCreateEnrollmentClose} size="md">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Create enrollment</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <FormControl mb={4}>
+              <FormLabel>Enrollment name (optional)</FormLabel>
+              <Input
+                value={createEnrollmentName}
+                onChange={(e) => setCreateEnrollmentName(e.target.value)}
+                placeholder="e.g. Q1 batch"
+              />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Recipients</FormLabel>
+              <Textarea
+                value={createEnrollmentRecipients}
+                onChange={(e) => setCreateEnrollmentRecipients(e.target.value)}
+                placeholder="one@example.com&#10;two@example.com"
+                rows={6}
+              />
+              <Text fontSize="xs" color="gray.500" mt={1}>
+                Paste emails separated by new lines or commas.
+              </Text>
+            </FormControl>
+            <Flex justify="flex-end" gap={2} mt={4}>
+              <Button variant="ghost" onClick={onCreateEnrollmentClose} isDisabled={createEnrollmentSubmitting}>
+                Cancel
+              </Button>
+              <Button colorScheme="blue" onClick={handleCreateEnrollment} isLoading={createEnrollmentSubmitting}>
+                Create
+              </Button>
+            </Flex>
+          </ModalBody>
         </ModalContent>
       </Modal>
 
