@@ -62,3 +62,4 @@ Enrollments today are created only via `POST /api/sequences/:id/enroll`; there i
 - **Stage 1A (shipped):** Enrollments schema (Enrollment, EnrollmentRecipient) + endpoints: `GET/POST /api/sequences/:sequenceId/enrollments`, `GET /api/enrollments/:enrollmentId`. Persistence only; no sending.
 - **Stage 1B (shipped):** Pause/resume + list by customer: `POST /api/enrollments/:enrollmentId/pause`, `POST /api/enrollments/:enrollmentId/resume`, `GET /api/enrollments` (tenant-scoped, optional `?sequenceId=`, `?status=`). No sending/queue logic.
 - **Stage 2:** Queue worker + observability (send queue consumer, metrics, alerts). Future PR.
+- **Stage 2A (contract):** Queue + Dry Run + Audit log contract only; no send. See [Stage 2A Send Engine contract](./ENGAGEMENT_PIPELINE_STAGE2A_SEND_ENGINE.md).
