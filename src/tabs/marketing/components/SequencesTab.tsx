@@ -266,6 +266,24 @@ const SequencesTab: React.FC = () => {
     enrollmentId: string
     entries: Array<{ id: string; eventType: string; timestamp: string; customerId: string; payload: Record<string, unknown> }>
   } | null>(null)
+  const { isOpen: isQueueOpen, onOpen: onQueueOpen, onClose: onQueueClose } = useDisclosure()
+  const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
+  const [queueLoading, setQueueLoading] = useState(false)
+  const [queueError, setQueueError] = useState<string | null>(null)
+  const [queueData, setQueueData] = useState<{
+    enrollmentId: string
+    items: Array<{
+      id?: string
+      recipientEmail?: string
+      stepIndex?: number
+      status?: string
+      attemptCount?: number
+      lastError?: string | null
+      createdAt?: string
+      scheduledFor?: string | null
+    }>
+  } | null>(null)
+  const [queueActionId, setQueueActionId] = useState<string | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -478,6 +496,76 @@ const SequencesTab: React.FC = () => {
     setAuditEnrollmentId(null)
     setAuditData(null)
     setAuditError(null)
+  }
+
+  const loadQueue = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setQueueLoading(true)
+    setQueueError(null)
+    try {
+      const { data, error } = await api.get<{ data?: Array<{
+        id?: string
+        recipientEmail?: string
+        stepIndex?: number
+        status?: string
+        attemptCount?: number
+        lastError?: string | null
+        createdAt?: string
+        scheduledFor?: string | null
+      }> }>(`/api/enrollments/${enrollmentId}/queue`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+      if (error) {
+        setQueueError(error)
+        setQueueData(null)
+        return
+      }
+      const items = Array.isArray(data?.data) ? data.data : []
+      setQueueData({ enrollmentId, items })
+    } finally {
+      setQueueLoading(false)
+    }
+  }
+
+  const openQueueModal = (enrollmentId: string) => {
+    setQueueEnrollmentId(enrollmentId)
+    setQueueData(null)
+    setQueueError(null)
+    onQueueOpen()
+    loadQueue(enrollmentId)
+  }
+
+  const closeQueueModal = () => {
+    onQueueClose()
+    setQueueEnrollmentId(null)
+    setQueueData(null)
+    setQueueError(null)
+  }
+
+  const handleEnqueue = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_') || !editingSequence?.id) return
+    setQueueActionId(enrollmentId)
+    try {
+      const { data, error } = await api.post<{
+        enrollmentId?: string
+        totalRecipients?: number
+        enqueuedCount?: number
+        alreadyQueuedCount?: number
+      }>(`/api/enrollments/${enrollmentId}/queue`, {}, { headers: { 'X-Customer-Id': selectedCustomerId } })
+      if (error) {
+        toast({ title: 'Enqueue failed', description: error, status: 'error' })
+        return
+      }
+      const enqueued = data?.enqueuedCount ?? 0
+      const skipped = data?.alreadyQueuedCount ?? 0
+      if (skipped > 0) {
+        toast({ title: 'Queued', description: `${enqueued} new, ${skipped} already in queue`, status: 'success' })
+      } else {
+        toast({ title: 'Queued', description: enqueued > 0 ? `${enqueued} item(s) queued` : 'Queued', status: 'success' })
+      }
+      await loadEnrollmentsForSequence(editingSequence.id)
+      openQueueModal(enrollmentId)
+    } finally {
+      setQueueActionId(null)
+    }
   }
 
   const handleCopyAllRecipients = async () => {
@@ -1985,6 +2073,23 @@ const SequencesTab: React.FC = () => {
                                   </Button>
                                   <Button
                                     size="xs"
+                                    variant="ghost"
+                                    leftIcon={<TimeIcon />}
+                                    onClick={() => handleEnqueue(e.id)}
+                                    isLoading={queueActionId === e.id}
+                                  >
+                                    Queue
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="ghost"
+                                    leftIcon={<ViewIcon />}
+                                    onClick={() => openQueueModal(e.id)}
+                                  >
+                                    View queue
+                                  </Button>
+                                  <Button
+                                    size="xs"
                                     variant="outline"
                                     colorScheme="yellow"
                                     isDisabled={e.status !== 'DRAFT' && e.status !== 'ACTIVE'}
@@ -2258,6 +2363,109 @@ const SequencesTab: React.FC = () => {
                 >
                   Refresh
                 </Button>
+              </VStack>
+            ) : null}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isQueueOpen} onClose={closeQueueModal} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Queue — {queueEnrollmentId ?? '—'}</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            {queueLoading ? (
+              <Text color="gray.500">Loading queue…</Text>
+            ) : queueError ? (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertDescription>{queueError}</AlertDescription>
+              </Alert>
+            ) : queueData ? (
+              <VStack align="stretch" spacing={4}>
+                <Flex gap={2} flexWrap="wrap" align="center">
+                  <Text fontSize="sm" color="gray.600">Enrollment: {queueData.enrollmentId}</Text>
+                  <Button
+                    size="sm"
+                    leftIcon={<RepeatIcon />}
+                    onClick={() => queueEnrollmentId && loadQueue(queueEnrollmentId)}
+                    isLoading={queueLoading}
+                  >
+                    Refresh
+                  </Button>
+                </Flex>
+                {(() => {
+                  const items = Array.isArray(queueData.items) ? queueData.items : []
+                  const byStatus: Record<string, number> = {}
+                  items.forEach((it) => {
+                    const s = it.status ?? 'unknown'
+                    byStatus[s] = (byStatus[s] ?? 0) + 1
+                  })
+                  return (
+                    <>
+                      <Flex gap={4} flexWrap="wrap">
+                        {['QUEUED', 'LOCKED', 'SENT', 'FAILED', 'SKIPPED'].filter((s) => (byStatus[s] ?? 0) > 0).map((status) => (
+                          <Stat key={status} size="sm">
+                            <StatLabel>{status}</StatLabel>
+                            <StatNumber>{byStatus[status] ?? 0}</StatNumber>
+                          </Stat>
+                        ))}
+                        {Object.keys(byStatus).length === 0 && items.length === 0 && (
+                          <Text fontSize="sm" color="gray.500">No queue items.</Text>
+                        )}
+                        {Object.keys(byStatus).length === 0 && items.length > 0 && (
+                          <Stat size="sm">
+                            <StatLabel>Total</StatLabel>
+                            <StatNumber>{items.length}</StatNumber>
+                          </Stat>
+                        )}
+                      </Flex>
+                      <Box overflowX="auto" maxH="300px">
+                        <Table size="sm">
+                          <Thead>
+                            <Tr>
+                              <Th>Email</Th>
+                              <Th>Step</Th>
+                              <Th>Status</Th>
+                              <Th>Attempts</Th>
+                              <Th>Last error</Th>
+                              <Th>Created</Th>
+                              <Th>Scheduled</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {items.length === 0 ? (
+                              <Tr>
+                                <Td colSpan={7} color="gray.500">No items</Td>
+                              </Tr>
+                            ) : (
+                              items.map((it, i) => (
+                                <Tr key={it.id ?? i}>
+                                  <Td fontSize="sm">{it.recipientEmail ?? '—'}</Td>
+                                  <Td>{typeof it.stepIndex === 'number' ? it.stepIndex : '—'}</Td>
+                                  <Td>
+                                    <Badge size="sm" variant="outline">{it.status ?? '—'}</Badge>
+                                  </Td>
+                                  <Td>{typeof it.attemptCount === 'number' ? it.attemptCount : '—'}</Td>
+                                  <Td fontSize="xs" maxW="120px" isTruncated title={it.lastError ?? undefined}>
+                                    {it.lastError ?? '—'}
+                                  </Td>
+                                  <Td fontSize="xs" whiteSpace="nowrap">
+                                    {it.createdAt ? new Date(it.createdAt).toLocaleString() : '—'}
+                                  </Td>
+                                  <Td fontSize="xs" whiteSpace="nowrap">
+                                    {it.scheduledFor ? new Date(it.scheduledFor).toLocaleString() : '—'}
+                                  </Td>
+                                </Tr>
+                              ))
+                            )}
+                          </Tbody>
+                        </Table>
+                      </Box>
+                    </>
+                  )
+                })()}
               </VStack>
             ) : null}
           </ModalBody>
