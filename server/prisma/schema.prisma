@@ -88,6 +88,14 @@ enum EnrollmentStatus {
   COMPLETED
 }
 
+enum OutboundSendQueueStatus {
+  QUEUED
+  LOCKED
+  SENT
+  FAILED
+  SKIPPED
+}
+
 // ============================================================================
 // MODELS (PascalCase with @@map to snake_case tables)
 // ============================================================================
@@ -672,6 +680,28 @@ model EnrollmentAuditEvent {
   @@index([customerId, enrollmentId, createdAt])
   @@index([customerId, recipientEmail])
   @@map("enrollment_audit_events")
+}
+
+// Stage 2B: Outbound send queue (idempotent per enrollment+recipient+step; no send in this PR)
+model OutboundSendQueueItem {
+  id              String                   @id @default(cuid())
+  customerId      String
+  enrollmentId    String
+  recipientEmail  String
+  stepIndex       Int
+  status          OutboundSendQueueStatus  @default(QUEUED)
+  scheduledFor    DateTime?
+  lockedAt        DateTime?
+  lockedBy        String?
+  attemptCount    Int                      @default(0)
+  lastError       String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+
+  @@unique([customerId, enrollmentId, recipientEmail, stepIndex])
+  @@index([customerId, status, scheduledFor])
+  @@index([customerId, enrollmentId, createdAt])
+  @@map("outbound_send_queue_items")
 }
 
 // Marketing leads imported from customer Google Sheets

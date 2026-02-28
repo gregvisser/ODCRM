@@ -32,7 +32,8 @@
     "test:enrollments-stage1a": "node scripts/self-test-enrollments-stage1a.mjs",
     "test:enrollments-stage1b": "node scripts/self-test-enrollments-stage1b.mjs",
     "test:engagement-stage2a-routes": "node scripts/self-test-engagement-stage2a-routes.mjs",
-    "test:engagement-stage2b-contract": "node scripts/self-test-engagement-stage2b-contract.mjs"
+    "test:engagement-stage2b-contract": "node scripts/self-test-engagement-stage2b-contract.mjs",
+    "test:engagement-stage2b-queue": "node scripts/self-test-engagement-stage2b-queue.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
