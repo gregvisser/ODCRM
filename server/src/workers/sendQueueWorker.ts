@@ -1,14 +1,16 @@
 /**
- * Stage 2B: Send-queue worker skeleton.
+ * Stage 2B: Send-queue worker with optional live sending.
  * - Locks QUEUED OutboundSendQueueItems with a lease (no double-processing).
  * - Enforces kill-switch (ENABLE_LIVE_SENDING default false) and canary gating.
- * - Writes append-only EnrollmentAuditEvent entries.
- * - Does NOT send email (no Graph/SMTP). When sending disabled: audit SKIPPED_KILL_SWITCH, unlock to QUEUED.
+ * - When ENABLE_LIVE_SENDING and canary vars are set, sends via Outlook (Graph).
+ * - Writes append-only EnrollmentAuditEvent entries for every decision/send.
  */
 import cron from 'node-cron'
 import os from 'node:os'
 import { PrismaClient } from '@prisma/client'
 import { OutboundSendQueueStatus } from '@prisma/client'
+import { sendEmail } from '../services/outlookEmailService.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
@@ -296,15 +298,87 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
     return
   }
 
+  // Load sequence step (stepOrder is 1-based; queue stepIndex 0 = first step)
+  const step = await prisma.emailSequenceStep.findFirst({
+    where: { sequenceId: enrollment.sequenceId, stepOrder: stepIndex + 1 },
+  })
+  let subject: string
+  let htmlBody: string
+  let textBody: string | undefined
+  if (step?.subjectTemplate != null && step?.bodyTemplateHtml != null) {
+    const recipientRow = await prisma.enrollmentRecipient.findFirst({
+      where: { enrollmentId, email: recipientEmail },
+      select: { firstName: true, lastName: true, company: true, email: true },
+    })
+    const vars = {
+      firstName: recipientRow?.firstName ?? '',
+      lastName: recipientRow?.lastName ?? '',
+      companyName: recipientRow?.company ?? '',
+      company: recipientRow?.company ?? '',
+      email: recipientEmail,
+      jobTitle: '',
+      title: '',
+      phone: '',
+    }
+    subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
+    htmlBody = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+    textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+  } else {
+    subject = `[Canary] Stage 2B test — ${enrollmentId} step ${stepIndex}`
+    htmlBody = `<p>Canary test email. Enrollment: ${enrollmentId}, step: ${stepIndex}, recipient: ${recipientEmail}.</p>`
+  }
+
   await prisma.enrollmentAuditEvent.create({
     data: {
       customerId,
       enrollmentId,
       recipientEmail,
       eventType: 'send_attempted',
-      message: 'SEND_READY',
-      meta: { stepIndex, identityId: identity.id, outcome: 'ready_no_send_in_this_pr' },
+      message: 'send_started',
+      meta: { stepIndex, identityId: identity.id },
     },
   })
-  await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, null)
+
+  const result = await sendEmail(prisma, {
+    senderIdentityId: identity.id,
+    toEmail: recipientEmail,
+    subject,
+    htmlBody,
+    textBody,
+  })
+
+  if (result.success) {
+    await prisma.outboundSendQueueItem.update({
+      where: { id: item.id },
+      data: {
+        status: OutboundSendQueueStatus.SENT,
+        lockedAt: null,
+        lockedBy: null,
+      },
+    })
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_succeeded',
+        message: 'send_succeeded',
+        meta: { stepIndex, identityId: identity.id, messageId: result.messageId ?? undefined },
+      },
+    })
+    return
+  }
+
+  const errMsg = (result.error ?? 'Unknown error').slice(0, 500)
+  await prisma.enrollmentAuditEvent.create({
+    data: {
+      customerId,
+      enrollmentId,
+      recipientEmail,
+      eventType: 'send_failed',
+      message: 'send_failed',
+      meta: { stepIndex, identityId: identity.id, error: errMsg },
+    },
+  })
+  await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, errMsg)
 }
