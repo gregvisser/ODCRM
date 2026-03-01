@@ -4,9 +4,9 @@ import { prisma } from '../lib/prisma.js';
 const router = Router();
 
 // ============================================================================
-// Admin Secret Middleware
+// Admin Secret Middleware (exported for use by other admin-guarded routes)
 // ============================================================================
-const validateAdminSecret = (req: Request, res: Response, next: NextFunction) => {
+export const validateAdminSecret = (req: Request, res: Response, next: NextFunction) => {
   const adminSecret = process.env.ADMIN_SECRET;
   const providedSecret = req.headers['x-admin-secret'];
   
