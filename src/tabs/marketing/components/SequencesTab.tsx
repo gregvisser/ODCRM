@@ -54,6 +54,14 @@ import {
   AlertDialogHeader,
   AlertDialogContent,
   AlertDialogOverlay,
+  Drawer,
+  DrawerBody,
+  DrawerCloseButton,
+  DrawerContent,
+  DrawerHeader,
+  DrawerOverlay,
+  Tooltip,
+  Code,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -68,6 +76,7 @@ import {
   ViewIcon,
   RepeatIcon,
   InfoIcon,
+  CopyIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
@@ -269,6 +278,7 @@ const SequencesTab: React.FC = () => {
   const { isOpen: isQueueOpen, onOpen: onQueueOpen, onClose: onQueueClose } = useDisclosure()
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
+  const [queueRefreshing, setQueueRefreshing] = useState(false)
   const [queueError, setQueueError] = useState<string | null>(null)
   const [queueData, setQueueData] = useState<{
     enrollmentId: string
@@ -281,7 +291,9 @@ const SequencesTab: React.FC = () => {
       lastError?: string | null
       createdAt?: string
       scheduledFor?: string | null
+      sentAt?: string | null
     }>
+    countsByStatus?: Record<string, number>
   } | null>(null)
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
 
@@ -503,25 +515,52 @@ const SequencesTab: React.FC = () => {
     setQueueLoading(true)
     setQueueError(null)
     try {
-      const { data, error } = await api.get<{ data?: Array<{
-        id?: string
-        recipientEmail?: string
-        stepIndex?: number
-        status?: string
-        attemptCount?: number
-        lastError?: string | null
-        createdAt?: string
-        scheduledFor?: string | null
-      }> }>(`/api/enrollments/${enrollmentId}/queue`, { headers: { 'X-Customer-Id': selectedCustomerId } })
-      if (error) {
-        setQueueError(error)
+      const res = await api.get<unknown>(
+        `/api/enrollments/${enrollmentId}/queue`,
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (res.error) {
+        setQueueError(typeof res.error === 'string' ? res.error : 'Request failed')
         setQueueData(null)
         return
       }
-      const items = Array.isArray(data?.data) ? data.data : []
-      setQueueData({ enrollmentId, items })
+      const raw = res.data
+      const items = Array.isArray(raw) ? raw : []
+      const countsByStatus: Record<string, number> = {}
+      for (const it of items as Array<{ status?: string }>) {
+        const s = it.status ?? 'unknown'
+        countsByStatus[s] = (countsByStatus[s] ?? 0) + 1
+      }
+      setQueueData({ enrollmentId, items, countsByStatus })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network or parse error'
+      setQueueError(msg)
+      setQueueData(null)
     } finally {
       setQueueLoading(false)
+    }
+  }
+
+  const refreshQueue = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setQueueRefreshing(true)
+    setQueueError(null)
+    try {
+      const res = await api.post<unknown>(
+        `/api/enrollments/${enrollmentId}/queue/refresh`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (res.error) {
+        setQueueError(typeof res.error === 'string' ? res.error : 'Refresh failed')
+        return
+      }
+      await loadQueue(enrollmentId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network or parse error'
+      setQueueError(msg)
+    } finally {
+      setQueueRefreshing(false)
     }
   }
 
@@ -2369,12 +2408,39 @@ const SequencesTab: React.FC = () => {
         </ModalContent>
       </Modal>
 
-      <Modal isOpen={isQueueOpen} onClose={closeQueueModal} size="lg">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>Queue — {queueEnrollmentId ?? '—'}</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody pb={6}>
+      <Drawer isOpen={isQueueOpen} onClose={closeQueueModal} size="lg" placement="right">
+        <DrawerOverlay />
+        <DrawerContent>
+          <DrawerCloseButton />
+          <DrawerHeader>
+            <VStack align="stretch" spacing={1}>
+              <Text>Send Queue</Text>
+              <Flex align="center" gap={2}>
+                <Text fontSize="sm" color="gray.600" fontFamily="mono">
+                  {queueEnrollmentId ?? '—'}
+                </Text>
+                {queueEnrollmentId && selectedCustomerId && (
+                  <Tooltip label="Copy enrollment ID">
+                    <IconButton
+                      aria-label="Copy enrollment ID"
+                      size="xs"
+                      variant="ghost"
+                      icon={<CopyIcon />}
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(queueEnrollmentId)
+                          toast({ title: 'Copied enrollment ID', status: 'success', duration: 2000 })
+                        } catch {
+                          toast({ title: 'Copy failed', status: 'error' })
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                )}
+              </Flex>
+            </VStack>
+          </DrawerHeader>
+          <DrawerBody pb={6}>
             {queueLoading ? (
               <Text color="gray.500">Loading queue…</Text>
             ) : queueError ? (
@@ -2385,77 +2451,73 @@ const SequencesTab: React.FC = () => {
             ) : queueData ? (
               <VStack align="stretch" spacing={4}>
                 <Flex gap={2} flexWrap="wrap" align="center">
-                  <Text fontSize="sm" color="gray.600">Enrollment: {queueData.enrollmentId}</Text>
                   <Button
                     size="sm"
                     leftIcon={<RepeatIcon />}
+                    onClick={() => queueEnrollmentId && refreshQueue(queueEnrollmentId)}
+                    isLoading={queueRefreshing}
+                  >
+                    Refresh queue
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    leftIcon={<ViewIcon />}
                     onClick={() => queueEnrollmentId && loadQueue(queueEnrollmentId)}
                     isLoading={queueLoading}
                   >
-                    Refresh
+                    Reload
                   </Button>
                 </Flex>
                 {(() => {
                   const items = Array.isArray(queueData.items) ? queueData.items : []
-                  const byStatus: Record<string, number> = {}
-                  items.forEach((it) => {
-                    const s = it.status ?? 'unknown'
-                    byStatus[s] = (byStatus[s] ?? 0) + 1
-                  })
+                  const countsByStatus = queueData.countsByStatus ?? {}
+                  const statusOrder = ['QUEUED', 'LOCKED', 'SENT', 'FAILED', 'SKIPPED']
                   return (
                     <>
-                      <Flex gap={4} flexWrap="wrap">
-                        {['QUEUED', 'LOCKED', 'SENT', 'FAILED', 'SKIPPED'].filter((s) => (byStatus[s] ?? 0) > 0).map((status) => (
-                          <Stat key={status} size="sm">
-                            <StatLabel>{status}</StatLabel>
-                            <StatNumber>{byStatus[status] ?? 0}</StatNumber>
-                          </Stat>
+                      <Flex gap={2} flexWrap="wrap" align="center">
+                        {statusOrder.filter((s) => (countsByStatus[s] ?? 0) > 0).map((status) => (
+                          <Badge key={status} colorScheme={status === 'SENT' ? 'green' : status === 'FAILED' ? 'red' : 'gray'} size="sm" px={2} py={1}>
+                            {status}: {countsByStatus[status] ?? 0}
+                          </Badge>
                         ))}
-                        {Object.keys(byStatus).length === 0 && items.length === 0 && (
+                        {Object.keys(countsByStatus).length === 0 && items.length === 0 && (
                           <Text fontSize="sm" color="gray.500">No queue items.</Text>
                         )}
-                        {Object.keys(byStatus).length === 0 && items.length > 0 && (
-                          <Stat size="sm">
-                            <StatLabel>Total</StatLabel>
-                            <StatNumber>{items.length}</StatNumber>
-                          </Stat>
-                        )}
                       </Flex>
-                      <Box overflowX="auto" maxH="300px">
+                      <Box overflowX="auto" maxH="280px">
                         <Table size="sm">
                           <Thead>
                             <Tr>
-                              <Th>Email</Th>
-                              <Th>Step</Th>
-                              <Th>Status</Th>
-                              <Th>Attempts</Th>
-                              <Th>Last error</Th>
-                              <Th>Created</Th>
                               <Th>Scheduled</Th>
+                              <Th>Status</Th>
+                              <Th>Step</Th>
+                              <Th>Recipient</Th>
+                              <Th>SentAt</Th>
+                              <Th>Error</Th>
                             </Tr>
                           </Thead>
                           <Tbody>
                             {items.length === 0 ? (
                               <Tr>
-                                <Td colSpan={7} color="gray.500">No items</Td>
+                                <Td colSpan={6} color="gray.500">No items</Td>
                               </Tr>
                             ) : (
-                              items.map((it, i) => (
+                              items.map((it: { id?: string; scheduledFor?: string | null; status?: string; stepIndex?: number; recipientEmail?: string; sentAt?: string | null; lastError?: string | null }, i: number) => (
                                 <Tr key={it.id ?? i}>
-                                  <Td fontSize="sm">{it.recipientEmail ?? '—'}</Td>
-                                  <Td>{typeof it.stepIndex === 'number' ? it.stepIndex : '—'}</Td>
+                                  <Td fontSize="xs" whiteSpace="nowrap">
+                                    {it.scheduledFor ? new Date(it.scheduledFor).toLocaleString() : '—'}
+                                  </Td>
                                   <Td>
                                     <Badge size="sm" variant="outline">{it.status ?? '—'}</Badge>
                                   </Td>
-                                  <Td>{typeof it.attemptCount === 'number' ? it.attemptCount : '—'}</Td>
-                                  <Td fontSize="xs" maxW="120px" isTruncated title={it.lastError ?? undefined}>
+                                  <Td>{typeof it.stepIndex === 'number' ? it.stepIndex : '—'}</Td>
+                                  <Td fontSize="sm">{it.recipientEmail ?? '—'}</Td>
+                                  <Td fontSize="xs" whiteSpace="nowrap">
+                                    {it.sentAt ? new Date(it.sentAt).toLocaleString() : '—'}
+                                  </Td>
+                                  <Td fontSize="xs" maxW="140px" isTruncated title={it.lastError ?? undefined}>
                                     {it.lastError ?? '—'}
-                                  </Td>
-                                  <Td fontSize="xs" whiteSpace="nowrap">
-                                    {it.createdAt ? new Date(it.createdAt).toLocaleString() : '—'}
-                                  </Td>
-                                  <Td fontSize="xs" whiteSpace="nowrap">
-                                    {it.scheduledFor ? new Date(it.scheduledFor).toLocaleString() : '—'}
                                   </Td>
                                 </Tr>
                               ))
@@ -2463,14 +2525,62 @@ const SequencesTab: React.FC = () => {
                           </Tbody>
                         </Table>
                       </Box>
+                      {queueEnrollmentId && selectedCustomerId && (
+                        <Box>
+                          <Text fontSize="xs" fontWeight="semibold" mb={2}>Copyable curl</Text>
+                          <Code display="block" whiteSpace="pre" fontSize="xs" p={2} borderRadius="md" overflowX="auto">
+                            {`curl -s -H "X-Customer-Id: ${selectedCustomerId}" \\
+  "${import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'}/api/enrollments/${queueEnrollmentId}/queue"`}
+                          </Code>
+                          <Button
+                            size="xs"
+                            leftIcon={<CopyIcon />}
+                            variant="ghost"
+                            mt={1}
+                            onClick={async () => {
+                              const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'}/api/enrollments/${queueEnrollmentId}/queue"`
+                              try {
+                                await navigator.clipboard.writeText(curl)
+                                toast({ title: 'Copied GET curl', status: 'success', duration: 2000 })
+                              } catch {
+                                toast({ title: 'Copy failed', status: 'error' })
+                              }
+                            }}
+                          >
+                            Copy GET curl
+                          </Button>
+                          <Code display="block" whiteSpace="pre" fontSize="xs" p={2} borderRadius="md" overflowX="auto" mt={2}>
+                            {`curl -s -X POST -H "X-Customer-Id: ${selectedCustomerId}" -H "Content-Type: application/json" \\
+  "${import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'}/api/enrollments/${queueEnrollmentId}/queue/refresh"`}
+                          </Code>
+                          <Button
+                            size="xs"
+                            leftIcon={<CopyIcon />}
+                            variant="ghost"
+                            mt={1}
+                            onClick={async () => {
+                              const base = import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+                              const curl = `curl -s -X POST -H "X-Customer-Id: ${selectedCustomerId}" -H "Content-Type: application/json" "${base}/api/enrollments/${queueEnrollmentId}/queue/refresh"`
+                              try {
+                                await navigator.clipboard.writeText(curl)
+                                toast({ title: 'Copied POST refresh curl', status: 'success', duration: 2000 })
+                              } catch {
+                                toast({ title: 'Copy failed', status: 'error' })
+                              }
+                            }}
+                          >
+                            Copy POST refresh curl
+                          </Button>
+                        </Box>
+                      )}
                     </>
                   )
                 })()}
               </VStack>
             ) : null}
-          </ModalBody>
-        </ModalContent>
-      </Modal>
+          </DrawerBody>
+        </DrawerContent>
+      </Drawer>
 
       <AlertDialog isOpen={isStartOpen} onClose={onStartClose} leastDestructiveRef={cancelStartRef}>
         <AlertDialogOverlay />
