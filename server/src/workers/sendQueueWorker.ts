@@ -17,7 +17,7 @@ const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 m
 const BATCH_SIZE = Math.min(Math.max(1, Number(process.env.SEND_QUEUE_BATCH_SIZE) || 10), 50)
 
 const ENABLE_LIVE_SENDING = process.env.ENABLE_LIVE_SENDING === 'true'
-// Stage 1B: explicit sending gate; default false = dry-run (mark FAILED with DRY_RUN, no real send)
+// Stage 1B/1D: explicit sending gate; default false = dry-run (non-destructive: leave QUEUED, no FAILED)
 const ENABLE_SEND_QUEUE_SENDING = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
 const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
 const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
@@ -188,27 +188,19 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
     return
   }
 
-  // Stage 1B: sending disabled by default; mark FAILED with dry-run message (no real send)
+  // Stage 1D: sending disabled = non-destructive dry-run: requeue (QUEUED), do NOT mark FAILED
   if (!ENABLE_SEND_QUEUE_SENDING) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_skipped',
-        message: 'DRY_RUN: sending disabled',
-        meta: { reason: 'ENABLE_SEND_QUEUE_SENDING not set', stepIndex },
-      },
-    })
+    const dryRunMsg = 'DRY_RUN: sending disabled'.slice(0, 500)
     await prisma.outboundSendQueueItem.update({
       where: { id: item.id },
       data: {
-        status: OutboundSendQueueStatus.FAILED,
-        lastError: 'DRY_RUN: sending disabled',
+        status: OutboundSendQueueStatus.QUEUED,
         lockedAt: null,
         lockedBy: null,
+        lastError: dryRunMsg,
       },
     })
+    console.log(`[sendQueueWorker] ${WORKER_ID} dry-run (sending disabled) item=${item.id} enrollment=${item.enrollmentId}`)
     return
   }
 

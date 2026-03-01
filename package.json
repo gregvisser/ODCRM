@@ -36,7 +36,8 @@
     "test:engagement-stage2b-queue": "node scripts/self-test-engagement-stage2b-queue.mjs",
     "test:engagement-stage2b-worker": "node scripts/self-test-engagement-stage2b-worker.mjs",
     "test:engagement-stage2b-live-sending": "node scripts/self-test-engagement-stage2b-live-sending.mjs",
-    "test:send-queue-stage1b": "node scripts/self-test-send-queue-stage1b.mjs"
+    "test:send-queue-stage1b": "node scripts/self-test-send-queue-stage1b.mjs",
+    "test:send-queue-stage1d": "node scripts/self-test-send-queue-stage1d.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
