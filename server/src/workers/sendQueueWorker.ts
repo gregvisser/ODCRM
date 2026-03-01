@@ -11,7 +11,7 @@ import { PrismaClient } from '@prisma/client'
 import { OutboundSendQueueStatus } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
-import { requeueDryRun, DRY_RUN_DEFAULT_REASON } from '../utils/sendQueue.js'
+import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
@@ -109,12 +109,31 @@ async function tick(prisma: PrismaClient, now: Date, leaseExpiry: Date) {
     orderBy: { createdAt: 'asc' },
   })
 
-  for (const item of locked) {
+  // Stage 1F: only send stepIndex 0; cap live sends per iteration
+  const step0 = locked.filter((i) => i.stepIndex === 0)
+  const toSend = step0.slice(0, LIVE_SEND_CAP)
+  const toRequeue = [
+    ...locked.filter((i) => i.stepIndex !== 0),
+    ...step0.slice(LIVE_SEND_CAP),
+  ]
+  for (const item of toRequeue) {
+    try {
+      await requeueDryRun(
+        prisma,
+        item.id,
+        item.stepIndex !== 0 ? 'Step 0 only (Stage 1F)' : DRY_RUN_DEFAULT_REASON
+      )
+    } catch (err) {
+      console.error(`[sendQueueWorker] ${WORKER_ID} requeue item=${item.id}:`, err)
+      await requeueAfterSendFailure(prisma, item.id, (err as Error)?.message ?? 'unknown error')
+    }
+  }
+  for (const item of toSend) {
     try {
       await processOne(prisma, item, now)
     } catch (err) {
       console.error(`[sendQueueWorker] ${WORKER_ID} item=${item.id} enrollment=${item.enrollmentId} recipient=${item.recipientEmail} step=${item.stepIndex}:`, err)
-      await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, (err as Error)?.message?.slice(0, 500) ?? 'unknown error')
+      await requeueAfterSendFailure(prisma, item.id, (err as Error)?.message?.slice(0, 500) ?? 'unknown error')
     }
   }
 }
@@ -136,8 +155,18 @@ async function unlockItem(
   })
 }
 
-async function processOne(prisma: PrismaClient, item: { id: string; customerId: string; enrollmentId: string; recipientEmail: string; stepIndex: number }, now: Date) {
+/** Stage 1F: only step 0 is sent; exported for tick route live path. */
+export async function processOne(
+  prisma: PrismaClient,
+  item: { id: string; customerId: string; enrollmentId: string; recipientEmail: string; stepIndex: number },
+  now: Date
+) {
   const { customerId, enrollmentId, recipientEmail, stepIndex } = item
+
+  if (stepIndex !== 0) {
+    await requeueDryRun(prisma, item.id, 'Step 0 only (Stage 1F)')
+    return
+  }
 
   const enrollment = await prisma.enrollment.findFirst({
     where: { id: enrollmentId, customerId },
@@ -211,7 +240,8 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
     return
   }
 
-  if (ENABLE_LIVE_SENDING && (SEND_CANARY_CUSTOMER_ID == null || SEND_CANARY_IDENTITY_ID == null)) {
+  // Stage 1F: canary — SEND_CANARY_CUSTOMER_ID required; SEND_CANARY_IDENTITY_ID optional (if set, must match)
+  if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID == null) {
     await prisma.enrollmentAuditEvent.create({
       data: {
         customerId,
@@ -226,36 +256,35 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
     return
   }
 
-  if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID != null && SEND_CANARY_IDENTITY_ID != null) {
-    if (customerId !== SEND_CANARY_CUSTOMER_ID) {
-      await prisma.enrollmentAuditEvent.create({
-        data: {
-          customerId,
-          enrollmentId,
-          recipientEmail,
-          eventType: 'send_skipped',
-          message: 'canary_blocked',
-          meta: { reason: 'customer_not_in_canary', stepIndex },
-        },
-      })
-      await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
-      return
-    }
-    const identityId = enrollment.sequence?.senderIdentityId ?? null
-    if (identityId !== SEND_CANARY_IDENTITY_ID) {
-      await prisma.enrollmentAuditEvent.create({
-        data: {
-          customerId,
-          enrollmentId,
-          recipientEmail,
-          eventType: 'send_skipped',
-          message: 'canary_blocked',
-          meta: { reason: 'identity_not_in_canary', stepIndex },
-        },
-      })
-      await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
-      return
-    }
+  if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID != null && customerId !== SEND_CANARY_CUSTOMER_ID) {
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_skipped',
+        message: 'canary_blocked',
+        meta: { reason: 'customer_not_in_canary', stepIndex },
+      },
+    })
+    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
+    return
+  }
+
+  const identityId = enrollment.sequence?.senderIdentityId ?? null
+  if (ENABLE_LIVE_SENDING && SEND_CANARY_IDENTITY_ID != null && identityId !== SEND_CANARY_IDENTITY_ID) {
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_skipped',
+        message: 'canary_blocked',
+        meta: { reason: 'identity_not_in_canary', stepIndex },
+      },
+    })
+    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
+    return
   }
 
   const suppressionEntries = await prisma.suppressionEntry.findMany({
@@ -290,7 +319,7 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
         meta: { reason: 'no_sender_identity', stepIndex },
       },
     })
-    await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, 'no_sender_identity')
+    await requeueAfterSendFailure(prisma, item.id, 'no_sender_identity')
     return
   }
   if (!inSendWindow(identity)) {
@@ -365,6 +394,7 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
         sentAt: now,
         lockedAt: null,
         lockedBy: null,
+        lastError: null,
       },
     })
     await prisma.enrollmentAuditEvent.create({
@@ -391,5 +421,5 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
       meta: { stepIndex, identityId: identity.id, error: errMsg },
     },
   })
-  await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, errMsg)
+  await requeueAfterSendFailure(prisma, item.id, errMsg)
 }
