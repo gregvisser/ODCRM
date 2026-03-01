@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client'
 import { OutboundSendQueueStatus } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { requeueDryRun, DRY_RUN_DEFAULT_REASON } from '../utils/sendQueue.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
@@ -190,16 +191,7 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
 
   // Stage 1D: sending disabled = non-destructive dry-run: requeue (QUEUED), do NOT mark FAILED
   if (!ENABLE_SEND_QUEUE_SENDING) {
-    const dryRunMsg = 'DRY_RUN: sending disabled'.slice(0, 500)
-    await prisma.outboundSendQueueItem.update({
-      where: { id: item.id },
-      data: {
-        status: OutboundSendQueueStatus.QUEUED,
-        lockedAt: null,
-        lockedBy: null,
-        lastError: dryRunMsg,
-      },
-    })
+    await requeueDryRun(prisma, item.id, DRY_RUN_DEFAULT_REASON)
     console.log(`[sendQueueWorker] ${WORKER_ID} dry-run (sending disabled) item=${item.id} enrollment=${item.enrollmentId}`)
     return
   }

@@ -81,6 +81,7 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { isAgencyUI } from '../../../platform/mode'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
@@ -296,6 +297,7 @@ const SequencesTab: React.FC = () => {
     countsByStatus?: Record<string, number>
   } | null>(null)
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
+  const [queueTickLoading, setQueueTickLoading] = useState(false)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -561,6 +563,36 @@ const SequencesTab: React.FC = () => {
       setQueueError(msg)
     } finally {
       setQueueRefreshing(false)
+    }
+  }
+
+  const handleTickDryRun = async () => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setQueueTickLoading(true)
+    setQueueError(null)
+    try {
+      const res = await api.post<{ data?: { requeued?: number; locked?: number; scanned?: number; errors?: number } }>(
+        '/api/send-queue/tick',
+        { customerId: selectedCustomerId, limit: 25, dryRun: true },
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (res.error) {
+        toast({ title: 'Tick failed', description: res.error, status: 'error' })
+        return
+      }
+      const d = res.data?.data
+      toast({
+        title: 'Tick (dry-run) done',
+        description: d ? `scanned=${d.scanned ?? 0} locked=${d.locked ?? 0} requeued=${d.requeued ?? 0} errors=${d.errors ?? 0}` : undefined,
+        status: 'success',
+        duration: 4000,
+      })
+      if (queueEnrollmentId) await loadQueue(queueEnrollmentId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
+      toast({ title: 'Tick failed', description: msg, status: 'error' })
+    } finally {
+      setQueueTickLoading(false)
     }
   }
 
@@ -2468,6 +2500,18 @@ const SequencesTab: React.FC = () => {
                   >
                     Reload
                   </Button>
+                  {isAgencyUI() && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      colorScheme="purple"
+                      leftIcon={<TimeIcon />}
+                      onClick={handleTickDryRun}
+                      isLoading={queueTickLoading}
+                    >
+                      Tick (dry-run)
+                    </Button>
+                  )}
                 </Flex>
                 {(() => {
                   const items = Array.isArray(queueData.items) ? queueData.items : []
