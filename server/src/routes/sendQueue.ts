@@ -18,6 +18,7 @@ type TickBody = {
   customerId?: string
   limit?: number
   dryRun?: boolean
+  ignoreWindow?: boolean
 }
 
 function liveTickAllowed(customerId: string): { allowed: boolean; reason?: string } {
@@ -39,8 +40,9 @@ function liveTickAllowed(customerId: string): { allowed: boolean; reason?: strin
 
 /**
  * POST /api/send-queue/tick
- * Body: { customerId: string, limit?: number (default 25, max 100), dryRun?: boolean (default true) }
+ * Body: { customerId: string, limit?: number (default 25, max 100), dryRun?: boolean (default true), ignoreWindow?: boolean (Stage 1G) }
  * When dryRun=false: live send only if ODCRM_ALLOW_LIVE_TICK + canary gates pass; step 0 only; cap LIVE_SEND_CAP.
+ * When ignoreWindow=true (and dryRun=false): requires ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW=true; bypasses send-window check for one controlled send.
  * Returns: { data: { customerId, limit, lockedBy, scanned, locked, processed, requeued, sent, errors } }
  */
 router.post('/tick', validateAdminSecret, async (req: Request, res: Response) => {
@@ -54,10 +56,15 @@ router.post('/tick', validateAdminSecret, async (req: Request, res: Response) =>
   if (Number.isNaN(limit) || limit < 1) limit = 25
   if (limit > 100) limit = 100
   const dryRun = body.dryRun !== false
+  const ignoreWindow = body.ignoreWindow === true
   if (!dryRun) {
     const gate = liveTickAllowed(customerId)
     if (!gate.allowed) {
       res.status(400).json({ error: gate.reason ?? 'Live tick not allowed' })
+      return
+    }
+    if (ignoreWindow && process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW !== 'true') {
+      res.status(400).json({ error: 'ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW must be true to use ignoreWindow' })
       return
     }
   }
@@ -171,9 +178,13 @@ router.post('/tick', validateAdminSecret, async (req: Request, res: Response) =>
           requeued += 1
         }
       }
+      const processOptions = ignoreWindow ? { ignoreWindow: true as const } : undefined
       for (const item of toSend) {
         try {
-          await processOne(prisma, item, now)
+          if (processOptions?.ignoreWindow) {
+            console.log(`[sendQueueTick] live send window bypass used customerId=${item.customerId} enrollmentId=${item.enrollmentId} item=${item.id}`)
+          }
+          await processOne(prisma, item, now, processOptions)
           sent += 1
         } catch (err) {
           errors += 1

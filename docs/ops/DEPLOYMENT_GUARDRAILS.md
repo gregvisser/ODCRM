@@ -10,6 +10,12 @@ The **Queue Debug Panel** is available in the Marketing → Sequences tab: per e
 
 ---
 
+## Send-queue tick: ignoreWindow (Stage 1G)
+
+The tick endpoint accepts `ignoreWindow=true` (with `dryRun=false`) to bypass the identity send-window check for one controlled canary send. This requires **`ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === "true"`** in App Service settings. **Do not enable this in production by default.** It is an ops-only switch for controlled testing (e.g. proving SENT + sentAt outside window). Turn it off after verification.
+
+---
+
 ## Cursor Constitution
 
 Canonical rules for Cursor when working on this repo (do everything yourself, no user commands, gates, prod parity, file-lock Handle, bootstrap proof).  
