@@ -155,11 +155,15 @@ async function unlockItem(
   })
 }
 
+/** Options for processOne (Stage 1G: ignoreWindow only from tick when env gate set). */
+export type ProcessOneOptions = { ignoreWindow?: boolean }
+
 /** Stage 1F: only step 0 is sent; exported for tick route live path. */
 export async function processOne(
   prisma: PrismaClient,
   item: { id: string; customerId: string; enrollmentId: string; recipientEmail: string; stepIndex: number },
-  now: Date
+  now: Date,
+  options?: ProcessOneOptions
 ) {
   const { customerId, enrollmentId, recipientEmail, stepIndex } = item
 
@@ -322,7 +326,8 @@ export async function processOne(
     await requeueAfterSendFailure(prisma, item.id, 'no_sender_identity')
     return
   }
-  if (!inSendWindow(identity)) {
+  // Stage 1G: ignoreWindow only when tick passes option (env ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW); worker never sets it
+  if (!options?.ignoreWindow && !inSendWindow(identity)) {
     await prisma.enrollmentAuditEvent.create({
       data: {
         customerId,
@@ -335,6 +340,18 @@ export async function processOne(
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'outside_window')
     return
+  }
+  if (options?.ignoreWindow) {
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_window_bypass',
+        message: 'SEND_WINDOW_BYPASS',
+        meta: { stepIndex, identityId: identity.id },
+      },
+    })
   }
 
   // Load sequence step (stepOrder is 1-based; queue stepIndex 0 = first step)
