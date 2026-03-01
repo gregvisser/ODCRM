@@ -120,6 +120,7 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
       res.status(400).json({ error: 'Every recipient must have an email' })
       return
     }
+    const now = new Date()
     const enrollment = await prisma.$transaction(async (tx) => {
       const e = await tx.enrollment.create({
         data: {
@@ -138,6 +139,18 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
           company: r.company,
           externalId: r.externalId,
         })),
+      })
+      // Stage 1B: enqueue step 0 for all recipients in same transaction
+      await tx.outboundSendQueueItem.createMany({
+        data: normalized.map((r) => ({
+          customerId,
+          enrollmentId: e.id,
+          recipientEmail: r.email,
+          stepIndex: 0,
+          status: OutboundSendQueueStatus.QUEUED,
+          scheduledFor: now,
+        })),
+        skipDuplicates: true,
       })
       const count = await tx.enrollmentRecipient.count({ where: { enrollmentId: e.id } })
       return { enrollment: e, recipientCount: count }
@@ -396,8 +409,94 @@ router.get('/:enrollmentId/audit', async (req: Request, res: Response) => {
 })
 
 // ---------------------------------------------------------------------------
-// Stage 2B: queue enqueue + list (no send; tenant-safe)
+// Stage 2B / Stage 1B: queue list, refresh (idempotent rebuild), enqueue (step 0)
 // ---------------------------------------------------------------------------
+
+/** POST /api/enrollments/:enrollmentId/queue/refresh — idempotent rebuild queue for all recipients and all steps; do not delete SENT */
+router.post('/:enrollmentId/queue/refresh', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const enrollmentId = req.params.enrollmentId
+    if (!enrollmentId) {
+      res.status(400).json({ error: 'enrollmentId required' })
+      return
+    }
+    const enrollment = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
+      include: {
+        recipients: true,
+        sequence: {
+          select: {
+            id: true,
+            steps: { orderBy: { stepOrder: 'asc' } },
+          },
+        },
+      },
+    })
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' })
+      return
+    }
+    const steps = enrollment.sequence?.steps ?? []
+    const now = new Date()
+    let created = 0
+    let updated = 0
+    let skipped = 0
+
+    for (const r of enrollment.recipients) {
+      let dueOffsetMs = 0
+      for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+        const step = steps[stepIndex]
+        if (stepIndex > 0 && step) {
+          dueOffsetMs += (step.delayDaysFromPrevious ?? 0) * 24 * 60 * 60 * 1000
+        }
+        const scheduledFor = new Date(now.getTime() + dueOffsetMs)
+        const existing = await prisma.outboundSendQueueItem.findUnique({
+          where: {
+            customerId_enrollmentId_recipientEmail_stepIndex: {
+              customerId,
+              enrollmentId,
+              recipientEmail: r.email,
+              stepIndex,
+            },
+          },
+        })
+        if (existing) {
+          if (existing.status === OutboundSendQueueStatus.SENT) {
+            skipped++
+            continue
+          }
+          await prisma.outboundSendQueueItem.update({
+            where: { id: existing.id },
+            data: { scheduledFor, updatedAt: now },
+          })
+          updated++
+        } else {
+          await prisma.outboundSendQueueItem.create({
+            data: {
+              customerId,
+              enrollmentId,
+              recipientEmail: r.email,
+              stepIndex,
+              status: OutboundSendQueueStatus.QUEUED,
+              scheduledFor,
+            },
+          })
+          created++
+        }
+      }
+    }
+
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: { created, updated, skipped },
+    })
+  } catch (err) {
+    console.error('POST /api/enrollments/:enrollmentId/queue/refresh error:', err)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
 
 /** POST /api/enrollments/:enrollmentId/queue — enqueue stepIndex=0 only; no sending */
 router.post('/:enrollmentId/queue', async (req: Request, res: Response) => {
@@ -467,7 +566,7 @@ router.post('/:enrollmentId/queue', async (req: Request, res: Response) => {
   }
 })
 
-/** GET /api/enrollments/:enrollmentId/queue — list queue items (most recent first) */
+/** GET /api/enrollments/:enrollmentId/queue — list queue items by dueAt (scheduledFor) asc, then createdAt asc; include meta.countsByStatus */
 router.get('/:enrollmentId/queue', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -487,10 +586,16 @@ router.get('/:enrollmentId/queue', async (req: Request, res: Response) => {
     }
     const items = await prisma.outboundSendQueueItem.findMany({
       where: { enrollmentId, customerId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ scheduledFor: 'asc' }, { createdAt: 'asc' }],
     })
+    const countsByStatus: Record<string, number> = {}
+    for (const item of items) {
+      countsByStatus[item.status] = (countsByStatus[item.status] ?? 0) + 1
+    }
     const data = items.map((item) => ({
       id: item.id,
+      customerId: item.customerId,
+      enrollmentId: item.enrollmentId,
       recipientEmail: item.recipientEmail,
       stepIndex: item.stepIndex,
       status: item.status,
@@ -499,10 +604,11 @@ router.get('/:enrollmentId/queue', async (req: Request, res: Response) => {
       lockedBy: item.lockedBy ?? null,
       attemptCount: item.attemptCount,
       lastError: item.lastError ?? null,
+      sentAt: item.sentAt?.toISOString() ?? null,
       createdAt: item.createdAt.toISOString(),
     }))
     res.setHeader('x-odcrm-customer-id', customerId)
-    res.json({ data })
+    res.json({ data, meta: { countsByStatus } })
   } catch (err) {
     console.error('GET /api/enrollments/:enrollmentId/queue error:', err)
     res.status(500).json({ error: 'An error occurred' })

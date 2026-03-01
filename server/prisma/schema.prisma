@@ -682,7 +682,7 @@ model EnrollmentAuditEvent {
   @@map("enrollment_audit_events")
 }
 
-// Stage 2B: Outbound send queue (idempotent per enrollment+recipient+step; no send in this PR)
+// Stage 2B / Stage 1B: Outbound send queue (idempotent per enrollment+recipient+step)
 model OutboundSendQueueItem {
   id              String                   @id @default(cuid())
   customerId      String
@@ -695,6 +695,7 @@ model OutboundSendQueueItem {
   lockedBy        String?
   attemptCount    Int                      @default(0)
   lastError       String?
+  sentAt          DateTime?                // Stage 1B: set when status=SENT
   createdAt       DateTime                @default(now())
   updatedAt       DateTime                @updatedAt
 

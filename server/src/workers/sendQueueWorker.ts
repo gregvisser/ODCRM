@@ -17,6 +17,8 @@ const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 m
 const BATCH_SIZE = Math.min(Math.max(1, Number(process.env.SEND_QUEUE_BATCH_SIZE) || 10), 50)
 
 const ENABLE_LIVE_SENDING = process.env.ENABLE_LIVE_SENDING === 'true'
+// Stage 1B: explicit sending gate; default false = dry-run (mark FAILED with DRY_RUN, no real send)
+const ENABLE_SEND_QUEUE_SENDING = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
 const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
 const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
 
@@ -59,7 +61,7 @@ export function startSendQueueWorker(prisma: PrismaClient) {
     }
   })
 
-  console.log(`✅ [sendQueueWorker] ${WORKER_ID} started (ENABLE_LIVE_SENDING=${ENABLE_LIVE_SENDING})`)
+  console.log(`✅ [sendQueueWorker] ${WORKER_ID} started (ENABLE_SEND_QUEUE_SENDING=${ENABLE_SEND_QUEUE_SENDING}, ENABLE_LIVE_SENDING=${ENABLE_LIVE_SENDING})`)
 }
 
 async function tick(prisma: PrismaClient, now: Date, leaseExpiry: Date) {
@@ -110,8 +112,8 @@ async function tick(prisma: PrismaClient, now: Date, leaseExpiry: Date) {
     try {
       await processOne(prisma, item, now)
     } catch (err) {
-      console.error(`[sendQueueWorker] ${WORKER_ID} process item ${item.id}:`, err)
-      await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, (err as Error)?.message?.slice(0, 500) ?? 'unknown error')
+      console.error(`[sendQueueWorker] ${WORKER_ID} item=${item.id} enrollment=${item.enrollmentId} recipient=${item.recipientEmail} step=${item.stepIndex}:`, err)
+      await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, (err as Error)?.message?.slice(0, 500) ?? 'unknown error')
     }
   }
 }
@@ -183,6 +185,30 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, 'recipient_not_on_enrollment')
+    return
+  }
+
+  // Stage 1B: sending disabled by default; mark FAILED with dry-run message (no real send)
+  if (!ENABLE_SEND_QUEUE_SENDING) {
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_skipped',
+        message: 'DRY_RUN: sending disabled',
+        meta: { reason: 'ENABLE_SEND_QUEUE_SENDING not set', stepIndex },
+      },
+    })
+    await prisma.outboundSendQueueItem.update({
+      where: { id: item.id },
+      data: {
+        status: OutboundSendQueueStatus.FAILED,
+        lastError: 'DRY_RUN: sending disabled',
+        lockedAt: null,
+        lockedBy: null,
+      },
+    })
     return
   }
 
@@ -352,6 +378,7 @@ async function processOne(prisma: PrismaClient, item: { id: string; customerId: 
       where: { id: item.id },
       data: {
         status: OutboundSendQueueStatus.SENT,
+        sentAt: now,
         lockedAt: null,
         lockedBy: null,
       },
