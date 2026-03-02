@@ -2,6 +2,7 @@
  * Stage 1E/1F: Admin send-queue tick endpoint.
  * POST /api/send-queue/tick — requires X-Admin-Secret.
  * dryRun=true (default): dry-run only. dryRun=false: live send only when ODCRM_ALLOW_LIVE_TICK and canary gates pass.
+ * Stage 2A: GET /api/send-queue/metrics?customerId=... — requires X-Admin-Secret; returns operational metrics for one customer.
  */
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
@@ -37,6 +38,108 @@ function liveTickAllowed(customerId: string): { allowed: boolean; reason?: strin
   }
   return { allowed: true }
 }
+
+const STUCK_LOCKED_THRESHOLD_MINUTES = 15
+
+/**
+ * GET /api/send-queue/metrics?customerId=<cust_...>
+ * Stage 2A: Admin-only (X-Admin-Secret). Returns operational metrics for a single customerId.
+ * customerId required (no default). Safe when no rows: zeros/nulls.
+ */
+router.get('/metrics', validateAdminSecret, async (req: Request, res: Response) => {
+  const customerId = typeof req.query.customerId === 'string' ? req.query.customerId.trim() : ''
+  if (!customerId) {
+    res.status(400).json({ error: 'customerId is required (query param)' })
+    return
+  }
+
+  const now = new Date()
+  const stuckThreshold = new Date(now.getTime() - STUCK_LOCKED_THRESHOLD_MINUTES * 60 * 1000)
+
+  try {
+    const baseWhere = { customerId }
+
+    const [groupByResult, dueNowCount, scheduledAgg, lockedCount, stuckLockedCount, sentAgg, lastErrorItem] = await Promise.all([
+      prisma.outboundSendQueueItem.groupBy({
+        by: ['status'],
+        where: baseWhere,
+        _count: { id: true },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          ...baseWhere,
+          status: OutboundSendQueueStatus.QUEUED,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+        },
+      }),
+      prisma.outboundSendQueueItem.aggregate({
+        where: { ...baseWhere, scheduledFor: { not: null } },
+        _min: { scheduledFor: true },
+        _max: { scheduledFor: true },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: { ...baseWhere, status: OutboundSendQueueStatus.LOCKED },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          ...baseWhere,
+          status: OutboundSendQueueStatus.LOCKED,
+          lockedAt: { lte: stuckThreshold },
+        },
+      }),
+      prisma.outboundSendQueueItem.aggregate({
+        where: { ...baseWhere, status: OutboundSendQueueStatus.SENT },
+        _max: { sentAt: true },
+      }),
+      prisma.outboundSendQueueItem.findFirst({
+        where: { ...baseWhere, lastError: { not: null } },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, status: true, lastError: true, updatedAt: true },
+      }),
+    ])
+
+    const countsByStatus: Record<string, number> = {
+      QUEUED: 0,
+      LOCKED: 0,
+      SENT: 0,
+      FAILED: 0,
+      SKIPPED: 0,
+    }
+    for (const row of groupByResult) {
+      countsByStatus[row.status] = row._count.id
+    }
+
+    const lastSentAt = sentAgg._max.sentAt ?? null
+    const lastErrorSample = lastErrorItem
+      ? {
+          itemId: lastErrorItem.id,
+          status: lastErrorItem.status,
+          lastError: lastErrorItem.lastError,
+          updatedAt: lastErrorItem.updatedAt.toISOString(),
+        }
+      : null
+
+    res.json({
+      data: {
+        customerId,
+        countsByStatus,
+        dueNow: dueNowCount,
+        oldestScheduledFor: scheduledAgg._min.scheduledFor?.toISOString() ?? null,
+        newestScheduledFor: scheduledAgg._max.scheduledFor?.toISOString() ?? null,
+        lockedCount,
+        stuckLocked: stuckLockedCount,
+        stuckLockedThresholdMinutes: STUCK_LOCKED_THRESHOLD_MINUTES,
+        lastSentAt: lastSentAt?.toISOString() ?? null,
+        lastErrorSample,
+      },
+    })
+  } catch (err) {
+    console.error('[send-queue/metrics] error:', err)
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Metrics failed',
+    })
+  }
+})
 
 /**
  * POST /api/send-queue/tick

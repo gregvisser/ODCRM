@@ -40,7 +40,8 @@
     "test:send-queue-stage1d": "node scripts/self-test-send-queue-stage1d.mjs",
     "test:send-queue-stage1e": "node scripts/self-test-send-queue-stage1e.mjs",
     "test:send-queue-stage1f": "node scripts/self-test-send-queue-stage1f.mjs",
-    "test:send-queue-stage1g": "node scripts/self-test-send-queue-stage1g.mjs"
+    "test:send-queue-stage1g": "node scripts/self-test-send-queue-stage1g.mjs",
+    "test:send-queue-metrics-stage2a": "node scripts/self-test-send-queue-metrics-stage2a.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
