@@ -1,14 +1,20 @@
 #!/usr/bin/env node
 /**
- * Self-test: Stage 3A — send-queue preview endpoint (CI-safe guardrail).
- * 1) No headers => expect 400 (X-Customer-Id required) or 401/403 (auth required).
- * 2) With X-Customer-Id, no auth => expect 200 (local/dev) or 401/403 (prod); if 200, validate data.items array.
+ * Self-test: Stage 3A — send-queue preview endpoint (CI guardrail, prod-by-default).
+ * Test A: No headers => accept ONLY 400 (body mentions X-Customer-Id) or 401/403. 404/500 => FAIL.
+ * Test B: With X-Customer-Id => accept ONLY 200 (validate {data:{items:[]}}), 401/403, or 400 if tenant missing. 404/500 => FAIL.
  */
-const BASE_URL = (process.env.ODCRM_API_BASE_URL || 'http://localhost:3001').replace(/\/$/, '')
+const PROD_API = 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+const BASE_URL = (process.env.ODCRM_API_BASE_URL || PROD_API).replace(/\/$/, '')
 const TEST_CUSTOMER_ID = process.env.ODCRM_TEST_CUSTOMER_ID?.trim() || 'cust_preview_test'
 
+function bodyPreview(body, maxLen = 200) {
+  if (body == null) return ''
+  const s = typeof body === 'object' ? JSON.stringify(body) : String(body)
+  return s.length <= maxLen ? s : s.slice(0, maxLen) + '...'
+}
+
 async function fetchJsonOrText(url, opts = {}) {
-  const method = opts.method || 'GET'
   try {
     const res = await fetch(url, opts)
     const text = await res.text()
@@ -25,31 +31,30 @@ async function fetchJsonOrText(url, opts = {}) {
 }
 
 async function main() {
-  let branch = 'none'
   const previewUrl = `${BASE_URL}/api/send-queue/preview`
+  console.log('  BASE_URL:', BASE_URL)
 
-  // 1) No headers
+  // Test A: No headers — ONLY 400 (assert body) or 401/403
   const noHeaders = await fetchJsonOrText(previewUrl, { method: 'GET' })
   if (noHeaders.status === 400) {
     const body = noHeaders.data || noHeaders.text || ''
     const msg = typeof body === 'object' ? body?.error || JSON.stringify(body) : body
     if (!String(msg).toLowerCase().includes('customer') && !String(msg).toLowerCase().includes('x-customer-id')) {
       console.error('self-test-send-queue-preview-stage3a: FAIL')
-      console.error('  Expected 400 body to mention X-Customer-Id required, got:', msg)
+      console.error('  Test A: Expected 400 body to mention X-Customer-Id, got:', bodyPreview(msg))
       process.exit(1)
     }
-    branch = '400 (tenant required)'
-    console.log('  GET /api/send-queue/preview (no headers): 400, body mentions X-Customer-Id')
+    console.log('  Test A (no headers):', noHeaders.status, '— body mentions X-Customer-Id')
   } else if (noHeaders.status === 401 || noHeaders.status === 403) {
-    branch = '401/403 (auth required)'
-    console.log(`  GET /api/send-queue/preview (no headers): ${noHeaders.status} (auth required)`)
+    console.log('  Test A (no headers):', noHeaders.status, '(auth required)')
   } else {
     console.error('self-test-send-queue-preview-stage3a: FAIL')
-    console.error('  Expected 400 or 401/403 without headers, got:', noHeaders.status, noHeaders.data ?? noHeaders.text)
+    console.error('  Test A: Accept ONLY 400 or 401/403 without headers. Got:', noHeaders.status)
+    console.error('  Body (first 200 chars):', bodyPreview(noHeaders.data ?? noHeaders.text))
     process.exit(1)
   }
 
-  // 2) With X-Customer-Id, no auth
+  // Test B: With X-Customer-Id — ONLY 200 (validate shape), 401/403, or 400 if tenant missing
   const withTenant = await fetchJsonOrText(previewUrl, {
     method: 'GET',
     headers: { 'X-Customer-Id': TEST_CUSTOMER_ID },
@@ -58,25 +63,28 @@ async function main() {
     const items = withTenant.data?.data?.items
     if (!Array.isArray(items)) {
       console.error('self-test-send-queue-preview-stage3a: FAIL')
-      console.error('  Expected 200 response to have data.items array, got:', withTenant.data)
+      console.error('  Test B: Expected 200 to have data.items array, got:', bodyPreview(withTenant.data))
       process.exit(1)
     }
-    branch += ' | 200 with X-Customer-Id (data.items present)'
-    console.log('  GET /api/send-queue/preview (X-Customer-Id): 200, items=', items.length)
+    console.log('  Test B (X-Customer-Id):', withTenant.status, '— items.length =', items.length)
   } else if (withTenant.status === 401 || withTenant.status === 403) {
-    branch += ' | 401/403 with X-Customer-Id (auth required)'
-    console.log(`  GET /api/send-queue/preview (X-Customer-Id): ${withTenant.status} (auth required)`)
-  } else if (withTenant.status === 500) {
-    branch += ' | 500 with X-Customer-Id (env/DB not ready, e.g. table missing)'
-    console.log('  GET /api/send-queue/preview (X-Customer-Id): 500 (env/DB not ready)')
+    console.log('  Test B (X-Customer-Id):', withTenant.status, '(auth required)')
+  } else if (withTenant.status === 400) {
+    const msg = typeof withTenant.data === 'object' ? withTenant.data?.error : withTenant.text
+    if (!String(msg || '').toLowerCase().includes('customer') && !String(msg || '').toLowerCase().includes('tenant')) {
+      console.error('self-test-send-queue-preview-stage3a: FAIL')
+      console.error('  Test B: 400 with X-Customer-Id accepted only if body says tenant missing. Got:', bodyPreview(msg))
+      process.exit(1)
+    }
+    console.log('  Test B (X-Customer-Id):', withTenant.status, '— tenant missing (unexpected with header set)')
   } else {
     console.error('self-test-send-queue-preview-stage3a: FAIL')
-    console.error('  Expected 200, 401/403, or 500 with X-Customer-Id, got:', withTenant.status, withTenant.data ?? withTenant.text)
+    console.error('  Test B: Accept ONLY 200, 401/403, or 400 (tenant missing). Got:', withTenant.status)
+    console.error('  Body (first 200 chars):', bodyPreview(withTenant.data ?? withTenant.text))
     process.exit(1)
   }
 
   console.log('self-test-send-queue-preview-stage3a: PASS')
-  console.log('  branch:', branch)
   process.exit(0)
 }
 
