@@ -3,6 +3,7 @@
  * POST /api/send-queue/tick — requires X-Admin-Secret.
  * dryRun=true (default): dry-run only. dryRun=false: live send only when ODCRM_ALLOW_LIVE_TICK and canary gates pass.
  * Stage 2A: GET /api/send-queue/metrics?customerId=... — requires X-Admin-Secret; returns operational metrics for one customer.
+ * Stage 3A: GET /api/send-queue/preview — tenant-scoped (X-Customer-Id), read-only; returns WAIT/SKIP/SEND + reasons.
  */
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
@@ -40,6 +41,89 @@ function liveTickAllowed(customerId: string): { allowed: boolean; reason?: strin
 }
 
 const STUCK_LOCKED_THRESHOLD_MINUTES = 15
+
+/** Stage 3A: Compute action and reasons for preview (read-only, no send). */
+function previewActionAndReasons(
+  item: { status: string; scheduledFor: Date | null; recipientEmail: string },
+  now: Date,
+  customerHasIdentity: boolean
+): { action: 'WAIT' | 'SKIP' | 'SEND'; reasons: string[] } {
+  if (item.status === 'SENT') {
+    return { action: 'SKIP', reasons: ['already_sent'] }
+  }
+  if (item.status === 'LOCKED') {
+    return { action: 'WAIT', reasons: ['locked'] }
+  }
+  if (item.status === 'FAILED' || item.status === 'SKIPPED') {
+    return { action: 'SKIP', reasons: ['unknown'] }
+  }
+  // QUEUED
+  if (item.scheduledFor && item.scheduledFor > now) {
+    return { action: 'WAIT', reasons: ['not_due_yet'] }
+  }
+  if (!item.recipientEmail?.trim()) {
+    return { action: 'SKIP', reasons: ['missing_recipient_email'] }
+  }
+  if (!customerHasIdentity) {
+    return { action: 'SKIP', reasons: ['missing_identity'] }
+  }
+  return { action: 'SEND', reasons: [] }
+}
+
+/**
+ * GET /api/send-queue/preview?enrollmentId=<optional>&limit=<optional>
+ * Stage 3A: Read-only dry-run preview. Requires X-Customer-Id. No admin secret. No DB mutations.
+ */
+router.get('/preview', async (req: Request, res: Response) => {
+  const customerId = (req.headers['x-customer-id'] as string)?.trim() || (req.headers['X-Customer-Id'] as string)?.trim() || ''
+  if (!customerId) {
+    res.status(400).json({ error: 'Customer ID is required (X-Customer-Id header)' })
+    return
+  }
+  const enrollmentIdParam = typeof req.query.enrollmentId === 'string' ? req.query.enrollmentId.trim() : ''
+  let limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20
+  if (Number.isNaN(limit) || limit < 1) limit = 20
+  if (limit > 100) limit = 100
+
+  const now = new Date()
+  try {
+    const where: { customerId: string; enrollmentId?: string } = { customerId }
+    if (enrollmentIdParam) where.enrollmentId = enrollmentIdParam
+
+    const [items, identityCount] = await Promise.all([
+      prisma.outboundSendQueueItem.findMany({
+        where,
+        orderBy: [{ scheduledFor: 'asc' }, { createdAt: 'asc' }],
+        take: limit,
+        select: { id: true, enrollmentId: true, stepIndex: true, scheduledFor: true, status: true, recipientEmail: true },
+      }),
+      prisma.emailIdentity.count({ where: { customerId } }),
+    ])
+    const customerHasIdentity = identityCount > 0
+
+    const data = items.map((item) => {
+      const { action, reasons } = previewActionAndReasons(
+        { status: item.status, scheduledFor: item.scheduledFor, recipientEmail: item.recipientEmail },
+        now,
+        customerHasIdentity
+      )
+      return {
+        id: item.id,
+        enrollmentId: item.enrollmentId,
+        stepIndex: item.stepIndex,
+        scheduledFor: item.scheduledFor?.toISOString() ?? null,
+        status: item.status,
+        action,
+        reasons,
+        renderPreview: null as { subject: string; bodyHtml: string } | null,
+      }
+    })
+    res.json({ data: { items: data } })
+  } catch (err) {
+    console.error('[send-queue/preview] error:', err)
+    res.status(500).json({ error: err instanceof Error ? err.message : 'Preview failed' })
+  }
+})
 
 /**
  * GET /api/send-queue/metrics?customerId=<cust_...>
