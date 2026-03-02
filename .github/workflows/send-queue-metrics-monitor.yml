@@ -34,7 +34,7 @@ jobs:
           ODCRM_OUTPUT: json
           ODCRM_OUTPUT_FILE: send-queue-metrics-report.json
           ODCRM_SORT: stuckLocked
-          ODCRM_FAIL_ON: failed,stuckLocked
+          ODCRM_FAIL_ON: failed>0,stuckLocked>0
 
       - name: Upload metrics report artifact
         uses: actions/upload-artifact@v4

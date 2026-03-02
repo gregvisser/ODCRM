@@ -11,11 +11,74 @@
  *   ODCRM_OUTPUT (optional: "json" | "pretty", default "pretty")
  *   ODCRM_OUTPUT_FILE (optional: write JSON to this path when set; stdout gets summary or pretty table)
  *   ODCRM_SORT (optional: dueNow | queued | failed | stuckLocked | lastSentAt)
- *   ODCRM_FAIL_ON (optional: comma/space-separated tokens: failed, stuckLocked, dueNow, queued — exit 2 if any > 0)
+ *   ODCRM_FAIL_ON (optional: comma-separated rules; token "failed" => failed>0, or "queued>=10", "dueNow>5" — exit 2 if any rule triggers). Stage 2E.
  */
 import https from 'node:https'
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+/** Allowed metric names (lowercase) -> totals key */
+const METRIC_TO_TOTALS = {
+  failed: 'FAILED',
+  stucklocked: 'stuckLocked',
+  duenow: 'dueNow',
+  queued: 'QUEUED',
+  sent: 'SENT',
+  locked: 'LOCKED',
+  skipped: 'SKIPPED',
+}
+
+/**
+ * Parse ODCRM_FAIL_ON string into rules. Token only => >0; else metric op value.
+ * @param {string} raw
+ * @returns {{ metric: string, op: string, value: number }[]}
+ */
+export function parseFailOnRules(raw) {
+  if (!raw || !raw.trim()) return []
+  const rules = []
+  const tokens = raw.split(',').map((s) => s.trim()).filter(Boolean)
+  for (const token of tokens) {
+    const m = token.match(/^([a-zA-Z]+)(>=|<=|=|>|<)(\d+)$/)
+    if (m) {
+      const metric = m[1].toLowerCase()
+      if (METRIC_TO_TOTALS[metric] !== undefined) {
+        rules.push({ metric, op: m[2], value: parseInt(m[3], 10) })
+      }
+    } else if (/^[a-zA-Z]+$/.test(token)) {
+      const metric = token.toLowerCase()
+      if (METRIC_TO_TOTALS[metric] !== undefined) {
+        rules.push({ metric, op: '>', value: 0 })
+      }
+    }
+  }
+  return rules
+}
+
+/**
+ * Evaluate rules against totals; return list of triggered rule descriptions.
+ * @param {{ QUEUED?: number, LOCKED?: number, SENT?: number, FAILED?: number, SKIPPED?: number, dueNow?: number, stuckLocked?: number }} totals
+ * @param {{ metric: string, op: string, value: number }[]} rules
+ * @returns {string[]}
+ */
+export function evaluateFailOn(totals, rules) {
+  const triggers = []
+  for (const rule of rules) {
+    const key = METRIC_TO_TOTALS[rule.metric]
+    const actual = totals[key] ?? 0
+    let hit = false
+    switch (rule.op) {
+      case '>': hit = actual > rule.value; break
+      case '>=': hit = actual >= rule.value; break
+      case '<': hit = actual < rule.value; break
+      case '<=': hit = actual <= rule.value; break
+      case '=': hit = actual === rule.value; break
+      default: break
+    }
+    if (hit) triggers.push(`${rule.metric}${rule.op}${rule.value}`)
+  }
+  return triggers
+}
 
 const BASE = (process.env.ODCRM_METRICS_API_BASE || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').replace(/\/$/, '')
 const SECRET = process.env.ODCRM_ADMIN_SECRET?.trim()
@@ -56,11 +119,6 @@ function loadCustomerIds() {
   if (!CUSTOMER_IDS_RAW) fail('ODCRM_CUSTOMER_IDS or ODCRM_CUSTOMER_IDS_FILE is required')
   return CUSTOMER_IDS_RAW.split(',').map((id) => id.trim()).filter(Boolean)
 }
-
-const customerIds = loadCustomerIds()
-if (customerIds.length === 0) fail('At least one customer id is required')
-
-if (!SECRET) fail('ODCRM_ADMIN_SECRET is required')
 
 /**
  * GET url with headers; returns { status, text }. Uses https.request for clean Windows exit.
@@ -156,16 +214,10 @@ function sortResults(results, sortKey) {
   results.sort(cmp)
 }
 
-function checkFailOn(totals, failOnTokens) {
-  if (!failOnTokens || failOnTokens.length === 0) return
-  const triggers = []
-  for (const token of failOnTokens) {
-    const t = token.toLowerCase()
-    if (t === 'failed' && (totals.FAILED || 0) > 0) triggers.push('failed>0')
-    if (t === 'stucklocked' && (totals.stuckLocked || 0) > 0) triggers.push('stuckLocked>0')
-    if (t === 'duenow' && (totals.dueNow || 0) > 0) triggers.push('dueNow>0')
-    if (t === 'queued' && (totals.QUEUED || 0) > 0) triggers.push('queued>0')
-  }
+function checkFailOn(totals) {
+  const rules = parseFailOnRules(FAIL_ON_RAW)
+  if (rules.length === 0) return
+  const triggers = evaluateFailOn(totals, rules)
   if (triggers.length > 0) {
     console.error('send-queue-metrics-report: FAIL_ON triggered:', triggers.join(', '))
     process.exit(2)
@@ -173,6 +225,10 @@ function checkFailOn(totals, failOnTokens) {
 }
 
 async function main() {
+  const customerIds = loadCustomerIds()
+  if (customerIds.length === 0) fail('At least one customer id is required')
+  if (!SECRET) fail('ODCRM_ADMIN_SECRET is required')
+
   const results = []
   for (const id of customerIds) {
     const data = await fetchMetrics(id)
@@ -201,8 +257,7 @@ async function main() {
 
   if (SORT) sortResults(results, SORT)
 
-  const failOnTokens = FAIL_ON_RAW ? FAIL_ON_RAW.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean) : []
-  checkFailOn(totals, failOnTokens)
+  checkFailOn(totals)
 
   const payload = { items: results, totals }
 
@@ -243,8 +298,11 @@ async function main() {
   process.exit(0)
 }
 
-main().catch((err) => {
-  console.error('send-queue-metrics-report: FAIL')
-  console.error(err)
-  process.exit(1)
-})
+const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url
+if (isMain) {
+  main().catch((err) => {
+    console.error('send-queue-metrics-report: FAIL')
+    console.error(err)
+    process.exit(1)
+  })
+}
