@@ -2,6 +2,7 @@
 /**
  * Stage 2B: Ops script — pull /api/send-queue/metrics for multiple customers and print a report.
  * Admin-only. Do NOT use admin secret in browser/frontend.
+ * Uses https.request (not fetch) for clean exit on Windows/Node 24.
  *
  * Env:
  *   ODCRM_METRICS_API_BASE (default: prod API URL)
@@ -9,10 +10,13 @@
  *   ODCRM_CUSTOMER_IDS (required; comma-separated)
  *   ODCRM_OUTPUT (optional: "json" | "pretty", default "pretty")
  */
+import https from 'node:https'
+
 const BASE = (process.env.ODCRM_METRICS_API_BASE || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').replace(/\/$/, '')
 const SECRET = process.env.ODCRM_ADMIN_SECRET?.trim()
 const CUSTOMER_IDS_RAW = process.env.ODCRM_CUSTOMER_IDS?.trim()
 const OUTPUT = (process.env.ODCRM_OUTPUT || 'pretty').toLowerCase()
+const REQUEST_TIMEOUT_MS = 20000
 
 function fail(msg) {
   console.error('send-queue-metrics-report: FAIL')
@@ -25,20 +29,57 @@ if (!CUSTOMER_IDS_RAW) fail('ODCRM_CUSTOMER_IDS is required (comma-separated)')
 const customerIds = CUSTOMER_IDS_RAW.split(',').map((id) => id.trim()).filter(Boolean)
 if (customerIds.length === 0) fail('ODCRM_CUSTOMER_IDS must contain at least one customer id')
 
+/**
+ * GET url with headers; returns { status, text }. Uses https.request for clean Windows exit.
+ */
+function getJson(url, headers) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const opts = {
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      method: 'GET',
+      headers: headers || {},
+    }
+    const req = https.request(opts, (res) => {
+      const chunks = []
+      res.on('data', (chunk) => chunks.push(chunk))
+      res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }))
+      res.on('error', reject)
+    })
+    req.on('error', reject)
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+    req.end()
+  })
+}
+
 async function fetchMetrics(customerId) {
   const url = `${BASE}/api/send-queue/metrics?customerId=${encodeURIComponent(customerId)}`
-  const res = await fetch(url, { headers: { 'X-Admin-Secret': SECRET } })
-  const text = await res.text()
+  const headers = { 'X-Admin-Secret': SECRET }
+  let status
+  let text
+  try {
+    const result = await getJson(url, headers)
+    status = result.status
+    text = result.text
+  } catch (err) {
+    console.error('  request error:', err instanceof Error ? err.message : String(err))
+    fail(`GET metrics for customerId=${customerId} failed`)
+  }
   let data = null
   try {
     data = text ? JSON.parse(text) : null
   } catch {
     // leave data null
   }
-  if (res.status !== 200) {
-    const excerpt = (text || res.statusText || '').slice(0, 300)
-    console.error(`  status=${res.status} body=${excerpt}`)
-    fail(`GET metrics for customerId=${customerId} returned ${res.status}`)
+  if (status !== 200) {
+    const excerpt = (text || '').slice(0, 300)
+    console.error(`  status=${status} body=${excerpt}`)
+    fail(`GET metrics for customerId=${customerId} returned ${status}`)
   }
   const payload = data?.data ?? data
   if (!payload || payload.customerId !== customerId) {
