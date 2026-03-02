@@ -1,0 +1,43 @@
+# Stage 2D: Scheduled send-queue metrics report. Runs report script, uploads JSON artifact.
+# Fail-on thresholds (ODCRM_FAIL_ON) cause exit 2 to flag issues. Secret from GitHub Secrets only.
+name: Send Queue Metrics Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every 6 hours
+    - cron: '0 */6 * * *'
+
+jobs:
+  metrics-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run send-queue metrics report
+        run: npm run send-queue:metrics:report
+        env:
+          ODCRM_METRICS_API_BASE: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
+          ODCRM_ADMIN_SECRET: ${{ secrets.ODCRM_ADMIN_SECRET }}
+          ODCRM_CUSTOMER_IDS_FILE: docs/ops/send-queue-metrics-customers.txt
+          ODCRM_OUTPUT: json
+          ODCRM_OUTPUT_FILE: send-queue-metrics-report.json
+          ODCRM_SORT: stuckLocked
+          ODCRM_FAIL_ON: failed,stuckLocked
+
+      - name: Upload metrics report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: send-queue-metrics-report
+          path: send-queue-metrics-report.json

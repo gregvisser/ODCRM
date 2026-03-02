@@ -1,0 +1,3 @@
+# Send-queue metrics monitor: one customerId per line. Lines starting with # are ignored.
+# Add more customer IDs below as needed (one per line or comma-separated).
+cust_1771179790060_u628sp
