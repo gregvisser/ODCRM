@@ -62,8 +62,18 @@ Read-only dry-run preview for the send queue. **No live sending. No DB mutations
 | `missing_recipient_email` | Recipient email is missing/blank |
 | `unknown` | Fallback (e.g. FAILED/SKIPPED) |
 
+## Smoke test (prod)
+
+Run against production by default (override with `ODCRM_API_BASE_URL`):
+
+- **Without headers:** `curl -s -o /dev/null -w "%{http_code}" https://.../api/send-queue/preview`  
+  Expect **400** (tenant required) or **401/403** (auth required). **Never expect 500.**
+- **With tenant:** `curl -s -H "X-Customer-Id: <cust_id>" https://.../api/send-queue/preview`  
+  Expect **200** (JSON with `data.items`) or **401/403** (auth required). **Never expect 500.**
+
+Local dev: endpoint requires a migrated DB (table `outbound_send_queue_items`); otherwise the handler may return 500. The CI guardrail does not accept 500.
+
 ## Self-test
 
 - **CI guardrail:** `npm run test:send-queue-preview-stage3a`
-  - Without headers => expect 400 (X-Customer-Id required) or 401/403 (auth required).
-  - With X-Customer-Id => expect 200 in local/dev or 401/403 in prod; if 200, assert `data.items` array.
+  - Uses prod API by default. Test A: no headers => 400 (body mentions X-Customer-Id) or 401/403 only. Test B: with X-Customer-Id => 200 (validate `data.items`), 401/403, or 400 only if body says tenant missing. **404 and 500 => FAIL.**
