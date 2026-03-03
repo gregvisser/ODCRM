@@ -182,6 +182,60 @@ router.get('/preview', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /api/send-queue/items/:itemId — Stage 3I: tenant-scoped item detail (read-only).
+ * Requires X-Customer-Id. Returns minimal fields; 404 when not found or wrong tenant.
+ */
+router.get('/items/:itemId', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const itemId = (req.params.itemId ?? '').trim()
+    if (!itemId) {
+      res.status(400).json({ success: false, error: 'itemId is required' })
+      return
+    }
+    const item = await prisma.outboundSendQueueItem.findFirst({
+      where: { id: itemId, customerId },
+      select: {
+        id: true,
+        status: true,
+        scheduledFor: true,
+        attemptCount: true,
+        lastError: true,
+        sentAt: true,
+        recipientEmail: true,
+        stepIndex: true,
+        enrollmentId: true,
+        createdAt: true,
+      },
+    })
+    if (!item) {
+      res.status(404).json({ success: false, error: 'Not found' })
+      return
+    }
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      success: true,
+      data: {
+        id: item.id,
+        status: item.status,
+        scheduledFor: item.scheduledFor?.toISOString() ?? null,
+        attemptCount: item.attemptCount,
+        lastError: item.lastError ?? null,
+        sentAt: item.sentAt?.toISOString() ?? null,
+        recipientEmail: item.recipientEmail,
+        stepIndex: item.stepIndex,
+        enrollmentId: item.enrollmentId,
+        createdAt: item.createdAt.toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-queue/items/:itemId] error:', err)
+    res.status(500).json({ success: false, error: 'An error occurred' })
+  }
+})
+
+/**
  * GET /api/send-queue/items/:itemId/render — Stage 3G: dry-run render by queue item id. Read-only; no DB mutations.
  * Requires X-Customer-Id. Returns subject + bodyHtml from sequence step templates. No querystring enrollmentId/stepIndex/recipientEmail.
  */
