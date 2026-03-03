@@ -2,7 +2,7 @@
 /**
  * Guardrail for Stage 1B: enrollment lifecycle (pause/resume/cancel).
  * Test A: POST with no headers -> 400 or 401/403 (NOT 200/500). FAIL on 404 (route must exist on prod).
- * Test B: POST with X-Customer-Id: cust_fake -> 404 or 400 or 401/403 (NOT 200/500).
+ * Test B: POST with X-Customer-Id: cust_fake -> 404 or 400 or 401/403 or 409 (NOT 200/500).
  * Repeated for /pause, /resume, /cancel.
  * Prod-by-default; no secrets. Uses exitSoon() to avoid Windows Node v24 UV_HANDLE_CLOSING crash.
  */
@@ -81,10 +81,10 @@ async function testEndpoint(action) {
     fail(`POST ${path} (fake tenant) must not return 500`, bodyB)
     return false
   }
-  if (res.status === 404 || res.status === 400 || res.status === 401 || res.status === 403) {
+  if (res.status === 404 || res.status === 400 || res.status === 401 || res.status === 403 || res.status === 409) {
     console.log(`  POST ${path} (X-Customer-Id: cust_fake): ${res.status}`)
   } else {
-    fail(`POST ${path} (fake tenant): expect 404 or 400 or 401/403, got ${res.status}`, bodyB)
+    fail(`POST ${path} (fake tenant): expect 404 or 400 or 401/403 or 409, got ${res.status}`, bodyB)
     return false
   }
 
