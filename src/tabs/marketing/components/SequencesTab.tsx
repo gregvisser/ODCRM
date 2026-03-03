@@ -518,7 +518,7 @@ const SequencesTab: React.FC = () => {
   }, [isOpen, editingSequence?.id, selectedCustomerId])
 
   const handleEnrollmentPause = async (enrollmentId: string) => {
-    if (!selectedCustomerId || !editingSequence?.id) return
+    if (!selectedCustomerId?.startsWith('cust_') || !editingSequence?.id) return
     setEnrollmentActionId(enrollmentId)
     try {
       const { error } = await api.post(
@@ -538,7 +538,7 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleEnrollmentResume = async (enrollmentId: string) => {
-    if (!selectedCustomerId || !editingSequence?.id) return
+    if (!selectedCustomerId?.startsWith('cust_') || !editingSequence?.id) return
     setEnrollmentActionId(enrollmentId)
     try {
       const { error } = await api.post(
@@ -551,6 +551,28 @@ const SequencesTab: React.FC = () => {
         return
       }
       toast({ title: 'Enrollment resumed', status: 'success' })
+      await loadEnrollmentsForSequence(editingSequence.id)
+    } finally {
+      setEnrollmentActionId(null)
+    }
+  }
+
+  const handleEnrollmentCancel = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_') || !editingSequence?.id) return
+    const confirmed = typeof window !== 'undefined' && window.confirm?.('Cancel this enrollment? This cannot be undone.')
+    if (!confirmed) return
+    setEnrollmentActionId(enrollmentId)
+    try {
+      const { error } = await api.post(
+        `/api/enrollments/${enrollmentId}/cancel`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (error) {
+        toast({ title: 'Cancel failed', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Enrollment cancelled', status: 'success' })
       await loadEnrollmentsForSequence(editingSequence.id)
     } finally {
       setEnrollmentActionId(null)
@@ -2681,7 +2703,7 @@ const SequencesTab: React.FC = () => {
                                     size="xs"
                                     variant="outline"
                                     colorScheme="yellow"
-                                    isDisabled={e.status !== 'DRAFT' && e.status !== 'ACTIVE'}
+                                    isDisabled={!selectedCustomerId?.startsWith('cust_') || (e.status !== 'DRAFT' && e.status !== 'ACTIVE')}
                                     isLoading={enrollmentActionId === e.id}
                                     onClick={() => handleEnrollmentPause(e.id)}
                                   >
@@ -2691,11 +2713,21 @@ const SequencesTab: React.FC = () => {
                                     size="xs"
                                     variant="outline"
                                     colorScheme="green"
-                                    isDisabled={e.status !== 'PAUSED'}
+                                    isDisabled={!selectedCustomerId?.startsWith('cust_') || e.status !== 'PAUSED'}
                                     isLoading={enrollmentActionId === e.id}
                                     onClick={() => handleEnrollmentResume(e.id)}
                                   >
                                     Resume
+                                  </Button>
+                                  <Button
+                                    size="xs"
+                                    variant="outline"
+                                    colorScheme="red"
+                                    isDisabled={!selectedCustomerId?.startsWith('cust_') || (e.status !== 'ACTIVE' && e.status !== 'PAUSED')}
+                                    isLoading={enrollmentActionId === e.id}
+                                    onClick={() => handleEnrollmentCancel(e.id)}
+                                  >
+                                    Cancel
                                   </Button>
                                 </HStack>
                               </Td>
