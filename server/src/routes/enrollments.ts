@@ -740,7 +740,7 @@ function lifecycleResponse(enrollment: { id: string; status: string; updatedAt: 
   return { success: true as const, data: { id: enrollment.id, status: enrollment.status, updatedAt: enrollment.updatedAt.toISOString() } }
 }
 
-/** POST /api/enrollments/:enrollmentId/pause — set status to PAUSED (only when DRAFT or ACTIVE) */
+/** POST /api/enrollments/:enrollmentId/pause — atomic: PAUSED only when status in DRAFT|ACTIVE */
 router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -750,32 +750,37 @@ router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'enrollmentId required' })
       return
     }
+    const { count } = await prisma.enrollment.updateMany({
+      where: { id: enrollmentId, customerId, status: { in: PAUSABLE_STATUSES } },
+      data: { status: EnrollmentStatus.PAUSED },
+    })
+    if (count === 1) {
+      const row = await prisma.enrollment.findFirst({
+        where: { id: enrollmentId, customerId },
+        select: { id: true, status: true, updatedAt: true },
+      })
+      if (row) {
+        res.setHeader('x-odcrm-customer-id', customerId)
+        res.json(lifecycleResponse(row))
+        return
+      }
+    }
     const existing = await prisma.enrollment.findFirst({
       where: { id: enrollmentId, customerId },
-      select: { id: true, status: true, updatedAt: true },
+      select: { id: true, status: true },
     })
     if (!existing) {
-      res.status(404).json({ error: 'Enrollment not found' })
+      res.status(404).json({ success: false, error: 'Not found' })
       return
     }
-    if (!PAUSABLE_STATUSES.includes(existing.status as EnrollmentStatus)) {
-      res.status(400).json({ error: 'Enrollment can only be paused when status is DRAFT or ACTIVE', currentStatus: existing.status })
-      return
-    }
-    const updated = await prisma.enrollment.update({
-      where: { id: enrollmentId },
-      data: { status: EnrollmentStatus.PAUSED },
-      select: { id: true, status: true, updatedAt: true },
-    })
-    res.setHeader('x-odcrm-customer-id', customerId)
-    res.json(lifecycleResponse(updated))
+    res.status(409).json({ success: false, error: `Invalid status transition for pause`, status: existing.status })
   } catch (err) {
     console.error('POST /api/enrollments/:enrollmentId/pause error:', err)
     res.status(400).json({ error: 'An error occurred' })
   }
 })
 
-/** POST /api/enrollments/:enrollmentId/resume — set status to ACTIVE (only when PAUSED) */
+/** POST /api/enrollments/:enrollmentId/resume — atomic: ACTIVE only when status is PAUSED */
 router.post('/:enrollmentId/resume', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -785,32 +790,37 @@ router.post('/:enrollmentId/resume', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'enrollmentId required' })
       return
     }
+    const { count } = await prisma.enrollment.updateMany({
+      where: { id: enrollmentId, customerId, status: RESUMABLE_STATUS },
+      data: { status: EnrollmentStatus.ACTIVE },
+    })
+    if (count === 1) {
+      const row = await prisma.enrollment.findFirst({
+        where: { id: enrollmentId, customerId },
+        select: { id: true, status: true, updatedAt: true },
+      })
+      if (row) {
+        res.setHeader('x-odcrm-customer-id', customerId)
+        res.json(lifecycleResponse(row))
+        return
+      }
+    }
     const existing = await prisma.enrollment.findFirst({
       where: { id: enrollmentId, customerId },
-      select: { id: true, status: true, updatedAt: true },
+      select: { id: true, status: true },
     })
     if (!existing) {
-      res.status(404).json({ error: 'Enrollment not found' })
+      res.status(404).json({ success: false, error: 'Not found' })
       return
     }
-    if (existing.status !== RESUMABLE_STATUS) {
-      res.status(400).json({ error: 'Enrollment can only be resumed when status is PAUSED', currentStatus: existing.status })
-      return
-    }
-    const updated = await prisma.enrollment.update({
-      where: { id: enrollmentId },
-      data: { status: EnrollmentStatus.ACTIVE },
-      select: { id: true, status: true, updatedAt: true },
-    })
-    res.setHeader('x-odcrm-customer-id', customerId)
-    res.json(lifecycleResponse(updated))
+    res.status(409).json({ success: false, error: `Invalid status transition for resume`, status: existing.status })
   } catch (err) {
     console.error('POST /api/enrollments/:enrollmentId/resume error:', err)
     res.status(400).json({ error: 'An error occurred' })
   }
 })
 
-/** POST /api/enrollments/:enrollmentId/cancel — set status to CANCELLED (only when ACTIVE or PAUSED; block COMPLETED) */
+/** POST /api/enrollments/:enrollmentId/cancel — atomic: CANCELLED only when status in ACTIVE|PAUSED */
 router.post('/:enrollmentId/cancel', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -820,25 +830,30 @@ router.post('/:enrollmentId/cancel', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'enrollmentId required' })
       return
     }
+    const { count } = await prisma.enrollment.updateMany({
+      where: { id: enrollmentId, customerId, status: { in: CANCELLABLE_STATUSES } },
+      data: { status: EnrollmentStatus.CANCELLED },
+    })
+    if (count === 1) {
+      const row = await prisma.enrollment.findFirst({
+        where: { id: enrollmentId, customerId },
+        select: { id: true, status: true, updatedAt: true },
+      })
+      if (row) {
+        res.setHeader('x-odcrm-customer-id', customerId)
+        res.json(lifecycleResponse(row))
+        return
+      }
+    }
     const existing = await prisma.enrollment.findFirst({
       where: { id: enrollmentId, customerId },
-      select: { id: true, status: true, updatedAt: true },
+      select: { id: true, status: true },
     })
     if (!existing) {
-      res.status(404).json({ error: 'Enrollment not found' })
+      res.status(404).json({ success: false, error: 'Not found' })
       return
     }
-    if (!CANCELLABLE_STATUSES.includes(existing.status as EnrollmentStatus)) {
-      res.status(400).json({ error: 'Enrollment can only be cancelled when status is ACTIVE or PAUSED', currentStatus: existing.status })
-      return
-    }
-    const updated = await prisma.enrollment.update({
-      where: { id: enrollmentId },
-      data: { status: EnrollmentStatus.CANCELLED },
-      select: { id: true, status: true, updatedAt: true },
-    })
-    res.setHeader('x-odcrm-customer-id', customerId)
-    res.json(lifecycleResponse(updated))
+    res.status(409).json({ success: false, error: `Invalid status transition for cancel`, status: existing.status })
   } catch (err) {
     console.error('POST /api/enrollments/:enrollmentId/cancel error:', err)
     res.status(400).json({ error: 'An error occurred' })
