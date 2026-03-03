@@ -299,11 +299,73 @@ const SequencesTab: React.FC = () => {
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
 
+  // Stage 3B: Send Queue Preview (dry-run, read-only)
+  type SendQueuePreviewItem = {
+    id: string
+    enrollmentId: string
+    stepIndex: number
+    scheduledFor: string | null
+    status: string
+    action: 'WAIT' | 'SKIP' | 'SEND'
+    reasons: string[]
+    recipientEmail?: string
+  }
+  const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
+  const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
+  const [queuePreviewData, setQueuePreviewData] = useState<SendQueuePreviewItem[] | null>(null)
+  const [queuePreviewError, setQueuePreviewError] = useState<string | null>(null)
+  const [queuePreviewLoading, setQueuePreviewLoading] = useState(false)
+
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
     const unique = Array.from(new Set(split))
     return unique.filter((email) => email.includes('@') && email.includes('.', email.indexOf('@')))
   }
+
+  const loadSendQueuePreview = async () => {
+    if (!selectedCustomerId) return
+    setQueuePreviewLoading(true)
+    setQueuePreviewError(null)
+    const limit = Math.min(100, Math.max(1, queuePreviewLimit))
+    const params = new URLSearchParams()
+    params.set('limit', String(limit))
+    if (queuePreviewEnrollmentId.trim()) params.set('enrollmentId', queuePreviewEnrollmentId.trim())
+    const qs = params.toString()
+    const endpoint = `/api/send-queue/preview${qs ? `?${qs}` : ''}`
+    const res = await api.get<{ items: SendQueuePreviewItem[] }>(endpoint)
+    setQueuePreviewLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setQueuePreviewError('Select a client.')
+      else if (status === 401 || status === 403) setQueuePreviewError('Not authorized.')
+      else setQueuePreviewError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setQueuePreviewData(null)
+      return
+    }
+    const items = res.data?.items ?? []
+    setQueuePreviewData(Array.isArray(items) ? items : [])
+    setQueuePreviewError(null)
+  }
+
+  function maskEmail(email: string): string {
+    const t = email.trim()
+    if (!t) return '—'
+    const at = t.indexOf('@')
+    if (at <= 0) return '***'
+    const local = t.slice(0, at)
+    const domain = t.slice(at)
+    if (local.length <= 2) return '***' + domain
+    return local.slice(0, 1) + '***' + domain
+  }
+
+  useEffect(() => {
+    if (selectedCustomerId) loadSendQueuePreview()
+    else {
+      setQueuePreviewData(null)
+      setQueuePreviewError(null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
+  }, [selectedCustomerId])
 
   const handleCreateEnrollment = async () => {
     if (!editingSequence?.id || !selectedCustomerId?.startsWith('cust_')) return
@@ -1715,6 +1777,74 @@ const SequencesTab: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Card mb={6}>
+        <CardBody>
+          <Heading size="sm" mb={3}>Send Queue Preview (Dry Run)</Heading>
+          <Flex gap={3} mb={3} flexWrap="wrap" align="center">
+            <Button size="sm" onClick={loadSendQueuePreview} isLoading={queuePreviewLoading} isDisabled={!selectedCustomerId}>
+              Refresh
+            </Button>
+            <HStack spacing={2}>
+              <FormControl width="80px">
+                <FormLabel fontSize="xs" mb={0}>Limit</FormLabel>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={queuePreviewLimit}
+                  onChange={(e) => setQueuePreviewLimit(Number(e.target.value) || 20)}
+                  size="sm"
+                />
+              </FormControl>
+              <FormControl width="200px">
+                <FormLabel fontSize="xs" mb={0}>Enrollment ID</FormLabel>
+                <Input
+                  placeholder="optional"
+                  value={queuePreviewEnrollmentId}
+                  onChange={(e) => setQueuePreviewEnrollmentId(e.target.value)}
+                  size="sm"
+                />
+              </FormControl>
+            </HStack>
+          </Flex>
+          {queuePreviewError && (
+            <Alert status="error" size="sm" mb={3}>
+              <AlertIcon />
+              <AlertDescription>{queuePreviewError}</AlertDescription>
+            </Alert>
+          )}
+          {queuePreviewData && queuePreviewData.length === 0 && !queuePreviewError && (
+            <Text fontSize="sm" color="gray.600">No queue items found.</Text>
+          )}
+          {queuePreviewData && queuePreviewData.length > 0 && (
+            <Box overflowX="auto">
+              <Table size="sm">
+                <Thead>
+                  <Tr>
+                    <Th>scheduledFor</Th>
+                    <Th>recipient</Th>
+                    <Th>status</Th>
+                    <Th>action</Th>
+                    <Th>reasons</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {queuePreviewData.map((row) => (
+                    <Tr key={row.id}>
+                      <Td>{row.scheduledFor ?? '—'}</Td>
+                      <Td>{maskEmail(row.recipientEmail ?? '')}</Td>
+                      <Td>{row.status}</Td>
+                      <Td><Badge size="sm">{row.action}</Badge></Td>
+                      <Td>{row.reasons?.length ? row.reasons.join(', ') : '—'}</Td>
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </Box>
+          )}
+        </CardBody>
+      </Card>
 
       <Flex gap={4} mb={6} align="center">
         <InputGroup maxW="300px">

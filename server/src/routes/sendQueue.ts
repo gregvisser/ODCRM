@@ -115,6 +115,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         status: item.status,
         action,
         reasons,
+        recipientEmail: item.recipientEmail ?? '',
         renderPreview: null as { subject: string; bodyHtml: string } | null,
       }
     })
