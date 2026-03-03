@@ -16,6 +16,7 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireCustomerId } from '../utils/tenantId.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { EnrollmentStatus, OutboundSendQueueStatus } from '@prisma/client'
 
 const router = Router()
@@ -611,6 +612,71 @@ router.get('/:enrollmentId/queue', async (req: Request, res: Response) => {
     res.json({ data, meta: { countsByStatus } })
   } catch (err) {
     console.error('GET /api/enrollments/:enrollmentId/queue error:', err)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
+/** GET /api/enrollments/:enrollmentId/steps/:stepIndex/render — Stage 3F: dry-run render subject + bodyHtml for a step. Read-only; no sends/locks. */
+router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    if (!customerId.startsWith('cust_')) {
+      res.status(400).json({ error: 'Customer ID must be a valid tenant id (X-Customer-Id header, cust_...)' })
+      return
+    }
+    const enrollmentId = req.params.enrollmentId
+    const stepIndexParam = req.params.stepIndex
+    const recipientEmail = typeof req.query.recipientEmail === 'string' ? req.query.recipientEmail.trim() : ''
+    if (!enrollmentId) {
+      res.status(400).json({ error: 'enrollmentId required' })
+      return
+    }
+    const stepIndex = parseInt(stepIndexParam, 10)
+    if (Number.isNaN(stepIndex) || stepIndex < 0) {
+      res.status(400).json({ error: 'stepIndex must be a non-negative integer' })
+      return
+    }
+    const enrollment = await prisma.enrollment.findFirst({
+      where: { id: enrollmentId, customerId },
+      select: { id: true, sequenceId: true },
+    })
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' })
+      return
+    }
+    const step = await prisma.emailSequenceStep.findFirst({
+      where: { sequenceId: enrollment.sequenceId, stepOrder: stepIndex + 1 },
+      select: { subjectTemplate: true, bodyTemplateHtml: true },
+    })
+    let subject = ''
+    let bodyHtml = ''
+    if (step?.subjectTemplate != null && step?.bodyTemplateHtml != null) {
+      const recipientRow = recipientEmail
+        ? await prisma.enrollmentRecipient.findFirst({
+            where: { enrollmentId, email: recipientEmail },
+            select: { firstName: true, lastName: true, company: true, email: true },
+          })
+        : null
+      const vars = {
+        firstName: recipientRow?.firstName ?? '',
+        lastName: recipientRow?.lastName ?? '',
+        company: recipientRow?.company ?? '',
+        companyName: recipientRow?.company ?? '',
+        email: recipientEmail,
+        jobTitle: '',
+        title: '',
+        phone: '',
+      }
+      subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
+      bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+    }
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: { subject, bodyHtml, stepIndex, enrollmentId },
+    })
+  } catch (err) {
+    console.error('GET /api/enrollments/:enrollmentId/steps/:stepIndex/render error:', err)
     res.status(500).json({ error: 'An error occurred' })
   }
 })

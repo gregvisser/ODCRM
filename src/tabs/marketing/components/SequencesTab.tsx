@@ -332,6 +332,10 @@ const SequencesTab: React.FC = () => {
   const [queueDrillLoading, setQueueDrillLoading] = useState(false)
   const [queueDrillError, setQueueDrillError] = useState<string | null>(null)
   const [queueDrillData, setQueueDrillData] = useState<unknown>(null)
+  // Stage 3F: dry-run render preview (read-only)
+  const [renderLoading, setRenderLoading] = useState(false)
+  const [renderError, setRenderError] = useState<string | null>(null)
+  const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string } | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -419,6 +423,9 @@ const SequencesTab: React.FC = () => {
     setQueueDrillOpen(true)
     setQueueDrillData(null)
     setQueueDrillError(null)
+    setRenderLoading(false)
+    setRenderError(null)
+    setRenderData(null)
     if (enrollmentId && selectedCustomerId?.startsWith('cust_')) loadEnrollmentQueue(enrollmentId)
   }
 
@@ -1960,7 +1967,7 @@ const SequencesTab: React.FC = () => {
             </Box>
           )}
 
-          <Modal isOpen={queueDrillOpen} onClose={() => setQueueDrillOpen(false)} size="xl">
+          <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null) }} size="xl">
             <ModalOverlay />
             <ModalContent>
               <ModalHeader>Enrollment Queue</ModalHeader>
@@ -1977,11 +1984,100 @@ const SequencesTab: React.FC = () => {
                   </Alert>
                 )}
                 {!queueDrillLoading && !queueDrillError && queueDrillData != null && (
-                  <Box overflow="auto" maxH="60vh" bg="gray.50" p={3} borderRadius="md">
-                    <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block">
-                      {JSON.stringify(queueDrillData, null, 2)}
-                    </Code>
-                  </Box>
+                  <>
+                    {Array.isArray(queueDrillData) ? (
+                      <Box mb={4}>
+                        <Table size="sm" variant="simple">
+                          <Thead>
+                            <Tr>
+                              <Th>stepIndex</Th>
+                              <Th>status</Th>
+                              <Th>scheduledFor</Th>
+                              <Th>recipientEmail</Th>
+                              <Th w="120px">actions</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {(queueDrillData as Array<{ id?: string; enrollmentId?: string; stepIndex?: number; status?: string; scheduledFor?: string; recipientEmail?: string }>).map((item, idx) => (
+                              <Tr key={item.id ?? idx}>
+                                <Td>{typeof item.stepIndex === 'number' ? item.stepIndex : '—'}</Td>
+                                <Td>{item.status ?? '—'}</Td>
+                                <Td>{item.scheduledFor ?? '—'}</Td>
+                                <Td fontSize="xs">{item.recipientEmail ?? '—'}</Td>
+                                <Td>
+                                  <Button
+                                    size="xs"
+                                    leftIcon={<EmailIcon />}
+                                    onClick={async () => {
+                                      if (!selectedCustomerId?.startsWith('cust_') || !queueDrillEnrollmentId) return
+                                      const stepIndex = typeof item.stepIndex === 'number' ? item.stepIndex : 0
+                                      setRenderLoading(true)
+                                      setRenderError(null)
+                                      setRenderData(null)
+                                      const qs = item.recipientEmail ? `?recipientEmail=${encodeURIComponent(item.recipientEmail)}` : ''
+                                      const res = await api.get<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string }>(
+                                        `/api/enrollments/${queueDrillEnrollmentId}/steps/${stepIndex}/render${qs}`,
+                                        { headers: { 'X-Customer-Id': selectedCustomerId } }
+                                      )
+                                      setRenderLoading(false)
+                                      if (res.error) {
+                                        setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
+                                        return
+                                      }
+                                      setRenderData(res.data ?? null)
+                                    }}
+                                    isDisabled={renderLoading}
+                                  >
+                                    Render email
+                                  </Button>
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                        {selectedCustomerId?.startsWith('cust_') && (
+                          <Button size="xs" variant="ghost" leftIcon={<CopyIcon />} onClick={() => {
+                            const base = (import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').trim()
+                            const step = renderData?.stepIndex ?? 0
+                            const url = `${base}/api/enrollments/${queueDrillEnrollmentId}/steps/${step}/render`
+                            const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${url}"`
+                            if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                              navigator.clipboard.writeText(curl).then(
+                                () => toast({ title: 'Copied render curl', status: 'success', duration: 2000 }),
+                                () => toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
+                              )
+                            } else {
+                              toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
+                            }
+                          }}>
+                            Copy render curl
+                          </Button>
+                        )}
+                      </Box>
+                    ) : (
+                      <Box overflow="auto" maxH="40vh" bg="gray.50" p={3} borderRadius="md">
+                        <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block">
+                          {JSON.stringify(queueDrillData, null, 2)}
+                        </Code>
+                      </Box>
+                    )}
+                    {/* Stage 3F: render preview section */}
+                    {renderLoading && <Flex justify="center" py={4}><Spinner size="md" /></Flex>}
+                    {!renderLoading && renderError && (
+                      <Alert status="error" mt={2}>
+                        <AlertIcon />
+                        <AlertDescription>{renderError}</AlertDescription>
+                      </Alert>
+                    )}
+                    {!renderLoading && !renderError && renderData && (
+                      <Box mt={4} p={3} bg="gray.50" borderRadius="md" borderWidth="1px">
+                        <Text fontWeight="semibold" mb={2}>Subject</Text>
+                        <Code as="pre" whiteSpace="pre-wrap" fontSize="sm" display="block" mb={3}>{renderData.subject || '(empty)'}</Code>
+                        <Text fontWeight="semibold" mb={2}>Body (HTML)</Text>
+                        <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block" overflow="auto" maxH="300px">{renderData.bodyHtml || '(empty)'}</Code>
+                      </Box>
+                    )}
+                  </>
                 )}
               </ModalBody>
             </ModalContent>
