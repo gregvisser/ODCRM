@@ -60,13 +60,35 @@ async function main() {
     headers: { 'X-Customer-Id': TEST_CUSTOMER_ID },
   })
   if (withTenant.status === 200) {
-    const items = withTenant.data?.data?.items
+    const payload = withTenant.data?.data
+    const items = payload?.items
     if (!Array.isArray(items)) {
       console.error('self-test-send-queue-preview-stage3a: FAIL')
       console.error('  Test B: Expected 200 to have data.items array, got:', bodyPreview(withTenant.data))
       process.exit(1)
     }
-    console.log('  Test B (X-Customer-Id):', withTenant.status, '— items.length =', items.length)
+    const summary = payload?.summary
+    if (summary != null) {
+      if (typeof summary.totalReturned !== 'number') {
+        console.error('self-test-send-queue-preview-stage3a: FAIL')
+        console.error('  Test B: summary.totalReturned must be number, got:', typeof summary.totalReturned)
+        process.exit(1)
+      }
+      const action = summary.countsByAction
+      if (!action || typeof action.SEND !== 'number' || typeof action.WAIT !== 'number' || typeof action.SKIP !== 'number') {
+        console.error('self-test-send-queue-preview-stage3a: FAIL')
+        console.error('  Test B: summary.countsByAction must have SEND/WAIT/SKIP numbers, got:', bodyPreview(action))
+        process.exit(1)
+      }
+      if (typeof summary.countsByReason !== 'object' || summary.countsByReason === null) {
+        console.error('self-test-send-queue-preview-stage3a: FAIL')
+        console.error('  Test B: summary.countsByReason must be object, got:', typeof summary.countsByReason)
+        process.exit(1)
+      }
+      console.log('  Test B (X-Customer-Id):', withTenant.status, '— items.length =', items.length, ', summary present')
+    } else {
+      console.log('  Test B (X-Customer-Id):', withTenant.status, '— items.length =', items.length, '(no summary, backward compatible)')
+    }
   } else if (withTenant.status === 401 || withTenant.status === 403) {
     console.log('  Test B (X-Customer-Id):', withTenant.status, '(auth required)')
   } else if (withTenant.status === 400) {
