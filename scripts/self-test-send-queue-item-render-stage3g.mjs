@@ -53,7 +53,9 @@ async function main() {
   exitSoon(1)
 }
 
-main().catch((err) => {
-  console.error('self-test-send-queue-item-render-stage3g: FAIL', err?.message ?? err)
-  exitSoon(1)
-})
+main()
+  .then(() => exitSoon(process.exitCode ?? 0))
+  .catch((err) => {
+    console.error('self-test-send-queue-item-render-stage3g: FAIL', err?.message ?? err)
+    exitSoon(1)
+  })

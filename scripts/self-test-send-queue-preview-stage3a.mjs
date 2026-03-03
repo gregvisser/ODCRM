@@ -131,8 +131,9 @@ async function main() {
   exitSoon(0)
 }
 
-main().catch((err) => {
-  console.error('self-test-send-queue-preview-stage3a: FAIL')
-  console.error(err)
-  exitSoon(1)
-})
+main()
+  .then(() => exitSoon(process.exitCode ?? 0))
+  .catch((err) => {
+    console.error('self-test-send-queue-preview-stage3a: FAIL', err?.message ?? err)
+    exitSoon(1)
+  })
