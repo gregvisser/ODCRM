@@ -335,7 +335,7 @@ const SequencesTab: React.FC = () => {
   // Stage 3F: dry-run render preview (read-only)
   const [renderLoading, setRenderLoading] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
-  const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string } | null>(null)
+  const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string; queueItemId?: string; recipientEmail?: string } | null>(null)
   const [renderViewMode, setRenderViewMode] = useState<'code' | 'rendered'>('code')
 
   function parseRecipientEmails(raw: string): string[] {
@@ -2001,7 +2001,7 @@ const SequencesTab: React.FC = () => {
                           </Thead>
                           <Tbody>
                             {(queueDrillData as Array<{ id?: string; enrollmentId?: string; stepIndex?: number; status?: string; scheduledFor?: string; recipientEmail?: string }>).map((item, idx) => (
-                              <Tr key={item.id ?? idx}>
+                              <Tr key={item.id ?? `row-${idx}`}>
                                 <Td>{typeof item.stepIndex === 'number' ? item.stepIndex : '—'}</Td>
                                 <Td>{item.status ?? '—'}</Td>
                                 <Td>{item.scheduledFor ?? '—'}</Td>
@@ -2011,14 +2011,12 @@ const SequencesTab: React.FC = () => {
                                     size="xs"
                                     leftIcon={<EmailIcon />}
                                     onClick={async () => {
-                                      if (!selectedCustomerId?.startsWith('cust_') || !queueDrillEnrollmentId) return
-                                      const stepIndex = typeof item.stepIndex === 'number' ? item.stepIndex : 0
+                                      if (!selectedCustomerId?.startsWith('cust_') || !item.id) return
                                       setRenderLoading(true)
                                       setRenderError(null)
                                       setRenderData(null)
-                                      const qs = item.recipientEmail ? `?recipientEmail=${encodeURIComponent(item.recipientEmail)}` : ''
-                                      const res = await api.get<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string }>(
-                                        `/api/enrollments/${queueDrillEnrollmentId}/steps/${stepIndex}/render${qs}`,
+                                      const res = await api.get<{ queueItemId: string; enrollmentId: string; stepIndex: number; recipientEmail: string; subject: string; bodyHtml: string }>(
+                                        `/api/send-queue/items/${item.id}/render`,
                                         { headers: { 'X-Customer-Id': selectedCustomerId } }
                                       )
                                       setRenderLoading(false)
@@ -2026,9 +2024,9 @@ const SequencesTab: React.FC = () => {
                                         setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
                                         return
                                       }
-                                      setRenderData(res.data ?? null)
+                                      setRenderData(res.data ? { ...res.data, enrollmentId: res.data.enrollmentId } : null)
                                     }}
-                                    isDisabled={renderLoading}
+                                    isDisabled={renderLoading || !item.id}
                                   >
                                     Render email
                                   </Button>
@@ -2041,8 +2039,8 @@ const SequencesTab: React.FC = () => {
                           <HStack spacing={2} flexWrap="wrap">
                             <Button size="xs" variant="ghost" leftIcon={<CopyIcon />} onClick={() => {
                               const base = (import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').trim()
-                              const step = renderData?.stepIndex ?? 0
-                              const url = `${base}/api/enrollments/${queueDrillEnrollmentId}/steps/${step}/render`
+                              const itemId = renderData?.queueItemId ?? ''
+                              const url = itemId ? `${base}/api/send-queue/items/${itemId}/render` : `${base}/api/send-queue/items/<itemId>/render`
                               const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${url}"`
                               if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
                                 navigator.clipboard.writeText(curl).then(
