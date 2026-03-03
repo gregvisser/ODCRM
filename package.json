@@ -53,7 +53,8 @@
     "test:enrollment-queue-render-stage3f": "node scripts/self-test-enrollment-queue-render-stage3f.mjs",
     "test:send-queue-item-render-stage3g": "node scripts/self-test-send-queue-item-render-stage3g.mjs",
     "test:send-queue-item-actions-stage3h": "node scripts/self-test-send-queue-item-actions-stage3h.mjs",
-    "test:send-queue-item-detail-stage3i": "node scripts/self-test-send-queue-item-detail-stage3i.mjs"
+    "test:send-queue-item-detail-stage3i": "node scripts/self-test-send-queue-item-detail-stage3i.mjs",
+    "test:enrollment-lifecycle-stage1b": "node scripts/self-test-enrollment-lifecycle-stage1b.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
