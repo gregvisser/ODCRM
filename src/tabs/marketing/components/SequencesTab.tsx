@@ -336,6 +336,7 @@ const SequencesTab: React.FC = () => {
   const [renderLoading, setRenderLoading] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string } | null>(null)
+  const [renderViewMode, setRenderViewMode] = useState<'code' | 'rendered'>('code')
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -426,6 +427,7 @@ const SequencesTab: React.FC = () => {
     setRenderLoading(false)
     setRenderError(null)
     setRenderData(null)
+    setRenderViewMode('code')
     if (enrollmentId && selectedCustomerId?.startsWith('cust_')) loadEnrollmentQueue(enrollmentId)
   }
 
@@ -1967,7 +1969,7 @@ const SequencesTab: React.FC = () => {
             </Box>
           )}
 
-          <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null) }} size="xl">
+          <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null); setRenderViewMode('code') }} size="xl">
             <ModalOverlay />
             <ModalContent>
               <ModalHeader>Enrollment Queue</ModalHeader>
@@ -2036,22 +2038,34 @@ const SequencesTab: React.FC = () => {
                           </Tbody>
                         </Table>
                         {selectedCustomerId?.startsWith('cust_') && (
-                          <Button size="xs" variant="ghost" leftIcon={<CopyIcon />} onClick={() => {
-                            const base = (import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').trim()
-                            const step = renderData?.stepIndex ?? 0
-                            const url = `${base}/api/enrollments/${queueDrillEnrollmentId}/steps/${step}/render`
-                            const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${url}"`
-                            if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-                              navigator.clipboard.writeText(curl).then(
-                                () => toast({ title: 'Copied render curl', status: 'success', duration: 2000 }),
-                                () => toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
-                              )
-                            } else {
-                              toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
-                            }
-                          }}>
-                            Copy render curl
-                          </Button>
+                          <HStack spacing={2} flexWrap="wrap">
+                            <Button size="xs" variant="ghost" leftIcon={<CopyIcon />} onClick={() => {
+                              const base = (import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').trim()
+                              const step = renderData?.stepIndex ?? 0
+                              const url = `${base}/api/enrollments/${queueDrillEnrollmentId}/steps/${step}/render`
+                              const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${url}"`
+                              if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                                navigator.clipboard.writeText(curl).then(
+                                  () => toast({ title: 'Copied render curl', status: 'success', duration: 2000 }),
+                                  () => toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
+                                )
+                              } else {
+                                toast({ title: 'Could not copy', description: curl.slice(0, 200), status: 'warning', duration: 5000 })
+                              }
+                            }}>
+                              Copy render curl
+                            </Button>
+                            {renderData && (
+                              <>
+                                <Button size="xs" variant={renderViewMode === 'rendered' ? 'solid' : 'outline'} onClick={() => setRenderViewMode('rendered')}>
+                                  View rendered
+                                </Button>
+                                <Button size="xs" variant={renderViewMode === 'code' ? 'solid' : 'outline'} onClick={() => setRenderViewMode('code')}>
+                                  View code
+                                </Button>
+                              </>
+                            )}
+                          </HStack>
                         )}
                       </Box>
                     ) : (
@@ -2074,7 +2088,18 @@ const SequencesTab: React.FC = () => {
                         <Text fontWeight="semibold" mb={2}>Subject</Text>
                         <Code as="pre" whiteSpace="pre-wrap" fontSize="sm" display="block" mb={3}>{renderData.subject || '(empty)'}</Code>
                         <Text fontWeight="semibold" mb={2}>Body (HTML)</Text>
-                        <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block" overflow="auto" maxH="300px">{renderData.bodyHtml || '(empty)'}</Code>
+                        {renderViewMode === 'rendered' ? (
+                          <Box overflow="auto" maxH="400px" borderWidth="1px" borderRadius="md" bg="white">
+                            <iframe
+                              title="Rendered email preview"
+                              sandbox=""
+                              srcDoc={renderData.bodyHtml || ''}
+                              style={{ width: '100%', minHeight: '360px', border: 'none', display: 'block' }}
+                            />
+                          </Box>
+                        ) : (
+                          <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block" overflow="auto" maxH="300px">{renderData.bodyHtml || '(empty)'}</Code>
+                        )}
                       </Box>
                     )}
                   </>
