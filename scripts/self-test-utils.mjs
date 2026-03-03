@@ -20,13 +20,17 @@ export async function withTimeout(ms, fn) {
   }
 }
 
+let exitScheduled = false
+
 /**
  * Schedule process.exit(code) after 250ms so fetch/connection can close on Windows.
- * Sets process.exitCode = code immediately.
+ * Sets process.exitCode = code immediately. Idempotent: multiple calls only schedule once.
  * @param {number} code
  */
 export function exitSoon(code) {
   process.exitCode = code
+  if (exitScheduled) return
+  exitScheduled = true
   setTimeout(() => process.exit(code), 250)
 }
 
