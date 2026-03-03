@@ -343,6 +343,10 @@ const SequencesTab: React.FC = () => {
     if (typeof sessionStorage === 'undefined') return ''
     return sessionStorage.getItem('odcrm_admin_secret') ?? ''
   })
+  // Stage 3I: queue item detail (read-only)
+  const [queueItemDetail, setQueueItemDetail] = useState<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null } | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -408,6 +412,8 @@ const SequencesTab: React.FC = () => {
 
   const loadEnrollmentQueue = async (enrollmentId: string) => {
     if (!selectedCustomerId?.startsWith('cust_') || !enrollmentId) return
+    setQueueItemDetail(null)
+    setDetailError(null)
     setQueueDrillLoading(true)
     setQueueDrillError(null)
     const res = await api.get<unknown>(`/api/enrollments/${enrollmentId}/queue`, { headers: { 'X-Customer-Id': selectedCustomerId } })
@@ -430,6 +436,9 @@ const SequencesTab: React.FC = () => {
     setQueueDrillOpen(true)
     setQueueDrillData(null)
     setQueueDrillError(null)
+    setQueueItemDetail(null)
+    setDetailLoading(false)
+    setDetailError(null)
     setRenderLoading(false)
     setRenderError(null)
     setRenderData(null)
@@ -1975,7 +1984,7 @@ const SequencesTab: React.FC = () => {
             </Box>
           )}
 
-          <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null); setRenderViewMode('code') }} size="xl">
+          <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null); setRenderViewMode('code'); setQueueItemDetail(null); setDetailLoading(false); setDetailError(null) }} size="xl">
             <ModalOverlay />
             <ModalContent>
               <ModalHeader>Enrollment Queue</ModalHeader>
@@ -2036,6 +2045,26 @@ const SequencesTab: React.FC = () => {
                                 <Td fontSize="xs">{item.recipientEmail ?? '—'}</Td>
                                 <Td>
                                   <HStack spacing={1} wrap="wrap">
+                                    <Button
+                                      size="xs"
+                                      variant="ghost"
+                                      isDisabled={!selectedCustomerId?.startsWith('cust_') || !item.id || detailLoading}
+                                      onClick={async () => {
+                                        if (!selectedCustomerId?.startsWith('cust_') || !item.id) return
+                                        setDetailLoading(true)
+                                        setDetailError(null)
+                                        setQueueItemDetail(null)
+                                        const res = await api.get<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null }>(`/api/send-queue/items/${item.id}`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+                                        setDetailLoading(false)
+                                        if (res.error) {
+                                          setDetailError(res.error + (res.errorDetails?.status ? ` (${res.errorDetails.status})` : ''))
+                                          return
+                                        }
+                                        if (res.data) setQueueItemDetail(res.data)
+                                      }}
+                                    >
+                                      Details
+                                    </Button>
                                     <Button
                                       size="xs"
                                       leftIcon={<EmailIcon />}
@@ -2108,6 +2137,30 @@ const SequencesTab: React.FC = () => {
                             )})}
                           </Tbody>
                         </Table>
+                        {detailLoading && <Flex justify="center" py={2}><Spinner size="sm" /></Flex>}
+                        {!detailLoading && detailError && (
+                          <Alert status="error" size="sm" mt={2}>
+                            <AlertIcon />
+                            <AlertDescription>{detailError}</AlertDescription>
+                          </Alert>
+                        )}
+                        {!detailLoading && !detailError && queueItemDetail && (
+                          <Box mt={3} p={3} bg="gray.50" borderRadius="md" borderWidth="1px" fontSize="sm">
+                            <Text fontWeight="semibold" mb={2}>Item detail</Text>
+                            <VStack align="stretch" spacing={1} alignItems="flex-start">
+                              <HStack spacing={3}><Text color="gray.600">Status</Text><Text>{queueItemDetail.status ?? '—'}</Text></HStack>
+                              <HStack spacing={3}><Text color="gray.600">scheduledFor</Text><Text>{queueItemDetail.scheduledFor ?? '—'}</Text></HStack>
+                              <HStack spacing={3}><Text color="gray.600">sentAt</Text><Text>{queueItemDetail.sentAt ?? '—'}</Text></HStack>
+                              <HStack spacing={3}><Text color="gray.600">attemptCount</Text><Text>{queueItemDetail.attemptCount ?? 0}</Text></HStack>
+                              <Box w="100%">
+                                <Text color="gray.600" mb={1}>lastError</Text>
+                                <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block" p={2} bg="white" borderRadius="md">
+                                  {queueItemDetail.lastError?.trim() || '(none)'}
+                                </Code>
+                              </Box>
+                            </VStack>
+                          </Box>
+                        )}
                         {selectedCustomerId?.startsWith('cust_') && (
                           <HStack spacing={2} flexWrap="wrap">
                             <Button size="xs" variant="ghost" leftIcon={<CopyIcon />} onClick={() => {
