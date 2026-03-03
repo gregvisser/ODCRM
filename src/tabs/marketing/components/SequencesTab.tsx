@@ -323,7 +323,7 @@ const SequencesTab: React.FC = () => {
   }
 
   const loadSendQueuePreview = async () => {
-    if (!selectedCustomerId) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
     setQueuePreviewLoading(true)
     setQueuePreviewError(null)
     const limit = Math.min(100, Math.max(1, queuePreviewLimit))
@@ -359,7 +359,7 @@ const SequencesTab: React.FC = () => {
   }
 
   useEffect(() => {
-    if (selectedCustomerId) loadSendQueuePreview()
+    if (selectedCustomerId?.startsWith('cust_')) loadSendQueuePreview()
     else {
       setQueuePreviewData(null)
       setQueuePreviewError(null)
