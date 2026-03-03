@@ -119,7 +119,29 @@ router.get('/preview', async (req: Request, res: Response) => {
         renderPreview: null as { subject: string; bodyHtml: string } | null,
       }
     })
-    res.json({ data: { items: data } })
+    const countsByAction = data.reduce(
+      (acc, i) => {
+        acc[i.action] = (acc[i.action] ?? 0) + 1
+        return acc
+      },
+      { SEND: 0, WAIT: 0, SKIP: 0 } as { SEND: number; WAIT: number; SKIP: number }
+    )
+    const countsByReason: Record<string, number> = {}
+    for (const i of data) {
+      for (const r of i.reasons) {
+        countsByReason[r] = (countsByReason[r] ?? 0) + 1
+      }
+    }
+    res.json({
+      data: {
+        items: data,
+        summary: {
+          totalReturned: data.length,
+          countsByAction,
+          countsByReason,
+        },
+      },
+    })
   } catch (err) {
     console.error('[send-queue/preview] error:', err)
     res.status(500).json({ error: err instanceof Error ? err.message : 'Preview failed' })

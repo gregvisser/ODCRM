@@ -299,7 +299,7 @@ const SequencesTab: React.FC = () => {
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
 
-  // Stage 3B: Send Queue Preview (dry-run, read-only)
+  // Stage 3B/3C: Send Queue Preview (dry-run, read-only)
   type SendQueuePreviewItem = {
     id: string
     enrollmentId: string
@@ -310,12 +310,19 @@ const SequencesTab: React.FC = () => {
     reasons: string[]
     recipientEmail?: string
   }
+  type SendQueuePreviewSummary = {
+    totalReturned: number
+    countsByAction: { SEND: number; WAIT: number; SKIP: number }
+    countsByReason: Record<string, number>
+  }
+  type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
   const [queuePreviewData, setQueuePreviewData] = useState<SendQueuePreviewItem[] | null>(null)
   const [queuePreviewError, setQueuePreviewError] = useState<string | null>(null)
   const [queuePreviewLoading, setQueuePreviewLoading] = useState(false)
   const [queuePreviewLastEndpoint, setQueuePreviewLastEndpoint] = useState<string>('')
+  const [queuePreviewSummary, setQueuePreviewSummary] = useState<SendQueuePreviewSummary | null>(null)
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -334,7 +341,7 @@ const SequencesTab: React.FC = () => {
     const qs = params.toString()
     const endpoint = `/api/send-queue/preview${qs ? `?${qs}` : ''}`
     setQueuePreviewLastEndpoint(endpoint)
-    const res = await api.get<{ items: SendQueuePreviewItem[] }>(endpoint, { headers: { 'X-Customer-Id': selectedCustomerId } })
+    const res = await api.get<SendQueuePreviewResponse>(endpoint, { headers: { 'X-Customer-Id': selectedCustomerId } })
     setQueuePreviewLoading(false)
     if (res.error) {
       const status = res.errorDetails?.status
@@ -342,10 +349,12 @@ const SequencesTab: React.FC = () => {
       else if (status === 401 || status === 403) setQueuePreviewError(`Not authorized. Preview requires you to be signed in. (${status})`)
       else setQueuePreviewError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
       setQueuePreviewData(null)
+      setQueuePreviewSummary(null)
       return
     }
     const items = res.data?.items ?? []
     setQueuePreviewData(Array.isArray(items) ? items : [])
+    setQueuePreviewSummary(res.data?.summary ?? null)
     setQueuePreviewError(null)
   }
 
@@ -383,6 +392,7 @@ const SequencesTab: React.FC = () => {
       setQueuePreviewData(null)
       setQueuePreviewError(null)
       setQueuePreviewLastEndpoint('')
+      setQueuePreviewSummary(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -1843,8 +1853,36 @@ const SequencesTab: React.FC = () => {
               <AlertDescription>{queuePreviewError}</AlertDescription>
             </Alert>
           )}
+          {queuePreviewSummary && (
+            <Box mb={3}>
+              <Text fontSize="sm" color="gray.600">Returned: {queuePreviewSummary.totalReturned}</Text>
+              <Text fontSize="sm" color="gray.600">
+                SEND: {queuePreviewSummary.countsByAction?.SEND ?? 0} · WAIT: {queuePreviewSummary.countsByAction?.WAIT ?? 0} · SKIP: {queuePreviewSummary.countsByAction?.SKIP ?? 0}
+              </Text>
+              {queuePreviewSummary.countsByReason && Object.keys(queuePreviewSummary.countsByReason).length > 0 && (
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  {Object.entries(queuePreviewSummary.countsByReason)
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .slice(0, 3)
+                    .map(([reason, count]) => `${reason} (${count})`)
+                    .join(', ')}
+                </Text>
+              )}
+            </Box>
+          )}
           {queuePreviewData && queuePreviewData.length === 0 && !queuePreviewError && (
-            <Text fontSize="sm" color="gray.600">No queue items found.</Text>
+            <>
+              {queuePreviewSummary ? (
+                <Text fontSize="sm" color="gray.600">
+                  No queue items returned. (Returned: {queuePreviewSummary.totalReturned}; SEND: {queuePreviewSummary.countsByAction?.SEND ?? 0} WAIT: {queuePreviewSummary.countsByAction?.WAIT ?? 0} SKIP: {queuePreviewSummary.countsByAction?.SKIP ?? 0})
+                  {queuePreviewSummary.countsByReason && Object.keys(queuePreviewSummary.countsByReason).length > 0
+                    ? ' — ' + Object.entries(queuePreviewSummary.countsByReason).sort(([, a], [, b]) => (b as number) - (a as number)).slice(0, 3).map(([r, c]) => r + ' (' + c + ')').join(', ')
+                    : ''}
+                </Text>
+              ) : (
+                <Text fontSize="sm" color="gray.600">No queue items found.</Text>
+              )}
+            </>
           )}
           {queuePreviewData && queuePreviewData.length > 0 && (
             <Box overflowX="auto">
