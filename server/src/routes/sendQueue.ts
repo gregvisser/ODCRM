@@ -10,6 +10,8 @@ import { prisma } from '../lib/prisma.js'
 import { OutboundSendQueueStatus } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { validateAdminSecret } from './admin.js'
+import { requireCustomerId } from '../utils/tenantId.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 
@@ -176,6 +178,81 @@ router.get('/preview', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-queue/preview] error:', err)
     res.status(500).json({ error: err instanceof Error ? err.message : 'Preview failed' })
+  }
+})
+
+/**
+ * GET /api/send-queue/items/:itemId/render — Stage 3G: dry-run render by queue item id. Read-only; no DB mutations.
+ * Requires X-Customer-Id. Returns subject + bodyHtml from sequence step templates. No querystring enrollmentId/stepIndex/recipientEmail.
+ */
+router.get('/items/:itemId/render', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const itemId = req.params.itemId
+    if (!itemId?.trim()) {
+      res.status(400).json({ error: 'itemId is required' })
+      return
+    }
+    const item = await prisma.outboundSendQueueItem.findFirst({
+      where: { id: itemId.trim(), customerId },
+      select: { id: true, enrollmentId: true, stepIndex: true, recipientEmail: true },
+    })
+    if (!item) {
+      res.status(404).json({ error: 'Queue item not found' })
+      return
+    }
+    const recipientEmail = (item.recipientEmail ?? '').trim()
+    if (!recipientEmail) {
+      res.status(400).json({ error: 'Recipient email missing for queue item' })
+      return
+    }
+    const enrollment = await prisma.enrollment.findFirst({
+      where: { id: item.enrollmentId, customerId },
+      select: { id: true, sequenceId: true },
+    })
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' })
+      return
+    }
+    const step = await prisma.emailSequenceStep.findFirst({
+      where: { sequenceId: enrollment.sequenceId, stepOrder: item.stepIndex + 1 },
+      select: { subjectTemplate: true, bodyTemplateHtml: true },
+    })
+    let subject = ''
+    let bodyHtml = ''
+    if (step?.subjectTemplate != null && step?.bodyTemplateHtml != null) {
+      const recipientRow = await prisma.enrollmentRecipient.findFirst({
+        where: { enrollmentId: item.enrollmentId, email: recipientEmail },
+        select: { firstName: true, lastName: true, company: true, email: true },
+      })
+      const vars = {
+        firstName: recipientRow?.firstName ?? '',
+        lastName: recipientRow?.lastName ?? '',
+        company: recipientRow?.company ?? '',
+        companyName: recipientRow?.company ?? '',
+        email: recipientEmail,
+        jobTitle: '',
+        title: '',
+        phone: '',
+      }
+      subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
+      bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+    }
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      data: {
+        queueItemId: item.id,
+        enrollmentId: item.enrollmentId,
+        stepIndex: item.stepIndex,
+        recipientEmail,
+        subject,
+        bodyHtml,
+      },
+    })
+  } catch (err) {
+    console.error('[send-queue/items/:itemId/render] error:', err)
+    res.status(500).json({ error: 'An error occurred' })
   }
 })
 
