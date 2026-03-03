@@ -89,6 +89,14 @@ async function main() {
     } else {
       console.log('  Test B (X-Customer-Id):', withTenant.status, '— items.length =', items.length, '(no summary, backward compatible)')
     }
+    const first = items[0]
+    if (first?.reasonDetails != null) {
+      if (!Array.isArray(first.reasonDetails) || first.reasonDetails.some((x) => typeof x !== 'string')) {
+        console.error('self-test-send-queue-preview-stage3a: FAIL')
+        console.error('  Test B: reasonDetails must be array of strings, got:', bodyPreview(first.reasonDetails))
+        process.exit(1)
+      }
+    }
   } else if (withTenant.status === 401 || withTenant.status === 403) {
     console.log('  Test B (X-Customer-Id):', withTenant.status, '(auth required)')
   } else if (withTenant.status === 400) {

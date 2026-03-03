@@ -308,6 +308,7 @@ const SequencesTab: React.FC = () => {
     status: string
     action: 'WAIT' | 'SKIP' | 'SEND'
     reasons: string[]
+    reasonDetails?: string[]
     recipientEmail?: string
   }
   type SendQueuePreviewSummary = {
@@ -1903,7 +1904,14 @@ const SequencesTab: React.FC = () => {
                       <Td>{maskEmail(row.recipientEmail ?? '')}</Td>
                       <Td>{row.status}</Td>
                       <Td><Badge size="sm">{row.action}</Badge></Td>
-                      <Td>{row.reasons?.length ? row.reasons.join(', ') : '—'}</Td>
+                      <Td>
+                        {row.reasons?.length ? row.reasons.join(', ') : '—'}
+                        {row.reasonDetails?.length ? (
+                          <Text fontSize="xs" color="gray.500" mt={1} noOfLines={2}>
+                            {row.reasonDetails.map((d) => (d.length > 120 ? d.slice(0, 120) + '…' : d)).join(' · ')}
+                          </Text>
+                        ) : null}
+                      </Td>
                     </Tr>
                   ))}
                 </Tbody>
