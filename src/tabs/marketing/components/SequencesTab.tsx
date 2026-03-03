@@ -46,6 +46,7 @@ import {
   ModalBody,
   ModalCloseButton,
   FormControl,
+  FormHelperText,
   FormLabel,
   Textarea,
   useToast,
@@ -337,6 +338,11 @@ const SequencesTab: React.FC = () => {
   const [renderError, setRenderError] = useState<string | null>(null)
   const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string; queueItemId?: string; recipientEmail?: string } | null>(null)
   const [renderViewMode, setRenderViewMode] = useState<'code' | 'rendered'>('code')
+  // Stage 3H: admin secret for retry/skip (local only, sessionStorage)
+  const [adminSecret, setAdminSecret] = useState<string>(() => {
+    if (typeof sessionStorage === 'undefined') return ''
+    return sessionStorage.getItem('odcrm_admin_secret') ?? ''
+  })
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -1975,6 +1981,25 @@ const SequencesTab: React.FC = () => {
               <ModalHeader>Enrollment Queue</ModalHeader>
               <ModalCloseButton />
               <Text fontSize="sm" color="gray.600" px={6} pb={2}>Enrollment ID: {queueDrillEnrollmentId || '—'}</Text>
+              <Box px={6} pb={2}>
+                <FormControl>
+                  <FormLabel fontSize="sm">Admin secret (local)</FormLabel>
+                  <Input
+                    type="password"
+                    size="sm"
+                    placeholder="Enter to enable Retry/Skip"
+                    value={adminSecret}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setAdminSecret(v)
+                      try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
+                    }}
+                  />
+                  {!adminSecret && (
+                    <FormHelperText fontSize="xs">Enter admin secret to enable actions.</FormHelperText>
+                  )}
+                </FormControl>
+              </Box>
               <ModalBody>
                 {queueDrillLoading && (
                   <Flex justify="center" py={6}><Spinner size="lg" /></Flex>
@@ -2000,39 +2025,87 @@ const SequencesTab: React.FC = () => {
                             </Tr>
                           </Thead>
                           <Tbody>
-                            {(queueDrillData as Array<{ id?: string; enrollmentId?: string; stepIndex?: number; status?: string; scheduledFor?: string; recipientEmail?: string }>).map((item, idx) => (
+                            {(queueDrillData as Array<{ id?: string; enrollmentId?: string; stepIndex?: number; status?: string; scheduledFor?: string; recipientEmail?: string; sentAt?: string | null }>).map((item, idx) => {
+                              const isSent = item.status === 'SENT' || !!(item.sentAt != null && String(item.sentAt).trim())
+                              const actionsDisabled = !selectedCustomerId?.startsWith('cust_') || !adminSecret || isSent
+                              return (
                               <Tr key={item.id ?? `row-${idx}`}>
                                 <Td>{typeof item.stepIndex === 'number' ? item.stepIndex : '—'}</Td>
                                 <Td>{item.status ?? '—'}</Td>
                                 <Td>{item.scheduledFor ?? '—'}</Td>
                                 <Td fontSize="xs">{item.recipientEmail ?? '—'}</Td>
                                 <Td>
-                                  <Button
-                                    size="xs"
-                                    leftIcon={<EmailIcon />}
-                                    onClick={async () => {
-                                      if (!selectedCustomerId?.startsWith('cust_') || !item.id) return
-                                      setRenderLoading(true)
-                                      setRenderError(null)
-                                      setRenderData(null)
-                                      const res = await api.get<{ queueItemId: string; enrollmentId: string; stepIndex: number; recipientEmail: string; subject: string; bodyHtml: string }>(
-                                        `/api/send-queue/items/${item.id}/render`,
-                                        { headers: { 'X-Customer-Id': selectedCustomerId } }
-                                      )
-                                      setRenderLoading(false)
-                                      if (res.error) {
-                                        setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
-                                        return
-                                      }
-                                      setRenderData(res.data ? { ...res.data, enrollmentId: res.data.enrollmentId } : null)
-                                    }}
-                                    isDisabled={renderLoading || !item.id}
-                                  >
-                                    Render email
-                                  </Button>
+                                  <HStack spacing={1} wrap="wrap">
+                                    <Button
+                                      size="xs"
+                                      leftIcon={<EmailIcon />}
+                                      onClick={async () => {
+                                        if (!selectedCustomerId?.startsWith('cust_') || !item.id) return
+                                        setRenderLoading(true)
+                                        setRenderError(null)
+                                        setRenderData(null)
+                                        const res = await api.get<{ queueItemId: string; enrollmentId: string; stepIndex: number; recipientEmail: string; subject: string; bodyHtml: string }>(
+                                          `/api/send-queue/items/${item.id}/render`,
+                                          { headers: { 'X-Customer-Id': selectedCustomerId } }
+                                        )
+                                        setRenderLoading(false)
+                                        if (res.error) {
+                                          setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
+                                          return
+                                        }
+                                        setRenderData(res.data ? { ...res.data, enrollmentId: res.data.enrollmentId } : null)
+                                      }}
+                                      isDisabled={renderLoading || !item.id}
+                                    >
+                                      Render email
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="outline"
+                                      isDisabled={actionsDisabled || !item.id}
+                                      onClick={async () => {
+                                        if (!selectedCustomerId?.startsWith('cust_') || !adminSecret || !item.id) return
+                                        const res = await api.post<{ ok?: boolean; item?: unknown }>(
+                                          `/api/send-queue/items/${item.id}/retry`,
+                                          {},
+                                          { headers: { 'X-Customer-Id': selectedCustomerId, 'x-admin-secret': adminSecret } }
+                                        )
+                                        if (res.error) {
+                                          toast({ title: 'Retry failed', description: `${res.errorDetails?.status ?? ''} ${res.error ?? ''}`.trim(), status: 'error' })
+                                          return
+                                        }
+                                        toast({ title: 'Queued for retry', status: 'success', duration: 2000 })
+                                        if (queueDrillEnrollmentId) loadEnrollmentQueue(queueDrillEnrollmentId)
+                                      }}
+                                    >
+                                      Retry
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="outline"
+                                      isDisabled={actionsDisabled || !item.id}
+                                      onClick={async () => {
+                                        if (!selectedCustomerId?.startsWith('cust_') || !adminSecret || !item.id) return
+                                        const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'manual_skip'
+                                        const res = await api.post<{ ok?: boolean; item?: unknown }>(
+                                          `/api/send-queue/items/${item.id}/skip`,
+                                          { reason },
+                                          { headers: { 'X-Customer-Id': selectedCustomerId, 'x-admin-secret': adminSecret } }
+                                        )
+                                        if (res.error) {
+                                          toast({ title: 'Skip failed', description: `${res.errorDetails?.status ?? ''} ${res.error ?? ''}`.trim(), status: 'error' })
+                                          return
+                                        }
+                                        toast({ title: 'Item skipped', status: 'success', duration: 2000 })
+                                        if (queueDrillEnrollmentId) loadEnrollmentQueue(queueDrillEnrollmentId)
+                                      }}
+                                    >
+                                      Skip
+                                    </Button>
+                                  </HStack>
                                 </Td>
                               </Tr>
-                            ))}
+                            )})}
                           </Tbody>
                         </Table>
                         {selectedCustomerId?.startsWith('cust_') && (

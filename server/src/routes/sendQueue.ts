@@ -257,6 +257,98 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
 })
 
 /**
+ * POST /api/send-queue/items/:itemId/retry — Stage 3H: requeue item (tenant + admin).
+ * Requires X-Customer-Id and X-Admin-Secret. Rejects if item is SENT.
+ */
+router.post('/items/:itemId/retry', validateAdminSecret, async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const itemId = (req.params.itemId ?? '').trim()
+    if (!itemId) {
+      res.status(400).json({ error: 'itemId is required' })
+      return
+    }
+    const item = await prisma.outboundSendQueueItem.findFirst({
+      where: { id: itemId },
+      select: { id: true, customerId: true, status: true, sentAt: true },
+    })
+    if (!item || item.customerId !== customerId) {
+      res.status(404).json({ error: 'Queue item not found' })
+      return
+    }
+    if (item.status === OutboundSendQueueStatus.SENT || item.sentAt != null) {
+      res.status(400).json({ error: 'Cannot retry a SENT item' })
+      return
+    }
+    const scheduledFor = new Date(Date.now() + 60_000)
+    const updated = await prisma.outboundSendQueueItem.update({
+      where: { id: itemId },
+      data: {
+        status: OutboundSendQueueStatus.QUEUED,
+        scheduledFor,
+        lockedAt: null,
+        lockedBy: null,
+        lastError: null,
+      },
+      select: { id: true, status: true, scheduledFor: true, lastError: true, lockedAt: true, lockedBy: true },
+    })
+    res.json({ ok: true, item: updated })
+  } catch (err) {
+    console.error('[send-queue/items/:itemId/retry] error:', err)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
+/**
+ * POST /api/send-queue/items/:itemId/skip — Stage 3H: mark item skipped (tenant + admin).
+ * Requires X-Customer-Id and X-Admin-Secret. Body optional { reason?: string } (trimmed, max 200).
+ */
+router.post('/items/:itemId/skip', validateAdminSecret, async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const itemId = (req.params.itemId ?? '').trim()
+    if (!itemId) {
+      res.status(400).json({ error: 'itemId is required' })
+      return
+    }
+    let reason: string | null = null
+    if (req.body && typeof req.body === 'object' && typeof req.body.reason === 'string') {
+      reason = req.body.reason.trim().slice(0, 200) || null
+    }
+    const item = await prisma.outboundSendQueueItem.findFirst({
+      where: { id: itemId },
+      select: { id: true, customerId: true, status: true, sentAt: true },
+    })
+    if (!item || item.customerId !== customerId) {
+      res.status(404).json({ error: 'Queue item not found' })
+      return
+    }
+    if (item.status === OutboundSendQueueStatus.SENT || item.sentAt != null) {
+      res.status(400).json({ error: 'Cannot skip a SENT item' })
+      return
+    }
+    const lastError = reason ? `skipped: ${reason}` : 'skipped_by_admin'
+    const updated = await prisma.outboundSendQueueItem.update({
+      where: { id: itemId },
+      data: {
+        status: OutboundSendQueueStatus.SKIPPED,
+        scheduledFor: null,
+        lockedAt: null,
+        lockedBy: null,
+        lastError,
+      },
+      select: { id: true, status: true, scheduledFor: true, lastError: true, lockedAt: true, lockedBy: true },
+    })
+    res.json({ ok: true, item: updated })
+  } catch (err) {
+    console.error('[send-queue/items/:itemId/skip] error:', err)
+    res.status(500).json({ error: 'An error occurred' })
+  }
+})
+
+/**
  * GET /api/send-queue/metrics?customerId=<cust_...>
  * Stage 2A: Admin-only (X-Admin-Secret). Returns operational metrics for a single customerId.
  * customerId required (no default). Safe when no rows: zeros/nulls.
