@@ -332,7 +332,7 @@ const SequencesTab: React.FC = () => {
     if (queuePreviewEnrollmentId.trim()) params.set('enrollmentId', queuePreviewEnrollmentId.trim())
     const qs = params.toString()
     const endpoint = `/api/send-queue/preview${qs ? `?${qs}` : ''}`
-    const res = await api.get<{ items: SendQueuePreviewItem[] }>(endpoint)
+    const res = await api.get<{ items: SendQueuePreviewItem[] }>(endpoint, { headers: { 'X-Customer-Id': selectedCustomerId } })
     setQueuePreviewLoading(false)
     if (res.error) {
       const status = res.errorDetails?.status
