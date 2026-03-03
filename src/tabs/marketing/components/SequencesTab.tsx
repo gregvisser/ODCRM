@@ -24,6 +24,7 @@ import {
   Select,
   SimpleGrid,
   Spacer,
+  Spinner,
   Stat,
   StatLabel,
   StatNumber,
@@ -325,6 +326,13 @@ const SequencesTab: React.FC = () => {
   const [queuePreviewLastEndpoint, setQueuePreviewLastEndpoint] = useState<string>('')
   const [queuePreviewSummary, setQueuePreviewSummary] = useState<SendQueuePreviewSummary | null>(null)
 
+  // Stage 3E: drill-down from preview row to enrollment queue
+  const [queueDrillOpen, setQueueDrillOpen] = useState(false)
+  const [queueDrillEnrollmentId, setQueueDrillEnrollmentId] = useState<string>('')
+  const [queueDrillLoading, setQueueDrillLoading] = useState(false)
+  const [queueDrillError, setQueueDrillError] = useState<string | null>(null)
+  const [queueDrillData, setQueueDrillData] = useState<unknown>(null)
+
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
     const unique = Array.from(new Set(split))
@@ -385,6 +393,33 @@ const SequencesTab: React.FC = () => {
     } else {
       toast({ title: 'Could not copy', description: curl.length > 200 ? curl.slice(0, 200) + '...' : curl, status: 'warning', duration: 5000 })
     }
+  }
+
+  const loadEnrollmentQueue = async (enrollmentId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_') || !enrollmentId) return
+    setQueueDrillLoading(true)
+    setQueueDrillError(null)
+    const res = await api.get<unknown>(`/api/enrollments/${enrollmentId}/queue`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+    setQueueDrillLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setQueueDrillError('Select a client.')
+      else if (status === 401 || status === 403) setQueueDrillError('Not authorized.')
+      else if (status === 404) setQueueDrillError('Queue endpoint not available for this enrollment.')
+      else setQueueDrillError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setQueueDrillData(null)
+      return
+    }
+    setQueueDrillData(res.data ?? null)
+    setQueueDrillError(null)
+  }
+
+  const openQueueDrill = (enrollmentId: string) => {
+    setQueueDrillEnrollmentId(enrollmentId)
+    setQueueDrillOpen(true)
+    setQueueDrillData(null)
+    setQueueDrillError(null)
+    if (enrollmentId && selectedCustomerId?.startsWith('cust_')) loadEnrollmentQueue(enrollmentId)
   }
 
   useEffect(() => {
@@ -1895,6 +1930,7 @@ const SequencesTab: React.FC = () => {
                     <Th>status</Th>
                     <Th>action</Th>
                     <Th>reasons</Th>
+                    <Th w="100px"></Th>
                   </Tr>
                 </Thead>
                 <Tbody>
@@ -1912,12 +1948,44 @@ const SequencesTab: React.FC = () => {
                           </Text>
                         ) : null}
                       </Td>
+                      <Td>
+                        <Button size="xs" variant="ghost" onClick={() => openQueueDrill(row.enrollmentId)} isDisabled={!row.enrollmentId}>
+                          View queue
+                        </Button>
+                      </Td>
                     </Tr>
                   ))}
                 </Tbody>
               </Table>
             </Box>
           )}
+
+          <Modal isOpen={queueDrillOpen} onClose={() => setQueueDrillOpen(false)} size="xl">
+            <ModalOverlay />
+            <ModalContent>
+              <ModalHeader>Enrollment Queue</ModalHeader>
+              <ModalCloseButton />
+              <Text fontSize="sm" color="gray.600" px={6} pb={2}>Enrollment ID: {queueDrillEnrollmentId || '—'}</Text>
+              <ModalBody>
+                {queueDrillLoading && (
+                  <Flex justify="center" py={6}><Spinner size="lg" /></Flex>
+                )}
+                {!queueDrillLoading && queueDrillError && (
+                  <Alert status="error">
+                    <AlertIcon />
+                    <AlertDescription>{queueDrillError}</AlertDescription>
+                  </Alert>
+                )}
+                {!queueDrillLoading && !queueDrillError && queueDrillData != null && (
+                  <Box overflow="auto" maxH="60vh" bg="gray.50" p={3} borderRadius="md">
+                    <Code as="pre" whiteSpace="pre-wrap" fontSize="xs" display="block">
+                      {JSON.stringify(queueDrillData, null, 2)}
+                    </Code>
+                  </Box>
+                )}
+              </ModalBody>
+            </ModalContent>
+          </Modal>
         </CardBody>
       </Card>
 
