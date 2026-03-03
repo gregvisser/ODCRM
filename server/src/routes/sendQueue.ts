@@ -70,6 +70,31 @@ function previewActionAndReasons(
   return { action: 'SEND', reasons: [] }
 }
 
+/** Stage 3D: Human-readable text for a reason code (no extra DB). */
+function humanizeReason(
+  reason: string,
+  item: { scheduledFor: Date | null; status: string; recipientEmail: string },
+  _now: Date,
+  _customerHasIdentity: boolean
+): string | null {
+  switch (reason) {
+    case 'not_due_yet':
+      return item.scheduledFor ? `Scheduled for ${item.scheduledFor.toISOString()}` : 'Not due yet'
+    case 'missing_identity':
+      return 'No active email identity configured for this client'
+    case 'missing_recipient_email':
+      return 'Recipient email missing'
+    case 'already_sent':
+      return 'Already sent'
+    case 'locked':
+      return 'Queue item locked'
+    case 'unknown':
+      return 'Unknown reason'
+    default:
+      return reason || null
+  }
+}
+
 /**
  * GET /api/send-queue/preview?enrollmentId=<optional>&limit=<optional>
  * Stage 3A: Read-only dry-run preview. Requires X-Customer-Id. No admin secret. No DB mutations.
@@ -101,12 +126,17 @@ router.get('/preview', async (req: Request, res: Response) => {
     ])
     const customerHasIdentity = identityCount > 0
 
+    const rawItemShape = (item: { status: string; scheduledFor: Date | null; recipientEmail: string | null }) => ({
+      status: item.status,
+      scheduledFor: item.scheduledFor,
+      recipientEmail: item.recipientEmail ?? '',
+    })
     const data = items.map((item) => {
-      const { action, reasons } = previewActionAndReasons(
-        { status: item.status, scheduledFor: item.scheduledFor, recipientEmail: item.recipientEmail },
-        now,
-        customerHasIdentity
-      )
+      const shape = rawItemShape(item)
+      const { action, reasons } = previewActionAndReasons(shape, now, customerHasIdentity)
+      const reasonDetails = reasons
+        .map((r) => humanizeReason(r, shape, now, customerHasIdentity))
+        .filter((s): s is string => s != null)
       return {
         id: item.id,
         enrollmentId: item.enrollmentId,
@@ -115,6 +145,7 @@ router.get('/preview', async (req: Request, res: Response) => {
         status: item.status,
         action,
         reasons,
+        reasonDetails,
         recipientEmail: item.recipientEmail ?? '',
         renderPreview: null as { subject: string; bodyHtml: string } | null,
       }
