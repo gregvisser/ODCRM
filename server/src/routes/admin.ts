@@ -10,14 +10,7 @@ export const validateAdminSecret = (req: Request, res: Response, next: NextFunct
   const adminSecret = process.env.ADMIN_SECRET;
   const providedSecret = req.headers['x-admin-secret'];
   
-  if (!adminSecret) {
-    return res.status(500).json({
-      success: false,
-      error: 'ADMIN_SECRET not configured on server',
-    });
-  }
-  
-  if (!providedSecret || providedSecret !== adminSecret) {
+  if (!adminSecret || !providedSecret || providedSecret !== adminSecret) {
     return res.status(401).json({
       success: false,
       error: 'Invalid or missing X-Admin-Secret header',
