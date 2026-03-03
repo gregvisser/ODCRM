@@ -315,6 +315,7 @@ const SequencesTab: React.FC = () => {
   const [queuePreviewData, setQueuePreviewData] = useState<SendQueuePreviewItem[] | null>(null)
   const [queuePreviewError, setQueuePreviewError] = useState<string | null>(null)
   const [queuePreviewLoading, setQueuePreviewLoading] = useState(false)
+  const [queuePreviewLastEndpoint, setQueuePreviewLastEndpoint] = useState<string>('')
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -332,12 +333,13 @@ const SequencesTab: React.FC = () => {
     if (queuePreviewEnrollmentId.trim()) params.set('enrollmentId', queuePreviewEnrollmentId.trim())
     const qs = params.toString()
     const endpoint = `/api/send-queue/preview${qs ? `?${qs}` : ''}`
+    setQueuePreviewLastEndpoint(endpoint)
     const res = await api.get<{ items: SendQueuePreviewItem[] }>(endpoint, { headers: { 'X-Customer-Id': selectedCustomerId } })
     setQueuePreviewLoading(false)
     if (res.error) {
       const status = res.errorDetails?.status
       if (status === 400) setQueuePreviewError('Select a client.')
-      else if (status === 401 || status === 403) setQueuePreviewError('Not authorized.')
+      else if (status === 401 || status === 403) setQueuePreviewError(`Not authorized. Preview requires you to be signed in. (${status})`)
       else setQueuePreviewError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
       setQueuePreviewData(null)
       return
@@ -358,11 +360,29 @@ const SequencesTab: React.FC = () => {
     return local.slice(0, 1) + '***' + domain
   }
 
+  const queuePreviewApiBase = (import.meta.env.VITE_API_URL?.toString().replace(/\/$/, '') || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').trim()
+
+  const handleCopyPreviewCurl = () => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const path = queuePreviewLastEndpoint || '/api/send-queue/preview?limit=20'
+    const url = `${queuePreviewApiBase}${path.startsWith('/') ? path : `/${path}`}`
+    const curl = `curl -s -H "X-Customer-Id: ${selectedCustomerId}" "${url}"`
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(curl).then(
+        () => toast({ title: 'Copied curl to clipboard', status: 'success', duration: 2000 }),
+        () => toast({ title: 'Could not copy', description: curl.length > 200 ? curl.slice(0, 200) + '...' : curl, status: 'warning', duration: 5000 })
+      )
+    } else {
+      toast({ title: 'Could not copy', description: curl.length > 200 ? curl.slice(0, 200) + '...' : curl, status: 'warning', duration: 5000 })
+    }
+  }
+
   useEffect(() => {
     if (selectedCustomerId?.startsWith('cust_')) loadSendQueuePreview()
     else {
       setQueuePreviewData(null)
       setQueuePreviewError(null)
+      setQueuePreviewLastEndpoint('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -1785,6 +1805,9 @@ const SequencesTab: React.FC = () => {
             <Button size="sm" onClick={loadSendQueuePreview} isLoading={queuePreviewLoading} isDisabled={!selectedCustomerId}>
               Refresh
             </Button>
+            <Button size="sm" variant="outline" onClick={handleCopyPreviewCurl} isDisabled={!selectedCustomerId?.startsWith('cust_')}>
+              Copy curl
+            </Button>
             <HStack spacing={2}>
               <FormControl width="80px">
                 <FormLabel fontSize="xs" mb={0}>Limit</FormLabel>
@@ -1808,6 +1831,12 @@ const SequencesTab: React.FC = () => {
               </FormControl>
             </HStack>
           </Flex>
+          {queuePreviewLastEndpoint && (
+            <Text fontSize="xs" color="gray.500" mb={1}>Endpoint: {queuePreviewLastEndpoint}</Text>
+          )}
+          {selectedCustomerId?.startsWith('cust_') && (
+            <Text fontSize="xs" color="gray.500" mb={2}>Tenant: {selectedCustomerId}</Text>
+          )}
           {queuePreviewError && (
             <Alert status="error" size="sm" mb={3}>
               <AlertIcon />
