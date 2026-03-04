@@ -55,7 +55,8 @@
     "test:send-queue-item-actions-stage3h": "node scripts/self-test-send-queue-item-actions-stage3h.mjs",
     "test:send-queue-item-detail-stage3i": "node scripts/self-test-send-queue-item-detail-stage3i.mjs",
     "test:enrollment-lifecycle-stage1b": "node scripts/self-test-enrollment-lifecycle-stage1b.mjs",
-    "test:send-worker-dryrun-stage2a": "node scripts/self-test-send-worker-dryrun-stage2a.mjs"
+    "test:send-worker-dryrun-stage2a": "node scripts/self-test-send-worker-dryrun-stage2a.mjs",
+    "test:pilot-release-smoke": "node scripts/self-test-pilot-release-smoke.mjs"
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.1",
