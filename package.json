@@ -65,6 +65,7 @@
     "test:enrollment-snapshot-ingestion": "node scripts/self-test-enrollment-snapshot-ingestion.mjs",
     "test:sequences-operator-ui": "node scripts/self-test-sequences-operator-ui.mjs",
     "test:queue-preview-autoload": "node scripts/self-test-queue-preview-autoload.mjs",
+    "test:send-queue-operator-ui": "node scripts/self-test-send-queue-operator-ui.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
