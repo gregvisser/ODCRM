@@ -353,6 +353,11 @@ const SequencesTab: React.FC = () => {
   const [queueItemDetail, setQueueItemDetail] = useState<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+  // Send Queue drawer per-row detail (read-only)
+  const [queueDrawerDetail, setQueueDrawerDetail] = useState<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null } | null>(null)
+  const [queueDrawerDetailLoading, setQueueDrawerDetailLoading] = useState(false)
+  const [queueDrawerDetailError, setQueueDrawerDetailError] = useState<string | null>(null)
+  const [dryRunWorkerLoading, setDryRunWorkerLoading] = useState(false)
 
   // dry-run audit viewer (read-only)
   const [auditItems, setAuditItems] = useState<Array<{ id: string; decidedAt: string; decision: string; reason: string | null; queueItemId: string; snapshot?: unknown }>>([])
@@ -887,14 +892,14 @@ const SequencesTab: React.FC = () => {
   }
 
   const handleTickDryRun = async () => {
-    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
     setQueueTickLoading(true)
     setQueueError(null)
     try {
       const res = await api.post<{ data?: { requeued?: number; locked?: number; scanned?: number; errors?: number } }>(
         '/api/send-queue/tick',
         { customerId: selectedCustomerId, limit: 25, dryRun: true },
-        { headers: { 'X-Customer-Id': selectedCustomerId } }
+        { headers: { 'X-Customer-Id': selectedCustomerId, 'x-admin-secret': adminSecret } }
       )
       if (res.error) {
         toast({ title: 'Tick failed', description: res.error, status: 'error' })
@@ -913,6 +918,38 @@ const SequencesTab: React.FC = () => {
       toast({ title: 'Tick failed', description: msg, status: 'error' })
     } finally {
       setQueueTickLoading(false)
+    }
+  }
+
+  const handleRunDryRunWorker = async () => {
+    if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
+    setDryRunWorkerLoading(true)
+    try {
+      const res = await api.post<{ success?: boolean; data?: { processedCount?: number; auditsCreated?: number } }>(
+        '/api/send-worker/dry-run',
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId, 'x-admin-secret': adminSecret } }
+      )
+      if (res.error) {
+        toast({ title: 'Dry-run worker failed', description: res.error, status: 'error' })
+        return
+      }
+      const d = res.data?.data
+      toast({
+        title: 'Dry-run worker done',
+        description: d ? `processed=${d.processedCount ?? 0} audits=${d.auditsCreated ?? 0}` : undefined,
+        status: 'success',
+        duration: 4000,
+      })
+      loadAuditSummary()
+      loadAudits()
+      loadSendQueuePreview()
+      if (queueEnrollmentId) loadQueue(queueEnrollmentId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
+      toast({ title: 'Dry-run worker failed', description: msg, status: 'error' })
+    } finally {
+      setDryRunWorkerLoading(false)
     }
   }
 
@@ -3309,7 +3346,7 @@ const SequencesTab: React.FC = () => {
         <DrawerContent>
           <DrawerCloseButton />
           <DrawerHeader>
-            <VStack align="stretch" spacing={1}>
+            <VStack align="stretch" spacing={3}>
               <Text>Send Queue</Text>
               <Flex align="center" gap={2}>
                 <Text fontSize="sm" color="gray.600" fontFamily="mono">
@@ -3334,6 +3371,23 @@ const SequencesTab: React.FC = () => {
                   </Tooltip>
                 )}
               </Flex>
+              <FormControl>
+                <FormLabel fontSize="sm">Admin secret (local)</FormLabel>
+                <Input
+                  type="password"
+                  size="sm"
+                  placeholder="Enter to enable Tick and Run dry-run worker"
+                  value={adminSecret}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setAdminSecret(v)
+                    try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
+                  }}
+                />
+                {!adminSecret && (
+                  <FormHelperText fontSize="xs">Admin secret required for Tick and Run dry-run worker.</FormHelperText>
+                )}
+              </FormControl>
             </VStack>
           </DrawerHeader>
           <DrawerBody pb={6}>
@@ -3365,16 +3419,32 @@ const SequencesTab: React.FC = () => {
                     Reload
                   </Button>
                   {isAgencyUI() && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      colorScheme="purple"
-                      leftIcon={<TimeIcon />}
-                      onClick={handleTickDryRun}
-                      isLoading={queueTickLoading}
-                    >
-                      Tick (dry-run)
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        colorScheme="purple"
+                        leftIcon={<TimeIcon />}
+                        onClick={handleTickDryRun}
+                        isLoading={queueTickLoading}
+                        isDisabled={!adminSecret || !selectedCustomerId?.startsWith('cust_')}
+                      >
+                        Tick (dry-run)
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        colorScheme="teal"
+                        onClick={handleRunDryRunWorker}
+                        isLoading={dryRunWorkerLoading}
+                        isDisabled={!adminSecret || !selectedCustomerId?.startsWith('cust_')}
+                      >
+                        Run dry-run worker
+                      </Button>
+                      {!adminSecret && (
+                        <Text fontSize="xs" color="gray.500">Admin secret required.</Text>
+                      )}
+                    </>
                   )}
                 </Flex>
                 {(() => {
@@ -3403,12 +3473,13 @@ const SequencesTab: React.FC = () => {
                               <Th>Recipient</Th>
                               <Th>SentAt</Th>
                               <Th>Error</Th>
+                              <Th w="80px">Details</Th>
                             </Tr>
                           </Thead>
                           <Tbody>
                             {items.length === 0 ? (
                               <Tr>
-                                <Td colSpan={6} color="gray.500">No items</Td>
+                                <Td colSpan={7} color="gray.500">No items</Td>
                               </Tr>
                             ) : (
                               items.map((it: { id?: string; scheduledFor?: string | null; status?: string; stepIndex?: number; recipientEmail?: string; sentAt?: string | null; lastError?: string | null }, i: number) => (
@@ -3427,12 +3498,60 @@ const SequencesTab: React.FC = () => {
                                   <Td fontSize="xs" maxW="140px" isTruncated title={it.lastError ?? undefined}>
                                     {it.lastError ?? '—'}
                                   </Td>
+                                  <Td>
+                                    <Button
+                                      size="xs"
+                                      variant="ghost"
+                                      isDisabled={!selectedCustomerId?.startsWith('cust_') || !it.id || queueDrawerDetailLoading}
+                                      onClick={async () => {
+                                        if (!selectedCustomerId?.startsWith('cust_') || !it.id) return
+                                        setQueueDrawerDetailLoading(true)
+                                        setQueueDrawerDetailError(null)
+                                        setQueueDrawerDetail(null)
+                                        const res = await api.get<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null }>(`/api/send-queue/items/${it.id}`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+                                        setQueueDrawerDetailLoading(false)
+                                        if (res.error) {
+                                          if (res.errorDetails?.status === 404) {
+                                            toast({ title: 'Queue item not found', status: 'warning' })
+                                            return
+                                          }
+                                          setQueueDrawerDetailError(res.error + (res.errorDetails?.status ? ` (${res.errorDetails.status})` : ''))
+                                          return
+                                        }
+                                        if (res.data) setQueueDrawerDetail(res.data)
+                                      }}
+                                    >
+                                      Details
+                                    </Button>
+                                  </Td>
                                 </Tr>
                               ))
                             )}
                           </Tbody>
                         </Table>
                       </Box>
+                      {queueDrawerDetailLoading && (
+                        <Text fontSize="sm" color="gray.500">Loading detail…</Text>
+                      )}
+                      {queueDrawerDetailError && (
+                        <Alert status="error" size="sm">
+                          <AlertIcon />
+                          <AlertDescription>{queueDrawerDetailError}</AlertDescription>
+                        </Alert>
+                      )}
+                      {queueDrawerDetail && !queueDrawerDetailLoading && (
+                        <Box borderWidth="1px" borderRadius="md" p={3} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                          <Text fontSize="sm" fontWeight="semibold" mb={2}>Queue item detail</Text>
+                          <VStack align="stretch" spacing={1} fontSize="sm">
+                            <Flex justify="space-between"><Text color="gray.600">status</Text><Text fontFamily="mono">{queueDrawerDetail.status}</Text></Flex>
+                            <Flex justify="space-between"><Text color="gray.600">scheduledFor</Text><Text fontFamily="mono">{queueDrawerDetail.scheduledFor ?? '—'}</Text></Flex>
+                            <Flex justify="space-between"><Text color="gray.600">sentAt</Text><Text fontFamily="mono">{queueDrawerDetail.sentAt ?? '—'}</Text></Flex>
+                            <Flex justify="space-between"><Text color="gray.600">attemptCount</Text><Text fontFamily="mono">{queueDrawerDetail.attemptCount ?? '—'}</Text></Flex>
+                            <Flex justify="space-between"><Text color="gray.600">lastError</Text><Text fontFamily="mono" fontSize="xs" isTruncated maxW="200px" title={queueDrawerDetail.lastError ?? undefined}>{queueDrawerDetail.lastError ?? '—'}</Text></Flex>
+                          </VStack>
+                          <Button size="xs" mt={2} variant="ghost" onClick={() => { setQueueDrawerDetail(null); setQueueDrawerDetailError(null) }}>Close</Button>
+                        </Box>
+                      )}
                       {queueEnrollmentId && selectedCustomerId && (
                         <Box>
                           <Text fontSize="xs" fontWeight="semibold" mb={2}>Copyable curl</Text>
