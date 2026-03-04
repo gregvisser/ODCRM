@@ -49,6 +49,8 @@ import {
   FormControl,
   FormHelperText,
   FormLabel,
+  Radio,
+  RadioGroup,
   Textarea,
   useToast,
   AlertDialog,
@@ -242,6 +244,7 @@ const SequencesTab: React.FC = () => {
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
+  const [createEnrollmentRecipientSource, setCreateEnrollmentRecipientSource] = useState<'snapshot' | 'manual'>('manual')
   const [createEnrollmentSubmitting, setCreateEnrollmentSubmitting] = useState(false)
   const { isOpen: isRecipientsModalOpen, onOpen: onRecipientsModalOpen, onClose: onRecipientsModalClose } = useDisclosure()
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null)
@@ -615,6 +618,19 @@ const SequencesTab: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load only when modal/sequence/customer change
   }, [isOpen, editingSequence?.id, selectedCustomerId])
+
+  useEffect(() => {
+    if (isCreateEnrollmentOpen && editingSequence) {
+      const useSnapshot = !!editingSequence.listId
+      setCreateEnrollmentRecipientSource(useSnapshot ? 'snapshot' : 'manual')
+      if (useSnapshot) {
+        setCreateEnrollmentRecipients('__from_snapshot@placeholder.local')
+      } else {
+        setCreateEnrollmentRecipients('')
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync when modal opens or listId changes
+  }, [isCreateEnrollmentOpen, editingSequence?.listId])
 
   const handleEnrollmentPause = async (enrollmentId: string) => {
     if (!selectedCustomerId?.startsWith('cust_') || !editingSequence?.id) return
@@ -2997,23 +3013,73 @@ const SequencesTab: React.FC = () => {
                 placeholder="e.g. Q1 batch"
               />
             </FormControl>
-            <FormControl isRequired>
-              <FormLabel>Recipients</FormLabel>
-              <Textarea
-                value={createEnrollmentRecipients}
-                onChange={(e) => setCreateEnrollmentRecipients(e.target.value)}
-                placeholder="one@example.com&#10;two@example.com"
-                rows={6}
-              />
-              <Text fontSize="xs" color="gray.500" mt={1}>
-                Paste emails separated by new lines or commas.
-              </Text>
+            <FormControl mb={4} isRequired>
+              <FormLabel>Recipients source</FormLabel>
+              <RadioGroup
+                value={createEnrollmentRecipientSource}
+                onChange={(val: 'snapshot' | 'manual') => {
+                  setCreateEnrollmentRecipientSource(val)
+                  if (val === 'snapshot') setCreateEnrollmentRecipients('__from_snapshot@placeholder.local')
+                  else if (createEnrollmentRecipients === '__from_snapshot@placeholder.local') setCreateEnrollmentRecipients('')
+                }}
+              >
+                <VStack align="stretch" spacing={2}>
+                  <Radio value="snapshot">Use Leads Snapshot (recommended)</Radio>
+                  <Radio value="manual">Paste emails manually (advanced)</Radio>
+                </VStack>
+              </RadioGroup>
             </FormControl>
+            {createEnrollmentRecipientSource === 'snapshot' ? (
+              <Box mb={4}>
+                <Alert status="info" borderRadius="md">
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle fontSize="sm">From Leads Snapshot</AlertTitle>
+                    <AlertDescription fontSize="xs">
+                      Recipients will be pulled from the selected Leads Snapshot for this sequence. To change recipients, change the Leads Snapshot selection in the sequence configuration.
+                    </AlertDescription>
+                  </Box>
+                </Alert>
+                {!editingSequence?.listId && (
+                  <Alert status="error" mt={2} borderRadius="md">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">
+                      No Leads Snapshot selected for this sequence. Select one in Configuration first, or switch to manual paste.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <Text fontSize="xs" color="gray.500" mt={2}>
+                  (System will replace this with snapshot recipients in a future update.)
+                </Text>
+              </Box>
+            ) : (
+              <FormControl mb={4} isRequired>
+                <FormLabel>Recipients</FormLabel>
+                <Textarea
+                  value={createEnrollmentRecipients}
+                  onChange={(e) => setCreateEnrollmentRecipients(e.target.value)}
+                  placeholder="one@example.com&#10;two@example.com"
+                  rows={6}
+                />
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Paste emails separated by new lines or commas.
+                </Text>
+              </FormControl>
+            )}
             <Flex justify="flex-end" gap={2} mt={4}>
               <Button variant="ghost" onClick={onCreateEnrollmentClose} isDisabled={createEnrollmentSubmitting}>
                 Cancel
               </Button>
-              <Button colorScheme="blue" onClick={handleCreateEnrollment} isLoading={createEnrollmentSubmitting}>
+              <Button
+                colorScheme="blue"
+                onClick={handleCreateEnrollment}
+                isLoading={createEnrollmentSubmitting}
+                isDisabled={
+                  createEnrollmentRecipientSource === 'manual'
+                    ? parseRecipientEmails(createEnrollmentRecipients).length === 0
+                    : !editingSequence?.listId
+                }
+              >
                 Create
               </Button>
             </Flex>
