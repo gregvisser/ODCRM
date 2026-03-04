@@ -562,7 +562,30 @@ const SequencesTab: React.FC = () => {
   const handleCreateEnrollment = async () => {
     if (!editingSequence?.id || !selectedCustomerId?.startsWith('cust_')) return
     if (createEnrollmentRecipientSource === 'snapshot') {
-      toast({ title: "Snapshot enrollments aren't enabled yet", description: 'Switch to manual paste.', status: 'error' })
+      if (!editingSequence.listId) {
+        toast({ title: 'No Leads Snapshot selected', description: 'Select one in Configuration first.', status: 'error' })
+        return
+      }
+      setCreateEnrollmentSubmitting(true)
+      try {
+        const { data, error } = await api.post<{ data?: { recipientCount?: number; recipientSource?: string } }>(
+          `/api/sequences/${editingSequence.id}/enrollments`,
+          { name: createEnrollmentName.trim() || undefined, recipientSource: 'snapshot' },
+          { headers: { 'X-Customer-Id': selectedCustomerId } }
+        )
+        if (error) {
+          toast({ title: 'Create enrollment failed', description: error, status: 'error' })
+          return
+        }
+        const count = data?.data?.recipientCount ?? 0
+        toast({ title: 'Enrollment created', description: count ? `${count} recipients from snapshot.` : undefined, status: 'success' })
+        onCreateEnrollmentClose()
+        setCreateEnrollmentName('')
+        setCreateEnrollmentRecipients('')
+        await loadEnrollmentsForSequence(editingSequence.id)
+      } finally {
+        setCreateEnrollmentSubmitting(false)
+      }
       return
     }
     const emails = parseRecipientEmails(createEnrollmentRecipients)
@@ -574,7 +597,7 @@ const SequencesTab: React.FC = () => {
     try {
       const { error } = await api.post<unknown>(
         `/api/sequences/${editingSequence.id}/enrollments`,
-        { name: createEnrollmentName.trim() || undefined, recipients: emails.map((email) => ({ email })) },
+        { name: createEnrollmentName.trim() || undefined, recipientSource: 'manual', recipients: emails.map((email) => ({ email })) },
         { headers: { 'X-Customer-Id': selectedCustomerId } }
       )
       if (error) {
@@ -3027,15 +3050,23 @@ const SequencesTab: React.FC = () => {
             </FormControl>
             {createEnrollmentRecipientSource === 'snapshot' ? (
               <Box mb={4}>
-                <Alert status="warning" borderRadius="md">
+                <Alert status="info" borderRadius="md">
                   <AlertIcon />
                   <Box>
-                    <AlertTitle fontSize="sm">Snapshot-based enrollments not enabled yet</AlertTitle>
+                    <AlertTitle fontSize="sm">From Leads Snapshot</AlertTitle>
                     <AlertDescription fontSize="xs">
-                      For Pilot, use &quot;Paste emails manually&quot;. Snapshot ingestion will ship in a later stage.
+                      Recipients will be pulled from the selected Leads Snapshot for this sequence.
                     </AlertDescription>
                   </Box>
                 </Alert>
+                {!editingSequence?.listId && (
+                  <Alert status="error" mt={2} borderRadius="md">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">
+                      No Leads Snapshot selected for this sequence. Select one in Configuration first, or switch to manual paste.
+                    </AlertDescription>
+                  </Alert>
+                )}
               </Box>
             ) : (
               <FormControl mb={4} isRequired>
@@ -3060,8 +3091,9 @@ const SequencesTab: React.FC = () => {
                 onClick={handleCreateEnrollment}
                 isLoading={createEnrollmentSubmitting}
                 isDisabled={
-                  createEnrollmentRecipientSource === 'snapshot' ||
-                  (createEnrollmentRecipientSource === 'manual' && parseRecipientEmails(createEnrollmentRecipients).length === 0)
+                  createEnrollmentRecipientSource === 'snapshot'
+                    ? !editingSequence?.listId || !selectedCustomerId?.startsWith('cust_')
+                    : parseRecipientEmails(createEnrollmentRecipients).length === 0
                 }
               >
                 Create
