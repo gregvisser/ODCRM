@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   CardBody,
+  Collapse,
   Flex,
   Heading,
   HStack,
@@ -279,6 +280,7 @@ const SequencesTab: React.FC = () => {
     entries: Array<{ id: string; eventType: string; timestamp: string; customerId: string; payload: Record<string, unknown> }>
   } | null>(null)
   const { isOpen: isQueueOpen, onOpen: onQueueOpen, onClose: onQueueClose } = useDisclosure()
+  const { isOpen: isAuditPanelOpen, onOpen: onAuditPanelOpen, onClose: onAuditPanelClose } = useDisclosure({ defaultIsOpen: true })
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -347,6 +349,14 @@ const SequencesTab: React.FC = () => {
   const [queueItemDetail, setQueueItemDetail] = useState<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
+
+  // Stage 2B-min: dry-run audit viewer (read-only)
+  const [auditItems, setAuditItems] = useState<Array<{ id: string; decidedAt: string; decision: string; reason: string | null; queueItemId: string; snapshot?: unknown }>>([])
+  const [auditViewerLoading, setAuditViewerLoading] = useState(false)
+  const [auditViewerError, setAuditViewerError] = useState<string | null>(null)
+  const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null)
+  const [auditQueueItemIdFilter, setAuditQueueItemIdFilter] = useState('')
+  const [auditDecisionFilter, setAuditDecisionFilter] = useState<string>('all')
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -429,6 +439,44 @@ const SequencesTab: React.FC = () => {
     }
     setQueueDrillData(res.data ?? null)
     setQueueDrillError(null)
+  }
+
+  const loadAudits = async (cursor?: string | null) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!cursor) {
+      setAuditLoading(true)
+      setAuditError(null)
+      setAuditItems([])
+      setAuditNextCursor(null)
+    }
+    const params = new URLSearchParams()
+    params.set('limit', '50')
+    if (auditQueueItemIdFilter.trim()) params.set('queueItemId', auditQueueItemIdFilter.trim())
+    if (auditDecisionFilter && auditDecisionFilter !== 'all') params.set('decision', auditDecisionFilter)
+    if (cursor) params.set('cursor', cursor)
+    const res = await api.get<{ success: boolean; data?: { items: Array<{ id: string; decidedAt: string; decision: string; reason: string | null; queueItemId: string; snapshot?: unknown }>; nextCursor?: string | null } }>(
+      `/api/send-worker/audits?${params.toString()}`,
+      { headers: { 'X-Customer-Id': selectedCustomerId } }
+    )
+    if (!cursor) setAuditViewerLoading(false)
+    if (res.error) {
+      setAuditViewerError(res.error + (res.errorDetails?.status ? ` (${res.errorDetails.status})` : ''))
+      if (!cursor) setAuditItems([])
+      return
+    }
+    const items = res.data?.data?.items ?? []
+    const next = res.data?.data?.nextCursor ?? null
+    if (cursor) {
+      setAuditItems((prev) => [...prev, ...items])
+    } else {
+      setAuditItems(items)
+    }
+    setAuditNextCursor(next)
+    setAuditViewerError(null)
+  }
+
+  const loadAuditsMore = () => {
+    if (auditNextCursor) loadAudits(auditNextCursor)
   }
 
   const openQueueDrill = (enrollmentId: string) => {
@@ -2253,6 +2301,105 @@ const SequencesTab: React.FC = () => {
               </ModalBody>
             </ModalContent>
           </Modal>
+        </CardBody>
+      </Card>
+
+      <Card mb={6}>
+        <CardBody>
+          <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
+            Dry-run Audit (Stage 2A) {isAuditPanelOpen ? '▼' : '▶'}
+          </Heading>
+          <Collapse in={isAuditPanelOpen}>
+            <Box>
+              {selectedCustomerId?.startsWith('cust_') && (
+                <>
+                  <Flex gap={3} mb={3} flexWrap="wrap" align="center">
+                    <Input
+                      placeholder="queueItemId (optional)"
+                      size="sm"
+                      maxW="220px"
+                      value={auditQueueItemIdFilter}
+                      onChange={(e) => setAuditQueueItemIdFilter(e.target.value)}
+                    />
+                    <Select
+                      size="sm"
+                      maxW="180px"
+                      value={auditDecisionFilter}
+                      onChange={(e) => setAuditDecisionFilter(e.target.value)}
+                    >
+                      <option value="all">all</option>
+                      <option value="WOULD_SEND">WOULD_SEND</option>
+                      <option value="SKIP_SUPPRESSED">SKIP_SUPPRESSED</option>
+                      <option value="SKIP_INVALID">SKIP_INVALID</option>
+                      <option value="SKIP_NO_IDENTITY">SKIP_NO_IDENTITY</option>
+                    </Select>
+                    <Button size="sm" onClick={() => loadAudits()} isLoading={auditViewerLoading} isDisabled={!selectedCustomerId}>
+                      Refresh
+                    </Button>
+                  </Flex>
+                  {auditViewerError && (
+                    <Alert status="error" size="sm" mb={3}>
+                      <AlertIcon />
+                      <AlertDescription>{auditViewerError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <Box overflowX="auto">
+                    <Table size="sm">
+                      <Thead>
+                        <Tr>
+                          <Th>decidedAt</Th>
+                          <Th>decision</Th>
+                          <Th>reason</Th>
+                          <Th>queueItemId</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {auditItems.length === 0 && !auditViewerLoading && (
+                          <Tr>
+                            <Td colSpan={4} color="gray.500">No audit rows. Run dry-run worker to generate.</Td>
+                          </Tr>
+                        )}
+                        {auditItems.map((row) => (
+                          <Tr key={row.id}>
+                            <Td fontSize="xs" whiteSpace="nowrap">{row.decidedAt ? new Date(row.decidedAt).toLocaleString() : '—'}</Td>
+                            <Td><Badge size="sm">{row.decision}</Badge></Td>
+                            <Td maxW="200px" isTruncated title={row.reason ?? undefined}>{row.reason ? (row.reason.length > 60 ? row.reason.slice(0, 60) + '…' : row.reason) : '—'}</Td>
+                            <Td>
+                              <HStack spacing={1}>
+                                <Code fontSize="xs">{row.queueItemId}</Code>
+                                <Tooltip label="Copy queueItemId">
+                                  <IconButton
+                                    aria-label="Copy"
+                                    size="xs"
+                                    variant="ghost"
+                                    icon={<CopyIcon />}
+                                    onClick={async () => {
+                                      try {
+                                        await navigator.clipboard.writeText(row.queueItemId)
+                                        toast({ title: 'Copied', status: 'success', duration: 2000 })
+                                      } catch { toast({ title: 'Copy failed', status: 'error' }) }
+                                    }}
+                                  />
+                                </Tooltip>
+                              </HStack>
+                            </Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                  {auditNextCursor && (
+                    <Button size="sm" variant="outline" mt={2} onClick={loadAuditsMore}>
+                      Load more
+                    </Button>
+                  )}
+                </>
+              )}
+              {!selectedCustomerId?.startsWith('cust_') && (
+                <Text fontSize="sm" color="gray.500">Select a client to view dry-run audit.</Text>
+              )}
+            </Box>
+          </Collapse>
         </CardBody>
       </Card>
 
