@@ -57,6 +57,7 @@
     "test:enrollment-lifecycle-stage1b": "node scripts/self-test-enrollment-lifecycle-stage1b.mjs",
     "test:send-worker-dryrun-stage2a": "node scripts/self-test-send-worker-dryrun-stage2a.mjs",
     "test:pilot-release-smoke": "node scripts/self-test-pilot-release-smoke.mjs",
+    "test:audit-viewer-stage2b-min": "node scripts/self-test-audit-viewer-stage2b-min.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
