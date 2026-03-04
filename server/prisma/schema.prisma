@@ -96,7 +96,7 @@ enum OutboundSendQueueStatus {
   SKIPPED
 }
 
-// Stage 2A: audit decision for dry-run (append-only)
+// Stage 2A: audit decision for dry-run (append-only). Stage 4-min: SENT, SEND_FAILED for live send.
 enum OutboundSendAttemptDecision {
   WOULD_SEND
   SKIP_SUPPRESSED
@@ -104,6 +104,8 @@ enum OutboundSendAttemptDecision {
   SKIP_NO_IDENTITY
   SKIP_RATE_LIMIT
   ERROR
+  SENT
+  SEND_FAILED
 }
 
 // ============================================================================
