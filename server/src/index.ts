@@ -35,6 +35,7 @@ import leadSourcesRouter from './routes/leadSources.js'
 import meRoutes from './routes/me.js'
 import enrollmentsRoutes from './routes/enrollments.js'
 import sendQueueRoutes from './routes/sendQueue.js'
+import sendWorkerRoutes from './routes/sendWorker.js'
 import { generalRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
@@ -436,6 +437,7 @@ app.get('/api/routes', (req, res): void => {
     '/api/sequences',
     '/api/enrollments',
     '/api/send-queue',
+    '/api/send-worker',
     '/api/customers',
     '/api/customers/:id/email-identities',
     '/api/leads',
@@ -480,6 +482,7 @@ app.use('/api/lists', listsRoutes)
 app.use('/api/sequences', observabilityHeaders, sequencesRoutes)
 app.use('/api/enrollments', observabilityHeaders, enrollmentsRoutes)
 app.use('/api/send-queue', sendQueueRoutes)
+app.use('/api/send-worker', sendWorkerRoutes)
 app.use('/api/customers', customersRoutes)
 console.log('  ✓ Mounted: /api/customers (includes /:id/email-identities)')
 app.use('/api/leads', leadsRoutes)

@@ -96,6 +96,16 @@ enum OutboundSendQueueStatus {
   SKIPPED
 }
 
+// Stage 2A: audit decision for dry-run (append-only)
+enum OutboundSendAttemptDecision {
+  WOULD_SEND
+  SKIP_SUPPRESSED
+  SKIP_INVALID
+  SKIP_NO_IDENTITY
+  SKIP_RATE_LIMIT
+  ERROR
+}
+
 // ============================================================================
 // MODELS (PascalCase with @@map to snake_case tables)
 // ============================================================================
@@ -703,6 +713,22 @@ model OutboundSendQueueItem {
   @@index([customerId, status, scheduledFor])
   @@index([customerId, enrollmentId, createdAt])
   @@map("outbound_send_queue_items")
+}
+
+// Stage 2A: append-only audit for each dry-run attempt decision
+model OutboundSendAttemptAudit {
+  id          String                     @id @default(cuid())
+  customerId  String
+  queueItemId String
+  decidedAt   DateTime                   @default(now())
+  decision    OutboundSendAttemptDecision
+  reason      String?
+  snapshot    Json?
+  createdAt   DateTime                   @default(now())
+
+  @@index([customerId])
+  @@index([queueItemId])
+  @@map("outbound_send_attempt_audits")
 }
 
 // Marketing leads imported from customer Google Sheets
