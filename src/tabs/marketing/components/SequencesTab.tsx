@@ -561,6 +561,10 @@ const SequencesTab: React.FC = () => {
 
   const handleCreateEnrollment = async () => {
     if (!editingSequence?.id || !selectedCustomerId?.startsWith('cust_')) return
+    if (createEnrollmentRecipientSource === 'snapshot') {
+      toast({ title: "Snapshot enrollments aren't enabled yet", description: 'Switch to manual paste.', status: 'error' })
+      return
+    }
     const emails = parseRecipientEmails(createEnrollmentRecipients)
     if (emails.length === 0) {
       toast({ title: 'Invalid or missing recipients', description: 'Enter at least one valid email (e.g. user@example.com).', status: 'error' })
@@ -623,11 +627,7 @@ const SequencesTab: React.FC = () => {
     if (isCreateEnrollmentOpen && editingSequence) {
       const useSnapshot = !!editingSequence.listId
       setCreateEnrollmentRecipientSource(useSnapshot ? 'snapshot' : 'manual')
-      if (useSnapshot) {
-        setCreateEnrollmentRecipients('__from_snapshot@placeholder.local')
-      } else {
-        setCreateEnrollmentRecipients('')
-      }
+      if (!useSnapshot) setCreateEnrollmentRecipients('')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only sync when modal opens or listId changes
   }, [isCreateEnrollmentOpen, editingSequence?.listId])
@@ -3017,11 +3017,7 @@ const SequencesTab: React.FC = () => {
               <FormLabel>Recipients source</FormLabel>
               <RadioGroup
                 value={createEnrollmentRecipientSource}
-                onChange={(val: 'snapshot' | 'manual') => {
-                  setCreateEnrollmentRecipientSource(val)
-                  if (val === 'snapshot') setCreateEnrollmentRecipients('__from_snapshot@placeholder.local')
-                  else if (createEnrollmentRecipients === '__from_snapshot@placeholder.local') setCreateEnrollmentRecipients('')
-                }}
+                onChange={(val: 'snapshot' | 'manual') => setCreateEnrollmentRecipientSource(val)}
               >
                 <VStack align="stretch" spacing={2}>
                   <Radio value="snapshot">Use Leads Snapshot (recommended)</Radio>
@@ -3031,26 +3027,15 @@ const SequencesTab: React.FC = () => {
             </FormControl>
             {createEnrollmentRecipientSource === 'snapshot' ? (
               <Box mb={4}>
-                <Alert status="info" borderRadius="md">
+                <Alert status="warning" borderRadius="md">
                   <AlertIcon />
                   <Box>
-                    <AlertTitle fontSize="sm">From Leads Snapshot</AlertTitle>
+                    <AlertTitle fontSize="sm">Snapshot-based enrollments not enabled yet</AlertTitle>
                     <AlertDescription fontSize="xs">
-                      Recipients will be pulled from the selected Leads Snapshot for this sequence. To change recipients, change the Leads Snapshot selection in the sequence configuration.
+                      For Pilot, use &quot;Paste emails manually&quot;. Snapshot ingestion will ship in a later stage.
                     </AlertDescription>
                   </Box>
                 </Alert>
-                {!editingSequence?.listId && (
-                  <Alert status="error" mt={2} borderRadius="md">
-                    <AlertIcon />
-                    <AlertDescription fontSize="sm">
-                      No Leads Snapshot selected for this sequence. Select one in Configuration first, or switch to manual paste.
-                    </AlertDescription>
-                  </Alert>
-                )}
-                <Text fontSize="xs" color="gray.500" mt={2}>
-                  (System will replace this with snapshot recipients in a future update.)
-                </Text>
               </Box>
             ) : (
               <FormControl mb={4} isRequired>
@@ -3075,9 +3060,8 @@ const SequencesTab: React.FC = () => {
                 onClick={handleCreateEnrollment}
                 isLoading={createEnrollmentSubmitting}
                 isDisabled={
-                  createEnrollmentRecipientSource === 'manual'
-                    ? parseRecipientEmails(createEnrollmentRecipients).length === 0
-                    : !editingSequence?.listId
+                  createEnrollmentRecipientSource === 'snapshot' ||
+                  (createEnrollmentRecipientSource === 'manual' && parseRecipientEmails(createEnrollmentRecipients).length === 0)
                 }
               >
                 Create
