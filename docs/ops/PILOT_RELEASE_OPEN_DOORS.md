@@ -9,12 +9,12 @@ Stability and operability doc for the Pilot Release. **No real sending.** Single
 - **Onboarding** — Client onboarding and setup
 - **Email Accounts** — Email identity configuration
 - **Sequences** — Create and manage email sequences
-- **Enrollments Stage 1A/1B** — Create enrollments, pause/resume/cancel lifecycle
-- **Send Queue Stage 3A** — Send Queue Preview (WAIT/SKIP/SEND reasons, tenant-scoped)
-- **Send Queue Stage 3G** — Dry-run render (subject + bodyHtml by queue item)
-- **Send Queue Stage 3H** — Retry/Skip queue items (tenant + admin)
-- **Send Queue Stage 3I** — Queue item detail (Details button in Enrollment Queue modal)
-- **Send Worker Stage 2A** — Dry-run processing: one admin-only endpoint that processes QUEUED items into audited decisions (writes `OutboundSendAttemptAudit`), no real emails
+- **Enrollments** — Create enrollments (from **Leads Snapshot** or manual paste), pause/resume/cancel lifecycle
+- **Send Queue Preview (Dry Run)** — WAIT/SKIP/SEND reasons, tenant-scoped
+- **Preview email** — Render-only preview of subject/body by queue item (no send)
+- **Details** — Queue item detail (status, scheduledFor, sentAt, attemptCount, lastError) in Enrollment Queue modal
+- **Retry/Skip** — Queue item actions (tenant + admin)
+- **Dry-run Worker** — One admin-only endpoint processes QUEUED items into **Dry-run Audit** (decision trail: why each item would send or skip); no real emails
 
 ---
 
@@ -27,12 +27,12 @@ Stability and operability doc for the Pilot Release. **No real sending.** Single
 ## Operator steps
 
 1. **Select client** — In the app, choose the client (tenant) from the selector. All subsequent actions are scoped to that client.
-2. **Create enrollment** — From Sequences, create an enrollment (batch of recipients) for a sequence.
-3. **View Send Queue Preview** — Use the Send Queue Preview to see WAIT/SKIP/SEND and reasons for queued items.
-4. **Open Enrollment Queue modal** — From the preview or sequence view, open the Enrollment Queue modal for an enrollment.
-5. **Use Details** — In the queue table, click **Details** on a row to load and show item detail (status, scheduledFor, sentAt, attemptCount, lastError).
-6. **Use Retry/Skip** — Retry or Skip queue items (requires admin secret in the modal). Only available when X-Customer-Id is set and admin secret is provided.
-7. **Run dry-run worker** — Call the admin-only endpoint to process one batch of QUEUED items into audit decisions (no real send). See Admin requirements below.
+2. **Create/Edit Sequence** — Open a sequence; in **Configuration**, pick a **Leads Snapshot** (saved list of leads).
+3. **Create Enrollment** — Create an enrollment for that sequence. Enrollments can be created from the selected **Leads Snapshot** (preferred) or by manual paste of emails.
+4. **Send Queue Preview (Dry Run)** — Open the **Send Queue Preview (Dry Run)** panel and Refresh; view WAIT/SKIP/SEND and reasons.
+5. **Preview email** — In the queue, click **Preview email** on a row to see the rendered subject/body (render-only; no sending).
+6. **Details** — Click **Details** on a row for full item state (status, scheduledFor, sentAt, attemptCount, lastError).
+7. **Dry-run Audit** — The **Dry-run Audit** panel shows the decision trail (why each item would send or skip), written when the dry-run worker runs. Optional: use **Retry/Skip** (admin secret) and run the **Dry-run Worker** (admin-only) to generate audit.
 
 ---
 

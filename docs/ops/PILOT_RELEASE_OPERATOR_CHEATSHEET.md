@@ -4,13 +4,27 @@
 
 ---
 
+## Mental model
+
+- **Sequence** = message plan (steps + delays).
+- **Template** = the email content for a step.
+- **Leads Snapshot** = saved list of leads (e.g. Cognism batch).
+- **Enrollment** = a batch run of a sequence against a specific recipient set.
+- **Enrollment Recipient** = a person/email enrolled (from snapshot or manual paste).
+- **Queue item** = one “to-be-sent” step for one recipient (dry-run or live gated).
+- **Preview email** = render-only preview of subject/body for a queue item (no send).
+- **Details** = metadata/status for a queue item (read-only).
+- **Dry-run Audit** = “why this would send/skip” decision log (created by Dry-run worker).
+
+---
+
 ## What you can do today
 
 - **Onboarding & setup** — Client onboarding, email accounts (identities)
 - **Sequences** — Create and manage email sequences
-- **Enrollments** — Create enrollments, **Pause / Resume / Cancel** lifecycle
-- **Send Queue Preview** — See WAIT/SKIP/SEND and reasons (tenant-scoped)
-- **Enrollment Queue modal** — Render email (subject + body), **Details** (status, scheduledFor, sentAt, attemptCount, lastError)
+- **Enrollments** — Create enrollments (from **Leads Snapshot** or manual paste), **Pause / Resume / Cancel** lifecycle
+- **Send Queue Preview (Dry Run)** — See WAIT/SKIP/SEND and reasons (tenant-scoped)
+- **Enrollment Queue modal** — **Preview email** (subject + body), **Details** (status, scheduledFor, sentAt, attemptCount, lastError)
 - **Retry / Skip** queue items — Admin-only; requires admin secret in the modal
 - **Dry-run worker** — Admin-only endpoint processes QUEUED items into audit rows; **no real send**
 
@@ -22,17 +36,18 @@
 
 ---
 
-## Step-by-step clicks (5–10 steps)
+## How to run Pilot (operator steps)
 
-1. **Select client** — Choose the client (tenant) in the app. Confirm client id shows `cust_...`.
-2. **Marketing → Sequences** — Open Sequences, open a sequence.
-3. **Enrollments** — Create or open an enrollment; confirm Pause/Resume/Cancel work as expected.
-4. **Send Queue Preview** — Open Send Queue Preview for that enrollment; confirm it renders (WAIT/SKIP/SEND).
-5. **Enrollment Queue modal** — Open the Enrollment Queue modal.
-6. **Render** — Click render on a row; confirm subject/body load (Stage 3G).
-7. **Details** — Click Details on a row; confirm status, scheduledFor, sentAt, attemptCount, lastError (Stage 3I).
-8. **Retry/Skip** — Enter admin secret in the modal field; Retry/Skip buttons enable; use only if you have the secret (Stage 3H).
-9. **Dry-run worker** — Call `POST /api/send-worker/dry-run` with `X-Admin-Secret` (see Admin secret notes) to process one batch; writes audit only.
+1. **Pick Client** — Select the client (tenant) in the app. Confirm client id shows `cust_...`.
+2. **Create/Edit Sequence** — Marketing → Sequences; open a sequence. In **Configuration**, pick a **Leads Snapshot** (saved list of leads).
+3. **Create Enrollment** — Create an enrollment for that sequence.
+   - **Recommended:** “Use Leads Snapshot” — pulls recipients from the selected snapshot.
+   - **Advanced:** manual paste of emails.
+4. **Send Queue Preview (Dry Run)** — Open the **Send Queue Preview (Dry Run)** panel and **Refresh**. Confirm WAIT/SKIP/SEND and reasons.
+5. **Preview email and Details** — In the queue, use **Preview email** on a row (render-only; no send). Use **Details** on a row for status, scheduledFor, sentAt, attemptCount, lastError.
+6. **Optional (admin)** — Enter admin secret in the modal; use **Retry/Skip** if needed. Run **Dry-run Worker** (admin-only) to generate **Dry-run Audit** (decision log for why items would/wouldn’t send).
+
+**Explicit:** Pilot does **NOT** send email. All of the above is dry-run / preview / audit-only unless Azure live-send flags are enabled — and we are **NOT** enabling them for Pilot.
 
 ---
 

@@ -2,11 +2,13 @@
 
 Spoken demo flow for OpenDoors Pilot. **No real sending.** All send paths are dry-run or audit-only.
 
+**This demo is deliberately dry-run only; real sending is gated and disabled.**
+
 ---
 
 ## 1. Intro (≈1 min)
 
-**What it is:** ODCRM Pilot for OpenDoors: sequences, enrollments, send queue preview, queue item details, render, and admin-only Retry/Skip and dry-run worker. Everything is tenant-scoped and safe for demo.
+**What it is:** ODCRM Pilot for OpenDoors: sequences, enrollments, send queue preview, queue item **Preview email** and **Details**, and admin-only Retry/Skip and dry-run worker. Everything is tenant-scoped and safe for demo.
 
 **What it isn’t:** No live email delivery. We show the full flow up to “would send”; the worker only writes audit rows.
 
@@ -15,25 +17,26 @@ Spoken demo flow for OpenDoors Pilot. **No real sending.** All send paths are dr
 ## 2. Create / view enrollment (≈1 min)
 
 - Go to **Marketing → Sequences**, open a sequence.
-- Create or open an **enrollment** (batch of recipients).
+- In **Configuration**, pick a **Leads Snapshot** (or use manual paste).
+- Create or open an **enrollment** (batch of recipients from snapshot or paste).
 - Show **Pause / Resume / Cancel** if relevant.
 - “Enrollments are the unit we queue from; the send queue is per enrollment.”
 
 ---
 
-## 3. Send Queue Preview (≈1 min)
+## 3. Send Queue Preview (Dry Run) (≈1 min)
 
-- Open **Send Queue Preview** for that enrollment.
+- Open **Send Queue Preview (Dry Run)** for that enrollment.
 - Point out **WAIT / SKIP / SEND** and reasons.
 - “This is tenant-scoped; the backend uses the selected client id.”
 
 ---
 
-## 4. Enrollment Queue modal — Render + Details (≈1–2 min)
+## 4. Enrollment Queue modal — Preview email + Details (≈1–2 min)
 
 - Open the **Enrollment Queue** modal for the same enrollment.
-- **Render:** Pick a row, click **Render email**; show subject and body (Stage 3G). “Rendered from templates; no send.”
-- **Details:** Click **Details** on a row; show status, scheduledFor, sentAt, attemptCount, lastError (Stage 3I). “Full item state for ops.”
+- **Preview email:** Pick a row, click **Preview email**; show subject and body. “Rendered from templates; we preview what would send — no actual send.”
+- **Details:** Click **Details** on a row; show status, scheduledFor, sentAt, attemptCount, lastError. “Full item state for ops.”
 
 ---
 
@@ -44,14 +47,14 @@ Spoken demo flow for OpenDoors Pilot. **No real sending.** All send paths are dr
 
 ---
 
-## 6. Dry-run worker (admin-only) and audit (≈30 s)
+## 6. Dry-run worker (admin-only) and Dry-run Audit (≈30 s)
 
-- “The send worker has a **dry-run** endpoint: it takes QUEUED items, makes decisions, and writes **audit** rows only — no real email.”
+- “The send worker has a **dry-run** endpoint: it takes QUEUED items, makes decisions, and writes **Dry-run Audit** rows — the decision trail for why each item would send or skip. No real email.”
 - “Only operators with the admin secret can call it. Use it to validate that the pipeline runs end-to-end in Pilot.”
 
 ---
 
 ## 7. Close — next milestones (≈30 s)
 
-- “Pilot proves: enrollments, queue preview, queue modal, render, details, Retry/Skip, and dry-run worker with audit.”
+- “Pilot proves: enrollments (including from Leads Snapshot), queue preview, **Preview email**, **Details**, Retry/Skip, and dry-run worker with **Dry-run Audit**.”
 - “Next: enable real sending behind canary/env when we’re ready.”
