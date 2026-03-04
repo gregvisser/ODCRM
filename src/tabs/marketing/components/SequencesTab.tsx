@@ -534,6 +534,13 @@ const SequencesTab: React.FC = () => {
     }
   }, [isAuditPanelOpen, selectedCustomerId, auditQueueItemIdFilter, auditDecisionFilter])
 
+  useEffect(() => {
+    if (!isQueuePreviewPanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    loadSendQueuePreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: trigger on panel open + tenant only
+  }, [isQueuePreviewPanelOpen, selectedCustomerId])
+
   const openQueueDrill = (enrollmentId: string) => {
     setQueueDrillEnrollmentId(enrollmentId)
     setQueueDrillOpen(true)
