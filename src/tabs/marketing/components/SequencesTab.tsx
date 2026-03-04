@@ -966,6 +966,11 @@ const SequencesTab: React.FC = () => {
     setQueueEnrollmentId(null)
     setQueueData(null)
     setQueueError(null)
+    setQueueDrawerDetail(null)
+    setQueueDrawerDetailError(null)
+    setQueueDrawerDetailLoading(false)
+    setDryRunWorkerLoading(false)
+    setQueueTickLoading(false)
   }
 
   const handleEnqueue = async (enrollmentId: string) => {
