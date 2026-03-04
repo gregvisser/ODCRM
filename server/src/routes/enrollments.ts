@@ -85,7 +85,14 @@ export async function listEnrollmentsForSequence(req: Request, res: Response): P
   }
 }
 
-/** POST /api/sequences/:id/enrollments — create enrollment + recipients (mount in sequences) */
+const MAX_SNAPSHOT_RECIPIENTS = 500
+
+function isValidEmail(email: string): boolean {
+  const e = email.trim().toLowerCase()
+  return e.length > 0 && e.includes('@') && e.includes('.', e.indexOf('@'))
+}
+
+/** POST /api/sequences/:id/enrollments — create enrollment + recipients (mount in sequences). Supports recipientSource: 'manual' | 'snapshot'. */
 export async function createEnrollmentForSequence(req: Request, res: Response): Promise<void> {
   const customerId = requireCustomerId(req, res)
   if (!customerId) return
@@ -103,25 +110,103 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
       res.status(404).json({ error: 'Sequence not found' })
       return
     }
-    const body = (req.body || {}) as { name?: string; recipients?: Array<{ email: string; firstName?: string; lastName?: string; company?: string; externalId?: string }> }
-    const recipients = Array.isArray(body.recipients) ? body.recipients : []
-    if (recipients.length === 0) {
-      res.status(400).json({ error: 'recipients must be a non-empty array' })
-      return
+    const body = (req.body || {}) as {
+      name?: string
+      recipients?: Array<{ email: string; firstName?: string; lastName?: string; company?: string; externalId?: string }>
+      recipientSource?: 'manual' | 'snapshot'
     }
+    const recipientSource = body.recipientSource === 'snapshot' ? 'snapshot' : body.recipientSource === 'manual' ? 'manual' : undefined
+    const manualRecipients = Array.isArray(body.recipients) ? body.recipients : []
     const name = typeof body.name === 'string' ? body.name.trim() || null : null
-    const normalized = recipients.map((r) => ({
-      email: String(r?.email ?? '').trim().toLowerCase(),
-      firstName: typeof r?.firstName === 'string' ? r.firstName.trim() || null : null,
-      lastName: typeof r?.lastName === 'string' ? r.lastName.trim() || null : null,
-      company: typeof r?.company === 'string' ? r.company.trim() || null : null,
-      externalId: typeof r?.externalId === 'string' ? r.externalId.trim() || null : null,
-    }))
-    const invalid = normalized.find((r) => !r.email)
-    if (invalid) {
-      res.status(400).json({ error: 'Every recipient must have an email' })
-      return
+
+    let normalized: Array<{ email: string; firstName: string | null; lastName: string | null; company: string | null; externalId: string | null }>
+    let resolvedSource: 'manual' | 'snapshot'
+    let invalidCount = 0
+    let dedupedCount = 0
+
+    if (recipientSource === 'snapshot' || (!recipientSource && manualRecipients.length === 0)) {
+      resolvedSource = 'snapshot'
+      const campaign = await prisma.emailCampaign.findFirst({
+        where: { customerId, sequenceId, listId: { not: null } },
+        select: { listId: true },
+      })
+      const listId = campaign?.listId ?? null
+      if (!listId) {
+        res.status(400).json({ success: false, error: 'No Leads Snapshot selected for this sequence' })
+        return
+      }
+      const list = await prisma.contactList.findFirst({
+        where: { id: listId, customerId },
+        select: { id: true },
+      })
+      if (!list) {
+        res.status(404).json({ success: false, error: 'Leads Snapshot list not found' })
+        return
+      }
+      const members = await prisma.contactListMember.findMany({
+        where: { listId: list.id },
+        include: { contact: { select: { email: true, firstName: true, lastName: true, companyName: true } } },
+      })
+      const rawEmails = members.map((m) => ({
+        email: String(m.contact?.email ?? '').trim().toLowerCase(),
+        firstName: typeof m.contact?.firstName === 'string' ? m.contact.firstName.trim() || null : null,
+        lastName: typeof m.contact?.lastName === 'string' ? m.contact.lastName.trim() || null : null,
+        company: typeof m.contact?.companyName === 'string' ? m.contact.companyName.trim() || null : null,
+      }))
+      invalidCount = rawEmails.filter((r) => !isValidEmail(r.email)).length
+      const valid = rawEmails.filter((r) => isValidEmail(r.email))
+      const seen = new Set<string>()
+      const deduped: typeof normalized = []
+      for (const r of valid) {
+        if (seen.has(r.email)) continue
+        seen.add(r.email)
+        deduped.push({ ...r, externalId: null })
+      }
+      dedupedCount = valid.length - deduped.length
+      if (deduped.length > MAX_SNAPSHOT_RECIPIENTS) {
+        res.status(400).json({
+          success: false,
+          error: `Snapshot has ${deduped.length} valid recipients; maximum is ${MAX_SNAPSHOT_RECIPIENTS}. Reduce the list or use manual paste.`,
+        })
+        return
+      }
+      if (deduped.length === 0) {
+        res.status(400).json({
+          success: false,
+          error: 'No valid emails in the selected Leads Snapshot. Add contacts with valid email addresses.',
+        })
+        return
+      }
+      normalized = deduped
+    } else {
+      resolvedSource = 'manual'
+      if (manualRecipients.length === 0) {
+        res.status(400).json({ error: 'recipients must be a non-empty array when using manual source' })
+        return
+      }
+      normalized = manualRecipients.map((r) => ({
+        email: String(r?.email ?? '').trim().toLowerCase(),
+        firstName: typeof r?.firstName === 'string' ? r.firstName.trim() || null : null,
+        lastName: typeof r?.lastName === 'string' ? r.lastName.trim() || null : null,
+        company: typeof r?.company === 'string' ? r.company.trim() || null : null,
+        externalId: typeof r?.externalId === 'string' ? r.externalId.trim() || null : null,
+      }))
+      const invalid = normalized.find((r) => !r.email || !isValidEmail(r.email))
+      if (invalid) {
+        res.status(400).json({ error: 'Every recipient must have a valid email' })
+        return
+      }
+      const seen = new Set<string>()
+      const deduped: typeof normalized = []
+      for (const r of normalized) {
+        if (seen.has(r.email)) continue
+        seen.add(r.email)
+        deduped.push(r)
+      }
+      dedupedCount = normalized.length - deduped.length
+      normalized = deduped
     }
+
     const now = new Date()
     const enrollment = await prisma.$transaction(async (tx) => {
       const e = await tx.enrollment.create({
@@ -142,7 +227,6 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
           externalId: r.externalId,
         })),
       })
-      // Stage 1B: enqueue step 0 for all recipients in same transaction
       await tx.outboundSendQueueItem.createMany({
         data: normalized.map((r) => ({
           customerId,
@@ -159,7 +243,9 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
     })
     res.setHeader('x-odcrm-customer-id', customerId)
     res.status(201).json({
+      success: true,
       data: {
+        enrollmentId: enrollment.enrollment.id,
         id: enrollment.enrollment.id,
         sequenceId: enrollment.enrollment.sequenceId,
         customerId: enrollment.enrollment.customerId,
@@ -168,6 +254,9 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
         createdAt: enrollment.enrollment.createdAt.toISOString(),
         updatedAt: enrollment.enrollment.updatedAt.toISOString(),
         recipientCount: enrollment.recipientCount,
+        recipientSource: resolvedSource,
+        invalidCount: resolvedSource === 'snapshot' ? invalidCount : undefined,
+        dedupedCount,
       },
     })
   } catch (err) {
