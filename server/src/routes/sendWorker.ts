@@ -49,7 +49,7 @@ function getSuppressionReason(
   email: string
 ): string | null {
   const normalized = email.toLowerCase().trim()
-  const domain = email.includes('@') ? email.split('@')[1] : ''
+  const domain = normalized.includes('@') ? normalized.split('@')[1] : ''
   const emailEntry = suppressionEntries.find((s) => s.type === 'email' && (s.emailNormalized ?? s.value) === normalized)
   if (emailEntry) return emailEntry.reason ?? 'suppressed'
   const domainEntry = suppressionEntries.find((s) => s.type === 'domain' && s.value === domain)
@@ -310,7 +310,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
       let textBody: string | undefined
       if (step?.subjectTemplate != null && step?.bodyTemplateHtml != null) {
         const recipientRow = await prisma.enrollmentRecipient.findFirst({
-          where: { enrollmentId: item.enrollmentId, email: recipientEmail },
+          where: { enrollmentId: item.enrollmentId, email: recipientEmail.toLowerCase().trim() },
           select: { firstName: true, lastName: true, company: true, email: true },
         })
         const vars = {
