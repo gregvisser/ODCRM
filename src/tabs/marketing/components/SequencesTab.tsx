@@ -350,13 +350,15 @@ const SequencesTab: React.FC = () => {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
-  // Stage 2B-min: dry-run audit viewer (read-only)
+  // Stage 2B-min / 2B+: dry-run audit viewer (read-only)
   const [auditItems, setAuditItems] = useState<Array<{ id: string; decidedAt: string; decision: string; reason: string | null; queueItemId: string; snapshot?: unknown }>>([])
   const [auditViewerLoading, setAuditViewerLoading] = useState(false)
   const [auditViewerError, setAuditViewerError] = useState<string | null>(null)
   const [auditNextCursor, setAuditNextCursor] = useState<string | null>(null)
   const [auditQueueItemIdFilter, setAuditQueueItemIdFilter] = useState('')
   const [auditDecisionFilter, setAuditDecisionFilter] = useState<string>('all')
+  const [auditSummary, setAuditSummary] = useState<{ total: number; byDecision: Record<string, number>; sinceHours?: number } | null>(null)
+  const auditSummarySinceHours = 24
 
   function parseRecipientEmails(raw: string): string[] {
     const split = raw.split(/[\n,;\s]+/).map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -444,7 +446,7 @@ const SequencesTab: React.FC = () => {
   const loadAudits = async (cursor?: string | null) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!cursor) {
-      setAuditLoading(true)
+      setAuditViewerLoading(true)
       setAuditError(null)
       setAuditItems([])
       setAuditNextCursor(null)
@@ -478,6 +480,55 @@ const SequencesTab: React.FC = () => {
   const loadAuditsMore = () => {
     if (auditNextCursor) loadAudits(auditNextCursor)
   }
+
+  const loadAuditSummary = async () => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const params = new URLSearchParams()
+    params.set('sinceHours', String(auditSummarySinceHours))
+    if (auditQueueItemIdFilter.trim()) params.set('queueItemId', auditQueueItemIdFilter.trim())
+    if (auditDecisionFilter && auditDecisionFilter !== 'all') params.set('decision', auditDecisionFilter)
+    const res = await api.get<{ success: boolean; data?: { sinceHours: number; total: number; byDecision: Record<string, number> } }>(
+      `/api/send-worker/audits/summary?${params.toString()}`,
+      { headers: { 'X-Customer-Id': selectedCustomerId } }
+    )
+    if (res.error) {
+      setAuditSummary(null)
+      return
+    }
+    const d = res.data?.data
+    setAuditSummary(d ? { total: d.total, byDecision: d.byDecision ?? {}, sinceHours: d.sinceHours } : null)
+  }
+
+  const handleExportAuditCsv = () => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const params = new URLSearchParams()
+    params.set('sinceHours', String(auditSummarySinceHours))
+    if (auditQueueItemIdFilter.trim()) params.set('queueItemId', auditQueueItemIdFilter.trim())
+    if (auditDecisionFilter && auditDecisionFilter !== 'all') params.set('decision', auditDecisionFilter)
+    const base = (import.meta.env.VITE_API_URL ?? '').toString().replace(/\/$/, '')
+    const path = `/api/send-worker/audits.csv?${params.toString()}`
+    const url = base ? `${base}${path}` : path
+    fetch(url, { headers: { 'X-Customer-Id': selectedCustomerId } })
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status))
+        return r.blob()
+      })
+      .then((blob) => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = 'send_attempt_audits.csv'
+        a.click()
+        URL.revokeObjectURL(a.href)
+        toast({ title: 'CSV downloaded', status: 'success', duration: 2000 })
+      })
+      .catch(() => toast({ title: 'Export failed', status: 'error' }))
+  }
+
+  useEffect(() => {
+    if (isAuditPanelOpen && selectedCustomerId?.startsWith('cust_')) {
+      loadAuditSummary()
+    }
+  }, [isAuditPanelOpen, selectedCustomerId, auditQueueItemIdFilter, auditDecisionFilter])
 
   const openQueueDrill = (enrollmentId: string) => {
     setQueueDrillEnrollmentId(enrollmentId)
@@ -2333,10 +2384,21 @@ const SequencesTab: React.FC = () => {
                       <option value="SKIP_INVALID">SKIP_INVALID</option>
                       <option value="SKIP_NO_IDENTITY">SKIP_NO_IDENTITY</option>
                     </Select>
-                    <Button size="sm" onClick={() => loadAudits()} isLoading={auditViewerLoading} isDisabled={!selectedCustomerId}>
+                    <Button size="sm" onClick={() => { loadAudits(); loadAuditSummary() }} isLoading={auditViewerLoading} isDisabled={!selectedCustomerId}>
                       Refresh
                     </Button>
+                    <Button size="sm" variant="outline" onClick={handleExportAuditCsv} isDisabled={!selectedCustomerId?.startsWith('cust_')}>
+                      Export CSV
+                    </Button>
                   </Flex>
+                  {auditSummary != null && (
+                    <Flex gap={2} mb={3} flexWrap="wrap" align="center">
+                      <Badge size="sm" colorScheme="gray">Total: {auditSummary.total}</Badge>
+                      {Object.keys(auditSummary.byDecision).sort().map((k) => (
+                        <Badge key={k} size="sm" variant="outline">{k}: {auditSummary.byDecision[k] ?? 0}</Badge>
+                      ))}
+                    </Flex>
+                  )}
                   {auditViewerError && (
                     <Alert status="error" size="sm" mb={3}>
                       <AlertIcon />

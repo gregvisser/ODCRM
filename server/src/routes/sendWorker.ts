@@ -13,8 +13,33 @@ const router = Router()
 const DRY_RUN_BATCH_SIZE = 20
 const AUDITS_LIMIT_DEFAULT = 50
 const AUDITS_LIMIT_MAX = 200
+const AUDITS_CSV_MAX = 2000
+const SUMMARY_SINCE_HOURS_DEFAULT = 24
+const SUMMARY_SINCE_HOURS_MAX = 168
 
 const VALID_DECISIONS = new Set<string>(Object.values(OutboundSendAttemptDecision))
+
+function buildAuditWhere(
+  customerId: string,
+  opts: { queueItemId?: string; decision?: OutboundSendAttemptDecision; sinceHours?: number }
+): { customerId: string; queueItemId?: string; decision?: OutboundSendAttemptDecision; decidedAt?: { gte: Date } } {
+  const where: { customerId: string; queueItemId?: string; decision?: OutboundSendAttemptDecision; decidedAt?: { gte: Date } } = { customerId }
+  if (opts.queueItemId) where.queueItemId = opts.queueItemId
+  if (opts.decision) where.decision = opts.decision
+  if (opts.sinceHours != null && opts.sinceHours > 0) {
+    const since = new Date(Date.now() - opts.sinceHours * 60 * 60 * 1000)
+    where.decidedAt = { gte: since }
+  }
+  return where
+}
+
+function escapeCsvField(val: string | null | undefined): string {
+  const s = val == null ? '' : String(val)
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
 
 function getSuppressionReason(
   suppressionEntries: Array<{ type: string; value: string; emailNormalized: string | null; reason: string | null }>,
@@ -190,6 +215,103 @@ router.get('/audits', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/audits] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Audits list failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/audits/summary — tenant-scoped audit summary (total + byDecision).
+ * Query: queueItemId?, decision?, sinceHours (default 24, max 168).
+ */
+router.get('/audits/summary', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const queueItemId = typeof req.query.queueItemId === 'string' ? req.query.queueItemId.trim() || undefined : undefined
+    const decisionParam = typeof req.query.decision === 'string' ? req.query.decision.trim() : undefined
+    const decision = decisionParam && VALID_DECISIONS.has(decisionParam) ? (decisionParam as OutboundSendAttemptDecision) : undefined
+    let sinceHours = SUMMARY_SINCE_HOURS_DEFAULT
+    if (typeof req.query.sinceHours === 'string') {
+      const n = parseInt(req.query.sinceHours, 10)
+      if (!Number.isNaN(n) && n >= 1) sinceHours = Math.min(n, SUMMARY_SINCE_HOURS_MAX)
+    }
+
+    const where = buildAuditWhere(customerId, { queueItemId, decision, sinceHours })
+
+    const [total, groups] = await Promise.all([
+      prisma.outboundSendAttemptAudit.count({ where }),
+      prisma.outboundSendAttemptAudit.groupBy({
+        by: ['decision'],
+        where,
+        _count: { id: true },
+      }),
+    ])
+
+    const byDecision: Record<string, number> = {}
+    for (const g of groups) {
+      byDecision[g.decision] = g._count.id
+    }
+
+    res.json({
+      success: true,
+      data: {
+        sinceHours,
+        total,
+        byDecision,
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/audits/summary] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Summary failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/audits.csv — tenant-scoped CSV export (read-only).
+ * Query: queueItemId?, decision?, sinceHours (default 24). Hard cap 2000 rows.
+ */
+router.get('/audits.csv', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const queueItemId = typeof req.query.queueItemId === 'string' ? req.query.queueItemId.trim() || undefined : undefined
+    const decisionParam = typeof req.query.decision === 'string' ? req.query.decision.trim() : undefined
+    const decision = decisionParam && VALID_DECISIONS.has(decisionParam) ? (decisionParam as OutboundSendAttemptDecision) : undefined
+    let sinceHours = SUMMARY_SINCE_HOURS_DEFAULT
+    if (typeof req.query.sinceHours === 'string') {
+      const n = parseInt(req.query.sinceHours, 10)
+      if (!Number.isNaN(n) && n >= 1) sinceHours = Math.min(n, SUMMARY_SINCE_HOURS_MAX)
+    }
+
+    const where = buildAuditWhere(customerId, { queueItemId, decision, sinceHours })
+
+    const rows = await prisma.outboundSendAttemptAudit.findMany({
+      where,
+      orderBy: [{ decidedAt: 'desc' as const }, { id: 'desc' as const }],
+      take: AUDITS_CSV_MAX,
+      select: {
+        decidedAt: true,
+        decision: true,
+        reason: true,
+        queueItemId: true,
+      },
+    })
+
+    const header = 'decidedAt,decision,reason,queueItemId'
+    const lines = [header]
+    for (const r of rows) {
+      const decidedAt = r.decidedAt instanceof Date ? r.decidedAt.toISOString() : String(r.decidedAt ?? '')
+      lines.push([escapeCsvField(decidedAt), escapeCsvField(r.decision), escapeCsvField(r.reason), escapeCsvField(r.queueItemId)].join(','))
+    }
+    const csv = lines.join('\r\n')
+
+    res.setHeader('Content-Type', 'text/csv')
+    res.setHeader('Content-Disposition', 'attachment; filename=send_attempt_audits.csv')
+    res.send(csv)
+  } catch (err) {
+    console.error('[send-worker/audits.csv] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'CSV export failed' })
   }
 })
 
