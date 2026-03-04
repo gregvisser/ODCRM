@@ -1,0 +1,53 @@
+# Pilot Release — OpenDoors (ODCRM)
+
+Stability and operability doc for the Pilot Release. **No real sending.** Single smoke script proves core flows on prod.
+
+---
+
+## What’s included in Pilot Release
+
+- **Onboarding** — Client onboarding and setup
+- **Email Accounts** — Email identity configuration
+- **Sequences** — Create and manage email sequences
+- **Enrollments Stage 1A/1B** — Create enrollments, pause/resume/cancel lifecycle
+- **Send Queue Stage 3A** — Send Queue Preview (WAIT/SKIP/SEND reasons, tenant-scoped)
+- **Send Queue Stage 3G** — Dry-run render (subject + bodyHtml by queue item)
+- **Send Queue Stage 3H** — Retry/Skip queue items (tenant + admin)
+- **Send Queue Stage 3I** — Queue item detail (Details button in Enrollment Queue modal)
+- **Send Worker Stage 2A** — Dry-run processing: one admin-only endpoint that processes QUEUED items into audited decisions (writes `OutboundSendAttemptAudit`), no real emails
+
+---
+
+## What is explicitly NOT included
+
+- **Real sending** — No live email delivery. All send paths are dry-run or gated (canary/env) and not enabled for Pilot.
+
+---
+
+## Operator steps
+
+1. **Select client** — In the app, choose the client (tenant) from the selector. All subsequent actions are scoped to that client.
+2. **Create enrollment** — From Sequences, create an enrollment (batch of recipients) for a sequence.
+3. **View Send Queue Preview** — Use the Send Queue Preview to see WAIT/SKIP/SEND and reasons for queued items.
+4. **Open Enrollment Queue modal** — From the preview or sequence view, open the Enrollment Queue modal for an enrollment.
+5. **Use Details** — In the queue table, click **Details** on a row to load and show item detail (status, scheduledFor, sentAt, attemptCount, lastError).
+6. **Use Retry/Skip** — Retry or Skip queue items (requires admin secret in the modal). Only available when X-Customer-Id is set and admin secret is provided.
+7. **Run dry-run worker** — Call the admin-only endpoint to process one batch of QUEUED items into audit decisions (no real send). See Admin requirements below.
+
+---
+
+## Admin requirements
+
+- **ADMIN_SECRET** — Must be configured in the **backend** environment (e.g. Azure App Service application settings for the API, or `server/.env` locally). Used to validate `X-Admin-Secret` on admin-only routes.
+- **Who has access** — Only operators who have the value of `ADMIN_SECRET` can call admin-only endpoints (e.g. send-queue retry/skip, send-worker dry-run).
+- **How to call POST /api/send-worker/dry-run safely** — From a machine that has the secret:  
+  `curl -X POST -H "Content-Type: application/json" -H "X-Admin-Secret: <ADMIN_SECRET>" -d "{}" "https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/send-worker/dry-run"`  
+  Do not commit or log the secret. The endpoint processes up to 20 QUEUED items and writes audit rows; it does not send email.
+
+---
+
+## Troubleshooting
+
+- **400 tenant required** — The request is missing or invalid **X-Customer-Id** (e.g. for send-queue preview or item detail). Select a client in the UI or send the header with a valid customer id (e.g. `cust_...`).
+- **401 admin required** — The request is missing or invalid **X-Admin-Secret**. Admin-only endpoints (e.g. retry/skip, send-worker dry-run) require this header to match the backend `ADMIN_SECRET`.
+- **Where to check prod parity** — Frontend: `https://odcrm.bidlow.co.uk/__build.json` (contains build SHA). Backend: `https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/_build` (contains build SHA). Use `scripts/prod-check.cjs` with `EXPECT_SHA` set to the merge commit SHA to confirm FE and BE match.
