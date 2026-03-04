@@ -59,6 +59,7 @@
     "test:pilot-release-smoke": "node scripts/self-test-pilot-release-smoke.mjs",
     "test:audit-viewer-stage2b-min": "node scripts/self-test-audit-viewer-stage2b-min.mjs",
     "test:audit-viewer-stage2b-plus": "node scripts/self-test-audit-viewer-stage2b-plus.mjs",
+    "test:send-worker-live-tick-stage4min": "node scripts/self-test-send-worker-live-tick-stage4min.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

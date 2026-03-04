@@ -1,5 +1,3 @@
-/* eslint-disable no-console */
-
 /**
  * Regression safety script: attachments + Web Address wiring
  *
