@@ -9,6 +9,7 @@ import { exitSoon } from './self-test-utils.mjs'
 
 const TESTS = [
   'test:send-queue-preview-stage3a',
+  'test:send-queue-item-render-stage3g',
   'test:enrollment-lifecycle-stage1b',
   'test:send-queue-item-actions-stage3h',
   'test:send-queue-item-detail-stage3i',
