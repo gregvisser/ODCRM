@@ -62,6 +62,7 @@
     "test:send-worker-live-tick-stage4min": "node scripts/self-test-send-worker-live-tick-stage4min.mjs",
     "test:enrollment-recipient-source-ui": "node scripts/self-test-enrollment-recipient-source-ui.mjs",
     "test:enrollment-snapshot-ingestion": "node scripts/self-test-enrollment-snapshot-ingestion.mjs",
+    "test:sequences-operator-ui": "node scripts/self-test-sequences-operator-ui.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

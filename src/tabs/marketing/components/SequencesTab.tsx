@@ -283,7 +283,8 @@ const SequencesTab: React.FC = () => {
     entries: Array<{ id: string; eventType: string; timestamp: string; customerId: string; payload: Record<string, unknown> }>
   } | null>(null)
   const { isOpen: isQueueOpen, onOpen: onQueueOpen, onClose: onQueueClose } = useDisclosure()
-  const { isOpen: isAuditPanelOpen, onOpen: onAuditPanelOpen, onClose: onAuditPanelClose } = useDisclosure({ defaultIsOpen: true })
+  const { isOpen: isAuditPanelOpen, onOpen: onAuditPanelOpen, onClose: onAuditPanelClose } = useDisclosure({ defaultIsOpen: false })
+  const { isOpen: isQueuePreviewPanelOpen, onOpen: onQueuePreviewPanelOpen, onClose: onQueuePreviewPanelClose } = useDisclosure({ defaultIsOpen: false })
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -306,7 +307,7 @@ const SequencesTab: React.FC = () => {
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
 
-  // Stage 3B/3C: Send Queue Preview (dry-run, read-only)
+  // Send Queue Preview (dry-run, read-only)
   type SendQueuePreviewItem = {
     id: string
     enrollmentId: string
@@ -332,28 +333,28 @@ const SequencesTab: React.FC = () => {
   const [queuePreviewLastEndpoint, setQueuePreviewLastEndpoint] = useState<string>('')
   const [queuePreviewSummary, setQueuePreviewSummary] = useState<SendQueuePreviewSummary | null>(null)
 
-  // Stage 3E: drill-down from preview row to enrollment queue
+  // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
   const [queueDrillEnrollmentId, setQueueDrillEnrollmentId] = useState<string>('')
   const [queueDrillLoading, setQueueDrillLoading] = useState(false)
   const [queueDrillError, setQueueDrillError] = useState<string | null>(null)
   const [queueDrillData, setQueueDrillData] = useState<unknown>(null)
-  // Stage 3F: dry-run render preview (read-only)
+  // dry-run render preview (read-only)
   const [renderLoading, setRenderLoading] = useState(false)
   const [renderError, setRenderError] = useState<string | null>(null)
   const [renderData, setRenderData] = useState<{ subject: string; bodyHtml: string; stepIndex: number; enrollmentId: string; queueItemId?: string; recipientEmail?: string } | null>(null)
   const [renderViewMode, setRenderViewMode] = useState<'code' | 'rendered'>('code')
-  // Stage 3H: admin secret for retry/skip (local only, sessionStorage)
+  // admin secret for retry/skip (local only, sessionStorage)
   const [adminSecret, setAdminSecret] = useState<string>(() => {
     if (typeof sessionStorage === 'undefined') return ''
     return sessionStorage.getItem('odcrm_admin_secret') ?? ''
   })
-  // Stage 3I: queue item detail (read-only)
+  // queue item detail (read-only)
   const [queueItemDetail, setQueueItemDetail] = useState<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
-  // Stage 2B-min / 2B+: dry-run audit viewer (read-only)
+  // dry-run audit viewer (read-only)
   const [auditItems, setAuditItems] = useState<Array<{ id: string; decidedAt: string; decision: string; reason: string | null; queueItemId: string; snapshot?: unknown }>>([])
   const [auditViewerLoading, setAuditViewerLoading] = useState(false)
   const [auditViewerError, setAuditViewerError] = useState<string | null>(null)
@@ -2030,7 +2031,11 @@ const SequencesTab: React.FC = () => {
 
       <Card mb={6}>
         <CardBody>
-          <Heading size="sm" mb={3}>Send Queue Preview (Dry Run)</Heading>
+          <Heading size="sm" mb={3} cursor="pointer" onClick={isQueuePreviewPanelOpen ? onQueuePreviewPanelClose : onQueuePreviewPanelOpen}>
+            Send Queue Preview (Dry Run) {isQueuePreviewPanelOpen ? '▼' : '▶'}
+          </Heading>
+          <Collapse in={isQueuePreviewPanelOpen}>
+            <Box>
           <Flex gap={3} mb={3} flexWrap="wrap" align="center">
             <Button size="sm" onClick={loadSendQueuePreview} isLoading={queuePreviewLoading} isDisabled={!selectedCustomerId}>
               Refresh
@@ -2143,6 +2148,8 @@ const SequencesTab: React.FC = () => {
               </Table>
             </Box>
           )}
+            </Box>
+          </Collapse>
 
           <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null); setRenderViewMode('code'); setQueueItemDetail(null); setDetailLoading(false); setDetailError(null) }} size="xl">
             <ModalOverlay />
@@ -2246,7 +2253,7 @@ const SequencesTab: React.FC = () => {
                                       }}
                                       isDisabled={renderLoading || !item.id}
                                     >
-                                      Render email
+                                      Preview email
                                     </Button>
                                     <Button
                                       size="xs"
@@ -2359,7 +2366,7 @@ const SequencesTab: React.FC = () => {
                         </Code>
                       </Box>
                     )}
-                    {/* Stage 3F: render preview section */}
+                    {/* render preview section */}
                     {renderLoading && <Flex justify="center" py={4}><Spinner size="md" /></Flex>}
                     {!renderLoading && renderError && (
                       <Alert status="error" mt={2}>
@@ -2397,7 +2404,7 @@ const SequencesTab: React.FC = () => {
       <Card mb={6}>
         <CardBody>
           <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
-            Dry-run Audit (Stage 2A) {isAuditPanelOpen ? '▼' : '▶'}
+            Dry-run Audit {isAuditPanelOpen ? '▼' : '▶'}
           </Heading>
           <Collapse in={isAuditPanelOpen}>
             <Box>
@@ -2863,6 +2870,15 @@ const SequencesTab: React.FC = () => {
 
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
+                  <Alert status="info" size="sm" mb={4} borderRadius="md">
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle fontSize="sm">How this works</AlertTitle>
+                      <AlertDescription fontSize="xs">
+                        1. Pick a Leads Snapshot in Configuration · 2. Create an Enrollment (a batch run of this sequence) · 3. Use &quot;Preview email&quot; and &quot;Details&quot; in the queue to review what would send
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
                   <Flex justify="space-between" align="center" mb={4}>
                     <Heading size="sm">Enrollments</Heading>
                     <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
