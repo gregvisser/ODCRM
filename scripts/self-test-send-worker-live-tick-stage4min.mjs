@@ -124,7 +124,44 @@ async function main() {
     console.log(`  POST ${PATH} (cust_fake, no admin): ${res.status}`)
   }
 
-  pass('No headers, tenant-only, and tenant-without-admin correctly rejected (401/403/400).')
+  // Test D: X-Customer-Id + wrong X-Admin-Secret -> expect 401/403 (NOT 200/500)
+  try {
+    res = await withTimeout(15000, async ({ signal }) =>
+      fetch(url, {
+        method: 'POST',
+        signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Customer-Id': 'cust_fake',
+          'X-Admin-Secret': 'wrong',
+        },
+        body: '{}',
+      })
+    )
+  } catch (err) {
+    fail(`fetch POST ${PATH} (wrong admin secret) error: ${err?.message ?? err}`)
+    return
+  }
+  const bodyD = await readBodyPreview(res, 200)
+  if (res.status === 200) {
+    fail(`POST ${PATH} (wrong admin secret) must not return 200`, bodyD)
+    return
+  }
+  if (res.status === 500) {
+    fail(`POST ${PATH} (wrong admin secret) must not return 500`, bodyD)
+    return
+  }
+  if (res.status === 404) {
+    fail(`POST ${PATH} (wrong admin secret): 404 — route missing`, bodyD)
+    return
+  } else if (res.status === 401 || res.status === 403) {
+    console.log(`  POST ${PATH} (X-Admin-Secret wrong): ${res.status} — rejected`)
+  } else {
+    fail(`POST ${PATH} (wrong admin secret): expect 401 or 403, got ${res.status}`, bodyD)
+    return
+  }
+
+  pass('No headers, tenant-only, tenant-without-admin, and wrong admin secret correctly rejected (401/403/400).')
 }
 
 main()
