@@ -2115,6 +2115,7 @@ const SequencesTab: React.FC = () => {
               </FormControl>
             </HStack>
           </Flex>
+          <Text fontSize="xs" color="gray.500" mb={2}>Details are available in the Send Queue drawer (View queue).</Text>
           {queuePreviewLastEndpoint && (
             <Text fontSize="xs" color="gray.500" mb={1}>Endpoint: {queuePreviewLastEndpoint}</Text>
           )}

@@ -19,6 +19,7 @@ const required = [
   'Preview email',
   'Send Queue Preview (Dry Run)',
   'Dry-run Audit',
+  'Details are available in the Send Queue drawer',
 ]
 const forbidden = ['Stage 2A', 'Stage 3', '(Stage']
 

@@ -30,8 +30,7 @@ Stability and operability doc for the Pilot Release. **No real sending.** Single
 2. **Create/Edit Sequence** — Open a sequence; in **Configuration**, pick a **Leads Snapshot** (saved list of leads).
 3. **Create Enrollment** — Create an enrollment for that sequence. Enrollments can be created from the selected **Leads Snapshot** (preferred) or by manual paste of emails.
 4. **Send Queue Preview (Dry Run)** — Open the **Send Queue Preview (Dry Run)** panel and Refresh; view WAIT/SKIP/SEND and reasons.
-5. **Preview email** — In the queue, click **Preview email** on a row to see the rendered subject/body (render-only; no sending).
-6. **Details** — Click **Details** on a row for full item state (status, scheduledFor, sentAt, attemptCount, lastError).
+5. **Preview email and Details** — Open **Send Queue** (drawer) for an enrollment via **View queue**. In the drawer table, click **Details** on a row for full item state (status, scheduledFor, sentAt, attemptCount, lastError); click **Preview email** on a row for render-only subject/body.
 7. **Dry-run Audit** — The **Dry-run Audit** panel shows the decision trail (why each item would send or skip), written when the dry-run worker runs. Optional: use **Retry/Skip** (admin secret) and run the **Dry-run Worker** (admin-only) to generate audit.
 
 ---
