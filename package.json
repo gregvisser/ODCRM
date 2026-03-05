@@ -67,6 +67,7 @@
     "test:queue-preview-autoload": "node scripts/self-test-queue-preview-autoload.mjs",
     "test:send-queue-operator-ui": "node scripts/self-test-send-queue-operator-ui.mjs",
     "test:send-queue-drawer-reset": "node scripts/self-test-send-queue-drawer-reset.mjs",
+    "test:send-queue-details-helper": "node scripts/self-test-send-queue-details-helper.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
