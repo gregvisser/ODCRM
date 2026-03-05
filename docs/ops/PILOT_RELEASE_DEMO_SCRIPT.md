@@ -32,11 +32,11 @@ Spoken demo flow for OpenDoors Pilot. **No real sending.** All send paths are dr
 
 ---
 
-## 4. Enrollment Queue modal — Preview email + Details (≈1–2 min)
+## 4. Send Queue (drawer) — Preview email + Details (≈1–2 min)
 
-- Open the **Enrollment Queue** modal for the same enrollment.
+- Open **Send Queue** (drawer) for the enrollment via **View queue**.
+- In the drawer table, click **Details** on a row to show status, scheduledFor, sentAt, attemptCount, lastError. “Full item state for ops.”
 - **Preview email:** Pick a row, click **Preview email**; show subject and body. “Rendered from templates; we preview what would send — no actual send.”
-- **Details:** Click **Details** on a row; show status, scheduledFor, sentAt, attemptCount, lastError. “Full item state for ops.”
 
 ---
 

@@ -24,7 +24,7 @@
 - **Sequences** — Create and manage email sequences
 - **Enrollments** — Create enrollments (from **Leads Snapshot** or manual paste), **Pause / Resume / Cancel** lifecycle
 - **Send Queue Preview (Dry Run)** — See WAIT/SKIP/SEND and reasons (tenant-scoped)
-- **Enrollment Queue modal** — **Preview email** (subject + body), **Details** (status, scheduledFor, sentAt, attemptCount, lastError)
+- **Send Queue drawer** — Open via **View queue** for an enrollment; **Preview email** and **Details** (status, scheduledFor, sentAt, attemptCount, lastError) on each row
 - **Retry / Skip** queue items — Admin-only; requires admin secret in the modal
 - **Dry-run worker** — Admin-only endpoint processes QUEUED items into audit rows; **no real send**
 
@@ -44,7 +44,7 @@
    - **Recommended:** “Use Leads Snapshot” — pulls recipients from the selected snapshot.
    - **Advanced:** manual paste of emails.
 4. **Send Queue Preview (Dry Run)** — Open the **Send Queue Preview (Dry Run)** panel and **Refresh**. Confirm WAIT/SKIP/SEND and reasons.
-5. **Preview email and Details** — In the queue, use **Preview email** on a row (render-only; no send). Use **Details** on a row for status, scheduledFor, sentAt, attemptCount, lastError.
+5. **Preview email and Details** — Open **Send Queue** (drawer) for an enrollment via **View queue**. In the drawer table, click **Details** on a row to view status, scheduledFor, sentAt, attemptCount, lastError; use **Preview email** on a row for render-only preview.
 6. **Optional (admin)** — Enter admin secret in the modal; use **Retry/Skip** if needed. Run **Dry-run Worker** (admin-only) to generate **Dry-run Audit** (decision log for why items would/wouldn’t send).
 
 **Explicit:** Pilot does **NOT** send email. All of the above is dry-run / preview / audit-only unless Azure live-send flags are enabled — and we are **NOT** enabling them for Pilot.
