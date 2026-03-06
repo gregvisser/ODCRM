@@ -81,3 +81,4 @@ Optional dry-run endpoint check (admin-only):
 `$env:ADMIN_SECRET="***"; $env:CUSTOMER_ID="cust_xxx"; npm run -s test:marketing-runtime-smoke`
 If `ADMIN_SECRET` is not set, the dry-run check is reported as **SKIP** (not a failure).
 Marketing runtime smoke now covers all Marketing tab GET paths (Templates, Email Accounts, Compliance, Schedules, Inbox, Reports, Lead Sources) using tenant-scoped checks.
+It validates read-only Marketing endpoints for the selected tenant; if a tenant has no sequences/enrollments yet, queue/enrollment checks are reported as **SKIP** (expected for new tenants).

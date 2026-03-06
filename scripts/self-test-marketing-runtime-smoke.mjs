@@ -225,22 +225,23 @@ function assertObject(path, payload) {
 
   const firstSequenceId = sequences.find((s) => s && typeof s.id === 'string')?.id
   if (!firstSequenceId) {
-    fail('No sequences available for tenant; cannot validate queue drawer endpoint /api/enrollments/:id/queue')
-  }
+    skip('no sequences for tenant; skipping enrollments/queue checks')
+  } else {
+    const enrollmentsPath = `/api/sequences/${encodeURIComponent(firstSequenceId)}/enrollments`
+    const enrollmentsJson = await getJson(enrollmentsPath, { tenant: true })
+    const enrollments = assertCollection(enrollmentsPath, enrollmentsJson)
+    pass(`${enrollmentsPath} returned ${enrollments.length} row(s)`)
 
-  const enrollmentsPath = `/api/sequences/${encodeURIComponent(firstSequenceId)}/enrollments`
-  const enrollmentsJson = await getJson(enrollmentsPath, { tenant: true })
-  const enrollments = assertCollection(enrollmentsPath, enrollmentsJson)
-  const firstEnrollmentId = enrollments.find((e) => e && typeof e.id === 'string')?.id
-  if (!firstEnrollmentId) {
-    fail(`No enrollments found for sequence ${firstSequenceId}; cannot validate drawer list endpoint /api/enrollments/:id/queue`)
+    const firstEnrollmentId = enrollments.find((e) => e && typeof e.id === 'string')?.id
+    if (!firstEnrollmentId) {
+      skip(`no enrollments for sequence ${firstSequenceId}; skipping enrollment queue check`)
+    } else {
+      const queuePath = `/api/enrollments/${encodeURIComponent(firstEnrollmentId)}/queue`
+      const queueJson = await getJson(queuePath, { tenant: true })
+      const queueItems = assertCollection(queuePath, queueJson)
+      pass(`${queuePath} returned ${queueItems.length} row(s)`)
+    }
   }
-  pass(`${enrollmentsPath} returned ${enrollments.length} row(s)`)
-
-  const queuePath = `/api/enrollments/${encodeURIComponent(firstEnrollmentId)}/queue`
-  const queueJson = await getJson(queuePath, { tenant: true })
-  const queueItems = assertCollection(queuePath, queueJson)
-  pass(`${queuePath} returned ${queueItems.length} row(s)`)
 
   const auditsPath = '/api/send-worker/audits?limit=5'
   const auditsJson = await getJson(auditsPath, { tenant: true })
