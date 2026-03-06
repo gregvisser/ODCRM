@@ -74,3 +74,6 @@
 - **Backend build SHA:** https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net/api/_build  
 
 Use `scripts/prod-check.cjs` with `EXPECT_SHA=<merge SHA>` to confirm FE SHA == BE SHA == expected.
+
+Runtime smoke check (requires tenant id):
+`$env:CUSTOMER_ID="cust_xxx"; npm run -s test:marketing-runtime-smoke`
