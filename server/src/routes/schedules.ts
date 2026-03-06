@@ -99,57 +99,66 @@ router.get('/emails', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
 
-    const upcomingSends = await (prisma as any).emailCampaignProspectStep.findMany({
-      where: {
-        scheduledAt: { gte: new Date() },
-        campaign: {
-          customerId,
-          status: { in: ['running', 'paused'] },
+    let upcomingSends: any[] = []
+    try {
+      upcomingSends = await (prisma as any).emailCampaignProspectStep.findMany({
+        where: {
+          scheduledAt: { gte: new Date() },
+          campaign: {
+            customerId,
+            status: { in: ['running', 'paused'] },
+          },
+          sentAt: null,
         },
-        sentAt: null,
-      },
-      include: {
-        campaign: {
-          include: {
-            senderIdentity: {
-              select: {
-                id: true,
-                emailAddress: true,
-                displayName: true,
+        include: {
+          campaign: {
+            include: {
+              senderIdentity: {
+                select: {
+                  id: true,
+                  emailAddress: true,
+                  displayName: true,
+                },
+              },
+            },
+          },
+          campaignProspect: {
+            include: {
+              contact: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                },
               },
             },
           },
         },
-        prospect: {
-          include: {
-            contact: {
-              select: {
-                id: true,
-                email: true,
-                firstName: true,
-                lastName: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: { scheduledAt: 'asc' },
-      take: limit,
-    })
+        orderBy: { scheduledAt: 'asc' },
+        take: limit,
+      })
+    } catch (queryError) {
+      console.error('[schedules:/emails] query failed', {
+        customerId,
+        message: queryError instanceof Error ? queryError.message : String(queryError),
+      })
+      return res.status(500).json({ error: 'Failed to load scheduled emails' })
+    }
 
     const scheduledEmails = Array.isArray(upcomingSends)
       ? upcomingSends.map((send: any) => ({
           id: send.id,
           campaignId: send.campaignId,
           campaignName: send.campaign?.name || 'Unknown Campaign',
-          prospectEmail: send.prospect?.contact?.email || '',
+          prospectEmail: send.campaignProspect?.contact?.email || '',
           prospectName:
-            `${send.prospect?.contact?.firstName || ''} ${send.prospect?.contact?.lastName || ''}`.trim() ||
+            `${send.campaignProspect?.contact?.firstName || ''} ${send.campaignProspect?.contact?.lastName || ''}`.trim() ||
             'Unknown',
-          scheduledFor: send.scheduledAt?.toISOString(),
+          scheduledFor: send.scheduledAt ? send.scheduledAt.toISOString() : null,
           status: 'scheduled' as const,
           senderIdentity: send.campaign?.senderIdentity,
-          stepNumber: send.stepNumber,
+          stepNumber: typeof send.stepNumber === 'number' ? send.stepNumber : 0,
         }))
       : []
 
