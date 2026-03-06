@@ -31,6 +31,8 @@ import {
   WarningIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Customer and report response types
 type CustomerOption = {
@@ -85,27 +87,38 @@ const ReportsTab: React.FC = () => {
   // Load customers on mount
   useEffect(() => {
     const loadCustomers = async () => {
-      try {
-        const response = await api.get('/api/reports/customers')
-        setCustomers(response.data.customers || [])
-
-        // Auto-select first customer if available
-        if (response.data.customers?.length > 0 && !selectedCustomerId) {
-          setSelectedCustomerId(response.data.customers[0].id)
-        }
-      } catch (err) {
-        console.error('Failed to load customers:', err)
-        setError('Failed to load customer list')
+      const response = await api.get<{ customers: CustomerOption[] }>('/api/reports/customers')
+      if (response.error) {
+        setCustomers([])
+        setError(response.error)
+        setLoading(false)
+        return
+      }
+      const list = response.data?.customers || []
+      setCustomers(list)
+      const current = getCurrentCustomerId()
+      const selected = list.find((c) => c.id === current)
+      if (selected) {
+        setSelectedCustomerId(selected.id)
+      } else if (list.length > 0 && !selectedCustomerId) {
+        setSelectedCustomerId(list[0].id)
+        setCurrentCustomerId(list[0].id)
       }
     }
 
-    loadCustomers()
+    void loadCustomers()
+
+    const unsubscribe = onSettingsUpdated((detail) => {
+      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
+      if (next) setSelectedCustomerId(next)
+    })
+    return () => unsubscribe()
   }, [])
 
   // Load report when customer or date range changes
   useEffect(() => {
     if (selectedCustomerId) {
-      loadReport()
+      void loadReport()
     }
   }, [selectedCustomerId, dateRange])
 
@@ -115,29 +128,34 @@ const ReportsTab: React.FC = () => {
     setLoading(true)
     setError(null)
 
-    try {
-      const response = await api.get(`/api/reports/customer?customerId=${selectedCustomerId}&dateRange=${dateRange}`)
-      setReport(response.data)
-    } catch (err) {
-      console.error('Failed to load report:', err)
-      setError('Failed to load report data')
-    } finally {
+    const response = await api.get<CustomerReportResponse>(
+      `/api/reports/customer?customerId=${selectedCustomerId}&dateRange=${dateRange}`
+    )
+    if (response.error) {
+      setError(response.error)
+      setReport(null)
       setLoading(false)
+      return
     }
+    setReport(response.data || null)
+    setLoading(false)
   }
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
 
   if (loading && customers.length === 0) {
     return (
-      <Box textAlign="center" py={10}>
-        <Spinner size="lg" />
-        <Text mt={4}>Loading customer reports...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Spinner size="lg" />
+          <Text mt={4}>Loading customer reports...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
@@ -157,7 +175,10 @@ const ReportsTab: React.FC = () => {
               <FormLabel>Select Client</FormLabel>
               <Select
                 value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                onChange={(e) => {
+                  setSelectedCustomerId(e.target.value)
+                  setCurrentCustomerId(e.target.value)
+                }}
                 placeholder="Choose a customer"
               >
                 {customers.map(customer => (
@@ -426,6 +447,7 @@ const ReportsTab: React.FC = () => {
         </Card>
       )}
     </Box>
+    </RequireActiveClient>
   )
 }
 
