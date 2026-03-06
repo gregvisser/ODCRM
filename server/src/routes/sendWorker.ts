@@ -446,6 +446,78 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
 })
 
 /**
+ * GET /api/send-worker/live-gates — read-only tenant-scoped live-send gate status.
+ * Requires X-Customer-Id. No mutations, no sending.
+ */
+router.get('/live-gates', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const cap = getLiveSendCap()
+    const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
+    const liveGateEnabled = process.env.ENABLE_LIVE_SENDING === 'true'
+    const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
+    const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
+    const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
+    const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
+
+    const [activeIdentityCount, dueNowCount] = await Promise.all([
+      prisma.emailIdentity.count({
+        where: { customerId, isActive: true },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          customerId,
+          status: OutboundSendQueueStatus.QUEUED,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
+        },
+      }),
+    ])
+
+    const reasons: string[] = []
+    if (!queueGateEnabled) reasons.push('ENABLE_SEND_QUEUE_SENDING is not true')
+    if (!liveGateEnabled) reasons.push('ENABLE_LIVE_SENDING is not true')
+    if (!canaryCustomerId) reasons.push('SEND_CANARY_CUSTOMER_ID is not configured')
+    if (canaryCustomerId && canaryCustomerId !== customerId) reasons.push('tenant is not in canary (customer mismatch)')
+    if (activeIdentityCount < 1) reasons.push('no active sender identity for tenant')
+    if (canaryIdentityId) {
+      const canaryIdentity = await prisma.emailIdentity.findFirst({
+        where: { id: canaryIdentityId, customerId, isActive: true },
+        select: { id: true },
+      })
+      if (!canaryIdentity) reasons.push('SEND_CANARY_IDENTITY_ID is not active for tenant')
+    }
+
+    res.json({
+      success: true,
+      data: {
+        enabled: reasons.length === 0,
+        reasons,
+        caps: {
+          liveSendCap: cap,
+        },
+        flags: {
+          enableSendQueueSending: queueGateEnabled,
+          enableLiveSending: liveGateEnabled,
+          odcrmAllowLiveTick: allowLiveTick,
+          odcrmAllowLiveTickIgnoreWindow: allowLiveTickIgnoreWindow,
+        },
+        canaryCustomerId,
+        canaryIdentityId,
+        currentCount: {
+          queuedDueNow: dueNowCount,
+          activeIdentities: activeIdentityCount,
+        },
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/live-gates] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Live gates check failed' })
+  }
+})
+
+/**
  * GET /api/send-worker/audits — read-only list of OutboundSendAttemptAudit (tenant-scoped).
  * Query: queueItemId?, decision?, limit (default 50, max 200), cursor? (id for stable pagination).
  * Order: decidedAt desc, id desc.
