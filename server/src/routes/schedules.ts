@@ -1,8 +1,30 @@
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { z } from 'zod'
 
 const router = express.Router()
+const CampaignStatusValues = ['draft', 'running', 'paused', 'completed'] as const
+
+const createScheduleSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(1000).optional().nullable(),
+  senderIdentity: z.object({
+    id: z.string().min(1),
+  }).optional().nullable(),
+  senderIdentityId: z.string().optional().nullable(),
+  status: z.enum(CampaignStatusValues).optional(),
+  timeWindows: z.array(z.object({
+    startTime: z.string().regex(/^\d{2}:\d{2}$/),
+    endTime: z.string().regex(/^\d{2}:\d{2}$/),
+    maxEmails: z.number().int().min(1).max(5000).optional(),
+  })).optional(),
+  maxEmailsPerDay: z.number().int().min(1).max(5000).optional(),
+})
+
+const updateScheduleSchema = createScheduleSchema.partial().extend({
+  status: z.enum(CampaignStatusValues).optional(),
+})
 
 const getCustomerId = (req: express.Request): string => {
   const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
@@ -12,6 +34,14 @@ const getCustomerId = (req: express.Request): string => {
     throw err
   }
   return customerId
+}
+
+async function assertCustomerExists(customerId: string): Promise<boolean> {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true },
+  })
+  return !!customer
 }
 
 // GET /api/schedules — active campaigns with sender identity (used as "schedules")
@@ -243,6 +273,138 @@ router.get('/:id/stats', async (req, res, next) => {
       dailyLimit: campaign.senderIdentity?.dailySendLimit || 150,
       senderIdentity: campaign.senderIdentity,
     })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /api/schedules — create a campaign schedule record
+router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    if (!(await assertCustomerExists(customerId))) {
+      return res.status(404).json({ error: 'customer_not_found' })
+    }
+    const data = createScheduleSchema.parse(req.body || {})
+    const senderIdentityId = data.senderIdentityId || data.senderIdentity?.id || null
+    if (senderIdentityId) {
+      const identity = await prisma.emailIdentity.findFirst({
+        where: { id: senderIdentityId, customerId },
+        select: { id: true },
+      })
+      if (!identity) return res.status(400).json({ error: 'sender_identity_not_found_for_customer' })
+    }
+
+    const firstWindow = data.timeWindows?.[0]
+    const windowStart = firstWindow ? parseInt(firstWindow.startTime.slice(0, 2), 10) : undefined
+    const windowEnd = firstWindow ? parseInt(firstWindow.endTime.slice(0, 2), 10) : undefined
+    const status = data.status && data.status !== 'draft' ? data.status : 'paused'
+
+    const campaign = await prisma.emailCampaign.create({
+      data: {
+        customerId,
+        name: data.name,
+        description: data.description || null,
+        senderIdentityId,
+        status,
+        ...(windowStart != null ? { sendWindowHoursStart: windowStart } : {}),
+        ...(windowEnd != null ? { sendWindowHoursEnd: windowEnd } : {}),
+      },
+    })
+
+    if (senderIdentityId && data.maxEmailsPerDay != null) {
+      await prisma.emailIdentity.updateMany({
+        where: { id: senderIdentityId, customerId },
+        data: { dailySendLimit: data.maxEmailsPerDay },
+      })
+    }
+
+    res.status(201).json({
+      id: campaign.id,
+      status: campaign.status,
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// PUT /api/schedules/:id — update schedule metadata
+router.put('/:id', requireMarketingMutationAuth, async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+    const data = updateScheduleSchema.parse(req.body || {})
+    const existing = await prisma.emailCampaign.findFirst({
+      where: { id, customerId },
+      select: { id: true, senderIdentityId: true },
+    })
+    if (!existing) return res.status(404).json({ error: 'Schedule not found' })
+
+    const senderIdentityId = data.senderIdentityId || data.senderIdentity?.id || existing.senderIdentityId || null
+    if (senderIdentityId) {
+      const identity = await prisma.emailIdentity.findFirst({
+        where: { id: senderIdentityId, customerId },
+        select: { id: true },
+      })
+      if (!identity) return res.status(400).json({ error: 'sender_identity_not_found_for_customer' })
+    }
+
+    const firstWindow = data.timeWindows?.[0]
+    const windowStart = firstWindow ? parseInt(firstWindow.startTime.slice(0, 2), 10) : undefined
+    const windowEnd = firstWindow ? parseInt(firstWindow.endTime.slice(0, 2), 10) : undefined
+    const updated = await prisma.emailCampaign.update({
+      where: { id },
+      data: {
+        ...(data.name != null ? { name: data.name } : {}),
+        ...(data.description !== undefined ? { description: data.description || null } : {}),
+        ...(data.status != null ? { status: data.status } : {}),
+        ...(data.senderIdentityId !== undefined || data.senderIdentity !== undefined ? { senderIdentityId } : {}),
+        ...(windowStart != null ? { sendWindowHoursStart: windowStart } : {}),
+        ...(windowEnd != null ? { sendWindowHoursEnd: windowEnd } : {}),
+      },
+    })
+
+    if (senderIdentityId && data.maxEmailsPerDay != null) {
+      await prisma.emailIdentity.updateMany({
+        where: { id: senderIdentityId, customerId },
+        data: { dailySendLimit: data.maxEmailsPerDay },
+      })
+    }
+
+    res.json({ success: true, campaign: updated })
+  } catch (error) {
+    next(error)
+  }
+})
+
+// PATCH /api/schedules/:id — quick toggle/status updates from UI
+router.patch('/:id', requireMarketingMutationAuth, async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const { id } = req.params
+    const isActive = req.body?.isActive
+    const status = req.body?.status
+    const existing = await prisma.emailCampaign.findFirst({
+      where: { id, customerId },
+      select: { id: true, status: true },
+    })
+    if (!existing) return res.status(404).json({ error: 'Schedule not found' })
+
+    const nextStatus =
+      typeof isActive === 'boolean'
+        ? (isActive ? 'running' : 'paused')
+        : (typeof status === 'string' ? status : null)
+
+    if (!nextStatus || !CampaignStatusValues.includes(nextStatus as any)) {
+      return res.status(400).json({ error: 'invalid_status_update' })
+    }
+
+    const updated = await prisma.emailCampaign.update({
+      where: { id },
+      data: { status: nextStatus as any },
+    })
+
+    res.json({ success: true, campaign: updated })
   } catch (error) {
     next(error)
   }

@@ -136,7 +136,7 @@ type ScheduleStats = {
 }
 
 const SchedulesTab: React.FC = () => {
-  const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
+  const [schedules, setSchedules] = useState<DeliverySchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [loading, setLoading] = useState(true)
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -154,6 +154,29 @@ const SchedulesTab: React.FC = () => {
     { value: 6, label: 'Saturday' },
   ]
 
+  const toDeliverySchedule = (schedule: CampaignSchedule): DeliverySchedule => {
+    const startHour = schedule.senderIdentity?.sendWindowHoursStart ?? 9
+    const endHour = schedule.senderIdentity?.sendWindowHoursEnd ?? 17
+    const maxDaily = schedule.senderIdentity?.dailySendLimit ?? 200
+    return {
+      ...schedule,
+      description: '',
+      isActive: schedule.status === 'running',
+      timezone: schedule.senderIdentity?.sendWindowTimeZone ?? 'Europe/London',
+      daysOfWeek: [1, 2, 3, 4, 5],
+      timeWindows: [
+        {
+          startTime: `${String(startHour).padStart(2, '0')}:00`,
+          endTime: `${String(endHour).padStart(2, '0')}:00`,
+          maxEmails: maxDaily,
+        },
+      ],
+      maxEmailsPerDay: maxDaily,
+      maxEmailsPerHour: Math.max(1, Math.floor(maxDaily / 10)),
+      respectRecipientTimezone: true,
+    }
+  }
+
   useEffect(() => {
     loadData()
   }, [])
@@ -170,7 +193,7 @@ const SchedulesTab: React.FC = () => {
         console.error('Failed to load schedules:', schedulesRes.error)
         setSchedules([])
       } else {
-        setSchedules(schedulesRes.data || [])
+        setSchedules((schedulesRes.data || []).map(toDeliverySchedule))
       }
 
       if (emailsRes.error) {
@@ -301,20 +324,8 @@ const SchedulesTab: React.FC = () => {
     onOpen()
   }
 
-  const handleEditSchedule = (schedule: CampaignSchedule) => {
-    setEditingSchedule({
-      ...schedule,
-      isActive: schedule.status === 'running',
-      timezone: schedule.senderIdentity?.sendWindowTimeZone ?? 'Europe/London',
-      daysOfWeek: [1, 2, 3, 4, 5],
-      timeWindows: [
-        {
-          startTime: `${String(schedule.senderIdentity?.sendWindowHoursStart ?? 9).padStart(2, '0')}:00`,
-          endTime: `${String(schedule.senderIdentity?.sendWindowHoursEnd ?? 17).padStart(2, '0')}:00`,
-          maxEmails: schedule.senderIdentity?.dailySendLimit ?? 50,
-        },
-      ],
-    })
+  const handleEditSchedule = (schedule: DeliverySchedule) => {
+    setEditingSchedule({ ...schedule })
     onOpen()
   }
 
@@ -344,7 +355,7 @@ const SchedulesTab: React.FC = () => {
     }
   }
 
-  const handleToggleSchedule = async (schedule: CampaignSchedule) => {
+  const handleToggleSchedule = async (schedule: DeliverySchedule) => {
     const nowActive = schedule.status !== 'running'
     try {
       await api.patch(`/api/schedules/${schedule.id}`, { isActive: nowActive })
@@ -436,6 +447,9 @@ const SchedulesTab: React.FC = () => {
             View and manage active campaign schedules with upcoming sends
           </Text>
         </VStack>
+        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSchedule}>
+          Create Schedule
+        </Button>
       </Flex>
 
       {/* Stats */}
@@ -501,11 +515,11 @@ const SchedulesTab: React.FC = () => {
                   <Flex justify="space-between" align="start" mb={3}>
                     <VStack align="start" spacing={1}>
                       <HStack>
-                        <Heading size="md">{schedule.name}</Heading>
-                        <Badge colorScheme={schedule.isActive ? 'green' : 'gray'}>
-                          {schedule.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </HStack>
+                  <Heading size="md">{schedule.name}</Heading>
+                  <Badge colorScheme={schedule.status === 'running' ? 'green' : schedule.status === 'paused' ? 'yellow' : 'gray'}>
+                    {schedule.status}
+                  </Badge>
+                </HStack>
                       {schedule.description && (
                         <Text fontSize="sm" color="gray.600">{schedule.description}</Text>
                       )}
@@ -521,12 +535,17 @@ const SchedulesTab: React.FC = () => {
                         <MenuItem icon={<EditIcon />} onClick={() => handleEditSchedule(schedule)}>
                           Edit
                         </MenuItem>
-                        <MenuItem
-                          as={Switch}
-                          isChecked={schedule.isActive}
-                          onChange={() => handleToggleSchedule(schedule)}
-                        >
-                          {schedule.isActive ? 'Deactivate' : 'Activate'}
+                        {schedule.status === 'running' ? (
+                          <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSchedule(schedule.id)}>
+                            Pause
+                          </MenuItem>
+                        ) : (
+                          <MenuItem icon={<CheckIcon />} onClick={() => handleResumeSchedule(schedule.id)}>
+                            Resume
+                          </MenuItem>
+                        )}
+                        <MenuItem icon={<SettingsIcon />} onClick={() => handleToggleSchedule(schedule)}>
+                          {schedule.status === 'running' ? 'Deactivate' : 'Activate'}
                         </MenuItem>
                         <MenuDivider />
                         <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteSchedule(schedule.id)}>

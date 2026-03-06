@@ -70,6 +70,7 @@
     "test:send-queue-operator-ui": "node scripts/self-test-send-queue-operator-ui.mjs",
     "test:send-queue-drawer-reset": "node scripts/self-test-send-queue-drawer-reset.mjs",
     "test:send-queue-details-helper": "node scripts/self-test-send-queue-details-helper.mjs",
+    "test:schedules-routes": "node scripts/self-test-schedules-routes.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
