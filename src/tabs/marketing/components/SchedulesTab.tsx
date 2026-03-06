@@ -65,6 +65,7 @@ import {
   CheckIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type CampaignSchedule = {
   id: string
@@ -431,13 +432,16 @@ const SchedulesTab: React.FC = () => {
 
   if (loading) {
     return (
-      <Box textAlign="center" py={10}>
-        <Text>Loading schedules...</Text>
-      </Box>
+      <RequireActiveClient>
+        <Box textAlign="center" py={10}>
+          <Text>Loading schedules...</Text>
+        </Box>
+      </RequireActiveClient>
     )
   }
 
   return (
+    <RequireActiveClient>
     <Box>
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
@@ -831,6 +835,7 @@ const SchedulesTab: React.FC = () => {
         </ModalContent>
       </Modal>
     </Box>
+    </RequireActiveClient>
   )
 }
 
