@@ -22,6 +22,7 @@ const ENABLE_LIVE_SENDING = process.env.ENABLE_LIVE_SENDING === 'true'
 const ENABLE_SEND_QUEUE_SENDING = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
 const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
 const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
+const SEND_QUEUE_PER_MINUTE_CAP = Number(process.env.SEND_QUEUE_PER_MINUTE_CAP) || 0
 
 function getSuppressionReason(
   suppressionEntries: Array<{ type: string; value: string; emailNormalized: string | null; reason: string | null }>,
@@ -186,6 +187,7 @@ export async function processOne(
               sendWindowTimeZone: true,
               sendWindowHoursStart: true,
               sendWindowHoursEnd: true,
+              dailySendLimit: true,
             },
           },
         },
@@ -353,6 +355,64 @@ export async function processOne(
         meta: { stepIndex, identityId: identity.id },
       },
     })
+  }
+
+  // Respect mailbox throughput guardrails before attempting a live send.
+  const dailyLimit = (enrollment.sequence?.senderIdentity as any)?.dailySendLimit as number | null | undefined
+  const nowUtc = now
+  if (dailyLimit != null && dailyLimit > 0) {
+    const startOfUtcDay = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate(), 0, 0, 0, 0))
+    const sentToday = await prisma.emailMessageMetadata.count({
+      where: {
+        senderIdentityId: identity.id,
+        direction: 'outbound',
+        createdAt: { gte: startOfUtcDay },
+      },
+    })
+    if (sentToday >= dailyLimit) {
+      await prisma.enrollmentAuditEvent.create({
+        data: {
+          customerId,
+          enrollmentId,
+          recipientEmail,
+          eventType: 'send_skipped',
+          message: 'rate_limited',
+          meta: { reason: 'daily_cap_reached', stepIndex, identityId: identity.id, sentToday, dailyLimit },
+        },
+      })
+      await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'daily_cap_reached')
+      return 'requeued'
+    }
+  }
+  if (SEND_QUEUE_PER_MINUTE_CAP > 0) {
+    const oneMinuteAgo = new Date(nowUtc.getTime() - 60_000)
+    const sentLastMinute = await prisma.emailMessageMetadata.count({
+      where: {
+        senderIdentityId: identity.id,
+        direction: 'outbound',
+        createdAt: { gte: oneMinuteAgo },
+      },
+    })
+    if (sentLastMinute >= SEND_QUEUE_PER_MINUTE_CAP) {
+      await prisma.enrollmentAuditEvent.create({
+        data: {
+          customerId,
+          enrollmentId,
+          recipientEmail,
+          eventType: 'send_skipped',
+          message: 'rate_limited',
+          meta: {
+            reason: 'per_minute_cap_reached',
+            stepIndex,
+            identityId: identity.id,
+            sentLastMinute,
+            perMinuteCap: SEND_QUEUE_PER_MINUTE_CAP,
+          },
+        },
+      })
+      await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'per_minute_cap_reached')
+      return 'requeued'
+    }
   }
 
   // Load sequence step (stepOrder is 1-based; queue stepIndex 0 = first step)
