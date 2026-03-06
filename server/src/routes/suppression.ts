@@ -58,6 +58,30 @@ type ParsedSuppressionRows = {
   sheetTitle: string
 }
 
+async function readPublicSheetCsv(sheetId: string, gid: string | null): Promise<{ headers: string[]; rows: Record<string, string>[]; sheetTitle: string }> {
+  const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${encodeURIComponent(gid)}` : ''}`
+  const response = await fetch(csvUrl)
+  if (!response.ok) {
+    throw new Error(`public_sheet_fetch_failed:${response.status}`)
+  }
+  const csv = await response.text()
+  const lines = csv.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  if (lines.length === 0) {
+    return { headers: [], rows: [], sheetTitle: 'Sheet' }
+  }
+  const rawHeaders = lines[0].split(',').map((h) => h.replace(/^"|"$/g, '').trim())
+  const headers = rawHeaders.map(normalizeHeaderName)
+  const rows = lines.slice(1).map((line) => {
+    const cols = line.split(',').map((v) => v.replace(/^"|"$/g, '').trim())
+    const row: Record<string, string> = {}
+    headers.forEach((h, i) => {
+      row[h] = cols[i] || ''
+    })
+    return row
+  })
+  return { headers, rows, sheetTitle: 'Sheet' }
+}
+
 function normalizeHeaderName(header: string): string {
   return header
     .toLowerCase()
@@ -439,16 +463,20 @@ async function importSuppressionFromSheet(
   expectedType: 'email' | 'domain',
   input: z.infer<typeof sheetImportSchema>
 ) {
-  const credCheck = validateCredentials()
-  if (!credCheck.valid) {
-    const err = new Error(credCheck.error || 'Google Sheets credentials not configured') as Error & { status?: number }
-    err.status = 500
-    throw err
-  }
-
   const parsed = parseSheetUrl(input.sheetUrl)
   const gid = input.gid?.trim() || parsed.gid || null
-  const sheetData = await readSheet(parsed.sheetId, gid)
+  const credCheck = validateCredentials()
+  let sheetData: { headers: string[]; rows: Record<string, string>[]; sheetTitle: string }
+  try {
+    if (credCheck.valid) {
+      sheetData = await readSheet(parsed.sheetId, gid)
+    } else {
+      sheetData = await readPublicSheetCsv(parsed.sheetId, gid)
+    }
+  } catch {
+    // Fallback for publicly shared sheets when service-account read fails.
+    sheetData = await readPublicSheetCsv(parsed.sheetId, gid)
+  }
   const parsedRows = parseSheetRowsForType(sheetData.rows, sheetData.headers, expectedType)
   parsedRows.sheetTitle = sheetData.sheetTitle
   const source = input.sourceLabel?.trim() || `google-sheet:${expectedType}`
