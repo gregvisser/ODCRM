@@ -34,6 +34,10 @@ export interface InboxMessage {
   internetMessageHeaders?: Array<{ name: string; value: string }>
 }
 
+function escapeODataLiteral(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
 /**
  * Get a Microsoft Graph client for the given EmailIdentity
  */
@@ -194,6 +198,7 @@ export async function sendEmail(
 
     // Send email via Microsoft Graph
     const userEmail = identity.outlookUserId || identity.emailAddress
+    const sendStartedAt = new Date()
     const response = await client
       .api(`/users/${userEmail}/sendMail`)
       .post(message)
@@ -205,15 +210,23 @@ export async function sendEmail(
 
     try {
       // Fetch the sent message to get its ID
+      const escapedSubject = escapeODataLiteral(params.subject)
       const sentMessages = await client
-        .api(`/users/${userEmail}/messages`)
-        .filter(`subject eq '${params.subject.replace(/'/g, "''")}'`)
+        .api(`/users/${userEmail}/mailFolders/sentitems/messages`)
+        .filter(`subject eq '${escapedSubject}' and sentDateTime ge ${sendStartedAt.toISOString()}`)
         .orderby('sentDateTime desc')
-        .top(1)
+        .top(10)
         .get()
 
       if (sentMessages.value && sentMessages.value.length > 0) {
-        const sentMessage = sentMessages.value[0]
+        const toEmailNormalized = params.toEmail.trim().toLowerCase()
+        const sentMessage =
+          sentMessages.value.find((m: any) =>
+            Array.isArray(m.toRecipients) &&
+            m.toRecipients.some(
+              (r: any) => (r?.emailAddress?.address ?? '').toLowerCase() === toEmailNormalized
+            )
+          ) ?? sentMessages.value[0]
         messageId = sentMessage.id
         threadId = sentMessage.conversationId
       }

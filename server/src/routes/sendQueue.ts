@@ -582,7 +582,7 @@ router.post('/tick', validateAdminSecret, async (req: Request, res: Response) =>
           status: OutboundSendQueueStatus.LOCKED,
           lockedAt: now,
           lockedBy,
-          attemptCount: item.attemptCount + 1,
+          attemptCount: { increment: 1 },
         },
       })
       if (updated.count > 0) lockedIds.push(item.id)
@@ -648,8 +648,9 @@ router.post('/tick', validateAdminSecret, async (req: Request, res: Response) =>
           if (processOptions?.ignoreWindow) {
             console.log(`[sendQueueTick] live send window bypass used customerId=${item.customerId} enrollmentId=${item.enrollmentId} item=${item.id}`)
           }
-          await processOne(prisma, item, now, processOptions)
-          sent += 1
+          const outcome = await processOne(prisma, item, now, processOptions)
+          if (outcome === 'sent') sent += 1
+          if (outcome === 'requeued') requeued += 1
         } catch (err) {
           errors += 1
           await requeueAfterSendFailure(prisma, item.id, (err as Error)?.message?.slice(0, 500) ?? 'unknown error')

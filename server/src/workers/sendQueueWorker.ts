@@ -98,7 +98,7 @@ async function tick(prisma: PrismaClient, now: Date, leaseExpiry: Date) {
         status: OutboundSendQueueStatus.LOCKED,
         lockedAt: now,
         lockedBy: WORKER_ID,
-        attemptCount: item.attemptCount + 1,
+        attemptCount: { increment: 1 },
       },
     })
     if (updated.count > 0) lockedIds.push(item.id)
@@ -157,6 +157,7 @@ async function unlockItem(
 
 /** Options for processOne (Stage 1G: ignoreWindow only from tick when env gate set). */
 export type ProcessOneOptions = { ignoreWindow?: boolean }
+export type ProcessOneResult = 'sent' | 'requeued' | 'skipped' | 'failed_terminal'
 
 /** Stage 1F: only step 0 is sent; exported for tick route live path. */
 export async function processOne(
@@ -164,12 +165,12 @@ export async function processOne(
   item: { id: string; customerId: string; enrollmentId: string; recipientEmail: string; stepIndex: number },
   now: Date,
   options?: ProcessOneOptions
-) {
+): Promise<ProcessOneResult> {
   const { customerId, enrollmentId, recipientEmail, stepIndex } = item
 
   if (stepIndex !== 0) {
     await requeueDryRun(prisma, item.id, 'Step 0 only (Stage 1F)')
-    return
+    return 'requeued'
   }
 
   const enrollment = await prisma.enrollment.findFirst({
@@ -204,7 +205,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, 'enrollment_not_found')
-    return
+    return 'failed_terminal'
   }
 
   if (enrollment.recipients.length === 0) {
@@ -219,14 +220,14 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, 'recipient_not_on_enrollment')
-    return
+    return 'failed_terminal'
   }
 
   // Stage 1D: sending disabled = non-destructive dry-run: requeue (QUEUED), do NOT mark FAILED
   if (!ENABLE_SEND_QUEUE_SENDING) {
     await requeueDryRun(prisma, item.id, DRY_RUN_DEFAULT_REASON)
     console.log(`[sendQueueWorker] ${WORKER_ID} dry-run (sending disabled) item=${item.id} enrollment=${item.enrollmentId}`)
-    return
+    return 'requeued'
   }
 
   if (!ENABLE_LIVE_SENDING) {
@@ -241,7 +242,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, null)
-    return
+    return 'requeued'
   }
 
   // Stage 1F: canary — SEND_CANARY_CUSTOMER_ID required; SEND_CANARY_IDENTITY_ID optional (if set, must match)
@@ -257,7 +258,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_required')
-    return
+    return 'requeued'
   }
 
   if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID != null && customerId !== SEND_CANARY_CUSTOMER_ID) {
@@ -272,7 +273,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
-    return
+    return 'requeued'
   }
 
   const identityId = enrollment.sequence?.senderIdentityId ?? null
@@ -288,7 +289,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
-    return
+    return 'requeued'
   }
 
   const suppressionEntries = await prisma.suppressionEntry.findMany({
@@ -308,7 +309,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.SKIPPED, 'suppressed')
-    return
+    return 'skipped'
   }
 
   const identity = enrollment.sequence?.senderIdentity ?? null
@@ -324,7 +325,7 @@ export async function processOne(
       },
     })
     await requeueAfterSendFailure(prisma, item.id, 'no_sender_identity')
-    return
+    return 'requeued'
   }
   // Stage 1G: ignoreWindow only when tick passes option (env ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW); worker never sets it
   if (!options?.ignoreWindow && !inSendWindow(identity)) {
@@ -339,7 +340,7 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'outside_window')
-    return
+    return 'requeued'
   }
   if (options?.ignoreWindow) {
     await prisma.enrollmentAuditEvent.create({
@@ -424,7 +425,7 @@ export async function processOne(
         meta: { stepIndex, identityId: identity.id, messageId: result.messageId ?? undefined },
       },
     })
-    return
+    return 'sent'
   }
 
   const errMsg = (result.error ?? 'Unknown error').slice(0, 500)
@@ -439,4 +440,5 @@ export async function processOne(
     },
   })
   await requeueAfterSendFailure(prisma, item.id, errMsg)
+  return 'requeued'
 }

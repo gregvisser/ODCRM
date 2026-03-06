@@ -4,6 +4,7 @@
  * Stage 4-min: POST /api/send-worker/live-tick — admin + canary gated real send of N items.
  */
 import { Router, Request, Response } from 'express'
+import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
@@ -19,6 +20,7 @@ const AUDITS_LIMIT_MAX = 200
 const AUDITS_CSV_MAX = 2000
 const SUMMARY_SINCE_HOURS_DEFAULT = 24
 const SUMMARY_SINCE_HOURS_MAX = 168
+const LIVE_TICK_LOCK_PREFIX = 'live_tick_'
 
 const VALID_DECISIONS = new Set<string>(Object.values(OutboundSendAttemptDecision))
 
@@ -200,7 +202,11 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
     }
 
     const items = await prisma.outboundSendQueueItem.findMany({
-      where: { customerId, status: OutboundSendQueueStatus.QUEUED },
+      where: {
+        customerId,
+        status: OutboundSendQueueStatus.QUEUED,
+        OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
+      },
       orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
       take: limit,
       select: {
@@ -208,9 +214,42 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
         enrollmentId: true,
         stepIndex: true,
         recipientEmail: true,
-        attemptCount: true,
       },
     })
+
+    const lockId = `${LIVE_TICK_LOCK_PREFIX}${randomUUID()}`
+    const lockAt = new Date()
+    const lockedIds: string[] = []
+    for (const item of items) {
+      const updated = await prisma.outboundSendQueueItem.updateMany({
+        where: {
+          id: item.id,
+          customerId,
+          status: OutboundSendQueueStatus.QUEUED,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: lockAt } }],
+        },
+        data: {
+          status: OutboundSendQueueStatus.LOCKED,
+          lockedAt: lockAt,
+          lockedBy: lockId,
+          attemptCount: { increment: 1 },
+        },
+      })
+      if (updated.count > 0) lockedIds.push(item.id)
+    }
+
+    const lockedItems = lockedIds.length
+      ? await prisma.outboundSendQueueItem.findMany({
+          where: { id: { in: lockedIds }, customerId, status: OutboundSendQueueStatus.LOCKED, lockedBy: lockId },
+          orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            enrollmentId: true,
+            stepIndex: true,
+            recipientEmail: true,
+          },
+        })
+      : []
 
     const suppressionEntries = await prisma.suppressionEntry.findMany({
       where: { customerId },
@@ -225,7 +264,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
 
     const now = new Date()
 
-    for (const item of items) {
+    for (const item of lockedItems) {
       processed += 1
       const recipientEmail = (item.recipientEmail ?? '').trim()
       const normalizedEmail = recipientEmail.toLowerCase()
@@ -235,7 +274,8 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           data: {
             status: OutboundSendQueueStatus.SKIPPED,
             lastError: 'missing_recipient_email',
-            attemptCount: item.attemptCount + 1,
+            lockedAt: null,
+            lockedBy: null,
           },
         })
         await prisma.outboundSendAttemptAudit.create({
@@ -259,7 +299,8 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           data: {
             status: OutboundSendQueueStatus.SKIPPED,
             lastError: suppressionReason,
-            attemptCount: item.attemptCount + 1,
+            lockedAt: null,
+            lockedBy: null,
           },
         })
         await prisma.outboundSendAttemptAudit.create({
@@ -286,7 +327,8 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           data: {
             status: OutboundSendQueueStatus.FAILED,
             lastError: 'enrollment_not_found',
-            attemptCount: item.attemptCount + 1,
+            lockedAt: null,
+            lockedBy: null,
           },
         })
         await prisma.outboundSendAttemptAudit.create({
@@ -348,7 +390,8 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
             status: OutboundSendQueueStatus.SENT,
             sentAt: now,
             lastError: null,
-            attemptCount: item.attemptCount + 1,
+            lockedAt: null,
+            lockedBy: null,
           },
         })
         await prisma.outboundSendAttemptAudit.create({
@@ -368,7 +411,8 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           data: {
             status: OutboundSendQueueStatus.FAILED,
             lastError: errMsg,
-            attemptCount: item.attemptCount + 1,
+            lockedAt: null,
+            lockedBy: null,
           },
         })
         await prisma.outboundSendAttemptAudit.create({
