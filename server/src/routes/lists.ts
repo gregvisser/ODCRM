@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
@@ -103,7 +104,7 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/lists - Create a new list
-router.post('/', async (req, res) => {
+router.post('/', requireMarketingMutationAuth, async (req, res) => {
   try {
     const validated = createListSchema.parse(req.body)
 
@@ -135,7 +136,7 @@ router.post('/', async (req, res) => {
 })
 
 // PUT /api/lists/:id - Update a list
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { id } = req.params
     const validated = updateListSchema.parse(req.body)
@@ -172,7 +173,7 @@ router.put('/:id', async (req, res) => {
 })
 
 // DELETE /api/lists/:id - Delete a list
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -188,7 +189,7 @@ router.delete('/:id', async (req, res) => {
 })
 
 // POST /api/lists/:id/contacts - Add contacts to a list
-router.post('/:id/contacts', async (req, res) => {
+router.post('/:id/contacts', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { id } = req.params
     const validated = addContactsSchema.parse(req.body)
@@ -236,7 +237,7 @@ router.post('/:id/contacts', async (req, res) => {
 })
 
 // DELETE /api/lists/:id/contacts/:contactId - Remove a contact from a list
-router.delete('/:id/contacts/:contactId', async (req, res) => {
+router.delete('/:id/contacts/:contactId', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { id, contactId } = req.params
 

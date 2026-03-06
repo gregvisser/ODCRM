@@ -2,6 +2,7 @@ import express from 'express'
 import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = express.Router()
 
@@ -120,7 +121,7 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = createSchema.parse(req.body)
@@ -164,7 +165,7 @@ router.post('/', async (req, res, next) => {
   }
 })
 
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -201,7 +202,7 @@ router.get('/emails', async (req, res, next) => {
   }
 })
 
-router.post('/emails', async (req, res, next) => {
+router.post('/emails', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { value, reason, source } = req.body as { value: string; reason?: string; source?: string }
@@ -226,7 +227,7 @@ router.post('/emails', async (req, res, next) => {
 // POST /emails/upload — CSV file upload for suppressed emails
 // Accepts JSON body: { rows: string[], sourceFileName?: string }
 // rows = array of raw lines from CSV (client parses file, sends lines)
-router.post('/emails/upload', async (req, res, next) => {
+router.post('/emails/upload', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { rows, sourceFileName } = req.body as { rows: string[]; sourceFileName?: string }
@@ -269,7 +270,7 @@ router.post('/emails/upload', async (req, res, next) => {
 })
 
 // DELETE /emails — batch delete by ids array
-router.delete('/emails', async (req, res, next) => {
+router.delete('/emails', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const ids = (req.body?.ids as string[]) || []
@@ -302,7 +303,7 @@ router.get('/domains', async (req, res, next) => {
   }
 })
 
-router.post('/domains', async (req, res, next) => {
+router.post('/domains', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { value, reason, source } = req.body as { value: string; reason?: string; source?: string }
@@ -325,7 +326,7 @@ router.post('/domains', async (req, res, next) => {
 })
 
 // POST /domains/upload — CSV upload for suppressed domains
-router.post('/domains/upload', async (req, res, next) => {
+router.post('/domains/upload', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { rows, sourceFileName } = req.body as { rows: string[]; sourceFileName?: string }
@@ -366,7 +367,7 @@ router.post('/domains/upload', async (req, res, next) => {
 })
 
 // DELETE /domains — batch delete by ids array
-router.delete('/domains', async (req, res, next) => {
+router.delete('/domains', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const ids = (req.body?.ids as string[]) || []
@@ -386,7 +387,7 @@ router.delete('/domains', async (req, res, next) => {
 // Legacy CSV Import endpoint (kept for backwards compatibility)
 // ============================================================================
 // CSV Import endpoint
-router.post('/import-csv', async (req, res, next) => {
+router.post('/import-csv', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = csvImportSchema.parse(req.body)

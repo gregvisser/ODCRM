@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { listEnrollmentsForSequence, createEnrollmentForSequence } from './enrollments.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
@@ -85,7 +86,7 @@ router.get('/', async (req, res) => {
 // GET /api/sequences/:id/enrollments - List enrollment batches for sequence (Stage 1A)
 router.get('/:id/enrollments', listEnrollmentsForSequence)
 // POST /api/sequences/:id/enrollments - Create enrollment batch + recipients (Stage 1A)
-router.post('/:id/enrollments', createEnrollmentForSequence)
+router.post('/:id/enrollments', requireMarketingMutationAuth, createEnrollmentForSequence)
 
 // GET /api/sequences/:id - Get a single sequence with steps
 router.get('/:id', async (req, res) => {
@@ -144,7 +145,7 @@ router.get('/:id', async (req, res) => {
 })
 
 // POST /api/sequences - Create a new sequence (with optional steps)
-router.post('/', async (req, res) => {
+router.post('/', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -284,7 +285,7 @@ router.post('/', async (req, res) => {
 })
 
 // PUT /api/sequences/:id - Update a sequence (metadata only, not steps)
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -334,7 +335,7 @@ router.put('/:id', async (req, res) => {
 })
 
 // DELETE /api/sequences/:id - Delete a sequence
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -368,7 +369,7 @@ router.delete('/:id', async (req, res) => {
 })
 
 // POST /api/sequences/:id/steps - Add a step to a sequence
-router.post('/:id/steps', async (req, res) => {
+router.post('/:id/steps', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -451,7 +452,7 @@ router.post('/:id/steps', async (req, res) => {
 })
 
 // PUT /api/sequences/:id/steps/:stepId - Update a step
-router.put('/:id/steps/:stepId', async (req, res) => {
+router.put('/:id/steps/:stepId', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -505,7 +506,7 @@ router.put('/:id/steps/:stepId', async (req, res) => {
 })
 
 // DELETE /api/sequences/:id/steps/:stepId - Delete a step
-router.delete('/:id/steps/:stepId', async (req, res) => {
+router.delete('/:id/steps/:stepId', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -534,7 +535,7 @@ router.delete('/:id/steps/:stepId', async (req, res) => {
 })
 
 // POST /api/sequences/:id/enroll - Enroll contacts in a sequence
-router.post('/:id/enroll', async (req, res) => {
+router.post('/:id/enroll', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -699,7 +700,7 @@ router.post('/:id/enroll', async (req, res) => {
 //   3. emailScheduler.ts (cron * * * *) → processScheduledEmails() picks up running campaigns,
 //      calls sendEmail() in outlookEmailService.ts (Microsoft Graph API).
 //   No email is sent from this dry-run endpoint.
-router.post('/:id/dry-run', async (req, res) => {
+router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return

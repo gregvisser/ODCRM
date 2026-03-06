@@ -1,6 +1,7 @@
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = express.Router()
 
@@ -33,7 +34,7 @@ const createCampaignSchema = z.object({
   followUpDelayDaysMax: z.number().int().positive().optional(),
 })
 
-router.post('/', async (req, res, next) => {
+router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const incomingBody = (req.body || {}) as Record<string, unknown>
@@ -212,7 +213,7 @@ router.get('/:id', async (req, res, next) => {
 })
 
 // Update campaign
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -267,7 +268,7 @@ const saveTemplatesSchemaV1 = z.object({
   })
 })
 
-router.post('/:id/templates', async (req, res, next) => {
+router.post('/:id/templates', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -349,7 +350,7 @@ router.post('/:id/templates', async (req, res, next) => {
 })
 
 // Attach prospects
-router.post('/:id/prospects', async (req, res, next) => {
+router.post('/:id/prospects', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -416,7 +417,7 @@ router.post('/:id/prospects', async (req, res, next) => {
 })
 
 // Start campaign
-router.post('/:id/start', async (req, res, next) => {
+router.post('/:id/start', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -504,7 +505,7 @@ router.post('/:id/start', async (req, res, next) => {
 })
 
 // Pause campaign
-router.post('/:id/pause', async (req, res, next) => {
+router.post('/:id/pause', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -522,7 +523,7 @@ router.post('/:id/pause', async (req, res, next) => {
 })
 
 // Complete campaign
-router.post('/:id/complete', async (req, res, next) => {
+router.post('/:id/complete', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -540,7 +541,7 @@ router.post('/:id/complete', async (req, res, next) => {
 })
 
 // Delete campaign
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params

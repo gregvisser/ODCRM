@@ -1,6 +1,7 @@
 import express from 'express'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = express.Router()
 
@@ -581,7 +582,7 @@ const getCustomerId = (req: express.Request) =>
   (req.headers['x-customer-id'] as string)
 
 // Create SMTP identity
-router.post('/identities', async (req, res, next) => {
+router.post('/identities', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const {
       customerId,
@@ -734,7 +735,7 @@ const PATCH_IDENTITY_WHITELIST = [
   'isActive',
 ] as const
 
-router.patch('/identities/:id', async (req, res, next) => {
+router.patch('/identities/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -765,7 +766,7 @@ router.patch('/identities/:id', async (req, res, next) => {
 })
 
 // Disconnect identity
-router.delete('/identities/:id', async (req, res, next) => {
+router.delete('/identities/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -791,7 +792,7 @@ router.delete('/identities/:id', async (req, res, next) => {
 })
 
 // Test send email via Microsoft Graph for a specific identity
-router.post('/identities/:id/test-send', async (req, res, next) => {
+router.post('/identities/:id/test-send', requireMarketingMutationAuth, async (req, res, next) => {
   const { id } = req.params
   const customerId = getCustomerId(req)
   const { toEmail, subject, body } = req.body
@@ -997,7 +998,7 @@ router.get('/identities/:id/signature', async (req, res, next) => {
 })
 
 // PUT /api/outlook/identities/:id/signature — update signature for an identity
-router.put('/identities/:id/signature', async (req, res, next) => {
+router.put('/identities/:id/signature', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
     if (!customerId) return res.status(400).json({ error: 'Customer ID required' })

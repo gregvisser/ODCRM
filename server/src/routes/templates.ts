@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersSafe, previewTemplate } from '../services/templateRenderer.js';
 import { tweakEmailWithAI, analyzeEmailTemplate, generateEmailVariations } from '../services/aiEmailService.js';
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js';
 
 const router = Router();
 
@@ -59,7 +60,7 @@ router.get('/', async (req, res, next) => {
 })
 
 // Create template
-router.post('/', async (req, res, next) => {
+router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = createTemplateSchema.parse(req.body)
@@ -88,7 +89,7 @@ router.post('/', async (req, res, next) => {
 })
 
 // Update template
-router.patch('/:id', async (req, res, next) => {
+router.patch('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const data = updateTemplateSchema.parse(req.body)
@@ -116,7 +117,7 @@ router.patch('/:id', async (req, res, next) => {
 })
 
 // Delete template
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -195,7 +196,7 @@ const aiTweakSchema = z.object({
  * - instruction (optional): Custom instructions for the AI
  * - preservePlaceholders (optional): Keep {{placeholders}} intact (default: true)
  */
-router.post('/ai/tweak', async (req, res) => {
+router.post('/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
   try {
     const data = aiTweakSchema.parse(req.body)
     
@@ -251,7 +252,7 @@ router.post('/ai/tweak', async (req, res) => {
  * - templateBody (required): The email body to analyze
  * - templateSubject (optional): The email subject
  */
-router.post('/ai/analyze', async (req, res) => {
+router.post('/ai/analyze', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { templateBody, templateSubject } = req.body
     
@@ -286,7 +287,7 @@ router.post('/ai/analyze', async (req, res) => {
  * - templateSubject (required): The email subject
  * - count (optional): Number of variations to generate (1-5, default: 3)
  */
-router.post('/ai/variations', async (req, res) => {
+router.post('/ai/variations', requireMarketingMutationAuth, async (req, res) => {
   try {
     const { templateBody, templateSubject, count = 3 } = req.body
     
@@ -326,7 +327,7 @@ router.post('/ai/variations', async (req, res) => {
  * - instruction (optional): Custom instructions
  * - saveResult (optional): If true, update the template with tweaked content
  */
-router.post('/:id/ai/tweak', async (req, res) => {
+router.post('/:id/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params

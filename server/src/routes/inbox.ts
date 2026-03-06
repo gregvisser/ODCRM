@@ -1,6 +1,7 @@
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = express.Router()
 
@@ -350,7 +351,7 @@ router.get('/messages', async (req, res, next) => {
 })
 
 // POST /api/inbox/messages/:id/read — mark message as read/unread
-router.post('/messages/:id/read', async (req, res, next) => {
+router.post('/messages/:id/read', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -376,7 +377,7 @@ router.post('/messages/:id/read', async (req, res, next) => {
 })
 
 // POST /api/inbox/messages/:id/optout — add sender email/domain to suppression list
-router.post('/messages/:id/optout', async (req, res, next) => {
+router.post('/messages/:id/optout', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -414,7 +415,7 @@ router.post('/messages/:id/optout', async (req, res, next) => {
 })
 
 // POST /api/inbox/refresh — trigger immediate reply detection poll for this customer
-router.post('/refresh', async (req, res, next) => {
+router.post('/refresh', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
 
@@ -488,7 +489,7 @@ router.post('/refresh', async (req, res, next) => {
 })
 
 // Send reply in a thread
-router.post('/threads/:threadId/reply', async (req, res, next) => {
+router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { threadId } = req.params

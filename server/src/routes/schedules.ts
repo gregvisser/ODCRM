@@ -1,5 +1,6 @@
 import express from 'express'
 import { prisma } from '../lib/prisma.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = express.Router()
 
@@ -129,7 +130,7 @@ router.get('/emails', async (req, res, next) => {
 })
 
 // POST /api/schedules/:id/pause
-router.post('/:id/pause', async (req, res, next) => {
+router.post('/:id/pause', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -153,7 +154,7 @@ router.post('/:id/pause', async (req, res, next) => {
 })
 
 // POST /api/schedules/:id/resume
-router.post('/:id/resume', async (req, res, next) => {
+router.post('/:id/resume', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
@@ -248,7 +249,7 @@ router.get('/:id/stats', async (req, res, next) => {
 })
 
 // DELETE /api/schedules/:id — cancel a campaign (sets to completed)
-router.delete('/:id', async (req, res, next) => {
+router.delete('/:id', requireMarketingMutationAuth, async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params

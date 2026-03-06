@@ -20,6 +20,7 @@
     "deploy:update-neon": "node scripts/update-neon-env.js",
     "deploy:update-azure": "node scripts/update-azure-env.js",
     "health-check": "node scripts/system-health-check.cjs",
+    "marketing:readiness": "node scripts/marketing-readiness-check.mjs",
     "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1",
     "prod:check": "node scripts/prod-check.cjs",
     "test:no-tenant-fallback": "node scripts/self-test-no-tenant-fallback.mjs",

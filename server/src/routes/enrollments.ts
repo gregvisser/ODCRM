@@ -19,6 +19,7 @@ import { prisma } from '../lib/prisma.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { EnrollmentStatus, OutboundSendQueueStatus } from '@prisma/client'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
@@ -296,7 +297,7 @@ router.get('/', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 /** POST /api/enrollments/:enrollmentId/dry-run — plan what would be sent; persist audit events; no send */
-router.post('/:enrollmentId/dry-run', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/dry-run', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -504,7 +505,7 @@ router.get('/:enrollmentId/audit', async (req: Request, res: Response) => {
 // ---------------------------------------------------------------------------
 
 /** POST /api/enrollments/:enrollmentId/queue/refresh — idempotent rebuild queue for all recipients and all steps; do not delete SENT */
-router.post('/:enrollmentId/queue/refresh', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/queue/refresh', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -590,7 +591,7 @@ router.post('/:enrollmentId/queue/refresh', async (req: Request, res: Response) 
 })
 
 /** POST /api/enrollments/:enrollmentId/queue — enqueue stepIndex=0 only; no sending */
-router.post('/:enrollmentId/queue', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/queue', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -830,7 +831,7 @@ function lifecycleResponse(enrollment: { id: string; status: string; updatedAt: 
 }
 
 /** POST /api/enrollments/:enrollmentId/pause — atomic: PAUSED only when status in DRAFT|ACTIVE */
-router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/pause', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -870,7 +871,7 @@ router.post('/:enrollmentId/pause', async (req: Request, res: Response) => {
 })
 
 /** POST /api/enrollments/:enrollmentId/resume — atomic: ACTIVE only when status is PAUSED */
-router.post('/:enrollmentId/resume', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/resume', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -910,7 +911,7 @@ router.post('/:enrollmentId/resume', async (req: Request, res: Response) => {
 })
 
 /** POST /api/enrollments/:enrollmentId/cancel — atomic: CANCELLED only when status in ACTIVE|PAUSED */
-router.post('/:enrollmentId/cancel', async (req: Request, res: Response) => {
+router.post('/:enrollmentId/cancel', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return

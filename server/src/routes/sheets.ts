@@ -20,6 +20,7 @@ import {
   hasValue,
 } from '../services/googleSheetsService.js'
 import { requireCustomerId } from '../utils/tenantId.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
@@ -114,7 +115,7 @@ const connectSchema = z.object({
   label: z.string().trim().min(1),
 })
 
-router.post('/sources/:source/connect', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/sources/:source/connect', requireMarketingMutationAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -178,7 +179,7 @@ router.post('/sources/:source/connect', async (req: Request, res: Response, next
  * POST /api/sheets/sources/:source/sync
  * Trigger a sync now for a source
  */
-router.post('/sources/:source/sync', async (req: Request, res: Response, next: NextFunction) => {
+router.post('/sources/:source/sync', requireMarketingMutationAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return

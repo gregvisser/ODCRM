@@ -11,6 +11,7 @@ import { csvToMappedRows, detectDelimiter } from '../services/leadSourcesCanonic
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
 import { requireCustomerId } from '../utils/tenantId.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
@@ -192,7 +193,7 @@ router.get('/batches', async (req: Request, res: Response) => {
 })
 
 // POST /api/lead-sources/batches/:batchKey/materialize-list — create or reuse list from lead batch (idempotent)
-router.post('/batches/:batchKey/materialize-list', async (req: Request, res: Response) => {
+router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -308,13 +309,12 @@ router.post('/batches/:batchKey/materialize-list', async (req: Request, res: Res
 })
 
 // POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
-// TODO: In production, guard with admin/auth middleware; customerId is from requireCustomerId(req, res) only.
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
   displayName: z.string().trim().min(1),
   applyToAllAccounts: z.boolean().optional().default(false),
 })
-router.post('/:sourceType/connect', async (req: Request, res: Response) => {
+router.post('/:sourceType/connect', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const { sheetUrl, displayName, applyToAllAccounts } = connectSchema.parse(req.body)
 
@@ -384,7 +384,7 @@ router.post('/:sourceType/connect', async (req: Request, res: Response) => {
 })
 
 // POST /api/lead-sources/:sourceType/poll — fetch sheet, normalize, upsert LeadSourceRowSeen
-router.post('/:sourceType/poll', async (req: Request, res: Response) => {
+router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
