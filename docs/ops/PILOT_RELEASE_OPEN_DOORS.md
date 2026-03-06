@@ -28,6 +28,8 @@ Stability and operability doc for the Pilot Release. **No real sending.** Single
 
 1. **Select client** — In the app, choose the client (tenant) from the selector. All subsequent actions are scoped to that client.
 2. **Create/Edit Sequence** — Open a sequence; in **Configuration**, pick a **Leads Snapshot** (saved list of leads).
+   Sequences are step-based: each step has its own template content and delay.
+   On **Start Sequence**, ODCRM syncs those step templates into the campaign before calling campaign start.
 3. **Create Enrollment** — Create an enrollment for that sequence. Enrollments can be created from the selected **Leads Snapshot** (preferred) or by manual paste of emails.
 4. **Send Queue Preview (Dry Run)** — Open the **Send Queue Preview (Dry Run)** panel and Refresh; view WAIT/SKIP/SEND and reasons.
 5. **Preview email and Details** — Open **Send Queue** (drawer) for an enrollment via **View queue**. In the drawer table, click **Details** on a row for full item state (status, scheduledFor, sentAt, attemptCount, lastError); click **Preview email** on a row for render-only subject/body.

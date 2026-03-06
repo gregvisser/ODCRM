@@ -66,6 +66,7 @@
     "test:enrollment-recipient-source-ui": "node scripts/self-test-enrollment-recipient-source-ui.mjs",
     "test:enrollment-snapshot-ingestion": "node scripts/self-test-enrollment-snapshot-ingestion.mjs",
     "test:sequences-operator-ui": "node scripts/self-test-sequences-operator-ui.mjs",
+    "test:sequences-startflow-step-based": "node scripts/self-test-sequences-startflow-step-based.mjs",
     "test:queue-preview-autoload": "node scripts/self-test-queue-preview-autoload.mjs",
     "test:send-queue-operator-ui": "node scripts/self-test-send-queue-operator-ui.mjs",
     "test:send-queue-drawer-reset": "node scripts/self-test-send-queue-drawer-reset.mjs",

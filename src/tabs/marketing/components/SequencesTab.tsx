@@ -2853,7 +2853,7 @@ const SequencesTab: React.FC = () => {
                         <Select
                           value={step.templateId || ''}
                           onChange={(e) => handleStepTemplateChange(step.stepOrder, e.target.value)}
-                          placeholder={templatesLoading ? 'Loading…' : 'Select a template'}
+                          placeholder={templatesLoading ? 'Loading…' : 'Choose step template'}
                           size="sm"
                         >
                           {templates.map((t) => (
