@@ -77,3 +77,6 @@ Use `scripts/prod-check.cjs` with `EXPECT_SHA=<merge SHA>` to confirm FE SHA == 
 
 Runtime smoke check (requires tenant id):
 `$env:CUSTOMER_ID="cust_xxx"; npm run -s test:marketing-runtime-smoke`
+Optional dry-run endpoint check (admin-only):
+`$env:ADMIN_SECRET="***"; $env:CUSTOMER_ID="cust_xxx"; npm run -s test:marketing-runtime-smoke`
+If `ADMIN_SECRET` is not set, the dry-run check is reported as **SKIP** (not a failure).
