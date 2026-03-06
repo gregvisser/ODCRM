@@ -135,6 +135,65 @@ function pickSha(buildPayload) {
   return null
 }
 
+function hasSuccessEnvelope(payload) {
+  return !!payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'success')
+}
+
+function getPrimaryData(payload) {
+  if (!payload || typeof payload !== 'object') return payload
+  if (Object.prototype.hasOwnProperty.call(payload, 'data')) return payload.data
+  return payload
+}
+
+function normalizeCollection(payload, keys = []) {
+  const primary = getPrimaryData(payload)
+
+  if (Array.isArray(primary)) return primary
+
+  if (primary && typeof primary === 'object') {
+    if (Array.isArray(primary.items)) return primary.items
+    for (const key of keys) {
+      if (Array.isArray(primary[key])) return primary[key]
+    }
+  }
+
+  if (payload && typeof payload === 'object') {
+    for (const key of keys) {
+      if (Array.isArray(payload[key])) return payload[key]
+    }
+  }
+
+  return null
+}
+
+function normalizeObject(payload) {
+  const primary = getPrimaryData(payload)
+  if (primary && typeof primary === 'object' && !Array.isArray(primary)) return primary
+  return null
+}
+
+function assertCollection(path, payload, keys = []) {
+  if (hasSuccessEnvelope(payload) && payload.success !== true) {
+    fail(`GET ${path} returned success!=true`)
+  }
+  const rows = normalizeCollection(payload, keys)
+  if (!rows) {
+    fail(`GET ${path} returned unexpected shape (expected list/envelope list)`)
+  }
+  return rows
+}
+
+function assertObject(path, payload) {
+  if (hasSuccessEnvelope(payload) && payload.success !== true) {
+    fail(`GET ${path} returned success!=true`)
+  }
+  const obj = normalizeObject(payload)
+  if (!obj) {
+    fail(`GET ${path} returned unexpected shape (expected object/envelope object)`)
+  }
+  return obj
+}
+
 (async () => {
   console.log(`Base URL: ${BASE_URL}`)
   console.log(`Customer ID: ${CUSTOMER_ID}`)
@@ -146,68 +205,112 @@ function pickSha(buildPayload) {
   }
   pass(`/api/_build reachable (sha=${buildSha})`)
 
-  const customerJson = await getJson(`/api/customers/${encodeURIComponent(CUSTOMER_ID)}`, { tenant: true })
-  const customer = customerJson?.data ?? customerJson
-  if (!customer || typeof customer !== 'object' || customer.id !== CUSTOMER_ID) {
-    fail(`GET /api/customers/${CUSTOMER_ID} unexpected shape or id mismatch`)
+  const customerByIdPath = `/api/customers/${encodeURIComponent(CUSTOMER_ID)}`
+  const customerJson = await getJson(customerByIdPath, { tenant: true })
+  const customer = normalizeObject(customerJson)
+  if (!customer || customer.id !== CUSTOMER_ID) {
+    fail(`GET ${customerByIdPath} unexpected shape or id mismatch`)
   }
-  pass(`/api/customers/${CUSTOMER_ID} returned tenant customer`)
+  pass(`${customerByIdPath} returned tenant customer`)
 
-  const sequencesJson = await getJson('/api/sequences', { tenant: true })
-  const sequences = Array.isArray(sequencesJson?.data) ? sequencesJson.data : null
-  if (!sequences) {
-    fail('GET /api/sequences returned unexpected shape (expected data array)')
-  }
-  pass(`/api/sequences returned ${sequences.length} row(s)`)
+  const sequencesPath = '/api/sequences'
+  const sequencesJson = await getJson(sequencesPath, { tenant: true })
+  const sequences = assertCollection(sequencesPath, sequencesJson)
+  pass(`${sequencesPath} returned ${sequences.length} row(s)`)
 
-  const previewJson = await getJson('/api/send-queue/preview?limit=20', { tenant: true })
-  const previewRows = Array.isArray(previewJson?.data)
-    ? previewJson.data
-    : Array.isArray(previewJson?.data?.items)
-      ? previewJson.data.items
-      : null
-  if (!previewRows) {
-    fail('GET /api/send-queue/preview?limit=20 returned unexpected shape (expected data[] or data.items[])')
-  }
-  pass(`/api/send-queue/preview?limit=20 returned ${previewRows.length} row(s)`)
+  const previewPath = '/api/send-queue/preview?limit=20'
+  const previewJson = await getJson(previewPath, { tenant: true })
+  const previewRows = assertCollection(previewPath, previewJson)
+  pass(`${previewPath} returned ${previewRows.length} row(s)`)
 
   const firstSequenceId = sequences.find((s) => s && typeof s.id === 'string')?.id
   if (!firstSequenceId) {
     fail('No sequences available for tenant; cannot validate queue drawer endpoint /api/enrollments/:id/queue')
   }
 
-  const enrollmentsJson = await getJson(`/api/sequences/${encodeURIComponent(firstSequenceId)}/enrollments`, { tenant: true })
-  const enrollments = Array.isArray(enrollmentsJson?.data) ? enrollmentsJson.data : null
-  if (!enrollments) {
-    fail(`GET /api/sequences/${firstSequenceId}/enrollments returned unexpected shape (expected data array)`)
-  }
+  const enrollmentsPath = `/api/sequences/${encodeURIComponent(firstSequenceId)}/enrollments`
+  const enrollmentsJson = await getJson(enrollmentsPath, { tenant: true })
+  const enrollments = assertCollection(enrollmentsPath, enrollmentsJson)
   const firstEnrollmentId = enrollments.find((e) => e && typeof e.id === 'string')?.id
   if (!firstEnrollmentId) {
     fail(`No enrollments found for sequence ${firstSequenceId}; cannot validate drawer list endpoint /api/enrollments/:id/queue`)
   }
-  pass(`/api/sequences/${firstSequenceId}/enrollments returned ${enrollments.length} row(s)`)
+  pass(`${enrollmentsPath} returned ${enrollments.length} row(s)`)
 
-  const queueJson = await getJson(`/api/enrollments/${encodeURIComponent(firstEnrollmentId)}/queue`, { tenant: true })
-  const queueItems = Array.isArray(queueJson?.data) ? queueJson.data : null
-  if (!queueItems) {
-    fail(`GET /api/enrollments/${firstEnrollmentId}/queue returned unexpected shape (expected data array)`)
-  }
-  pass(`/api/enrollments/${firstEnrollmentId}/queue returned ${queueItems.length} row(s)`)
+  const queuePath = `/api/enrollments/${encodeURIComponent(firstEnrollmentId)}/queue`
+  const queueJson = await getJson(queuePath, { tenant: true })
+  const queueItems = assertCollection(queuePath, queueJson)
+  pass(`${queuePath} returned ${queueItems.length} row(s)`)
 
-  const auditsJson = await getJson('/api/send-worker/audits?limit=5', { tenant: true })
-  const auditItems = Array.isArray(auditsJson?.data?.items) ? auditsJson.data.items : null
-  if (!auditsJson?.success || !auditItems) {
-    fail('GET /api/send-worker/audits?limit=5 returned unexpected shape (expected success=true and data.items[])')
-  }
-  pass(`/api/send-worker/audits?limit=5 returned ${auditItems.length} row(s)`)
+  const auditsPath = '/api/send-worker/audits?limit=5'
+  const auditsJson = await getJson(auditsPath, { tenant: true })
+  const auditItems = assertCollection(auditsPath, auditsJson)
+  pass(`${auditsPath} returned ${auditItems.length} row(s)`)
 
-  const summaryJson = await getJson('/api/send-worker/audits/summary?sinceHours=24', { tenant: true })
-  const total = summaryJson?.data?.total
-  const byDecision = summaryJson?.data?.byDecision
-  if (!summaryJson?.success || typeof total !== 'number' || !byDecision || typeof byDecision !== 'object') {
-    fail('GET /api/send-worker/audits/summary?sinceHours=24 returned unexpected shape (expected success=true, data.total, data.byDecision)')
+  const summaryPath = '/api/send-worker/audits/summary?sinceHours=24'
+  const summaryJson = await getJson(summaryPath, { tenant: true })
+  const summary = assertObject(summaryPath, summaryJson)
+  if (typeof summary.total !== 'number' || typeof summary.byDecision !== 'object' || !summary.byDecision) {
+    fail(`GET ${summaryPath} returned unexpected summary shape (missing total/byDecision)`)
   }
-  pass(`/api/send-worker/audits/summary?sinceHours=24 returned total=${total}`)
+  pass(`${summaryPath} returned total=${summary.total}`)
+
+  // Marketing tabs GET-only runtime checks (derived from tab components)
+  const templatesPath = '/api/templates'
+  const templatesJson = await getJson(templatesPath, { tenant: true })
+  const templates = assertCollection(templatesPath, templatesJson)
+  pass(`${templatesPath} returned ${templates.length} row(s)`)
+
+  const identitiesPath = `/api/outlook/identities?customerId=${encodeURIComponent(CUSTOMER_ID)}`
+  const identitiesJson = await getJson(identitiesPath, { tenant: true })
+  const identities = assertCollection(identitiesPath, identitiesJson)
+  pass(`${identitiesPath} returned ${identities.length} row(s)`)
+
+  const suppressionPath = `/api/suppression?customerId=${encodeURIComponent(CUSTOMER_ID)}`
+  const suppressionJson = await getJson(suppressionPath, { tenant: true })
+  const suppression = assertCollection(suppressionPath, suppressionJson)
+  pass(`${suppressionPath} returned ${suppression.length} row(s)`)
+
+  const inboxThreadsPath = '/api/inbox/threads?limit=50&offset=0&unreadOnly=false'
+  const inboxThreadsJson = await getJson(inboxThreadsPath, { tenant: true })
+  const inboxThreads = assertCollection(inboxThreadsPath, inboxThreadsJson, ['threads'])
+  pass(`${inboxThreadsPath} returned ${inboxThreads.length} row(s)`)
+
+  const end = new Date()
+  const start = new Date(end)
+  start.setDate(start.getDate() - 30)
+  const inboxRepliesPath = `/api/inbox/replies?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+  const inboxRepliesJson = await getJson(inboxRepliesPath, { tenant: true })
+  const inboxReplies = assertCollection(inboxRepliesPath, inboxRepliesJson, ['items'])
+  pass(`/api/inbox/replies returned ${inboxReplies.length} row(s)`)
+
+  const reportsCustomersPath = '/api/reports/customers'
+  const reportsCustomersJson = await getJson(reportsCustomersPath, { tenant: true })
+  const reportsCustomers = assertCollection(reportsCustomersPath, reportsCustomersJson, ['customers'])
+  pass(`${reportsCustomersPath} returned ${reportsCustomers.length} row(s)`)
+
+  const reportPath = `/api/reports/customer?customerId=${encodeURIComponent(CUSTOMER_ID)}&dateRange=today`
+  const reportJson = await getJson(reportPath, { tenant: true })
+  const report = assertObject(reportPath, reportJson)
+  if (report.customerId && report.customerId !== CUSTOMER_ID) {
+    fail(`GET ${reportPath} customerId mismatch`)
+  }
+  pass(`/api/reports/customer returned object`)
+
+  const leadSourcesPath = '/api/lead-sources'
+  const leadSourcesJson = await getJson(leadSourcesPath, { tenant: true })
+  const leadSources = assertCollection(leadSourcesPath, leadSourcesJson, ['sources'])
+  pass(`${leadSourcesPath} returned ${leadSources.length} row(s)`)
+
+  const schedulesPath = '/api/schedules'
+  const schedulesJson = await getJson(schedulesPath, { tenant: true })
+  const schedules = assertCollection(schedulesPath, schedulesJson)
+  pass(`${schedulesPath} returned ${schedules.length} row(s)`)
+
+  const scheduledEmailsPath = '/api/schedules/emails'
+  const scheduledEmailsJson = await getJson(scheduledEmailsPath, { tenant: true })
+  const scheduledEmails = assertCollection(scheduledEmailsPath, scheduledEmailsJson)
+  pass(`${scheduledEmailsPath} returned ${scheduledEmails.length} row(s)`)
 
   if (!ADMIN_SECRET) {
     skip('dry-run: ADMIN_SECRET not set')
