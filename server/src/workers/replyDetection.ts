@@ -127,6 +127,7 @@ async function processInboundMessage(
       fromAddress: message.fromAddress,
       toAddress: message.toAddress,
       subject: message.subject,
+      bodyPreview: typeof message.bodyPreview === 'string' ? message.bodyPreview.slice(0, 500) : null,
       rawHeaders: message.headers
     } as any })
 

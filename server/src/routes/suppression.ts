@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { parseSheetUrl, readSheet, validateCredentials } from '../services/googleSheetsService.js'
 
 const router = express.Router()
 
@@ -34,11 +35,78 @@ const csvImportSchema = z.object({
   sourceFileName: z.string().optional(),
 })
 
+const sheetImportSchema = z.object({
+  sheetUrl: z.string().url(),
+  gid: z.string().optional(),
+  reason: z.string().optional(),
+  sourceLabel: z.string().optional(),
+  mode: z.enum(['append', 'replace']).optional(),
+})
+
 const isValidDomain = (value: string) => {
   const trimmed = value.trim().toLowerCase()
   if (!trimmed || trimmed.includes('@')) return false
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return false
   return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(trimmed)
+}
+
+type ParsedSuppressionRows = {
+  values: string[]
+  invalid: string[]
+  totalRows: number
+  headers: string[]
+  sheetTitle: string
+}
+
+function normalizeHeaderName(header: string): string {
+  return header
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+}
+
+function parseSheetRowsForType(
+  rows: Record<string, string>[],
+  headers: string[],
+  expectedType: 'email' | 'domain'
+): ParsedSuppressionRows {
+  const normalizedHeaders = headers.map(normalizeHeaderName)
+  const valueCandidates =
+    expectedType === 'email'
+      ? ['email', 'email_address', 'work_email', 'contact_email', 'value']
+      : ['domain', 'website', 'company_domain', 'value']
+  const valueHeader = normalizedHeaders.find((h) => valueCandidates.includes(h))
+  const output = new Set<string>()
+  const invalid: string[] = []
+
+  for (const row of rows) {
+    const raw =
+      (valueHeader ? row[valueHeader] : null) ??
+      (headers.length > 0 ? row[headers[0]] : null) ??
+      ''
+    const candidate = String(raw || '').trim().toLowerCase()
+    if (!candidate) continue
+    if (expectedType === 'email') {
+      if (!z.string().email().safeParse(candidate).success) {
+        invalid.push(candidate)
+        continue
+      }
+    } else if (!isValidDomain(candidate)) {
+      invalid.push(candidate)
+      continue
+    }
+    output.add(candidate)
+  }
+
+  return {
+    values: Array.from(output),
+    invalid,
+    totalRows: rows.length,
+    headers,
+    sheetTitle: '',
+  }
 }
 
 // POST /api/suppression/check - Check how many emails from a list are suppressed
@@ -361,6 +429,101 @@ router.post('/domains/upload', requireMarketingMutationAuth, async (req, res, ne
     }
 
     res.json({ success: true, inserted, duplicates, invalid: invalid.slice(0, 20), totalProcessed: rows.length })
+  } catch (error) {
+    next(error)
+  }
+})
+
+async function importSuppressionFromSheet(
+  customerId: string,
+  expectedType: 'email' | 'domain',
+  input: z.infer<typeof sheetImportSchema>
+) {
+  const credCheck = validateCredentials()
+  if (!credCheck.valid) {
+    const err = new Error(credCheck.error || 'Google Sheets credentials not configured') as Error & { status?: number }
+    err.status = 500
+    throw err
+  }
+
+  const parsed = parseSheetUrl(input.sheetUrl)
+  const gid = input.gid?.trim() || parsed.gid || null
+  const sheetData = await readSheet(parsed.sheetId, gid)
+  const parsedRows = parseSheetRowsForType(sheetData.rows, sheetData.headers, expectedType)
+  parsedRows.sheetTitle = sheetData.sheetTitle
+  const source = input.sourceLabel?.trim() || `google-sheet:${expectedType}`
+  const reason = input.reason?.trim() || null
+  const mode = input.mode || 'append'
+  let replacedCount = 0
+
+  if (mode === 'replace') {
+    const deleted = await prisma.suppressionEntry.deleteMany({
+      where: { customerId, type: expectedType },
+    })
+    replacedCount = deleted.count
+  }
+
+  let inserted = 0
+  let duplicates = 0
+  for (const value of parsedRows.values) {
+    const upserted = await prisma.suppressionEntry.upsert({
+      where: { customerId_type_value: { customerId, type: expectedType, value } },
+      update: {
+        reason,
+        source,
+        sourceFileName: input.sheetUrl,
+        ...(expectedType === 'email' ? { emailNormalized: value } : {}),
+      },
+      create: {
+        id: randomUUID(),
+        customerId,
+        type: expectedType,
+        value,
+        ...(expectedType === 'email' ? { emailNormalized: value } : {}),
+        reason,
+        source,
+        sourceFileName: input.sheetUrl,
+      },
+    })
+    if (upserted.createdAt.getTime() === upserted.updatedAt.getTime()) inserted += 1
+    else duplicates += 1
+  }
+
+  return {
+    success: true,
+    type: expectedType,
+    mode,
+    sheetTitle: sheetData.sheetTitle,
+    sheetUrl: input.sheetUrl,
+    gid,
+    totalRows: parsedRows.totalRows,
+    inserted,
+    duplicates,
+    replacedCount,
+    invalid: parsedRows.invalid.slice(0, 100),
+    headers: parsedRows.headers,
+  }
+}
+
+// POST /emails/import-sheet — import suppressed emails from Google Sheet URL
+router.post('/emails/import-sheet', requireMarketingMutationAuth, async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const input = sheetImportSchema.parse(req.body)
+    const result = await importSuppressionFromSheet(customerId, 'email', input)
+    res.json(result)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// POST /domains/import-sheet — import suppressed domains from Google Sheet URL
+router.post('/domains/import-sheet', requireMarketingMutationAuth, async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const input = sheetImportSchema.parse(req.body)
+    const result = await importSuppressionFromSheet(customerId, 'domain', input)
+    res.json(result)
   } catch (error) {
     next(error)
   }

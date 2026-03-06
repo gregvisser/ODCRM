@@ -2,6 +2,7 @@ import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { randomUUID } from 'crypto'
 
 const router = express.Router()
 
@@ -137,11 +138,11 @@ router.get('/replies', async (req, res, next) => {
 router.get('/threads', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const limit = parseInt(req.query.limit as string) || 50
-    const offset = parseInt(req.query.offset as string) || 0
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200)
+    const offset = Math.max(parseInt(req.query.offset as string) || 0, 0)
+    const unreadOnly = req.query.unreadOnly === 'true'
 
-    // Get all threads that have messages in customer's mailboxes
-    const threads = await prisma.emailMessageMetadata.findMany({
+    const messages = await prisma.emailMessageMetadata.findMany({
       where: {
         senderIdentity: { customerId },
         threadId: { not: null },
@@ -182,21 +183,30 @@ router.get('/threads', async (req, res, next) => {
         },
       },
       orderBy: { createdAt: 'desc' },
-      distinct: ['threadId'],
-      take: limit,
-      skip: offset,
+      take: 2000,
     })
 
-    // Group messages by thread and get latest message info
-    const threadMap = new Map()
-
-    for (const message of threads) {
+    const threadMap = new Map<string, {
+      threadId: string
+      subject: string
+      participantEmail: string
+      participantName: string | null
+      mailboxEmail: string | null
+      mailboxName: string | null
+      campaignId: string | undefined
+      campaignName: string | undefined
+      latestMessageAt: Date
+      messageCount: number
+      hasReplies: boolean
+      unreadCount: number
+    }>()
+    for (const message of messages) {
       if (!message.threadId) continue
 
       const threadId = message.threadId
       const existing = threadMap.get(threadId)
 
-      if (!existing || message.createdAt > existing.latestMessageAt) {
+      if (!existing) {
         threadMap.set(threadId, {
           threadId,
           subject: message.subject,
@@ -211,25 +221,45 @@ router.get('/threads', async (req, res, next) => {
           latestMessageAt: message.createdAt,
           messageCount: 1,
           hasReplies: message.direction === 'inbound',
+          unreadCount: message.direction === 'inbound' && (message as any).isRead === false ? 1 : 0,
         })
       } else {
         existing.messageCount++
+        if (message.direction === 'inbound' && (message as any).isRead === false) {
+          existing.unreadCount++
+        }
+        if (message.createdAt > existing.latestMessageAt) {
+          existing.subject = message.subject
+          existing.participantEmail = message.direction === 'inbound' ? message.fromAddress : message.toAddress
+          existing.participantName = message.campaignProspect?.contact ?
+            `${message.campaignProspect.contact.firstName || ''} ${message.campaignProspect.contact.lastName || ''}`.trim() ||
+            message.campaignProspect.contact.companyName : null
+          existing.mailboxEmail = message.senderIdentity?.emailAddress || null
+          existing.mailboxName = message.senderIdentity?.displayName || null
+          existing.campaignId = message.campaignProspect?.campaign?.id
+          existing.campaignName = message.campaignProspect?.campaign?.name
+          existing.latestMessageAt = message.createdAt
+        }
         if (message.direction === 'inbound') {
           existing.hasReplies = true
         }
       }
     }
 
-    const threadList = Array.from(threadMap.values())
+    let threadList = Array.from(threadMap.values())
     threadList.sort((a, b) => b.latestMessageAt.getTime() - a.latestMessageAt.getTime())
+    if (unreadOnly) {
+      threadList = threadList.filter((t) => t.unreadCount > 0)
+    }
+    const paged = threadList.slice(offset, offset + limit)
 
     res.json({
-      threads: threadList.map(thread => ({
+      threads: paged.map(thread => ({
         ...thread,
         latestMessageAt: thread.latestMessageAt.toISOString(),
       })),
-      hasMore: threads.length === limit,
-      offset: offset + threads.length,
+      hasMore: offset + paged.length < threadList.length,
+      offset: offset + paged.length,
     })
   } catch (error) {
     next(error)
@@ -277,10 +307,13 @@ router.get('/threads/:threadId/messages', async (req, res, next) => {
       threadId,
       messages: messages.map(msg => ({
         id: msg.id,
+        threadId: msg.threadId,
         direction: msg.direction,
         fromAddress: msg.fromAddress,
         toAddress: msg.toAddress,
         subject: msg.subject,
+        bodyPreview: (msg as any).bodyPreview || null,
+        isRead: (msg as any).isRead ?? false,
         rawHeaders: msg.rawHeaders,
         createdAt: msg.createdAt.toISOString(),
         senderIdentity: msg.senderIdentity,
@@ -493,14 +526,14 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
   try {
     const customerId = getCustomerId(req)
     const { threadId } = req.params
-    const { content, toAddress } = req.body
+    const { content } = req.body
 
-    if (!content || !toAddress) {
-      return res.status(400).json({ error: 'Content and toAddress are required' })
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'content is required' })
     }
 
-    // Find the original message to determine which mailbox to reply from
-    const originalMessage = await prisma.emailMessageMetadata.findFirst({
+    // Find messages in the thread to choose mailbox + recipient deterministically.
+    const threadMessages = await prisma.emailMessageMetadata.findMany({
       where: {
         threadId,
         senderIdentity: { customerId },
@@ -516,17 +549,24 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
       orderBy: { createdAt: 'desc' },
     })
 
-    if (!originalMessage) {
+    if (threadMessages.length === 0) {
       return res.status(404).json({ error: 'Thread not found' })
     }
+    const latest = threadMessages[0]
+    const latestInbound = threadMessages.find((m) => m.direction === 'inbound') || null
+    const toAddress = latestInbound?.fromAddress || latest.toAddress
+    if (!toAddress) {
+      return res.status(400).json({ error: 'Unable to resolve reply recipient for thread' })
+    }
+    const baseSubject = (latest.subject || '').replace(/^Re:\s*/i, '').trim() || 'No subject'
+    const replySubject = `Re: ${baseSubject}`
 
-    // Send the reply using the same mailbox
     const { sendEmail } = await import('../services/outlookEmailService.js')
 
     const result = await sendEmail(prisma, {
-      senderIdentityId: originalMessage.senderIdentity.id,
+      senderIdentityId: latest.senderIdentity.id,
       toEmail: toAddress,
-      subject: `Re: ${originalMessage.subject.replace(/^Re:\s*/i, '')}`,
+      subject: replySubject,
       htmlBody: content,
       textBody: content,
     })
@@ -535,28 +575,27 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
       return res.status(500).json({ error: 'Failed to send reply', details: result.error })
     }
 
-    // Create EmailMessageMetadata for the outbound reply
     await prisma.emailMessageMetadata.create({
       data: {
-        id: `msg_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-        senderIdentityId: originalMessage.senderIdentity.id,
-        providerMessageId: result.messageId || `sent_${Date.now()}`,
+        campaignProspectId: latest.campaignProspectId || null,
+        senderIdentityId: latest.senderIdentity.id,
+        providerMessageId: result.messageId || `sent_${randomUUID()}`,
         threadId: threadId,
         direction: 'outbound',
-        fromAddress: originalMessage.senderIdentity.emailAddress,
+        fromAddress: latest.senderIdentity.emailAddress,
         toAddress: toAddress,
-        subject: `Re: ${originalMessage.subject.replace(/^Re:\s*/i, '')}`,
+        subject: replySubject,
+        bodyPreview: content.trim().slice(0, 500),
       },
     })
 
-    // Create EmailEvent for the reply
-    if (originalMessage.campaignProspectId) {
+    if (latest.campaignProspectId) {
       await prisma.emailEvent.create({
         data: {
           customerId,
-          campaignId: originalMessage.campaignProspect?.campaignId || '',
-          campaignProspectId: originalMessage.campaignProspectId,
-          senderIdentityId: originalMessage.senderIdentity.id,
+          campaignId: latest.campaignProspect?.campaignId || '',
+          campaignProspectId: latest.campaignProspectId,
+          senderIdentityId: latest.senderIdentity.id,
           recipientEmail: toAddress,
           type: 'replied',
           metadata: {
@@ -580,4 +619,3 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
 })
 
 export default router
-

@@ -64,14 +64,18 @@ type EmailThread = {
   latestMessageAt: string
   messageCount: number
   hasReplies: boolean
+  unreadCount?: number
 }
 
 type EmailMessage = {
   id: string
+  threadId?: string
   direction: 'inbound' | 'outbound'
   fromAddress: string
   toAddress: string
   subject: string
+  bodyPreview?: string | null
+  isRead?: boolean
   rawHeaders?: any
   createdAt: string
   senderIdentity?: {
@@ -143,12 +147,12 @@ const InboxTab: React.FC = () => {
   useEffect(() => {
     if (selectedCustomerId) {
       if (view === 'replies') {
-        loadReplies()
+        void loadReplies()
       } else {
-        loadThreads()
+        void loadThreads()
       }
     }
-  }, [selectedCustomerId, view, dateRange])
+  }, [selectedCustomerId, view, dateRange, unreadOnly])
 
   const loadReplies = async () => {
     setLoading(true)
@@ -183,11 +187,13 @@ const InboxTab: React.FC = () => {
   }
 
   const loadCustomers = async () => {
+    setLoading(true)
     const { data, error: apiError } = await api.get('/api/customers')
 
     if (apiError) {
       console.error('Failed to load customers:', apiError)
       setCustomers([])
+      setLoading(false)
       return
     }
 
@@ -199,21 +205,26 @@ const InboxTab: React.FC = () => {
       const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(storedCustomerId)
+      } else if (customerList.length > 0) {
+        setSelectedCustomerId(customerList[0].id)
+        setCurrentCustomerId(customerList[0].id)
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
       setCustomers([])
+    } finally {
+      setLoading(false)
     }
   }
 
   const loadThreads = async () => {
+    setLoading(true)
     setThreadsLoading(true)
     setError(null)
 
-    const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>('/api/inbox/threads', {
-      limit: 50,
-      offset: 0
-    })
+    const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
+      `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`
+    )
 
     if (apiError) {
       setError(apiError)
@@ -222,6 +233,7 @@ const InboxTab: React.FC = () => {
     }
 
     setThreadsLoading(false)
+    setLoading(false)
   }
 
   const loadThreadMessages = async (threadId: string) => {
@@ -247,14 +259,8 @@ const InboxTab: React.FC = () => {
   const sendReply = async () => {
     if (!selectedThreadId || !replyContent.trim()) return
 
-    const lastMessage = selectedThread?.[selectedThread.length - 1]
-    if (!lastMessage) return
-
-    const toAddress = lastMessage.direction === 'inbound' ? lastMessage.fromAddress : lastMessage.toAddress
-
     const { error: apiError } = await api.post(`/api/inbox/threads/${selectedThreadId}/reply`, {
       content: replyContent,
-      toAddress,
     })
 
     if (apiError) {
@@ -308,7 +314,7 @@ const InboxTab: React.FC = () => {
     const headers = { 'X-Customer-Id': selectedCustomerId }
     const inbound = messages.filter((m) => m.direction === 'inbound')
     for (const msg of inbound) {
-      if ((msg as any).isRead === false) {
+      if (msg.isRead === false) {
         await api.post(`/api/inbox/messages/${msg.id}/read`, { isRead: true }, { headers })
       }
     }
@@ -394,7 +400,10 @@ const InboxTab: React.FC = () => {
           <Select
             size="sm"
             value={view}
-            onChange={(e) => setView(e.target.value as 'replies' | 'threads')}
+            onChange={(e) => {
+              const next = e.target.value as 'replies' | 'threads'
+              setView(next)
+            }}
             w="120px"
           >
             <option value="threads">Threads</option>
@@ -489,6 +498,9 @@ const InboxTab: React.FC = () => {
                               {thread.mailboxName || thread.mailboxEmail}
                             </Badge>
                             {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
+                            {(thread.unreadCount || 0) > 0 ? (
+                              <Badge size="sm" colorScheme="orange">{thread.unreadCount} unread</Badge>
+                            ) : null}
                           </HStack>
                         </VStack>
                       </HStack>
@@ -533,7 +545,7 @@ const InboxTab: React.FC = () => {
                         </Text>
                       </HStack>
                       <Text fontSize="sm" whiteSpace="pre-wrap">
-                        {message.rawHeaders?.body || 'No message content'}
+                        {message.bodyPreview || 'No preview available'}
                       </Text>
                     </Box>
                   ))}
