@@ -61,6 +61,7 @@
     "test:audit-viewer-stage2b-min": "node scripts/self-test-audit-viewer-stage2b-min.mjs",
     "test:audit-viewer-stage2b-plus": "node scripts/self-test-audit-viewer-stage2b-plus.mjs",
     "test:send-worker-live-tick-stage4min": "node scripts/self-test-send-worker-live-tick-stage4min.mjs",
+    "test:sendworker-normalization": "node scripts/self-test-sendworker-normalization.mjs",
     "test:enrollment-recipient-source-ui": "node scripts/self-test-enrollment-recipient-source-ui.mjs",
     "test:enrollment-snapshot-ingestion": "node scripts/self-test-enrollment-snapshot-ingestion.mjs",
     "test:sequences-operator-ui": "node scripts/self-test-sequences-operator-ui.mjs",
