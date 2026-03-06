@@ -6,6 +6,9 @@
 
 const BASE_URL = (process.env.BASE_URL || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').replace(/\/$/, '')
 const CUSTOMER_ID = (process.env.CUSTOMER_ID || '').trim()
+const ADMIN_SECRET = (process.env.ADMIN_SECRET || '').trim()
+let passCount = 0
+let skipCount = 0
 
 function fail(message) {
   console.error(`self-test-marketing-runtime-smoke: FAIL - ${message}`)
@@ -14,6 +17,12 @@ function fail(message) {
 
 function pass(message) {
   console.log(`PASS ${message}`)
+  passCount += 1
+}
+
+function skip(message) {
+  console.log(`SKIP ${message}`)
+  skipCount += 1
 }
 
 if (!CUSTOMER_ID) {
@@ -64,6 +73,56 @@ async function getJson(path, { tenant = false } = {}) {
     json = await res.json()
   } catch {
     fail(`GET ${path} returned non-JSON response`)
+  }
+
+  return json
+}
+
+async function postJson(path, { tenant = false, admin = false, body = {} } = {}) {
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }
+  if (tenant) headers['X-Customer-Id'] = CUSTOMER_ID
+  if (admin) headers['X-Admin-Secret'] = ADMIN_SECRET
+
+  const maxAttempts = 3
+  let res = null
+  let lastError = null
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      res = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: JSON.stringify(body) })
+      if (res.ok) break
+      if (res.status >= 500 && attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt))
+        continue
+      }
+      break
+    } catch (err) {
+      lastError = err
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt))
+        continue
+      }
+    }
+  }
+
+  if (!res) {
+    fail(`network error for POST ${path}: ${lastError?.message || String(lastError)}`)
+  }
+
+  if (!res.ok) {
+    let bodyText = ''
+    try { bodyText = await res.text() } catch { bodyText = '' }
+    fail(`POST ${path} returned ${res.status}. Body: ${bodyText.slice(0, 400)}`)
+  }
+
+  let json
+  try {
+    json = await res.json()
+  } catch {
+    fail(`POST ${path} returned non-JSON response`)
   }
 
   return json
@@ -135,7 +194,33 @@ function pickSha(buildPayload) {
   }
   pass(`/api/enrollments/${firstEnrollmentId}/queue returned ${queueItems.length} row(s)`)
 
-  console.log('self-test-marketing-runtime-smoke: PASS')
+  const auditsJson = await getJson('/api/send-worker/audits?limit=5', { tenant: true })
+  const auditItems = Array.isArray(auditsJson?.data?.items) ? auditsJson.data.items : null
+  if (!auditsJson?.success || !auditItems) {
+    fail('GET /api/send-worker/audits?limit=5 returned unexpected shape (expected success=true and data.items[])')
+  }
+  pass(`/api/send-worker/audits?limit=5 returned ${auditItems.length} row(s)`)
+
+  const summaryJson = await getJson('/api/send-worker/audits/summary?sinceHours=24', { tenant: true })
+  const total = summaryJson?.data?.total
+  const byDecision = summaryJson?.data?.byDecision
+  if (!summaryJson?.success || typeof total !== 'number' || !byDecision || typeof byDecision !== 'object') {
+    fail('GET /api/send-worker/audits/summary?sinceHours=24 returned unexpected shape (expected success=true, data.total, data.byDecision)')
+  }
+  pass(`/api/send-worker/audits/summary?sinceHours=24 returned total=${total}`)
+
+  if (!ADMIN_SECRET) {
+    skip('dry-run: ADMIN_SECRET not set')
+  } else {
+    const dryRunJson = await postJson('/api/send-worker/dry-run', { admin: true, body: {} })
+    const dryRunSuccess = dryRunJson?.success === true
+    if (!dryRunSuccess) {
+      fail('POST /api/send-worker/dry-run returned unexpected contract (expected success=true)')
+    }
+    pass('POST /api/send-worker/dry-run succeeded')
+  }
+
+  console.log(`self-test-marketing-runtime-smoke: PASS (checks=${passCount}, skipped=${skipCount})`)
   process.exit(0)
 })().catch((err) => {
   fail(err?.message || String(err))
