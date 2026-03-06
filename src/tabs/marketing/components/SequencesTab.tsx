@@ -1527,6 +1527,66 @@ const SequencesTab: React.FC = () => {
     return sequenceId
   }
 
+  const toCampaignTemplateSteps = (steps: SequenceStep[]) => {
+    return [...steps]
+      .sort((a, b) => a.stepOrder - b.stepOrder)
+      .map((step) => ({
+        stepNumber: step.stepOrder,
+        subjectTemplate: step.subjectTemplate,
+        bodyTemplateHtml: step.bodyTemplateHtml,
+        bodyTemplateText: step.bodyTemplateText || undefined,
+        delayDaysMin: step.stepOrder === 1 ? 0 : Math.max(0, step.delayDaysFromPrevious),
+        delayDaysMax: step.stepOrder === 1 ? 0 : Math.max(0, step.delayDaysFromPrevious),
+      }))
+  }
+
+  const campaignStartDefaults = {
+    sendWindowHoursStart: 8,
+    sendWindowHoursEnd: 18,
+    randomizeWithinHours: 4,
+    followUpDelayDaysMin: 1,
+    followUpDelayDaysMax: 3,
+  }
+
+  const ensureCampaignReadyToStart = async (campaignId: string, sequence: SequenceCampaign, headers: Record<string, string>) => {
+    const res = await api.patch(`/api/campaigns/${campaignId}`, {
+      name: sequence.name.trim(),
+      description: sequence.description?.trim() || undefined,
+      listId: sequence.listId || undefined,
+      senderIdentityId: sequence.senderIdentityId || undefined,
+      sequenceId: sequence.sequenceId || undefined,
+      ...campaignStartDefaults,
+    }, { headers })
+    if (res.error) {
+      throw new Error(res.error)
+    }
+  }
+
+  const syncCampaignTemplatesFromSequence = async (campaignId: string, sequenceId: string, headers: Record<string, string>) => {
+    const verifyRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`, { headers })
+    if (verifyRes.error || !verifyRes.data || !Array.isArray(verifyRes.data.steps) || verifyRes.data.steps.length === 0) {
+      throw new Error('Sequence has no steps. Save draft again.')
+    }
+    const sequenceSteps: SequenceStep[] = verifyRes.data.steps.map((step) => ({
+      stepOrder: step.stepOrder,
+      delayDaysFromPrevious: step.delayDaysFromPrevious || 0,
+      subjectTemplate: step.subjectTemplate || '',
+      bodyTemplateHtml: step.bodyTemplateHtml || '',
+      bodyTemplateText: step.bodyTemplateText || '',
+    }))
+    const invalidStep = sequenceSteps.find((step) => !step.subjectTemplate.trim() || !step.bodyTemplateHtml.trim())
+    if (invalidStep) {
+      throw new Error(`Step ${invalidStep.stepOrder} is incomplete. Add subject and body before starting.`)
+    }
+    const templatesRes = await api.post(`/api/campaigns/${campaignId}/templates`, {
+      steps: toCampaignTemplateSteps(sequenceSteps),
+    }, { headers })
+    if (templatesRes.error) {
+      throw new Error(templatesRes.error)
+    }
+    return sequenceSteps
+  }
+
 
   const handleSaveDraft = async () => {
     if (!editingSequence) return
@@ -1630,9 +1690,10 @@ const SequencesTab: React.FC = () => {
     if (!sequence.name.trim()) return 'Sequence name is required.'
     if (!sequence.listId) return leadBatches.length === 0 ? 'No lead batches yet. Go to Lead Sources and click Sync.' : 'Select a lead batch.'
     if (templates.length === 0) return 'No templates available.'
-    if (!sequence.templateId) return 'Select a template.'
     if (senderIdentities.length === 0) return 'No senders available.'
     if (!sequence.senderIdentityId) return 'Select a sender.'
+    if (!sequence.sequenceId) return 'Save draft first to generate sequence.'
+    if (!sequence.campaignId) return 'Save draft first to create campaign.'
     if (snapshotsError || templatesError || sendersError) return 'Fix the data loading errors first.'
     return null
   }
@@ -1650,7 +1711,7 @@ const SequencesTab: React.FC = () => {
     }
 
     const sender = senderIdentities.find((item) => item.id === sequence.senderIdentityId)
-    if (!sender || !sequence.steps || sequence.steps.length === 0) {
+    if (!sender || !sequence.sequenceId || !selectedCustomerId?.startsWith('cust_')) {
       toast({
         title: 'Cannot start sequence',
         description: 'Steps or sender selection is invalid.',
@@ -1660,7 +1721,26 @@ const SequencesTab: React.FC = () => {
       return
     }
 
-    setStartPreviewCampaign(sequence)
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const detailRes = await api.get<SequenceDetail>(`/api/sequences/${sequence.sequenceId}`, { headers })
+    if (detailRes.error || !detailRes.data || !Array.isArray(detailRes.data.steps) || detailRes.data.steps.length === 0) {
+      toast({
+        title: 'Cannot start sequence',
+        description: 'Sequence has no steps. Save draft and add at least one step.',
+        status: 'error',
+        duration: 5000,
+      })
+      return
+    }
+    const hydratedSteps: SequenceStep[] = detailRes.data.steps.map((step) => ({
+      stepOrder: step.stepOrder,
+      delayDaysFromPrevious: step.delayDaysFromPrevious || 0,
+      subjectTemplate: step.subjectTemplate || '',
+      bodyTemplateHtml: step.bodyTemplateHtml || '',
+      bodyTemplateText: step.bodyTemplateText || '',
+    }))
+    const startCampaign: SequenceCampaign = { ...sequence, steps: hydratedSteps }
+    setStartPreviewCampaign(startCampaign)
     setStartPreview({
       snapshot: undefined,
       sender,
@@ -1669,7 +1749,7 @@ const SequencesTab: React.FC = () => {
     })
     onStartOpen()
 
-    const listRes = await api.get<{ name?: string; contacts: Array<{ id: string; email: string | null }> }>(`/api/lists/${sequence.listId}`, sequence.listId && selectedCustomerId?.startsWith('cust_') ? { headers: { 'X-Customer-Id': selectedCustomerId } } : undefined)
+    const listRes = await api.get<{ name?: string; contacts: Array<{ id: string; email: string | null }> }>(`/api/lists/${sequence.listId}`, sequence.listId ? { headers } : undefined)
     if (listRes.error) {
       setStartPreview((prev) => ({
         ...prev,
@@ -1756,18 +1836,8 @@ const SequencesTab: React.FC = () => {
       }
       const startHeaders = { 'X-Customer-Id': selectedCustomerId }
 
-      const verifyRes = await api.get<SequenceDetail>(`/api/sequences/${sequenceId}`, { headers: startHeaders })
-      if (verifyRes.error || !verifyRes.data || !verifyRes.data.steps || verifyRes.data.steps.length === 0) {
-        throw new Error('Sequence has no steps. Save draft again.')
-      }
-
-      await api.patch(`/api/campaigns/${campaignId}`, {
-        name: sequence.name.trim(),
-        description: sequence.description?.trim() || undefined,
-        listId,
-        senderIdentityId,
-        sequenceId,
-      }, { headers: startHeaders })
+      await ensureCampaignReadyToStart(campaignId, sequence, startHeaders)
+      await syncCampaignTemplatesFromSequence(campaignId, sequenceId, startHeaders)
 
       const listRes = await api.get<{ contacts: Array<{ id: string }> }>(`/api/lists/${listId}`, { headers: startHeaders })
       if (listRes.error) {
