@@ -199,6 +199,7 @@ type SequenceDetail = {
 }
 
 const LEAD_SOURCES: SnapshotOption['source'][] = ['cognism', 'apollo', 'blackbook']
+const MAX_STEP_DELAY_DAYS = 365
 
 type Customer = {
   id: string
@@ -1590,46 +1591,11 @@ const SequencesTab: React.FC = () => {
 
   const handleSaveDraft = async () => {
     if (!editingSequence) return
-    
-    // Validate name
-    if (!editingSequence.name.trim()) {
+    const validationErrors = getSequenceDraftValidationErrors(editingSequence)
+    if (validationErrors.length > 0) {
       toast({
-        title: 'Sequence name is required',
-        status: 'error',
-        duration: 3000,
-      })
-      return
-    }
-
-    // Validate sender identity
-    if (!editingSequence.senderIdentityId) {
-      toast({
-        title: 'Sender identity is required',
-        status: 'error',
-        duration: 3000,
-      })
-      return
-    }
-
-    // Validate steps
-    if (!editingSequence.steps || editingSequence.steps.length === 0) {
-      toast({
-        title: 'At least one step is required',
-        status: 'error',
-        duration: 3000,
-      })
-      return
-    }
-
-    // Validate each step has content
-    const emptySteps = editingSequence.steps.filter(
-      step => !step.subjectTemplate.trim() || !step.bodyTemplateHtml.trim()
-    )
-    
-    if (emptySteps.length > 0) {
-      toast({
-        title: 'All steps must have subject and body',
-        description: `Step${emptySteps.length > 1 ? 's' : ''} ${emptySteps.map(s => s.stepOrder).join(', ')} ${emptySteps.length > 1 ? 'are' : 'is'} incomplete.`,
+        title: 'Fix sequence validation errors',
+        description: validationErrors[0],
         status: 'error',
         duration: 4000,
       })
@@ -1697,6 +1663,27 @@ const SequencesTab: React.FC = () => {
     if (snapshotsError || templatesError || sendersError) return 'Fix the data loading errors first.'
     return null
   }
+
+  const getSequenceDraftValidationErrors = (sequence: SequenceCampaign): string[] => {
+    const errors: string[] = []
+    if (!sequence.name.trim()) errors.push('Sequence name is required.')
+    if (!sequence.senderIdentityId) errors.push('Sender identity is required.')
+    if (!Array.isArray(sequence.steps) || sequence.steps.length === 0) errors.push('At least one step is required.')
+    for (const step of sequence.steps ?? []) {
+      if (!step.templateId) errors.push(`Step ${step.stepOrder}: template is required.`)
+      if (!step.subjectTemplate.trim() || !step.bodyTemplateHtml.trim()) {
+        errors.push(`Step ${step.stepOrder}: subject and body are required.`)
+      }
+      const delay = Number(step.delayDaysFromPrevious)
+      if (!Number.isFinite(delay) || delay < 0 || delay > MAX_STEP_DELAY_DAYS) {
+        errors.push(`Step ${step.stepOrder}: delay must be between 0 and ${MAX_STEP_DELAY_DAYS} days.`)
+      }
+    }
+    return Array.from(new Set(errors))
+  }
+
+  const sequenceDraftValidationErrors = editingSequence ? getSequenceDraftValidationErrors(editingSequence) : []
+  const canSaveDraft = !!editingSequence && sequenceDraftValidationErrors.length === 0
 
   const handleRequestStart = async (sequence: SequenceCampaign) => {
     const validationError = validateStartRequirements(sequence)
@@ -2879,6 +2866,17 @@ const SequencesTab: React.FC = () => {
                   <Heading size="sm" mb={4}>
                     Configuration
                   </Heading>
+                  {sequenceDraftValidationErrors.length > 0 && (
+                    <Alert status="error" mb={4} borderRadius="md">
+                      <AlertIcon />
+                      <Box>
+                        <AlertTitle fontSize="sm">Validation required before save</AlertTitle>
+                        <AlertDescription fontSize="xs">
+                          {sequenceDraftValidationErrors[0]}
+                        </AlertDescription>
+                      </Box>
+                    </Alert>
+                  )}
 
                   <VStack spacing={5} align="stretch">
                     <FormControl isRequired>
@@ -2942,6 +2940,11 @@ const SequencesTab: React.FC = () => {
                         <Text fontSize="sm" color="gray.500" mt={1}>
                           No lead batches yet — go to Lead Sources and click Sync.
                         </Text>
+                      )}
+                      {materializedBatchKey && (
+                        <FormHelperText>
+                          Preview recipients: {leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0}. Enrolling this sequence will generate queue items for these recipients.
+                        </FormHelperText>
                       )}
                     </FormControl>
 
@@ -3140,7 +3143,7 @@ const SequencesTab: React.FC = () => {
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button variant="outline" onClick={handleSaveDraft}>
+            <Button variant="outline" onClick={handleSaveDraft} isDisabled={!canSaveDraft}>
               Save Draft
             </Button>
             <Button
