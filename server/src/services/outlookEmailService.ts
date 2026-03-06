@@ -21,6 +21,13 @@ export interface SendEmailResult {
   rawResponse?: any
 }
 
+export interface ReplyEmailParams {
+  senderIdentityId: string
+  replyToMessageId: string
+  htmlBody: string
+  toEmail?: string
+}
+
 export interface InboxMessage {
   messageId: string
   threadId?: string
@@ -261,6 +268,79 @@ export async function sendEmail(
       success: false,
       error: error.message || 'Unknown error',
       rawResponse: error
+    }
+  }
+}
+
+/**
+ * Reply to an existing message thread via Microsoft Graph.
+ * Uses Graph reply endpoint to preserve thread continuity in Outlook.
+ */
+export async function replyToMessage(
+  prisma: PrismaClient,
+  params: ReplyEmailParams
+): Promise<SendEmailResult> {
+  try {
+    const identity = await prisma.emailIdentity.findUnique({
+      where: { id: params.senderIdentityId }
+    })
+
+    if (!identity || !identity.isActive) {
+      return { success: false, error: 'Email identity not found or inactive' }
+    }
+    if (identity.provider !== 'outlook') {
+      return { success: false, error: `Unsupported provider: ${identity.provider}` }
+    }
+
+    const client = await getGraphClient(identity)
+    const userEmail = identity.outlookUserId || identity.emailAddress
+    const sendStartedAt = new Date()
+
+    await client
+      .api(`/users/${userEmail}/messages/${params.replyToMessageId}/reply`)
+      .post({
+        comment: params.htmlBody,
+      })
+
+    let messageId: string | undefined
+    let threadId: string | undefined
+    try {
+      const sentMessages = await client
+        .api(`/users/${userEmail}/mailFolders/sentitems/messages`)
+        .filter(`sentDateTime ge ${sendStartedAt.toISOString()}`)
+        .orderby('sentDateTime desc')
+        .top(10)
+        .get()
+
+      if (Array.isArray(sentMessages?.value) && sentMessages.value.length > 0) {
+        const toEmailNormalized = params.toEmail?.trim().toLowerCase()
+        const sentMessage =
+          (toEmailNormalized
+            ? sentMessages.value.find((m: any) =>
+                Array.isArray(m.toRecipients) &&
+                m.toRecipients.some(
+                  (r: any) => (r?.emailAddress?.address ?? '').toLowerCase() === toEmailNormalized
+                )
+              )
+            : null) ?? sentMessages.value[0]
+        messageId = sentMessage?.id
+        threadId = sentMessage?.conversationId
+      }
+    } catch (err) {
+      console.warn('Could not fetch sent reply metadata:', err)
+    }
+
+    return {
+      success: true,
+      messageId,
+      threadId,
+    }
+  } catch (error: any) {
+    console.error('Error replying to email:', error)
+    return {
+      success: false,
+      error: error.message || 'Unknown error',
+      rawResponse: error,
     }
   }
 }

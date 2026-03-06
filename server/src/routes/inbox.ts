@@ -23,6 +23,11 @@ const listRepliesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
 })
 
+function isMissingColumnError(err: unknown, columnName: string): boolean {
+  const text = (err as any)?.message || ''
+  return typeof text === 'string' && text.includes('does not exist') && text.includes(columnName)
+}
+
 function parseRange(start?: string, end?: string) {
   const now = new Date()
   const endDate = end ? new Date(end) : now
@@ -272,36 +277,81 @@ router.get('/threads/:threadId/messages', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const { threadId } = req.params
 
-    const messages = await prisma.emailMessageMetadata.findMany({
-      where: {
-        threadId,
-        senderIdentity: { customerId },
-      },
-      include: {
-        senderIdentity: {
-          select: {
-            id: true,
-            emailAddress: true,
-            displayName: true,
-          },
+    let messages: any[] = []
+    try {
+      messages = await prisma.emailMessageMetadata.findMany({
+        where: {
+          threadId,
+          senderIdentity: { customerId },
         },
-        campaignProspect: {
-          select: {
-            id: true,
-            contact: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                companyName: true,
-                email: true,
+        include: {
+          senderIdentity: {
+            select: {
+              id: true,
+              emailAddress: true,
+              displayName: true,
+            },
+          },
+          campaignProspect: {
+            select: {
+              id: true,
+              contact: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  companyName: true,
+                  email: true,
+                },
               },
             },
           },
         },
-      },
-      orderBy: { createdAt: 'asc' },
-    })
+        orderBy: { createdAt: 'asc' },
+      })
+    } catch (err) {
+      if (!isMissingColumnError(err, 'email_message_metadata.bodyPreview') && !isMissingColumnError(err, 'email_message_metadata.isRead')) {
+        throw err
+      }
+      messages = await prisma.emailMessageMetadata.findMany({
+        where: {
+          threadId,
+          senderIdentity: { customerId },
+        },
+        select: {
+          id: true,
+          threadId: true,
+          direction: true,
+          fromAddress: true,
+          toAddress: true,
+          subject: true,
+          rawHeaders: true,
+          createdAt: true,
+          senderIdentity: {
+            select: {
+              id: true,
+              emailAddress: true,
+              displayName: true,
+            },
+          },
+          campaignProspect: {
+            select: {
+              id: true,
+              contact: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  companyName: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+    }
 
     res.json({
       threadId,
@@ -333,32 +383,71 @@ router.get('/messages', async (req, res, next) => {
     const offset = parseInt(req.query.offset as string) || 0
     const unreadOnly = req.query.unreadOnly === 'true'
 
-    const messages = await prisma.emailMessageMetadata.findMany({
-      where: {
-        senderIdentity: { customerId },
-        direction: 'inbound',
-        ...(unreadOnly ? { isRead: false } : {}),
-      },
-      include: {
-        senderIdentity: {
-          select: { id: true, emailAddress: true, displayName: true },
+    let messages: any[] = []
+    try {
+      messages = await prisma.emailMessageMetadata.findMany({
+        where: {
+          senderIdentity: { customerId },
+          direction: 'inbound',
+          ...(unreadOnly ? { isRead: false } : {}),
         },
-        campaignProspect: {
-          select: {
-            id: true,
-            contact: {
-              select: { id: true, firstName: true, lastName: true, companyName: true, email: true },
-            },
-            campaign: {
-              select: { id: true, name: true },
+        include: {
+          senderIdentity: {
+            select: { id: true, emailAddress: true, displayName: true },
+          },
+          campaignProspect: {
+            select: {
+              id: true,
+              contact: {
+                select: { id: true, firstName: true, lastName: true, companyName: true, email: true },
+              },
+              campaign: {
+                select: { id: true, name: true },
+              },
             },
           },
         },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
-    })
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      })
+    } catch (err) {
+      if (!isMissingColumnError(err, 'email_message_metadata.bodyPreview') && !isMissingColumnError(err, 'email_message_metadata.isRead')) {
+        throw err
+      }
+      messages = await prisma.emailMessageMetadata.findMany({
+        where: {
+          senderIdentity: { customerId },
+          direction: 'inbound',
+        },
+        select: {
+          id: true,
+          threadId: true,
+          direction: true,
+          fromAddress: true,
+          toAddress: true,
+          subject: true,
+          createdAt: true,
+          senderIdentity: {
+            select: { id: true, emailAddress: true, displayName: true },
+          },
+          campaignProspect: {
+            select: {
+              id: true,
+              contact: {
+                select: { id: true, firstName: true, lastName: true, companyName: true, email: true },
+              },
+              campaign: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      })
+    }
 
     res.json({
       messages: messages.map((m) => ({
@@ -398,10 +487,17 @@ router.post('/messages/:id/read', requireMarketingMutationAuth, async (req, res,
 
     if (!message) return res.status(404).json({ error: 'Message not found' })
 
-    await prisma.emailMessageMetadata.update({
-      where: { id },
-      data: { isRead } as any,
-    })
+    try {
+      await prisma.emailMessageMetadata.update({
+        where: { id },
+        data: { isRead } as any,
+      })
+    } catch (err) {
+      if (!isMissingColumnError(err, 'email_message_metadata.isRead')) {
+        throw err
+      }
+      // Backward-compatible no-op when isRead column is not yet present in DB.
+    }
 
     res.json({ success: true, id, isRead })
   } catch (error) {
@@ -479,20 +575,38 @@ router.post('/refresh', requireMarketingMutationAuth, async (req, res, next) => 
                 select: { id: true },
               })
               if (!exists) {
-                await prisma.emailMessageMetadata.create({
-                  data: {
-                    senderIdentityId: identity.id,
-                    providerMessageId: msg.messageId,
-                    threadId: msg.threadId || null,
-                    direction: 'inbound',
-                    fromAddress: msg.fromAddress || '',
-                    toAddress: msg.toAddress || '',
-                    subject: msg.subject || '',
-                    rawHeaders: msg.headers || null,
-                    isRead: false,
-                    bodyPreview: msg.bodyPreview ? msg.bodyPreview.substring(0, 500) : null,
-                  } as any,
-                })
+                try {
+                  await prisma.emailMessageMetadata.create({
+                    data: {
+                      senderIdentityId: identity.id,
+                      providerMessageId: msg.messageId,
+                      threadId: msg.threadId || null,
+                      direction: 'inbound',
+                      fromAddress: msg.fromAddress || '',
+                      toAddress: msg.toAddress || '',
+                      subject: msg.subject || '',
+                      rawHeaders: msg.headers || null,
+                      isRead: false,
+                      bodyPreview: msg.bodyPreview ? msg.bodyPreview.substring(0, 500) : null,
+                    } as any,
+                  })
+                } catch (err) {
+                  if (!isMissingColumnError(err, 'email_message_metadata.bodyPreview') && !isMissingColumnError(err, 'email_message_metadata.isRead')) {
+                    throw err
+                  }
+                  await prisma.emailMessageMetadata.create({
+                    data: {
+                      senderIdentityId: identity.id,
+                      providerMessageId: msg.messageId,
+                      threadId: msg.threadId || null,
+                      direction: 'inbound',
+                      fromAddress: msg.fromAddress || '',
+                      toAddress: msg.toAddress || '',
+                      subject: msg.subject || '',
+                      rawHeaders: msg.headers || null,
+                    } as any,
+                  })
+                }
               }
             }
           }
@@ -561,15 +675,25 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
     const baseSubject = (latest.subject || '').replace(/^Re:\s*/i, '').trim() || 'No subject'
     const replySubject = `Re: ${baseSubject}`
 
-    const { sendEmail } = await import('../services/outlookEmailService.js')
+    const { sendEmail, replyToMessage } = await import('../services/outlookEmailService.js')
 
-    const result = await sendEmail(prisma, {
-      senderIdentityId: latest.senderIdentity.id,
-      toEmail: toAddress,
-      subject: replySubject,
-      htmlBody: content,
-      textBody: content,
-    })
+    let result
+    if (latestInbound?.providerMessageId) {
+      result = await replyToMessage(prisma, {
+        senderIdentityId: latest.senderIdentity.id,
+        replyToMessageId: latestInbound.providerMessageId,
+        htmlBody: content,
+        toEmail: toAddress,
+      })
+    } else {
+      result = await sendEmail(prisma, {
+        senderIdentityId: latest.senderIdentity.id,
+        toEmail: toAddress,
+        subject: replySubject,
+        htmlBody: content,
+        textBody: content,
+      })
+    }
 
     if (!result.success) {
       return res.status(500).json({ error: 'Failed to send reply', details: result.error })

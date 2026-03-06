@@ -2,6 +2,11 @@ import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { fetchRecentInboxMessages } from '../services/outlookEmailService.js'
 
+function isMissingColumnError(err: unknown, columnName: string): boolean {
+  const text = (err as any)?.message || ''
+  return typeof text === 'string' && text.includes('does not exist') && text.includes(columnName)
+}
+
 // Simple reply snippet extractor
 function extractReplySnippet(body: string): string {
   return body.substring(0, 200).trim()
@@ -118,18 +123,37 @@ async function processInboundMessage(
   }
 
   // Store inbound message metadata
-  await prisma.emailMessageMetadata.create({ data: {
-      campaignProspectId,
-      senderIdentityId: identityId,
-      providerMessageId: message.messageId,
-      threadId: message.threadId,
-      direction: 'inbound',
-      fromAddress: message.fromAddress,
-      toAddress: message.toAddress,
-      subject: message.subject,
-      bodyPreview: typeof message.bodyPreview === 'string' ? message.bodyPreview.slice(0, 500) : null,
-      rawHeaders: message.headers
-    } as any })
+  try {
+    await prisma.emailMessageMetadata.create({ data: {
+        campaignProspectId,
+        senderIdentityId: identityId,
+        providerMessageId: message.messageId,
+        threadId: message.threadId,
+        direction: 'inbound',
+        fromAddress: message.fromAddress,
+        toAddress: message.toAddress,
+        subject: message.subject,
+        bodyPreview: typeof message.bodyPreview === 'string' ? message.bodyPreview.slice(0, 500) : null,
+        rawHeaders: message.headers
+      } as any })
+  } catch (err) {
+    if (!isMissingColumnError(err, 'email_message_metadata.bodyPreview')) {
+      throw err
+    }
+    await prisma.emailMessageMetadata.create({
+      data: {
+        campaignProspectId,
+        senderIdentityId: identityId,
+        providerMessageId: message.messageId,
+        threadId: message.threadId,
+        direction: 'inbound',
+        fromAddress: message.fromAddress,
+        toAddress: message.toAddress,
+        subject: message.subject,
+        rawHeaders: message.headers,
+      } as any,
+    })
+  }
 
   // If we found a matching campaign prospect, process the reply
   if (campaignProspectId) {
