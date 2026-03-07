@@ -415,6 +415,32 @@ const SequencesTab: React.FC = () => {
     windowHours?: number
     lastUpdatedAt?: string
   }
+  type SequencePreflightData = {
+    sequenceId: string
+    sequenceName?: string | null
+    overallStatus: 'GO' | 'WARNING' | 'NO_GO'
+    blockers: string[]
+    warnings: string[]
+    checks: Record<string, boolean>
+    counts: Record<string, number>
+    actions: {
+      canDryRun: boolean
+      dryRunRoute: string
+      dryRunRequiresAdminSecret: boolean
+      canLiveCanary: boolean
+      liveCanaryRoute: string
+      liveCanaryRequiresAdminSecret: boolean
+      liveCanaryReason: string | null
+      nextSafeAction: string
+    }
+    dependencies?: {
+      leadSources?: { configuredCount?: number; total?: number; erroredCount?: number }
+      suppression?: { configuredCount?: number; erroredCount?: number; emailEntries?: number; domainEntries?: number }
+      liveGates?: { scheduledEngineMode?: string; manualLiveTickAllowed?: boolean; manualLiveTickReason?: string | null; activeIdentityCount?: number; dueNowCount?: number; cron?: string }
+      recent?: { windowHours?: number; counts?: Record<string, number> }
+    }
+    lastUpdatedAt?: string
+  }
   type OutreachReportRow = {
     sequenceId?: string
     sequenceName?: string
@@ -497,6 +523,9 @@ const SequencesTab: React.FC = () => {
   const [sequenceReadinessData, setSequenceReadinessData] = useState<SequenceReadinessData | null>(null)
   const [sequenceReadinessLoading, setSequenceReadinessLoading] = useState(false)
   const [sequenceReadinessError, setSequenceReadinessError] = useState<string | null>(null)
+  const [sequencePreflightData, setSequencePreflightData] = useState<SequencePreflightData | null>(null)
+  const [sequencePreflightLoading, setSequencePreflightLoading] = useState(false)
+  const [sequencePreflightError, setSequencePreflightError] = useState<string | null>(null)
   const [opsReportingData, setOpsReportingData] = useState<MarketingOpsReportingData | null>(null)
   const [opsReportingLoading, setOpsReportingLoading] = useState(false)
   const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
@@ -633,6 +662,36 @@ const SequencesTab: React.FC = () => {
     }
     setSequenceReadinessData(res.data ?? null)
     setSequenceReadinessError(null)
+  }
+
+  const loadSequencePreflight = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_') || !chosenSequenceId) {
+      if (!chosenSequenceId) {
+        setSequencePreflightData(null)
+        setSequencePreflightError(null)
+      }
+      return
+    }
+    if (!opts?.silent) setSequencePreflightLoading(true)
+    setSequencePreflightError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/sequence-preflight?sequenceId=${encodeURIComponent(chosenSequenceId)}&sinceHours=${hours}`
+    const res = await api.get<SequencePreflightData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setSequencePreflightLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setSequencePreflightError('Choose a sequence first.')
+      else if (status === 401 || status === 403) setSequencePreflightError(`Not authorized (${status}).`)
+      else if (status === 404) setSequencePreflightError('Sequence not found for this client.')
+      else setSequencePreflightError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setSequencePreflightData(null)
+      return
+    }
+    setSequencePreflightData(res.data ?? null)
+    setSequencePreflightError(null)
   }
 
   const loadOpsReporting = async (opts?: { silent?: boolean }) => {
@@ -793,6 +852,7 @@ const SequencesTab: React.FC = () => {
     await loadOperatorConsole(opts)
     if (sequenceReadinessSequenceId.trim()) {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
+      await loadSequencePreflight(sequenceReadinessSequenceId, { silent: true })
     }
     await loadOpsReporting({ silent: true })
     await loadQueueWorkbench({ silent: true })
@@ -1056,6 +1116,8 @@ const SequencesTab: React.FC = () => {
       setSequenceReadinessSequenceId('')
       setSequenceReadinessData(null)
       setSequenceReadinessError(null)
+      setSequencePreflightData(null)
+      setSequencePreflightError(null)
       setOpsReportingData(null)
       setOpsReportingError(null)
       setQueueWorkbenchData(null)
@@ -2965,6 +3027,141 @@ const SequencesTab: React.FC = () => {
                     <Card><CardBody py={3}><Stat><StatLabel>Sent recent</StatLabel><StatNumber>{operatorConsoleData.queue.sentRecently}</StatNumber></Stat></CardBody></Card>
                   </SimpleGrid>
 
+                  <Card id="sequence-preflight-panel" data-testid="sequence-preflight-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <HStack spacing={2}>
+                            <Text fontSize="sm" fontWeight="semibold">Sequence Preflight</Text>
+                            <Badge
+                              id="sequence-preflight-overall-status"
+                              data-testid="sequence-preflight-overall-status"
+                              colorScheme={
+                                sequencePreflightData?.overallStatus === 'GO'
+                                  ? 'green'
+                                  : sequencePreflightData?.overallStatus === 'WARNING'
+                                    ? 'orange'
+                                    : 'red'
+                              }
+                            >
+                              {sequencePreflightData?.overallStatus ?? 'NO_GO'}
+                            </Badge>
+                          </HStack>
+                          <Button
+                            id="sequence-preflight-refresh-btn"
+                            data-testid="sequence-preflight-refresh-btn"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadSequencePreflight()}
+                            isLoading={sequencePreflightLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh Preflight
+                          </Button>
+                        </Flex>
+
+                        {sequencePreflightError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{sequencePreflightError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!sequencePreflightError && sequencePreflightData && (
+                          <>
+                            <SimpleGrid id="sequence-preflight-checks" data-testid="sequence-preflight-checks" columns={{ base: 1, md: 2, lg: 3 }} spacing={2}>
+                              {Object.entries(sequencePreflightData.checks || {}).map(([key, value]) => (
+                                <HStack key={key} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                  <Text fontSize="xs" color="gray.600">{key}</Text>
+                                  <Badge colorScheme={value ? 'green' : 'red'}>{value ? 'PASS' : 'FAIL'}</Badge>
+                                </HStack>
+                              ))}
+                            </SimpleGrid>
+                            <SimpleGrid id="sequence-preflight-counts" data-testid="sequence-preflight-counts" columns={{ base: 2, md: 5 }} spacing={2}>
+                              {Object.entries(sequencePreflightData.counts || {}).map(([key, value]) => (
+                                <HStack key={key} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                  <Text fontSize="xs" color="gray.600">{key}</Text>
+                                  <Badge>{value}</Badge>
+                                </HStack>
+                              ))}
+                            </SimpleGrid>
+                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                              <Box id="sequence-preflight-blockers" data-testid="sequence-preflight-blockers" borderWidth="1px" borderRadius="md" p={3}>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Blockers</Text>
+                                {(sequencePreflightData.blockers || []).length === 0 ? (
+                                  <Text fontSize="xs" color="gray.500">No blockers.</Text>
+                                ) : (
+                                  <VStack align="stretch" spacing={1}>
+                                    {(sequencePreflightData.blockers || []).map((msg, idx) => (
+                                      <Text key={`${msg}-${idx}`} fontSize="xs" color="red.600">• {msg}</Text>
+                                    ))}
+                                  </VStack>
+                                )}
+                              </Box>
+                              <Box id="sequence-preflight-warnings" data-testid="sequence-preflight-warnings" borderWidth="1px" borderRadius="md" p={3}>
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Warnings</Text>
+                                {(sequencePreflightData.warnings || []).length === 0 ? (
+                                  <Text fontSize="xs" color="gray.500">No warnings.</Text>
+                                ) : (
+                                  <VStack align="stretch" spacing={1}>
+                                    {(sequencePreflightData.warnings || []).map((msg, idx) => (
+                                      <Text key={`${msg}-${idx}`} fontSize="xs" color="orange.600">• {msg}</Text>
+                                    ))}
+                                  </VStack>
+                                )}
+                              </Box>
+                            </SimpleGrid>
+                            <Card id="sequence-preflight-next-action" data-testid="sequence-preflight-next-action" variant="outline">
+                              <CardBody py={3}>
+                                <VStack align="stretch" spacing={1}>
+                                  <Text fontSize="xs" color="gray.600">Next safe action</Text>
+                                  <Text fontSize="sm">{sequencePreflightData.actions?.nextSafeAction || 'Review blockers/warnings first.'}</Text>
+                                  <Text fontSize="xs" color="gray.500">
+                                    Dry-run: {sequencePreflightData.actions?.canDryRun ? 'ready' : 'blocked'} · Live canary: {sequencePreflightData.actions?.canLiveCanary ? 'ready' : 'blocked'}
+                                    {sequencePreflightData.actions?.liveCanaryReason ? ` (${sequencePreflightData.actions.liveCanaryReason})` : ''}
+                                  </Text>
+                                  <HStack spacing={2}>
+                                    <Button
+                                      size="xs"
+                                      variant="ghost"
+                                      id="sequence-preflight-drilldown-readiness"
+                                      data-testid="sequence-preflight-drilldown-readiness"
+                                      onClick={() => loadSequenceReadiness(sequenceReadinessSequenceId)}
+                                      isDisabled={!sequenceReadinessSequenceId}
+                                    >
+                                      Open readiness
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="ghost"
+                                      id="sequence-preflight-drilldown-workbench"
+                                      data-testid="sequence-preflight-drilldown-workbench"
+                                      onClick={() => setQueueWorkbenchState('blocked')}
+                                    >
+                                      Open blocked queue
+                                    </Button>
+                                    <Button
+                                      size="xs"
+                                      variant="ghost"
+                                      id="sequence-preflight-drilldown-reporting"
+                                      data-testid="sequence-preflight-drilldown-reporting"
+                                      onClick={() => loadOpsReporting()}
+                                    >
+                                      Open reporting
+                                    </Button>
+                                  </HStack>
+                                </VStack>
+                              </CardBody>
+                            </Card>
+                            <Text id="sequence-preflight-last-updated" data-testid="sequence-preflight-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {sequencePreflightData.lastUpdatedAt ? new Date(sequencePreflightData.lastUpdatedAt).toLocaleString() : '—'}
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
                   <Card id="sequence-readiness-panel" data-testid="sequence-readiness-panel">
                     <CardBody>
                       <VStack align="stretch" spacing={3}>
@@ -2980,10 +3177,15 @@ const SequencesTab: React.FC = () => {
                               onChange={(e) => {
                                 const nextId = e.target.value
                                 setSequenceReadinessSequenceId(nextId)
-                                if (nextId) loadSequenceReadiness(nextId)
+                                if (nextId) {
+                                  loadSequenceReadiness(nextId)
+                                  loadSequencePreflight(nextId)
+                                }
                                 else {
                                   setSequenceReadinessData(null)
                                   setSequenceReadinessError(null)
+                                  setSequencePreflightData(null)
+                                  setSequencePreflightError(null)
                                 }
                               }}
                             >
@@ -2996,10 +3198,10 @@ const SequencesTab: React.FC = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => loadSequenceReadiness()}
-                            isLoading={sequenceReadinessLoading}
+                            isLoading={sequenceReadinessLoading || sequencePreflightLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
-                            Refresh Readiness
+                            Refresh Preflight + Readiness
                           </Button>
                           <Text fontSize="xs" color="gray.500">
                             Uses current queue and rule outcomes to show who is sendable now.
