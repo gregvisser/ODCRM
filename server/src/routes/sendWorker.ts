@@ -114,8 +114,10 @@ type QueueShapeRow = {
   recipientEmail: string
   status: OutboundSendQueueStatus
   scheduledFor: Date | null
+  sentAt?: Date | null
   lastError: string | null
   stepIndex: number
+  attemptCount?: number
   updatedAt: Date
 }
 
@@ -196,6 +198,26 @@ function deriveQueueReason(status: OutboundSendQueueStatus, scheduledFor: Date |
   if (status === OutboundSendQueueStatus.SKIPPED) return normalized || 'skipped'
   if (status === OutboundSendQueueStatus.QUEUED && scheduledFor && scheduledFor > now) return 'scheduled_later'
   return normalized || 'ready'
+}
+
+function buildLaunchSubjectPreview(
+  subjectTemplate: string | null | undefined,
+  recipientEmail: string,
+  recipientRow?: { firstName: string | null; lastName: string | null; company: string | null; email: string | null } | null
+): string | null {
+  if (!subjectTemplate || !subjectTemplate.trim()) return null
+  const vars = {
+    firstName: recipientRow?.firstName ?? '',
+    lastName: recipientRow?.lastName ?? '',
+    company: recipientRow?.company ?? '',
+    companyName: recipientRow?.company ?? '',
+    email: recipientRow?.email ?? recipientEmail,
+    jobTitle: '',
+    title: '',
+    phone: '',
+  }
+  const subject = applyTemplatePlaceholders(subjectTemplate, vars).trim()
+  return subject || null
 }
 
 async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
@@ -1302,6 +1324,214 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/sequence-preflight] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence preflight failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/launch-preview — first-batch candidate inspection for one sequence.
+ * Tenant-scoped, read-only.
+ */
+router.get('/launch-preview', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const sequenceId = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+  if (!sequenceId) {
+    res.status(400).json({ success: false, error: 'sequenceId is required' })
+    return
+  }
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const rawBatchLimit = typeof req.query.batchLimit === 'string' ? parseInt(req.query.batchLimit, 10) : 15
+    const batchLimit = Number.isFinite(rawBatchLimit) ? Math.min(Math.max(rawBatchLimit, 1), 50) : 15
+
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true, name: true, senderIdentityId: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+
+    const [readiness, gateData, manualLiveGate, enrollmentRows] = await Promise.all([
+      getSequenceReadinessSnapshot(customerId, sequenceId, sinceHours),
+      getLiveGatesSnapshot(customerId, sinceHours),
+      Promise.resolve(assertLiveSendAllowed({ customerId, trigger: 'manual' })),
+      prisma.enrollment.findMany({
+        where: { customerId, sequenceId },
+        select: { id: true, name: true, sequenceId: true },
+      }),
+    ])
+    const enrollmentIds = enrollmentRows.map((row) => row.id)
+    if (!readiness) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+    if (enrollmentIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          sequenceId: sequence.id,
+          sequenceName: sequence.name ?? null,
+          batchLimit,
+          summary: {
+            eligibleCandidatesTotal: 0,
+            firstBatchCount: 0,
+            excludedCount: 0,
+            blockedCount: 0,
+            notInBatchCount: 0,
+            totalRecipients: readiness.summary.totalRecipients ?? 0,
+          },
+          firstBatch: [],
+          excluded: [],
+          blocked: [],
+          notInBatch: [],
+          context: {
+            preflightStatus: null,
+            liveCanaryAllowed: manualLiveGate.allowed,
+            liveCanaryReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+            scheduledEngineMode: gateData.mode.scheduledEngineMode,
+            dueNowCount: gateData.currentCount.queuedDueNow,
+            activeIdentityCount: gateData.currentCount.activeIdentities,
+          },
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+
+    const now = new Date()
+    const queueRows = await prisma.outboundSendQueueItem.findMany({
+      where: { customerId, enrollmentId: { in: enrollmentIds } },
+      select: {
+        id: true,
+        enrollmentId: true,
+        recipientEmail: true,
+        status: true,
+        scheduledFor: true,
+        sentAt: true,
+        updatedAt: true,
+        stepIndex: true,
+        attemptCount: true,
+        lastError: true,
+      },
+    })
+    const byRecipient = new Map<string, QueueShapeRow[]>()
+    for (const row of queueRows) {
+      const emailNorm = row.recipientEmail.trim().toLowerCase()
+      const key = `${row.enrollmentId}::${emailNorm}`
+      const normalizedRow: QueueShapeRow = { ...row, recipientEmail: emailNorm }
+      const existing = byRecipient.get(key)
+      if (existing) existing.push(normalizedRow)
+      else byRecipient.set(key, [normalizedRow])
+    }
+
+    const senderIdentity = sequence.senderIdentityId
+      ? await prisma.emailIdentity.findFirst({
+          where: { id: sequence.senderIdentityId, customerId },
+          select: { id: true, emailAddress: true },
+        })
+      : null
+    const stepRows = await prisma.emailSequenceStep.findMany({
+      where: { sequenceId },
+      select: { stepOrder: true, subjectTemplate: true },
+    })
+    const stepSubjectByOrder = new Map(stepRows.map((row) => [row.stepOrder, row.subjectTemplate]))
+
+    const recipientNeedles = Array.from(byRecipient.values())
+      .map((rows) => rows[0])
+      .map((row) => ({ enrollmentId: row.enrollmentId, email: row.recipientEmail }))
+    const recipientRows = await prisma.enrollmentRecipient.findMany({
+      where: {
+        enrollmentId: { in: Array.from(new Set(recipientNeedles.map((n) => n.enrollmentId))) },
+        email: { in: Array.from(new Set(recipientNeedles.map((n) => n.email))) },
+      },
+      select: { enrollmentId: true, email: true, firstName: true, lastName: true, company: true },
+    })
+    const recipientByKey = new Map(recipientRows.map((row) => [`${row.enrollmentId}::${row.email.trim().toLowerCase()}`, row]))
+    const enrollmentById = new Map(enrollmentRows.map((row) => [row.id, row]))
+
+    const toLaunchRow = (classified: { bucket: 'eligible' | 'excluded' | 'blocked'; reason: string; row: QueueShapeRow }) => {
+      const row = classified.row
+      const recipientKey = `${row.enrollmentId}::${row.recipientEmail}`
+      const recipient = recipientByKey.get(recipientKey)
+      const stepOrder = row.stepIndex + 1
+      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient)
+      const enrollment = enrollmentById.get(row.enrollmentId)
+      return {
+        queueItemId: row.id,
+        enrollmentId: row.enrollmentId,
+        enrollmentName: enrollment?.name ?? null,
+        sequenceId,
+        sequenceName: sequence.name ?? null,
+        recipientEmail: row.recipientEmail,
+        identityEmail: senderIdentity?.emailAddress ?? null,
+        status: row.status,
+        reason: classified.reason,
+        scheduledFor: row.scheduledFor?.toISOString() ?? null,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        stepIndex: row.stepIndex,
+        attemptCount: row.attemptCount ?? 0,
+        lastError: row.lastError ?? null,
+        subjectPreview,
+        renderAvailable: true,
+        renderRoute: `/api/send-queue/items/${row.id}/render`,
+        detailRoute: `/api/send-queue/items/${row.id}`,
+        queueRoute: `/api/enrollments/${row.enrollmentId}/queue`,
+        auditRoute: `/api/send-worker/audits?queueItemId=${row.id}&limit=20`,
+      }
+    }
+
+    const classifiedRows = Array.from(byRecipient.values()).map((rows) => classifyRecipientGroup(rows, now))
+    const eligibleRows = classifiedRows
+      .filter((row) => row.bucket === 'eligible')
+      .sort((a, b) => {
+        const aTime = a.row.scheduledFor ? a.row.scheduledFor.getTime() : 0
+        const bTime = b.row.scheduledFor ? b.row.scheduledFor.getTime() : 0
+        return aTime - bTime || a.row.stepIndex - b.row.stepIndex || a.row.id.localeCompare(b.row.id)
+      })
+    const excludedRows = classifiedRows.filter((row) => row.bucket === 'excluded')
+    const blockedRows = classifiedRows.filter((row) => row.bucket === 'blocked')
+
+    const firstBatch = eligibleRows.slice(0, batchLimit).map(toLaunchRow)
+    const notInBatch = eligibleRows.slice(batchLimit, batchLimit + batchLimit).map(toLaunchRow)
+    const excluded = excludedRows.slice(0, batchLimit).map(toLaunchRow)
+    const blocked = blockedRows.slice(0, batchLimit).map(toLaunchRow)
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: sequence.id,
+        sequenceName: sequence.name ?? null,
+        batchLimit,
+        summary: {
+          eligibleCandidatesTotal: eligibleRows.length,
+          firstBatchCount: firstBatch.length,
+          excludedCount: excludedRows.length,
+          blockedCount: blockedRows.length,
+          notInBatchCount: Math.max(eligibleRows.length - firstBatch.length, 0),
+          totalRecipients: readiness.summary.totalRecipients ?? 0,
+        },
+        firstBatch,
+        excluded,
+        blocked,
+        notInBatch,
+        context: {
+          preflightStatus: null,
+          liveCanaryAllowed: manualLiveGate.allowed,
+          liveCanaryReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+          scheduledEngineMode: gateData.mode.scheduledEngineMode,
+          dueNowCount: gateData.currentCount.queuedDueNow,
+          activeIdentityCount: gateData.currentCount.activeIdentities,
+        },
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/launch-preview] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Launch preview failed' })
   }
 })
 
