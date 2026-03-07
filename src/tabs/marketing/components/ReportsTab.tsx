@@ -75,12 +75,33 @@ type CustomerReportResponse = {
 }
 
 type DateRange = 'today' | 'week' | 'month'
+type OutreachMetricsRow = {
+  sequenceId?: string
+  sequenceName?: string
+  identityId?: string
+  email?: string | null
+  name?: string | null
+  sent: number
+  sendFailed: number
+  suppressed: number
+  skipped: number
+  replies: number
+  optOuts: number
+}
+type OutreachReportResponse = {
+  customerId: string
+  sinceDays: number
+  bySequence: OutreachMetricsRow[]
+  byIdentity: OutreachMetricsRow[]
+  generatedAt: string
+}
 
 const ReportsTab: React.FC = () => {
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [dateRange, setDateRange] = useState<DateRange>('today')
   const [report, setReport] = useState<CustomerReportResponse | null>(null)
+  const [outreach, setOutreach] = useState<OutreachReportResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -119,6 +140,7 @@ const ReportsTab: React.FC = () => {
   useEffect(() => {
     if (selectedCustomerId) {
       void loadReport()
+      void loadOutreach()
     }
   }, [selectedCustomerId, dateRange])
 
@@ -139,6 +161,18 @@ const ReportsTab: React.FC = () => {
     }
     setReport(response.data || null)
     setLoading(false)
+  }
+
+  const loadOutreach = async () => {
+    if (!selectedCustomerId) return
+    const response = await api.get<{ data?: OutreachReportResponse }>(
+      `/api/reports/outreach?customerId=${selectedCustomerId}&sinceDays=30`
+    )
+    if (response.error) {
+      setOutreach(null)
+      return
+    }
+    setOutreach(response.data?.data ?? null)
   }
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
@@ -431,6 +465,45 @@ const ReportsTab: React.FC = () => {
                   <Text fontSize="sm" color="gray.600">Bounced</Text>
                 </Box>
               </SimpleGrid>
+            </CardBody>
+          </Card>
+
+          {/* Outreach Health */}
+          <Card mt={6}>
+            <CardHeader>
+              <Heading size="md">Outreach Health (Last 30 Days)</Heading>
+            </CardHeader>
+            <CardBody>
+              {!outreach ? (
+                <Text fontSize="sm" color="gray.500">Outreach health is loading or unavailable.</Text>
+              ) : (
+                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
+                  <Box>
+                    <Text fontWeight="semibold" mb={2}>Top Sequences</Text>
+                    <VStack align="stretch" spacing={2}>
+                      {(outreach.bySequence || []).slice(0, 3).map((row) => (
+                        <Box key={row.sequenceId || row.sequenceName} p={2} borderWidth="1px" borderRadius="md">
+                          <Text fontSize="sm" fontWeight="medium">{row.sequenceName || 'Unknown sequence'}</Text>
+                          <Text fontSize="xs" color="gray.600">sent={row.sent} failed={row.sendFailed} suppressed={row.suppressed} skipped={row.skipped}</Text>
+                        </Box>
+                      ))}
+                      {(outreach.bySequence || []).length === 0 && <Text fontSize="sm" color="gray.500">No sequence outreach metrics yet.</Text>}
+                    </VStack>
+                  </Box>
+                  <Box>
+                    <Text fontWeight="semibold" mb={2}>Top Identities</Text>
+                    <VStack align="stretch" spacing={2}>
+                      {(outreach.byIdentity || []).slice(0, 3).map((row) => (
+                        <Box key={row.identityId || row.email || 'unknown'} p={2} borderWidth="1px" borderRadius="md">
+                          <Text fontSize="sm" fontWeight="medium">{row.name || row.email || 'Unknown identity'}</Text>
+                          <Text fontSize="xs" color="gray.600">sent={row.sent} failed={row.sendFailed} replies={row.replies} optOuts={row.optOuts}</Text>
+                        </Box>
+                      ))}
+                      {(outreach.byIdentity || []).length === 0 && <Text fontSize="sm" color="gray.500">No identity outreach metrics yet.</Text>}
+                    </VStack>
+                  </Box>
+                </SimpleGrid>
+              )}
             </CardBody>
           </Card>
         </>
