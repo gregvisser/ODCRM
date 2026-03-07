@@ -60,6 +60,155 @@ function getSuppressionReason(
   return null
 }
 
+function parseSinceHours(raw: unknown): number {
+  if (typeof raw !== 'string') return SUMMARY_SINCE_HOURS_DEFAULT
+  const n = parseInt(raw, 10)
+  if (Number.isNaN(n) || n < 1) return SUMMARY_SINCE_HOURS_DEFAULT
+  return Math.min(n, SUMMARY_SINCE_HOURS_MAX)
+}
+
+function buildBlockedQueuedWhere(now: Date) {
+  return {
+    status: OutboundSendQueueStatus.QUEUED,
+    AND: [
+      { OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }] },
+      {
+        OR: [
+          { lastError: { contains: 'outside_window', mode: 'insensitive' as const } },
+          { lastError: { contains: 'canary', mode: 'insensitive' as const } },
+          { lastError: { contains: 'daily_cap_reached', mode: 'insensitive' as const } },
+          { lastError: { contains: 'per_minute_cap_reached', mode: 'insensitive' as const } },
+          { lastError: { contains: 'no_sender_identity', mode: 'insensitive' as const } },
+          { lastError: { contains: 'kill_switch', mode: 'insensitive' as const } },
+          { lastError: { contains: 'live_send_disabled', mode: 'insensitive' as const } },
+          { lastError: { contains: 'replied_stop', mode: 'insensitive' as const } },
+          { lastError: { contains: 'suppressed', mode: 'insensitive' as const } },
+        ],
+      },
+    ],
+  }
+}
+
+async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
+  const cap = getLiveSendCap()
+  const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
+  const liveGateEnabled = process.env.ENABLE_LIVE_SENDING === 'true'
+  const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
+  const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
+  const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
+  const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
+  const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
+  const scheduledLiveEnabled = process.env.ENABLE_SCHEDULED_SENDING_LIVE === 'true'
+  const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
+  const scheduledCron = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
+  const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+
+  const [activeIdentityCount, dueNowCount, auditByDecision, auditByReason, auditTotal] = await Promise.all([
+    prisma.emailIdentity.count({
+      where: { customerId, isActive: true },
+    }),
+    prisma.outboundSendQueueItem.count({
+      where: {
+        customerId,
+        status: OutboundSendQueueStatus.QUEUED,
+        OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
+      },
+    }),
+    prisma.outboundSendAttemptAudit.groupBy({
+      by: ['decision'],
+      where: { customerId, decidedAt: { gte: sinceDate } },
+      _count: { id: true },
+    }),
+    prisma.outboundSendAttemptAudit.groupBy({
+      by: ['reason'],
+      where: { customerId, decidedAt: { gte: sinceDate } },
+      _count: { id: true },
+    }),
+    prisma.outboundSendAttemptAudit.count({
+      where: { customerId, decidedAt: { gte: sinceDate } },
+    }),
+  ])
+
+  const reasons: string[] = []
+  if (!queueGateEnabled) reasons.push('ENABLE_SEND_QUEUE_SENDING is not true')
+  if (!liveGateEnabled) reasons.push('ENABLE_LIVE_SENDING is not true')
+  if (!canaryCustomerId) reasons.push('SEND_CANARY_CUSTOMER_ID is not configured')
+  if (canaryCustomerId && canaryCustomerId !== customerId) reasons.push('tenant is not in canary (customer mismatch)')
+  if (activeIdentityCount < 1) reasons.push('no active sender identity for tenant')
+  if (canaryIdentityId) {
+    const canaryIdentity = await prisma.emailIdentity.findFirst({
+      where: { id: canaryIdentityId, customerId, isActive: true },
+      select: { id: true },
+    })
+    if (!canaryIdentity) reasons.push('SEND_CANARY_IDENTITY_ID is not active for tenant')
+  }
+  const scheduledLiveGate = canaryCustomerId
+    ? assertLiveSendAllowed({ customerId, trigger: 'worker' })
+    : { allowed: false, reason: 'canary_customer_not_configured' }
+  const scheduledMode =
+    !scheduledEngineEnabled
+      ? 'OFF'
+      : scheduledLiveEnabled && scheduledLiveGate.allowed
+        ? 'LIVE_CANARY'
+        : 'DRY_RUN'
+
+  const byDecision: Record<string, number> = {}
+  for (const row of auditByDecision) {
+    byDecision[row.decision] = row._count.id
+  }
+  const byReason: Record<string, number> = {}
+  for (const row of auditByReason) {
+    if (row.reason) byReason[row.reason] = row._count.id
+  }
+
+  return {
+    enabled: reasons.length === 0,
+    reasons,
+    caps: {
+      liveSendCap: cap,
+      scheduledEngineCron: scheduledCron,
+    },
+    flags: {
+      enableSendQueueSending: queueGateEnabled,
+      enableLiveSending: liveGateEnabled,
+      enableScheduledSendingEngine: scheduledEngineEnabled,
+      enableScheduledSendingLive: scheduledLiveEnabled,
+      enableSendQueueWorkerLegacy: legacyWorkerEnabled,
+      odcrmAllowLiveTick: allowLiveTick,
+      odcrmAllowLiveTickIgnoreWindow: allowLiveTickIgnoreWindow,
+    },
+    mode: {
+      scheduledEngineMode: scheduledMode,
+      scheduledLiveAllowed: scheduledMode === 'LIVE_CANARY',
+      scheduledLiveReason: scheduledMode === 'LIVE_CANARY' ? null : scheduledLiveGate.reason ?? 'scheduled_live_not_enabled',
+    },
+    canary: {
+      customerIdPresent: Boolean(canaryCustomerId),
+      identityIdPresent: Boolean(canaryIdentityId),
+      customerId: canaryCustomerId,
+      identityId: canaryIdentityId,
+    },
+    canaryCustomerId,
+    canaryIdentityId,
+    currentCount: {
+      queuedDueNow: dueNowCount,
+      activeIdentities: activeIdentityCount,
+    },
+    recent: {
+      windowHours: sinceHours,
+      total: auditTotal,
+      counts: {
+        WOULD_SEND: byDecision.WOULD_SEND ?? 0,
+        SENT: byDecision.SENT ?? 0,
+        SEND_FAILED: byDecision.SEND_FAILED ?? 0,
+        SKIP_SUPPRESSED: byDecision.SKIP_SUPPRESSED ?? 0,
+        SKIP_REPLIED_STOP: byReason.SKIP_REPLIED_STOP ?? 0,
+        hard_bounce_invalid_recipient: byReason.hard_bounce_invalid_recipient ?? 0,
+      },
+    },
+  }
+}
+
 /**
  * POST /api/send-worker/dry-run — process one batch of QUEUED items; write audit per item; no real send.
  */
@@ -375,134 +524,151 @@ router.get('/live-gates', async (req: Request, res: Response) => {
   if (!customerId) return
 
   try {
-    const cap = getLiveSendCap()
-    const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
-    const liveGateEnabled = process.env.ENABLE_LIVE_SENDING === 'true'
-    const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
-    const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
-    const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
-    const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
-    const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
-    const scheduledLiveEnabled = process.env.ENABLE_SCHEDULED_SENDING_LIVE === 'true'
-    const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
-    const scheduledCron = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
-    let sinceHours = SUMMARY_SINCE_HOURS_DEFAULT
-    if (typeof req.query.sinceHours === 'string') {
-      const n = parseInt(req.query.sinceHours, 10)
-      if (!Number.isNaN(n) && n >= 1) sinceHours = Math.min(n, SUMMARY_SINCE_HOURS_MAX)
-    }
-    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
-
-    const [activeIdentityCount, dueNowCount, auditByDecision, auditByReason, auditTotal] = await Promise.all([
-      prisma.emailIdentity.count({
-        where: { customerId, isActive: true },
-      }),
-      prisma.outboundSendQueueItem.count({
-        where: {
-          customerId,
-          status: OutboundSendQueueStatus.QUEUED,
-          OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
-        },
-      }),
-      prisma.outboundSendAttemptAudit.groupBy({
-        by: ['decision'],
-        where: { customerId, decidedAt: { gte: sinceDate } },
-        _count: { id: true },
-      }),
-      prisma.outboundSendAttemptAudit.groupBy({
-        by: ['reason'],
-        where: { customerId, decidedAt: { gte: sinceDate } },
-        _count: { id: true },
-      }),
-      prisma.outboundSendAttemptAudit.count({
-        where: { customerId, decidedAt: { gte: sinceDate } },
-      }),
-    ])
-
-    const reasons: string[] = []
-    if (!queueGateEnabled) reasons.push('ENABLE_SEND_QUEUE_SENDING is not true')
-    if (!liveGateEnabled) reasons.push('ENABLE_LIVE_SENDING is not true')
-    if (!canaryCustomerId) reasons.push('SEND_CANARY_CUSTOMER_ID is not configured')
-    if (canaryCustomerId && canaryCustomerId !== customerId) reasons.push('tenant is not in canary (customer mismatch)')
-    if (activeIdentityCount < 1) reasons.push('no active sender identity for tenant')
-    if (canaryIdentityId) {
-      const canaryIdentity = await prisma.emailIdentity.findFirst({
-        where: { id: canaryIdentityId, customerId, isActive: true },
-        select: { id: true },
-      })
-      if (!canaryIdentity) reasons.push('SEND_CANARY_IDENTITY_ID is not active for tenant')
-    }
-    const scheduledLiveGate = canaryCustomerId
-      ? assertLiveSendAllowed({ customerId, trigger: 'worker' })
-      : { allowed: false, reason: 'canary_customer_not_configured' }
-    const scheduledMode =
-      !scheduledEngineEnabled
-        ? 'OFF'
-        : scheduledLiveEnabled && scheduledLiveGate.allowed
-          ? 'LIVE_CANARY'
-          : 'DRY_RUN'
-
-    const byDecision: Record<string, number> = {}
-    for (const row of auditByDecision) {
-      byDecision[row.decision] = row._count.id
-    }
-    const byReason: Record<string, number> = {}
-    for (const row of auditByReason) {
-      if (row.reason) byReason[row.reason] = row._count.id
-    }
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const gateData = await getLiveGatesSnapshot(customerId, sinceHours)
 
     res.json({
       success: true,
-      data: {
-        enabled: reasons.length === 0,
-        reasons,
-        caps: {
-          liveSendCap: cap,
-          scheduledEngineCron: scheduledCron,
-        },
-        flags: {
-          enableSendQueueSending: queueGateEnabled,
-          enableLiveSending: liveGateEnabled,
-          enableScheduledSendingEngine: scheduledEngineEnabled,
-          enableScheduledSendingLive: scheduledLiveEnabled,
-          enableSendQueueWorkerLegacy: legacyWorkerEnabled,
-          odcrmAllowLiveTick: allowLiveTick,
-          odcrmAllowLiveTickIgnoreWindow: allowLiveTickIgnoreWindow,
-        },
-        mode: {
-          scheduledEngineMode: scheduledMode,
-          scheduledLiveAllowed: scheduledMode === 'LIVE_CANARY',
-          scheduledLiveReason: scheduledMode === 'LIVE_CANARY' ? null : scheduledLiveGate.reason ?? 'scheduled_live_not_enabled',
-        },
-        canary: {
-          customerIdPresent: Boolean(canaryCustomerId),
-          identityIdPresent: Boolean(canaryIdentityId),
-          customerId: canaryCustomerId,
-          identityId: canaryIdentityId,
-        },
-        canaryCustomerId,
-        canaryIdentityId,
-        currentCount: {
-          queuedDueNow: dueNowCount,
-          activeIdentities: activeIdentityCount,
-        },
-        recent: {
-          windowHours: sinceHours,
-          total: auditTotal,
-          counts: {
-            WOULD_SEND: byDecision.WOULD_SEND ?? 0,
-            SENT: byDecision.SENT ?? 0,
-            SEND_FAILED: byDecision.SEND_FAILED ?? 0,
-            SKIP_SUPPRESSED: byDecision.SKIP_SUPPRESSED ?? 0,
-            SKIP_REPLIED_STOP: byReason.SKIP_REPLIED_STOP ?? 0,
-            hard_bounce_invalid_recipient: byReason.hard_bounce_invalid_recipient ?? 0,
-          },
-        },
-      },
+      data: gateData,
     })
   } catch (err) {
     console.error('[send-worker/live-gates] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Live gates check failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/console — operator-focused queue health + outcomes summary.
+ * Tenant-scoped, read-only.
+ */
+router.get('/console', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const gateData = await getLiveGatesSnapshot(customerId, sinceHours)
+    const now = new Date()
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+    const blockedDueWhere = {
+      customerId,
+      ...buildBlockedQueuedWhere(now),
+    }
+    const blockedErrorClauses = [
+      { lastError: { contains: 'outside_window', mode: 'insensitive' as const } },
+      { lastError: { contains: 'canary', mode: 'insensitive' as const } },
+      { lastError: { contains: 'daily_cap_reached', mode: 'insensitive' as const } },
+      { lastError: { contains: 'per_minute_cap_reached', mode: 'insensitive' as const } },
+      { lastError: { contains: 'no_sender_identity', mode: 'insensitive' as const } },
+      { lastError: { contains: 'kill_switch', mode: 'insensitive' as const } },
+      { lastError: { contains: 'live_send_disabled', mode: 'insensitive' as const } },
+      { lastError: { contains: 'replied_stop', mode: 'insensitive' as const } },
+      { lastError: { contains: 'suppressed', mode: 'insensitive' as const } },
+    ]
+    const readyDueWhere = {
+      customerId,
+      status: OutboundSendQueueStatus.QUEUED,
+      OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+      NOT: { OR: blockedErrorClauses },
+    }
+
+    const [totalQueued, scheduledLater, blocked, readyNow, suppressed, replyStopped, failedRecently, sentRecently, readyNowRows, failedRows, blockedRows] = await Promise.all([
+      prisma.outboundSendQueueItem.count({
+        where: { customerId, status: OutboundSendQueueStatus.QUEUED },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: { customerId, status: OutboundSendQueueStatus.QUEUED, scheduledFor: { gt: now } },
+      }),
+      prisma.outboundSendQueueItem.count({ where: blockedDueWhere }),
+      prisma.outboundSendQueueItem.count({ where: readyDueWhere }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          customerId,
+          status: OutboundSendQueueStatus.SKIPPED,
+          OR: [
+            { lastError: { contains: 'suppress', mode: 'insensitive' } },
+            { lastError: { contains: 'unsubscribe', mode: 'insensitive' } },
+            { lastError: { contains: 'hard_bounce_invalid_recipient', mode: 'insensitive' } },
+          ],
+        },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          customerId,
+          status: OutboundSendQueueStatus.SKIPPED,
+          lastError: { contains: 'replied_stop', mode: 'insensitive' },
+        },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: { customerId, status: OutboundSendQueueStatus.FAILED, updatedAt: { gte: sinceDate } },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: { customerId, status: OutboundSendQueueStatus.SENT, sentAt: { gte: sinceDate } },
+      }),
+      prisma.outboundSendQueueItem.findMany({
+        where: readyDueWhere,
+        orderBy: [{ scheduledFor: 'asc' }, { updatedAt: 'desc' }],
+        take: 5,
+        select: { id: true, enrollmentId: true, recipientEmail: true, status: true, scheduledFor: true, lastError: true },
+      }),
+      prisma.outboundSendQueueItem.findMany({
+        where: { customerId, status: OutboundSendQueueStatus.FAILED, updatedAt: { gte: sinceDate } },
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+        select: { id: true, enrollmentId: true, recipientEmail: true, status: true, scheduledFor: true, lastError: true },
+      }),
+      prisma.outboundSendQueueItem.findMany({
+        where: blockedDueWhere,
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+        select: { id: true, enrollmentId: true, recipientEmail: true, status: true, scheduledFor: true, lastError: true },
+      }),
+    ])
+
+    const mapSample = (
+      rows: Array<{ id: string; enrollmentId: string; recipientEmail: string; status: OutboundSendQueueStatus; scheduledFor: Date | null; lastError: string | null }>
+    ) =>
+      rows.map((row) => ({
+        queueItemId: row.id,
+        enrollmentId: row.enrollmentId,
+        recipientEmail: row.recipientEmail,
+        status: row.status,
+        scheduledFor: row.scheduledFor?.toISOString() ?? null,
+        lastError: row.lastError ?? null,
+      }))
+
+    res.json({
+      success: true,
+      data: {
+        status: {
+          scheduledEngineMode: gateData.mode.scheduledEngineMode,
+          scheduledEnabled: gateData.flags.enableScheduledSendingEngine,
+          scheduledLiveAllowed: gateData.mode.scheduledLiveAllowed,
+          cron: gateData.caps.scheduledEngineCron,
+          canaryCustomerIdPresent: gateData.canary.customerIdPresent,
+          liveSendCap: gateData.caps.liveSendCap,
+        },
+        queue: {
+          totalQueued,
+          readyNow,
+          scheduledLater,
+          suppressed,
+          replyStopped,
+          failedRecently,
+          sentRecently,
+          blocked,
+        },
+        recent: gateData.recent,
+        samples: {
+          readyNow: mapSample(readyNowRows),
+          failedRecently: mapSample(failedRows),
+          blocked: mapSample(blockedRows),
+        },
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/console] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Operator console failed' })
   }
 })
 

@@ -88,6 +88,7 @@
     "test:identities-email-runtime": "node scripts/self-test-identities-email-runtime.mjs",
     "test:sending-engine-status-runtime": "node scripts/self-test-sending-engine-status-runtime.mjs",
     "test:scheduled-sending-pack-runtime": "node scripts/self-test-scheduled-sending-pack-runtime.mjs",
+    "test:operator-console-runtime": "node scripts/self-test-operator-console-runtime.mjs",
     "test:bounce-suppression-runtime": "node scripts/self-test-bounce-suppression-runtime.mjs",
     "test:unsubscribe-link-runtime": "node scripts/self-test-unsubscribe-link-runtime.mjs",
     "test:reply-stop-runtime": "node scripts/self-test-reply-stop-runtime.mjs",
