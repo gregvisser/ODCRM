@@ -8,7 +8,7 @@
 import cron from 'node-cron'
 import os from 'node:os'
 import { PrismaClient } from '@prisma/client'
-import { OutboundSendQueueStatus } from '@prisma/client'
+import { OutboundSendAttemptDecision, OutboundSendQueueStatus } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
@@ -189,6 +189,7 @@ export async function processOne(
           senderIdentity: {
             select: {
               id: true,
+              emailAddress: true,
               sendWindowTimeZone: true,
               sendWindowHoursStart: true,
               sendWindowHoursEnd: true,
@@ -333,6 +334,57 @@ export async function processOne(
     })
     await requeueAfterSendFailure(prisma, item.id, 'no_sender_identity')
     return 'requeued'
+  }
+
+  const firstOutbound = await prisma.emailMessageMetadata.findFirst({
+    where: {
+      senderIdentityId: identity.id,
+      direction: 'outbound',
+      toAddress: { equals: recipientEmail, mode: 'insensitive' },
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { createdAt: true },
+  })
+  if (firstOutbound) {
+    const replyCount = await prisma.emailMessageMetadata.count({
+      where: {
+        senderIdentityId: identity.id,
+        direction: 'inbound',
+        fromAddress: { equals: recipientEmail, mode: 'insensitive' },
+        toAddress: { equals: identity.emailAddress, mode: 'insensitive' },
+        createdAt: { gte: firstOutbound.createdAt },
+      },
+    })
+    if (replyCount > 0) {
+      await prisma.enrollmentAuditEvent.create({
+        data: {
+          customerId,
+          enrollmentId,
+          recipientEmail,
+          eventType: 'send_skipped',
+          message: 'reply_stop',
+          meta: { reason: 'SKIP_REPLIED_STOP', stepIndex, identityId: identity.id, replyCount },
+        },
+      })
+      await prisma.outboundSendAttemptAudit.create({
+        data: {
+          customerId,
+          queueItemId: item.id,
+          // Existing enum does not include SKIP_REPLIED_STOP; keep backward-compatible decision + explicit reason marker.
+          decision: OutboundSendAttemptDecision.SKIP_INVALID,
+          reason: 'SKIP_REPLIED_STOP',
+          snapshot: {
+            enrollmentId,
+            recipientEmail,
+            stepIndex,
+            identityId: identity.id,
+            replyCount,
+          },
+        },
+      })
+      await unlockItem(prisma, item.id, OutboundSendQueueStatus.SKIPPED, 'replied_stop')
+      return 'skipped'
+    }
   }
   // Stage 1G: ignoreWindow only when tick passes option (env ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW); worker never sets it
   if (!options?.ignoreWindow && !inSendWindow(identity)) {
