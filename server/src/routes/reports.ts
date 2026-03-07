@@ -280,18 +280,26 @@ router.get('/outreach', async (req, res, next) => {
       if (String(audit.decision).startsWith('SKIP_')) { seqM.skipped += 1; idM.skipped += 1 }
     }
 
-    const [repliesByIdentity, optOutsByIdentity] = await Promise.all([
-      prisma.emailEvent.groupBy({
-        by: ['senderIdentityId'],
-        where: { customerId, type: 'replied', occurredAt: { gte: since } },
-        _count: { id: true },
-      }),
-      prisma.emailEvent.groupBy({
+    const repliesByIdentity = await prisma.emailEvent.groupBy({
+      by: ['senderIdentityId'],
+      where: { customerId, type: 'replied', occurredAt: { gte: since } },
+      _count: { id: true },
+    })
+    let optOutsByIdentity: Array<{ senderIdentityId: string | null; _count: { id: number } }> = []
+    try {
+      const groupedOptOuts = await prisma.emailEvent.groupBy({
         by: ['senderIdentityId'],
         where: { customerId, type: 'opted_out', occurredAt: { gte: since } },
         _count: { id: true },
-      }),
-    ])
+      })
+      optOutsByIdentity = groupedOptOuts.map((row) => ({
+        senderIdentityId: row.senderIdentityId ?? null,
+        _count: { id: row._count.id },
+      }))
+    } catch (error) {
+      // Some environments can lag enum values; keep reports available and treat opt-outs as 0.
+      console.warn('[reports/outreach] opted_out groupBy unavailable; defaulting optOuts to 0')
+    }
 
     for (const row of repliesByIdentity) {
       const identKey = row.senderIdentityId ?? 'unknown'
