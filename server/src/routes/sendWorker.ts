@@ -2002,6 +2002,333 @@ router.get('/run-history', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /api/send-worker/preview-vs-outcome — compare launch preview candidates against recent outcomes.
+ * Tenant-scoped, read-only.
+ * Query: sequenceId(required), sinceHours<=168, batchLimit<=50, outcomeLimit<=100
+ */
+router.get('/preview-vs-outcome', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const sequenceId = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+  if (!sequenceId) {
+    res.status(400).json({ success: false, error: 'sequenceId is required' })
+    return
+  }
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const rawBatchLimit = typeof req.query.batchLimit === 'string' ? parseInt(req.query.batchLimit, 10) : 15
+    const rawOutcomeLimit = typeof req.query.outcomeLimit === 'string' ? parseInt(req.query.outcomeLimit, 10) : 80
+    const batchLimit = Number.isFinite(rawBatchLimit) ? Math.min(Math.max(rawBatchLimit, 1), 50) : 15
+    const outcomeLimit = Number.isFinite(rawOutcomeLimit) ? Math.min(Math.max(rawOutcomeLimit, 1), 100) : 80
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+    const now = new Date()
+
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true, name: true, senderIdentityId: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+
+    const [enrollmentRows, senderIdentity, stepRows] = await Promise.all([
+      prisma.enrollment.findMany({
+        where: { customerId, sequenceId },
+        select: { id: true, name: true, sequenceId: true },
+      }),
+      sequence.senderIdentityId
+        ? prisma.emailIdentity.findFirst({
+            where: { id: sequence.senderIdentityId, customerId },
+            select: { id: true, emailAddress: true, displayName: true },
+          })
+        : Promise.resolve(null),
+      prisma.emailSequenceStep.findMany({
+        where: { sequenceId },
+        select: { stepOrder: true, subjectTemplate: true },
+      }),
+    ])
+    const enrollmentIds = enrollmentRows.map((row) => row.id)
+    const enrollmentById = new Map(enrollmentRows.map((row) => [row.id, row]))
+    const stepSubjectByOrder = new Map(stepRows.map((row) => [row.stepOrder, row.subjectTemplate]))
+
+    if (enrollmentIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          sequenceId: sequence.id,
+          sequenceName: sequence.name ?? null,
+          sinceHours,
+          batchLimit,
+          outcomeLimit,
+          summary: {
+            previewCandidates: 0,
+            outcomeRows: 0,
+            matchedRows: 0,
+            previewOnlyRows: 0,
+            outcomeOnlyRows: 0,
+            matchByQueueItemId: 0,
+            matchByRecipientEnrollment: 0,
+          },
+          previewRows: [],
+          outcomeRows: [],
+          matchedRows: [],
+          previewOnlyRows: [],
+          outcomeOnlyRows: [],
+          unmatchedPreviewRows: [],
+          unexpectedOutcomeRows: [],
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+
+    const queueRows = await prisma.outboundSendQueueItem.findMany({
+      where: { customerId, enrollmentId: { in: enrollmentIds } },
+      select: {
+        id: true,
+        enrollmentId: true,
+        recipientEmail: true,
+        status: true,
+        scheduledFor: true,
+        sentAt: true,
+        updatedAt: true,
+        stepIndex: true,
+        attemptCount: true,
+        lastError: true,
+      },
+    })
+
+    const byRecipient = new Map<string, QueueShapeRow[]>()
+    for (const row of queueRows) {
+      const emailNorm = row.recipientEmail.trim().toLowerCase()
+      const key = `${row.enrollmentId}::${emailNorm}`
+      const normalizedRow: QueueShapeRow = { ...row, recipientEmail: emailNorm }
+      const existing = byRecipient.get(key)
+      if (existing) existing.push(normalizedRow)
+      else byRecipient.set(key, [normalizedRow])
+    }
+
+    const recipientRows = await prisma.enrollmentRecipient.findMany({
+      where: {
+        enrollmentId: { in: enrollmentIds },
+        email: { in: Array.from(new Set(Array.from(byRecipient.keys()).map((key) => key.split('::')[1] || ''))).filter(Boolean) },
+      },
+      select: { enrollmentId: true, email: true, firstName: true, lastName: true, company: true },
+    })
+    const recipientByKey = new Map(recipientRows.map((row) => [`${row.enrollmentId}::${row.email.trim().toLowerCase()}`, row]))
+
+    const toPreviewRow = (classified: { bucket: 'eligible' | 'excluded' | 'blocked'; reason: string; row: QueueShapeRow }) => {
+      const row = classified.row
+      const recipientKey = `${row.enrollmentId}::${row.recipientEmail}`
+      const recipient = recipientByKey.get(recipientKey)
+      const stepOrder = row.stepIndex + 1
+      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient)
+      const enrollment = enrollmentById.get(row.enrollmentId)
+      return {
+        queueItemId: row.id,
+        enrollmentId: row.enrollmentId,
+        enrollmentName: enrollment?.name ?? null,
+        sequenceId,
+        sequenceName: sequence.name ?? null,
+        recipientEmail: row.recipientEmail,
+        identityEmail: senderIdentity?.emailAddress ?? null,
+        status: row.status,
+        reason: classified.reason,
+        scheduledFor: row.scheduledFor?.toISOString() ?? null,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        stepIndex: row.stepIndex,
+        attemptCount: row.attemptCount ?? 0,
+        lastError: row.lastError ?? null,
+        subjectPreview,
+        renderAvailable: true,
+        renderRoute: `/api/send-queue/items/${row.id}/render`,
+        detailRoute: `/api/send-queue/items/${row.id}`,
+        queueRoute: `/api/enrollments/${row.enrollmentId}/queue`,
+        auditRoute: `/api/send-worker/audits?queueItemId=${row.id}&limit=20`,
+      }
+    }
+
+    const classifiedRows = Array.from(byRecipient.values()).map((rows) => classifyRecipientGroup(rows, now))
+    const previewEligible = classifiedRows
+      .filter((row) => row.bucket === 'eligible')
+      .sort((a, b) => {
+        const aTime = a.row.scheduledFor ? a.row.scheduledFor.getTime() : 0
+        const bTime = b.row.scheduledFor ? b.row.scheduledFor.getTime() : 0
+        return aTime - bTime || a.row.stepIndex - b.row.stepIndex || a.row.id.localeCompare(b.row.id)
+      })
+      .slice(0, batchLimit)
+      .map(toPreviewRow)
+
+    const queueById = new Map(queueRows.map((row) => [row.id, row]))
+    const candidateTake = Math.min(Math.max(outcomeLimit * 12, 240), 2000)
+    const candidateAudits = await prisma.outboundSendAttemptAudit.findMany({
+      where: {
+        customerId,
+        decidedAt: { gte: sinceDate },
+      },
+      orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+      take: candidateTake,
+      select: {
+        id: true,
+        decidedAt: true,
+        decision: true,
+        reason: true,
+        queueItemId: true,
+        snapshot: true,
+      },
+    })
+
+    const filteredAudits = candidateAudits.filter((audit) => {
+      const queue = queueById.get(audit.queueItemId)
+      if (!queue) return false
+      const enrollment = enrollmentById.get(queue.enrollmentId)
+      return Boolean(enrollment && enrollment.sequenceId === sequenceId)
+    }).slice(0, outcomeLimit)
+
+    type OutcomeRow = {
+      auditId: string
+      queueItemId: string
+      enrollmentId: string | null
+      enrollmentName: string | null
+      sequenceId: string
+      sequenceName: string | null
+      recipientEmail: string | null
+      identityEmail: string | null
+      decision: string
+      outcome: string
+      reason: string | null
+      occurredAt: string
+      status: string | null
+      scheduledFor: string | null
+      sentAt: string | null
+      stepIndex: number | null
+      attemptCount: number | null
+      lastError: string | null
+      renderAvailable: boolean
+      renderRoute: string | null
+      detailRoute: string | null
+      queueRoute: string | null
+      auditRoute: string
+    }
+
+    const outcomeRows: OutcomeRow[] = filteredAudits.map((audit) => {
+      const queue = queueById.get(audit.queueItemId)
+      const enrollment = queue ? enrollmentById.get(queue.enrollmentId) : null
+      const recipientEmail =
+        queue?.recipientEmail?.trim().toLowerCase() ??
+        getSnapshotString(audit.snapshot, ['recipientEmailNorm', 'recipientEmail', 'email'])?.toLowerCase() ??
+        null
+      return {
+        auditId: audit.id,
+        queueItemId: audit.queueItemId,
+        enrollmentId: enrollment?.id ?? null,
+        enrollmentName: enrollment?.name ?? null,
+        sequenceId,
+        sequenceName: sequence.name ?? null,
+        recipientEmail,
+        identityEmail: senderIdentity?.emailAddress ?? null,
+        decision: audit.decision,
+        outcome: classifyRunOutcome(audit.decision, audit.reason ?? null),
+        reason: audit.reason ?? null,
+        occurredAt: audit.decidedAt.toISOString(),
+        status: queue?.status ?? null,
+        scheduledFor: queue?.scheduledFor?.toISOString() ?? null,
+        sentAt: queue?.sentAt?.toISOString() ?? null,
+        stepIndex: queue?.stepIndex ?? null,
+        attemptCount: queue?.attemptCount ?? null,
+        lastError: queue?.lastError ?? null,
+        renderAvailable: Boolean(audit.queueItemId),
+        renderRoute: audit.queueItemId ? `/api/send-queue/items/${audit.queueItemId}/render` : null,
+        detailRoute: audit.queueItemId ? `/api/send-queue/items/${audit.queueItemId}` : null,
+        queueRoute: enrollment?.id ? `/api/enrollments/${enrollment.id}/queue` : null,
+        auditRoute: `/api/send-worker/audits?queueItemId=${encodeURIComponent(audit.queueItemId)}&limit=20`,
+      }
+    })
+
+    const matchedPreviewIds = new Set<string>()
+    const matchedOutcomeIds = new Set<string>()
+    const previewByQueueId = new Map(previewEligible.map((row) => [row.queueItemId, row]))
+    const previewByRecipientEnrollment = new Map(
+      previewEligible.map((row) => [`${row.enrollmentId}::${row.recipientEmail.trim().toLowerCase()}`, row])
+    )
+
+    const matchedRows: Array<{
+      matchKind: 'queue_item_id' | 'recipient_enrollment'
+      preview: typeof previewEligible[number]
+      outcome: OutcomeRow
+      differs: {
+        outcome: boolean
+        reason: boolean
+        identity: boolean
+      }
+    }> = []
+
+    for (const outcome of outcomeRows) {
+      const direct = previewByQueueId.get(outcome.queueItemId)
+      const fallbackKey =
+        outcome.enrollmentId && outcome.recipientEmail
+          ? `${outcome.enrollmentId}::${outcome.recipientEmail.trim().toLowerCase()}`
+          : null
+      const fallback = fallbackKey ? previewByRecipientEnrollment.get(fallbackKey) : undefined
+      const preview = direct ?? fallback
+      if (!preview) continue
+
+      matchedPreviewIds.add(preview.queueItemId)
+      matchedOutcomeIds.add(outcome.auditId)
+      matchedRows.push({
+        matchKind: direct ? 'queue_item_id' : 'recipient_enrollment',
+        preview,
+        outcome,
+        differs: {
+          outcome: !['WOULD_SEND', 'SENT'].includes(outcome.outcome),
+          reason: Boolean((preview.reason || '') !== (outcome.reason || outcome.lastError || '')),
+          identity: Boolean((preview.identityEmail || '').trim().toLowerCase() !== (outcome.identityEmail || '').trim().toLowerCase()),
+        },
+      })
+    }
+
+    const previewOnlyRows = previewEligible.filter((row) => !matchedPreviewIds.has(row.queueItemId))
+    const outcomeOnlyRows = outcomeRows.filter((row) => !matchedOutcomeIds.has(row.auditId))
+
+    const summary = {
+      previewCandidates: previewEligible.length,
+      outcomeRows: outcomeRows.length,
+      matchedRows: matchedRows.length,
+      previewOnlyRows: previewOnlyRows.length,
+      outcomeOnlyRows: outcomeOnlyRows.length,
+      matchByQueueItemId: matchedRows.filter((row) => row.matchKind === 'queue_item_id').length,
+      matchByRecipientEnrollment: matchedRows.filter((row) => row.matchKind === 'recipient_enrollment').length,
+    }
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: sequence.id,
+        sequenceName: sequence.name ?? null,
+        sinceHours,
+        batchLimit,
+        outcomeLimit,
+        summary,
+        previewRows: previewEligible,
+        outcomeRows,
+        matchedRows,
+        previewOnlyRows,
+        outcomeOnlyRows,
+        unmatchedPreviewRows: previewOnlyRows,
+        unexpectedOutcomeRows: outcomeOnlyRows,
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/preview-vs-outcome] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Preview-vs-outcome comparison failed' })
+  }
+})
+
+/**
  * GET /api/send-worker/queue-workbench — tenant-scoped queue triage rows for operator workbench.
  * Query: state=ready|blocked|failed|scheduled|sent, limit<=100, search(recipient email contains), sinceHours
  */
