@@ -109,6 +109,7 @@
     "test:identity-capacity-runtime": "node scripts/self-test-identity-capacity-runtime.mjs",
     "test:preview-vs-outcome-runtime": "node scripts/self-test-preview-vs-outcome-runtime.mjs",
     "test:exception-center-runtime": "node scripts/self-test-exception-center-runtime.mjs",
+    "test:readiness-tab-runtime": "node scripts/self-test-readiness-tab-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
