@@ -427,6 +427,183 @@ async function getSuppressionHealthSnapshot(customerId: string) {
   }
 }
 
+async function getIdentityCapacitySnapshot(customerId: string, sinceHours: number, preferredIdentityId?: string | null) {
+  const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+  const [identities, recentAudits, queueRows, gateData] = await Promise.all([
+    prisma.emailIdentity.findMany({
+      where: { customerId },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        emailAddress: true,
+        displayName: true,
+        provider: true,
+        isActive: true,
+        dailySendLimit: true,
+        sendWindowTimeZone: true,
+        sendWindowHoursStart: true,
+        sendWindowHoursEnd: true,
+      },
+    }),
+    prisma.outboundSendAttemptAudit.findMany({
+      where: { customerId, decidedAt: { gte: sinceDate } },
+      orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+      take: 1200,
+      select: { queueItemId: true, decision: true, reason: true },
+    }),
+    prisma.outboundSendQueueItem.findMany({
+      where: {
+        customerId,
+        OR: [
+          { status: OutboundSendQueueStatus.QUEUED },
+          { status: OutboundSendQueueStatus.LOCKED },
+        ],
+      },
+      select: { id: true, enrollmentId: true },
+    }),
+    getLiveGatesSnapshot(customerId, sinceHours),
+  ])
+
+  const queueItemIds = Array.from(new Set(recentAudits.map((audit) => audit.queueItemId)))
+  const queueRowsForAudit = queueItemIds.length
+    ? await prisma.outboundSendQueueItem.findMany({
+        where: { id: { in: queueItemIds }, customerId },
+        select: { id: true, enrollmentId: true },
+      })
+    : []
+  const mergedQueueRows = [...queueRowsForAudit, ...queueRows]
+  const enrollmentIds = Array.from(new Set(mergedQueueRows.map((row) => row.enrollmentId).filter(Boolean)))
+  const enrollmentRows = enrollmentIds.length
+    ? await prisma.enrollment.findMany({
+        where: { id: { in: enrollmentIds }, customerId },
+        select: { id: true, sequenceId: true },
+      })
+    : []
+  const sequenceIds = Array.from(new Set(enrollmentRows.map((row) => row.sequenceId).filter(Boolean)))
+  const sequenceRows = sequenceIds.length
+    ? await prisma.emailSequence.findMany({
+        where: { id: { in: sequenceIds }, customerId },
+        select: { id: true, senderIdentityId: true, name: true },
+      })
+    : []
+
+  const queueById = new Map(mergedQueueRows.map((row) => [row.id, row]))
+  const enrollmentById = new Map(enrollmentRows.map((row) => [row.id, row]))
+  const sequenceById = new Map(sequenceRows.map((row) => [row.id, row]))
+
+  const identityStats = new Map<string, { sent: number; sendFailed: number; wouldSend: number; skipped: number }>()
+  const incrementStats = (identityId: string, key: 'sent' | 'sendFailed' | 'wouldSend' | 'skipped') => {
+    const current = identityStats.get(identityId) ?? { sent: 0, sendFailed: 0, wouldSend: 0, skipped: 0 }
+    current[key] += 1
+    identityStats.set(identityId, current)
+  }
+
+  for (const audit of recentAudits) {
+    const queue = queueById.get(audit.queueItemId)
+    if (!queue) continue
+    const enrollment = enrollmentById.get(queue.enrollmentId)
+    if (!enrollment) continue
+    const sequence = sequenceById.get(enrollment.sequenceId)
+    const identityId = sequence?.senderIdentityId
+    if (!identityId) continue
+    if (audit.decision === OutboundSendAttemptDecision.SENT) incrementStats(identityId, 'sent')
+    else if (audit.decision === OutboundSendAttemptDecision.SEND_FAILED) incrementStats(identityId, 'sendFailed')
+    else if (audit.decision === OutboundSendAttemptDecision.WOULD_SEND) incrementStats(identityId, 'wouldSend')
+    else if (String(audit.decision).startsWith('SKIP_') || audit.reason === 'SKIP_REPLIED_STOP') incrementStats(identityId, 'skipped')
+  }
+
+  const queuedByIdentity = new Map<string, number>()
+  for (const row of queueRows) {
+    const enrollment = enrollmentById.get(row.enrollmentId)
+    const sequence = enrollment?.sequenceId ? sequenceById.get(enrollment.sequenceId) : null
+    const identityId = sequence?.senderIdentityId
+    if (!identityId) continue
+    queuedByIdentity.set(identityId, (queuedByIdentity.get(identityId) ?? 0) + 1)
+  }
+
+  const rows = identities.map((identity) => {
+    const stats = identityStats.get(identity.id) ?? { sent: 0, sendFailed: 0, wouldSend: 0, skipped: 0 }
+    const queuedNow = queuedByIdentity.get(identity.id) ?? 0
+    const errorRate = stats.sendFailed > 0 ? stats.sendFailed / Math.max(1, stats.sent + stats.sendFailed) : 0
+    const reasons: string[] = []
+    let state: 'usable' | 'unavailable' | 'risky' = 'usable'
+    if (!identity.isActive) {
+      state = 'unavailable'
+      reasons.push('identity_inactive')
+    }
+    if (stats.sendFailed >= 3 && errorRate >= 0.5) {
+      state = state === 'unavailable' ? state : 'risky'
+      reasons.push('recent_failure_rate_high')
+    } else if (stats.sendFailed > 0 && stats.sent === 0) {
+      state = state === 'unavailable' ? state : 'risky'
+      reasons.push('recent_send_failures_detected')
+    }
+    if ((identity.dailySendLimit ?? 0) > 0 && stats.sent >= (identity.dailySendLimit ?? 0)) {
+      state = state === 'unavailable' ? state : 'risky'
+      reasons.push('daily_limit_reached_in_window')
+    }
+
+    return {
+      identityId: identity.id,
+      email: identity.emailAddress,
+      label: identity.displayName ?? null,
+      provider: identity.provider,
+      isActive: identity.isActive,
+      state,
+      reasons,
+      recent: {
+        windowHours: sinceHours,
+        sent: stats.sent,
+        sendFailed: stats.sendFailed,
+        wouldSend: stats.wouldSend,
+        skipped: stats.skipped,
+      },
+      queuePressure: {
+        queuedNow,
+      },
+      guardrails: {
+        dailySendLimit: identity.dailySendLimit ?? null,
+        sendWindowTimeZone: identity.sendWindowTimeZone ?? null,
+        sendWindowHoursStart: identity.sendWindowHoursStart ?? null,
+        sendWindowHoursEnd: identity.sendWindowHoursEnd ?? null,
+      },
+    }
+  })
+
+  const usable = rows.filter((row) => row.state === 'usable').length
+  const unavailable = rows.filter((row) => row.state === 'unavailable').length
+  const risky = rows.filter((row) => row.state === 'risky').length
+  const preferred = preferredIdentityId ? rows.find((row) => row.identityId === preferredIdentityId) ?? null : null
+  const recommended = preferred && preferred.state !== 'unavailable'
+    ? preferred
+    : rows.find((row) => row.state === 'usable')
+      ?? rows.find((row) => row.state === 'risky')
+      ?? null
+
+  const guardrailWarnings: string[] = []
+  if (usable < 1) guardrailWarnings.push('No usable active sending identity is currently available.')
+  if (risky > 0) guardrailWarnings.push(`${risky} identity/identities show recent failure or capacity risk signals.`)
+  if (gateData.currentCount.activeIdentities < 1) guardrailWarnings.push('Live gates report zero active identities.')
+
+  return {
+    summary: {
+      total: rows.length,
+      usable,
+      unavailable,
+      risky,
+      preferredIdentityId: preferredIdentityId ?? null,
+      preferredIdentityState: preferred?.state ?? null,
+      recommendedIdentityId: recommended?.identityId ?? null,
+    },
+    rows,
+    guardrails: {
+      warnings: guardrailWarnings,
+      liveGateReasons: Array.isArray(gateData.reasons) ? gateData.reasons : [],
+    },
+    lastUpdatedAt: new Date().toISOString(),
+  }
+}
+
 async function getSequenceReadinessSnapshot(customerId: string, sequenceId: string, sinceHours: number) {
   const sequence = await prisma.emailSequence.findFirst({
     where: { id: sequenceId, customerId },
@@ -1026,6 +1203,30 @@ router.get('/console', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /api/send-worker/identity-capacity — tenant-scoped identity readiness + guardrail signals.
+ * Read-only; derives capacity/risk from existing identity + audit + queue truth.
+ */
+router.get('/identity-capacity', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const data = await getIdentityCapacitySnapshot(customerId, sinceHours)
+    res.json({
+      success: true,
+      data: {
+        sinceHours,
+        ...data,
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/identity-capacity] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Identity capacity failed' })
+  }
+})
+
+/**
  * GET /api/send-worker/sequence-readiness — sequence-level eligibility/exclusion breakdown.
  * Tenant-scoped, read-only.
  */
@@ -1236,11 +1437,21 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
 
   try {
     const sinceHours = parseSinceHours(req.query.sinceHours)
-    const [gateData, readiness, leadSourceHealth, suppressionHealth] = await Promise.all([
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true, senderIdentityId: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+
+    const [gateData, readiness, leadSourceHealth, suppressionHealth, identityCapacity] = await Promise.all([
       getLiveGatesSnapshot(customerId, sinceHours),
       getSequenceReadinessSnapshot(customerId, sequenceId, sinceHours),
       getLeadSourceHealthSnapshot(customerId),
       getSuppressionHealthSnapshot(customerId),
+      getIdentityCapacitySnapshot(customerId, sinceHours, sequence.senderIdentityId ?? null),
     ])
     if (!readiness) {
       res.status(404).json({ success: false, error: 'sequence_not_found' })
@@ -1252,6 +1463,7 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
     const warnings: string[] = []
 
     if ((gateData.currentCount.activeIdentities ?? 0) < 1) blockers.push('No active sender identity for this tenant.')
+    if ((identityCapacity.summary.usable ?? 0) < 1) blockers.push('No usable sending identity is currently available.')
     if ((readiness.summary.enrollmentCount ?? 0) < 1) blockers.push('Sequence has no enrollments yet.')
     if ((readiness.summary.eligibleCount ?? 0) < 1) blockers.push('No eligible recipients are sendable now.')
 
@@ -1264,6 +1476,8 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
     if ((readiness.breakdown.invalid_recipient ?? 0) > 0) warnings.push(`${readiness.breakdown.invalid_recipient} recipients are invalid/hard-bounced.`)
     if (!manualLiveGate.allowed) warnings.push(`Live canary currently blocked: ${manualLiveGate.reason ?? 'manual_live_tick_not_allowed'}`)
     if ((gateData.recent.counts.SEND_FAILED ?? 0) > 0) warnings.push(`Recent SEND_FAILED events in window (${sinceHours}h): ${gateData.recent.counts.SEND_FAILED}`)
+    if ((identityCapacity.summary.risky ?? 0) > 0) warnings.push(`${identityCapacity.summary.risky} identities currently flagged as risky.`)
+    if (identityCapacity.summary.preferredIdentityState === 'unavailable') warnings.push('Sequence preferred identity is currently unavailable.')
 
     const overallStatus: 'GO' | 'WARNING' | 'NO_GO' =
       blockers.length > 0
@@ -1285,6 +1499,8 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
           activeIdentityReady: (gateData.currentCount.activeIdentities ?? 0) > 0,
           leadSourcesConfigured: leadSourceHealth.configuredCount > 0,
           suppressionSourceConfigured: suppressionHealth.configuredCount > 0,
+          usableIdentityCapacity: (identityCapacity.summary.usable ?? 0) > 0,
+          preferredIdentityAvailable: identityCapacity.summary.preferredIdentityState !== 'unavailable',
           recipientsEligibleNow: (readiness.summary.eligibleCount ?? 0) > 0,
           liveCanaryAllowed: manualLiveGate.allowed,
         },
@@ -1300,6 +1516,9 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
           invalidRecipient: readiness.breakdown.invalid_recipient ?? 0,
           failedRecently: readiness.summary.failedRecently ?? 0,
           sentRecently: readiness.summary.sentRecently ?? 0,
+          usableIdentities: identityCapacity.summary.usable ?? 0,
+          riskyIdentities: identityCapacity.summary.risky ?? 0,
+          unavailableIdentities: identityCapacity.summary.unavailable ?? 0,
         },
         actions: {
           canDryRun: true,
@@ -1319,6 +1538,7 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
         dependencies: {
           leadSources: leadSourceHealth,
           suppression: suppressionHealth,
+          identityCapacity: identityCapacity,
           liveGates: {
             scheduledEngineMode: gateData.mode.scheduledEngineMode,
             scheduledEnabled: gateData.flags.enableScheduledSendingEngine,

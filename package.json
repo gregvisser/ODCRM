@@ -106,6 +106,7 @@
     "test:sequence-preflight-runtime": "node scripts/self-test-sequence-preflight-runtime.mjs",
     "test:launch-preview-runtime": "node scripts/self-test-launch-preview-runtime.mjs",
     "test:run-history-runtime": "node scripts/self-test-run-history-runtime.mjs",
+    "test:identity-capacity-runtime": "node scripts/self-test-identity-capacity-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
