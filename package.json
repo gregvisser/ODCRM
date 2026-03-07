@@ -105,6 +105,7 @@
     "test:queue-remediation-runtime": "node scripts/self-test-queue-remediation-runtime.mjs",
     "test:sequence-preflight-runtime": "node scripts/self-test-sequence-preflight-runtime.mjs",
     "test:launch-preview-runtime": "node scripts/self-test-launch-preview-runtime.mjs",
+    "test:run-history-runtime": "node scripts/self-test-run-history-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

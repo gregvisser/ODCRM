@@ -220,6 +220,22 @@ function buildLaunchSubjectPreview(
   return subject || null
 }
 
+function getSnapshotString(snapshot: unknown, keys: string[]): string | null {
+  if (!snapshot || typeof snapshot !== 'object') return null
+  const record = snapshot as Record<string, unknown>
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function classifyRunOutcome(decision: string, reason: string | null): string {
+  if (reason === 'SKIP_REPLIED_STOP') return 'SKIP_REPLIED_STOP'
+  if (reason === 'hard_bounce_invalid_recipient') return 'hard_bounce_invalid_recipient'
+  return decision
+}
+
 async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
   const cap = getLiveSendCap()
   const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
@@ -1532,6 +1548,236 @@ router.get('/launch-preview', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/launch-preview] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Launch preview failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/run-history — tenant-scoped recent execution outcomes for run/batch review.
+ * Query: sequenceId?, sinceHours<=168, limit<=100
+ */
+router.get('/run-history', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 40
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 40
+    const sequenceId = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+
+    let scopedSequence: { id: string; name: string | null } | null = null
+    if (sequenceId) {
+      scopedSequence = await prisma.emailSequence.findFirst({
+        where: { id: sequenceId, customerId },
+        select: { id: true, name: true },
+      })
+      if (!scopedSequence) {
+        res.status(404).json({ success: false, error: 'Sequence not found for this client.' })
+        return
+      }
+    }
+
+    const candidateTake = sequenceId ? Math.min(Math.max(limit * 12, 240), 2000) : Math.min(Math.max(limit * 3, 120), 600)
+    const candidateAudits = await prisma.outboundSendAttemptAudit.findMany({
+      where: {
+        customerId,
+        decidedAt: { gte: sinceDate },
+      },
+      orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+      take: candidateTake,
+      select: {
+        id: true,
+        decidedAt: true,
+        decision: true,
+        reason: true,
+        queueItemId: true,
+        snapshot: true,
+      },
+    })
+
+    const queueItemIds = Array.from(new Set(candidateAudits.map((row) => row.queueItemId).filter(Boolean)))
+    const queueRows = queueItemIds.length
+      ? await prisma.outboundSendQueueItem.findMany({
+          where: { id: { in: queueItemIds }, customerId },
+          select: {
+            id: true,
+            enrollmentId: true,
+            recipientEmail: true,
+            status: true,
+            scheduledFor: true,
+            sentAt: true,
+            updatedAt: true,
+            stepIndex: true,
+            attemptCount: true,
+            lastError: true,
+          },
+        })
+      : []
+    const queueById = new Map(queueRows.map((row) => [row.id, row]))
+
+    const enrollmentIds = Array.from(new Set(queueRows.map((row) => row.enrollmentId).filter(Boolean)))
+    const enrollmentRows = enrollmentIds.length
+      ? await prisma.enrollment.findMany({
+          where: { id: { in: enrollmentIds }, customerId },
+          select: { id: true, sequenceId: true, name: true },
+        })
+      : []
+    const enrollmentById = new Map(enrollmentRows.map((row) => [row.id, row]))
+
+    const sequenceIds = Array.from(new Set(enrollmentRows.map((row) => row.sequenceId).filter(Boolean)))
+    const sequenceRows = sequenceIds.length
+      ? await prisma.emailSequence.findMany({
+          where: { id: { in: sequenceIds }, customerId },
+          select: { id: true, name: true, senderIdentityId: true },
+        })
+      : []
+    const sequenceById = new Map(sequenceRows.map((row) => [row.id, row]))
+
+    const identityIds = Array.from(new Set(sequenceRows.map((row) => row.senderIdentityId).filter((v): v is string => !!v)))
+    const identityRows = identityIds.length
+      ? await prisma.emailIdentity.findMany({
+          where: { id: { in: identityIds }, customerId },
+          select: { id: true, emailAddress: true, displayName: true },
+        })
+      : []
+    const identityById = new Map(identityRows.map((row) => [row.id, row]))
+
+    const filteredAudits = candidateAudits.filter((audit) => {
+      if (!sequenceId) return true
+      const queue = queueById.get(audit.queueItemId)
+      if (!queue) return false
+      const enrollment = enrollmentById.get(queue.enrollmentId)
+      return Boolean(enrollment && enrollment.sequenceId === sequenceId)
+    }).slice(0, limit)
+
+    const byDecision: Record<string, number> = {}
+    const byOutcome: Record<string, number> = {}
+    type RunHistoryRow = {
+      auditId: string
+      queueItemId: string
+      recipientEmail: string | null
+      decision: string
+      outcome: string
+      reason: string | null
+      occurredAt: string
+      sequenceId: string | null
+      sequenceName: string | null
+      enrollmentId: string | null
+      enrollmentName: string | null
+      identityEmail: string | null
+      status: string | null
+      scheduledFor: string | null
+      sentAt: string | null
+      stepIndex: number | null
+      attemptCount: number | null
+      lastError: string | null
+      renderAvailable: boolean
+      renderRoute: string | null
+      detailRoute: string | null
+      queueRoute: string | null
+      auditRoute: string | null
+    }
+
+    const rows: RunHistoryRow[] = filteredAudits.map((audit) => {
+      const queue = queueById.get(audit.queueItemId)
+      const enrollment = queue ? enrollmentById.get(queue.enrollmentId) : null
+      const sequence = enrollment?.sequenceId ? sequenceById.get(enrollment.sequenceId) : null
+      const identity = sequence?.senderIdentityId ? identityById.get(sequence.senderIdentityId) : null
+      const recipientEmail =
+        queue?.recipientEmail ??
+        getSnapshotString(audit.snapshot, ['recipientEmailNorm', 'recipientEmail', 'email']) ??
+        null
+      const outcome = classifyRunOutcome(audit.decision, audit.reason ?? null)
+      byDecision[audit.decision] = (byDecision[audit.decision] ?? 0) + 1
+      byOutcome[outcome] = (byOutcome[outcome] ?? 0) + 1
+      return {
+        auditId: audit.id,
+        queueItemId: audit.queueItemId,
+        recipientEmail,
+        decision: audit.decision,
+        outcome,
+        reason: audit.reason ?? null,
+        occurredAt: audit.decidedAt.toISOString(),
+        sequenceId: sequence?.id ?? null,
+        sequenceName: sequence?.name ?? null,
+        enrollmentId: enrollment?.id ?? null,
+        enrollmentName: enrollment?.name ?? null,
+        identityEmail: identity?.emailAddress ?? null,
+        status: queue?.status ?? null,
+        scheduledFor: queue?.scheduledFor?.toISOString() ?? null,
+        sentAt: queue?.sentAt?.toISOString() ?? null,
+        stepIndex: queue?.stepIndex ?? null,
+        attemptCount: queue?.attemptCount ?? null,
+        lastError: queue?.lastError ?? null,
+        renderAvailable: Boolean(audit.queueItemId),
+        renderRoute: audit.queueItemId ? `/api/send-queue/items/${audit.queueItemId}/render` : null,
+        detailRoute: audit.queueItemId ? `/api/send-queue/items/${audit.queueItemId}` : null,
+        queueRoute: enrollment?.id ? `/api/enrollments/${enrollment.id}/queue` : null,
+        auditRoute: `/api/send-worker/audits?queueItemId=${encodeURIComponent(audit.queueItemId)}&limit=20`,
+      }
+    })
+
+    const runMap = new Map<string, {
+      runKey: string
+      startedAt: string
+      endedAt: string
+      modeGuess: 'DRY_RUN' | 'LIVE_CANARY' | 'MIXED'
+      total: number
+      counts: Record<string, number>
+    }>()
+    for (const row of rows) {
+      const d = new Date(row.occurredAt)
+      d.setSeconds(0, 0)
+      const runKey = d.toISOString()
+      const modeGuess: 'DRY_RUN' | 'LIVE_CANARY' | 'MIXED' =
+        row.decision === 'WOULD_SEND'
+          ? 'DRY_RUN'
+          : row.decision === 'SENT' || row.decision === 'SEND_FAILED'
+            ? 'LIVE_CANARY'
+            : 'MIXED'
+      const existing = runMap.get(runKey)
+      if (!existing) {
+        runMap.set(runKey, {
+          runKey,
+          startedAt: row.occurredAt,
+          endedAt: row.occurredAt,
+          modeGuess,
+          total: 1,
+          counts: { [row.outcome]: 1 },
+        })
+      } else {
+        existing.total += 1
+        if (row.occurredAt < existing.startedAt) existing.startedAt = row.occurredAt
+        if (row.occurredAt > existing.endedAt) existing.endedAt = row.occurredAt
+        existing.counts[row.outcome] = (existing.counts[row.outcome] ?? 0) + 1
+        if (existing.modeGuess !== modeGuess) existing.modeGuess = 'MIXED'
+      }
+    }
+    const recentRuns = Array.from(runMap.values())
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      .slice(0, 10)
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: scopedSequence?.id ?? (sequenceId || null),
+        sequenceName: scopedSequence?.name ?? null,
+        sinceHours,
+        limit,
+        totalReturned: rows.length,
+        summary: {
+          byDecision,
+          byOutcome,
+        },
+        recentRuns,
+        rows,
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/run-history] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Run history failed' })
   }
 })
 
