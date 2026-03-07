@@ -570,13 +570,15 @@ app.listen(PORT, async () => {
   }
 
   // Stage 2B: Send-queue worker (gated; no send unless ENABLE_LIVE_SENDING=true and canary set)
-  const sendQueueWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
+  const sendQueueWorkerEnabled =
+    process.env.ENABLE_SEND_QUEUE_WORKER === 'true' ||
+    process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
   if (sendQueueWorkerEnabled) {
     console.log('📤 Starting send-queue worker...')
     const { startSendQueueWorker } = await import('./workers/sendQueueWorker.js')
     startSendQueueWorker(prisma)
   } else {
-    console.log('⏸️ Send-queue worker disabled (set ENABLE_SEND_QUEUE_WORKER=true to enable)')
+    console.log('⏸️ Send-queue worker disabled (set ENABLE_SCHEDULED_SENDING_ENGINE=true to enable)')
   }
 
   // Company enrichment removed (no worker)
@@ -594,4 +596,3 @@ process.on('SIGINT', async () => {
   await prisma.$disconnect()
   process.exit(0)
 })
-

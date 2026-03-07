@@ -462,6 +462,9 @@ router.get('/live-gates', async (req: Request, res: Response) => {
     const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
     const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
     const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
+    const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
+    const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
+    const scheduledCron = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
 
     const [activeIdentityCount, dueNowCount] = await Promise.all([
       prisma.emailIdentity.count({
@@ -497,10 +500,13 @@ router.get('/live-gates', async (req: Request, res: Response) => {
         reasons,
         caps: {
           liveSendCap: cap,
+          scheduledEngineCron: scheduledCron,
         },
         flags: {
           enableSendQueueSending: queueGateEnabled,
           enableLiveSending: liveGateEnabled,
+          enableScheduledSendingEngine: scheduledEngineEnabled,
+          enableSendQueueWorkerLegacy: legacyWorkerEnabled,
           odcrmAllowLiveTick: allowLiveTick,
           odcrmAllowLiveTickIgnoreWindow: allowLiveTickIgnoreWindow,
         },

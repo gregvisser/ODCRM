@@ -16,6 +16,7 @@ import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SE
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
 const BATCH_SIZE = Math.min(Math.max(1, Number(process.env.SEND_QUEUE_BATCH_SIZE) || 10), 50)
+const SCHEDULED_SENDING_CRON = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
 
 const ENABLE_LIVE_SENDING = process.env.ENABLE_LIVE_SENDING === 'true'
 // Stage 1B/1D: explicit sending gate; default false = dry-run (non-destructive: leave QUEUED, no FAILED)
@@ -49,11 +50,13 @@ function inSendWindow(identity: { sendWindowTimeZone?: string | null; sendWindow
 }
 
 export function startSendQueueWorker(prisma: PrismaClient) {
-  if (process.env.ENABLE_SEND_QUEUE_WORKER !== 'true') {
+  const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
+  const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
+  if (!scheduledEngineEnabled && !legacyWorkerEnabled) {
     return
   }
 
-  cron.schedule('* * * * *', async () => {
+  cron.schedule(SCHEDULED_SENDING_CRON, async () => {
     const now = new Date()
     const leaseExpiry = new Date(now.getTime() - LEASE_MS)
     try {
@@ -63,7 +66,9 @@ export function startSendQueueWorker(prisma: PrismaClient) {
     }
   })
 
-  console.log(`✅ [sendQueueWorker] ${WORKER_ID} started (ENABLE_SEND_QUEUE_SENDING=${ENABLE_SEND_QUEUE_SENDING}, ENABLE_LIVE_SENDING=${ENABLE_LIVE_SENDING})`)
+  console.log(
+    `✅ [sendQueueWorker] ${WORKER_ID} started (scheduledEngine=${scheduledEngineEnabled}, legacyWorker=${legacyWorkerEnabled}, cron=${SCHEDULED_SENDING_CRON}, ENABLE_SEND_QUEUE_SENDING=${ENABLE_SEND_QUEUE_SENDING}, ENABLE_LIVE_SENDING=${ENABLE_LIVE_SENDING})`
+  )
 }
 
 async function tick(prisma: PrismaClient, now: Date, leaseExpiry: Date) {
