@@ -56,5 +56,20 @@ const hits = audits.filter((row) => {
   )
 })
 
+for (const row of hits) {
+  const decision = String(row?.decision || '').trim()
+  const reason = String(row?.reason || '').trim()
+  const snapshot = JSON.stringify(row?.snapshot || {})
+  const hasMarker = reason === 'SKIP_REPLIED_STOP' || snapshot.includes('SKIP_REPLIED_STOP')
+
+  if (!decision) fail(`marker row ${row?.id ?? '(unknown id)'} has empty decision`)
+  if (decision === 'SKIP_REPLIED_STOP') {
+    fail(`marker row ${row?.id ?? '(unknown id)'} used unsupported enum decision SKIP_REPLIED_STOP`)
+  }
+  if (!hasMarker) {
+    fail(`marker row ${row?.id ?? '(unknown id)'} missing reason/snapshot marker SKIP_REPLIED_STOP`)
+  }
+}
+
 console.log(`PASS audits loaded=${audits.length}, replyStopMarkers=${hits.length}`)
 console.log('self-test-reply-stop-runtime: PASS')
