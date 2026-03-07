@@ -741,6 +741,12 @@ router.get('/console', async (req: Request, res: Response) => {
           cron: gateData.caps.scheduledEngineCron,
           canaryCustomerIdPresent: gateData.canary.customerIdPresent,
           liveSendCap: gateData.caps.liveSendCap,
+          dryRunTickRoute: '/api/send-worker/dry-run',
+          dryRunTickRequiresAdminSecret: true,
+          liveCanaryTickRoute: '/api/send-worker/live-tick',
+          liveCanaryTickRequiresAdminSecret: true,
+          liveCanaryTickAllowed: manualLiveGate.allowed,
+          liveCanaryTickReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
         },
         queue: {
           totalQueued,
