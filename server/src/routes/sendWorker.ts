@@ -548,6 +548,7 @@ router.get('/console', async (req: Request, res: Response) => {
   try {
     const sinceHours = parseSinceHours(req.query.sinceHours)
     const gateData = await getLiveGatesSnapshot(customerId, sinceHours)
+    const manualLiveGate = assertLiveSendAllowed({ customerId, trigger: 'manual' })
     const now = new Date()
     const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
     const blockedDueWhere = {
@@ -640,10 +641,17 @@ router.get('/console', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
+        lastUpdatedAt: new Date().toISOString(),
         status: {
           scheduledEngineMode: gateData.mode.scheduledEngineMode,
           scheduledEnabled: gateData.flags.enableScheduledSendingEngine,
           scheduledLiveAllowed: gateData.mode.scheduledLiveAllowed,
+          scheduledLiveReason: gateData.mode.scheduledLiveReason ?? null,
+          liveGateReasons: Array.isArray(gateData.reasons) ? gateData.reasons : [],
+          manualLiveTickAllowed: manualLiveGate.allowed,
+          manualLiveTickReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+          activeIdentityCount: gateData.currentCount.activeIdentities,
+          dueNowCount: gateData.currentCount.queuedDueNow,
           cron: gateData.caps.scheduledEngineCron,
           canaryCustomerIdPresent: gateData.canary.customerIdPresent,
           liveSendCap: gateData.caps.liveSendCap,

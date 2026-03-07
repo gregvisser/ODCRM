@@ -341,10 +341,17 @@ const SequencesTab: React.FC = () => {
     lastError: string | null
   }
   type OperatorConsoleData = {
+    lastUpdatedAt?: string
     status: {
       scheduledEngineMode: string
       scheduledEnabled: boolean
       scheduledLiveAllowed: boolean
+      scheduledLiveReason?: string | null
+      liveGateReasons?: string[]
+      manualLiveTickAllowed?: boolean
+      manualLiveTickReason?: string | null
+      activeIdentityCount?: number
+      dueNowCount?: number
       cron: string
       canaryCustomerIdPresent: boolean
       liveSendCap: number
@@ -382,6 +389,9 @@ const SequencesTab: React.FC = () => {
   const [operatorConsoleLoading, setOperatorConsoleLoading] = useState(false)
   const [operatorConsoleError, setOperatorConsoleError] = useState<string | null>(null)
   const [operatorConsoleSinceHours, setOperatorConsoleSinceHours] = useState<number>(24)
+  const [operatorConsoleLastUpdatedAt, setOperatorConsoleLastUpdatedAt] = useState<string | null>(null)
+  const [operatorActionStatus, setOperatorActionStatus] = useState<string | null>(null)
+  const [liveCanaryTickLoading, setLiveCanaryTickLoading] = useState(false)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -453,16 +463,16 @@ const SequencesTab: React.FC = () => {
     setQueuePreviewError(null)
   }
 
-  const loadOperatorConsole = async () => {
+  const loadOperatorConsole = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
-    setOperatorConsoleLoading(true)
+    if (!opts?.silent) setOperatorConsoleLoading(true)
     setOperatorConsoleError(null)
     const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
     const endpoint = `/api/send-worker/console?sinceHours=${hours}`
     const res = await api.get<OperatorConsoleData>(endpoint, {
       headers: { 'X-Customer-Id': selectedCustomerId },
     })
-    setOperatorConsoleLoading(false)
+    if (!opts?.silent) setOperatorConsoleLoading(false)
     if (res.error) {
       const status = res.errorDetails?.status
       if (status === 400) setOperatorConsoleError('Select a client.')
@@ -472,7 +482,19 @@ const SequencesTab: React.FC = () => {
       return
     }
     setOperatorConsoleData(res.data ?? null)
+    const refreshedAt = res.data?.lastUpdatedAt ?? new Date().toISOString()
+    setOperatorConsoleLastUpdatedAt(refreshedAt)
     setOperatorConsoleError(null)
+  }
+
+  const refreshControlLoopTruth = async (opts?: { silent?: boolean }) => {
+    await loadOperatorConsole(opts)
+    loadAuditSummary()
+    loadAudits()
+    loadSendQueuePreview()
+    if (queueEnrollmentId) {
+      loadQueue(queueEnrollmentId)
+    }
   }
 
   function maskEmail(email: string): string {
@@ -502,6 +524,22 @@ const SequencesTab: React.FC = () => {
       toast({ title: 'Could not copy', description: curl.length > 200 ? curl.slice(0, 200) + '...' : curl, status: 'warning', duration: 5000 })
     }
   }
+
+  const dryRunActionDisabledReason =
+    !selectedCustomerId?.startsWith('cust_')
+      ? 'Select a client.'
+      : !adminSecret
+        ? 'Admin secret required.'
+        : null
+
+  const liveCanaryActionDisabledReason =
+    !selectedCustomerId?.startsWith('cust_')
+      ? 'Select a client.'
+      : !adminSecret
+        ? 'Admin secret required.'
+        : !operatorConsoleData?.status.manualLiveTickAllowed
+          ? operatorConsoleData?.status.manualLiveTickReason || operatorConsoleData?.status.scheduledLiveReason || 'Live canary tick is blocked by current gates.'
+          : null
 
   const loadEnrollmentQueue = async (enrollmentId: string) => {
     if (!selectedCustomerId?.startsWith('cust_') || !enrollmentId) return
@@ -621,9 +659,19 @@ const SequencesTab: React.FC = () => {
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
-    loadOperatorConsole()
+    refreshControlLoopTruth()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: trigger on panel open + tenant + window only
   }, [isOperatorConsolePanelOpen, selectedCustomerId, operatorConsoleSinceHours])
+
+  useEffect(() => {
+    if (!isOperatorConsolePanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const timer = setInterval(() => {
+      refreshControlLoopTruth({ silent: true })
+    }, 30000)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- polling should track panel + tenant only
+  }, [isOperatorConsolePanelOpen, selectedCustomerId])
 
   const openQueueDrill = (enrollmentId: string) => {
     setQueueDrillEnrollmentId(enrollmentId)
@@ -658,6 +706,8 @@ const SequencesTab: React.FC = () => {
       setQueuePreviewSummary(null)
       setOperatorConsoleData(null)
       setOperatorConsoleError(null)
+      setOperatorConsoleLastUpdatedAt(null)
+      setOperatorActionStatus(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -1008,6 +1058,7 @@ const SequencesTab: React.FC = () => {
   const handleTickDryRun = async () => {
     if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
     setQueueTickLoading(true)
+    setOperatorActionStatus('Running dry-run tick...')
     setQueueError(null)
     try {
       const res = await api.post<{ data?: { requeued?: number; locked?: number; scanned?: number; errors?: number } }>(
@@ -1026,10 +1077,12 @@ const SequencesTab: React.FC = () => {
         status: 'success',
         duration: 4000,
       })
-      if (queueEnrollmentId) await loadQueue(queueEnrollmentId)
+      await refreshControlLoopTruth()
+      setOperatorActionStatus('Dry-run tick complete. Console refreshed from backend truth.')
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
       toast({ title: 'Tick failed', description: msg, status: 'error' })
+      setOperatorActionStatus(`Dry-run tick failed: ${msg}`)
     } finally {
       setQueueTickLoading(false)
     }
@@ -1038,6 +1091,7 @@ const SequencesTab: React.FC = () => {
   const handleRunDryRunWorker = async () => {
     if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
     setDryRunWorkerLoading(true)
+    setOperatorActionStatus('Running dry-run worker...')
     try {
       const res = await api.post<{ success?: boolean; data?: { processedCount?: number; auditsCreated?: number } }>(
         '/api/send-worker/dry-run',
@@ -1055,15 +1109,49 @@ const SequencesTab: React.FC = () => {
         status: 'success',
         duration: 4000,
       })
-      loadAuditSummary()
-      loadAudits()
-      loadSendQueuePreview()
-      if (queueEnrollmentId) loadQueue(queueEnrollmentId)
+      await refreshControlLoopTruth()
+      setOperatorActionStatus('Dry-run worker complete. Console refreshed from backend truth.')
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
       toast({ title: 'Dry-run worker failed', description: msg, status: 'error' })
+      setOperatorActionStatus(`Dry-run worker failed: ${msg}`)
     } finally {
       setDryRunWorkerLoading(false)
+    }
+  }
+
+  const handleRunLiveCanaryTick = async () => {
+    if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
+    setLiveCanaryTickLoading(true)
+    setOperatorActionStatus('Running live canary tick...')
+    try {
+      const cap = operatorConsoleData?.status.liveSendCap ?? 1
+      const res = await api.post<{ success?: boolean; data?: { processed?: number; sent?: number; failed?: number; skipped?: number; reasons?: Record<string, number> } }>(
+        '/api/send-worker/live-tick',
+        { limit: Math.min(5, Math.max(1, cap)) },
+        { headers: { 'X-Customer-Id': selectedCustomerId, 'x-admin-secret': adminSecret } }
+      )
+      if (res.error) {
+        const msg = `${res.errorDetails?.status ?? ''} ${res.error}`.trim()
+        toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
+        setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+        return
+      }
+      const d = res.data?.data
+      toast({
+        title: 'Live canary tick done',
+        description: d ? `processed=${d.processed ?? 0} sent=${d.sent ?? 0} failed=${d.failed ?? 0} skipped=${d.skipped ?? 0}` : undefined,
+        status: 'success',
+        duration: 4500,
+      })
+      await refreshControlLoopTruth()
+      setOperatorActionStatus('Live canary tick complete. Console refreshed from backend truth.')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
+      toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
+      setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+    } finally {
+      setLiveCanaryTickLoading(false)
     }
   }
 
@@ -2266,7 +2354,9 @@ const SequencesTab: React.FC = () => {
                 <Button
                   size="sm"
                   leftIcon={<RepeatIcon />}
-                  onClick={loadOperatorConsole}
+                  id="sending-console-refresh-btn"
+                  data-testid="sending-console-refresh-btn"
+                  onClick={() => refreshControlLoopTruth()}
                   isLoading={operatorConsoleLoading}
                   isDisabled={!selectedCustomerId?.startsWith('cust_')}
                 >
@@ -2286,7 +2376,10 @@ const SequencesTab: React.FC = () => {
                   </Select>
                 </FormControl>
                 <Text fontSize="xs" color="gray.500">
-                  Read-only console. Use existing queue drawer actions for operator mutations.
+                  Shared-state console. Actions always refresh from backend truth.
+                </Text>
+                <Text id="sending-console-last-updated" data-testid="sending-console-last-updated" fontSize="xs" color="gray.500">
+                  Last updated: {operatorConsoleLastUpdatedAt ? new Date(operatorConsoleLastUpdatedAt).toLocaleString() : '—'}
                 </Text>
               </Flex>
 
@@ -2303,6 +2396,80 @@ const SequencesTab: React.FC = () => {
 
               {operatorConsoleData && (
                 <>
+                  <Card>
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex gap={3} flexWrap="wrap" align="center">
+                          <FormControl maxW="340px">
+                            <FormLabel fontSize="xs" mb={1}>Admin secret (local)</FormLabel>
+                            <Input
+                              type="password"
+                              size="sm"
+                              placeholder="Required for dry-run/live tick actions"
+                              value={adminSecret}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                setAdminSecret(v)
+                                try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
+                              }}
+                            />
+                          </FormControl>
+                          <Button
+                            id="sending-console-run-dry-run-btn"
+                            data-testid="sending-console-run-dry-run-btn"
+                            size="sm"
+                            colorScheme="teal"
+                            onClick={handleRunDryRunWorker}
+                            isLoading={dryRunWorkerLoading}
+                            isDisabled={Boolean(dryRunActionDisabledReason)}
+                          >
+                            Run Dry-Run Tick
+                          </Button>
+                          <Button
+                            id="sending-console-run-live-canary-btn"
+                            data-testid="sending-console-run-live-canary-btn"
+                            size="sm"
+                            colorScheme="purple"
+                            onClick={handleRunLiveCanaryTick}
+                            isLoading={liveCanaryTickLoading}
+                            isDisabled={Boolean(liveCanaryActionDisabledReason)}
+                          >
+                            Run Live Canary Tick
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            leftIcon={<ViewIcon />}
+                            onClick={() => onAuditPanelOpen()}
+                            isDisabled={!selectedCustomerId?.startsWith('cust_')}
+                          >
+                            Open Audits
+                          </Button>
+                        </Flex>
+                        <VStack align="stretch" spacing={1}>
+                          {dryRunActionDisabledReason && (
+                            <Text id="sending-console-dryrun-disabled-reason" data-testid="sending-console-dryrun-disabled-reason" fontSize="xs" color="gray.600">
+                              Dry-run action unavailable: {dryRunActionDisabledReason}
+                            </Text>
+                          )}
+                          {liveCanaryActionDisabledReason && (
+                            <Text id="sending-console-live-disabled-reason" data-testid="sending-console-live-disabled-reason" fontSize="xs" color="orange.600">
+                              Live canary action unavailable: {liveCanaryActionDisabledReason}
+                            </Text>
+                          )}
+                          {Array.isArray(operatorConsoleData.status.liveGateReasons) && operatorConsoleData.status.liveGateReasons.length > 0 && (
+                            <Text fontSize="xs" color="gray.500">
+                              Current gate blockers: {operatorConsoleData.status.liveGateReasons.join(' | ')}
+                            </Text>
+                          )}
+                          <Text id="sending-console-action-status" data-testid="sending-console-action-status" fontSize="xs" color="blue.600">
+                            {operatorActionStatus || 'Idle. Use actions, then refresh/inspect samples to verify shared state.'}
+                          </Text>
+                        </VStack>
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
                   <SimpleGrid columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
                     <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
                     <Card><CardBody py={3}><Stat><StatLabel>Scheduled</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEnabled ? 'On' : 'Off'}</StatNumber></Stat></CardBody></Card>
@@ -2310,6 +2477,12 @@ const SequencesTab: React.FC = () => {
                     <Card><CardBody py={3}><Stat><StatLabel>Cron</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.cron}</StatNumber></Stat></CardBody></Card>
                     <Card><CardBody py={3}><Stat><StatLabel>Canary</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.canaryCustomerIdPresent ? 'Set' : 'Missing'}</StatNumber></Stat></CardBody></Card>
                     <Card><CardBody py={3}><Stat><StatLabel>Live Cap</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.liveSendCap}</StatNumber></Stat></CardBody></Card>
+                  </SimpleGrid>
+                  <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                    <Card><CardBody py={3}><Stat><StatLabel>Due now</StatLabel><StatNumber>{operatorConsoleData.status.dueNowCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Active identities</StatLabel><StatNumber>{operatorConsoleData.status.activeIdentityCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Manual live tick</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualLiveTickAllowed ? 'Allowed' : 'Blocked'}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Manual reason</StatLabel><StatNumber fontSize="xs">{operatorConsoleData.status.manualLiveTickReason ?? '—'}</StatNumber></Stat></CardBody></Card>
                   </SimpleGrid>
 
                   <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
