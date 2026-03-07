@@ -383,10 +383,17 @@ router.get('/live-gates', async (req: Request, res: Response) => {
     const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
     const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
     const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
+    const scheduledLiveEnabled = process.env.ENABLE_SCHEDULED_SENDING_LIVE === 'true'
     const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
     const scheduledCron = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
+    let sinceHours = SUMMARY_SINCE_HOURS_DEFAULT
+    if (typeof req.query.sinceHours === 'string') {
+      const n = parseInt(req.query.sinceHours, 10)
+      if (!Number.isNaN(n) && n >= 1) sinceHours = Math.min(n, SUMMARY_SINCE_HOURS_MAX)
+    }
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
 
-    const [activeIdentityCount, dueNowCount] = await Promise.all([
+    const [activeIdentityCount, dueNowCount, auditByDecision, auditByReason, auditTotal] = await Promise.all([
       prisma.emailIdentity.count({
         where: { customerId, isActive: true },
       }),
@@ -396,6 +403,19 @@ router.get('/live-gates', async (req: Request, res: Response) => {
           status: OutboundSendQueueStatus.QUEUED,
           OR: [{ scheduledFor: null }, { scheduledFor: { lte: new Date() } }],
         },
+      }),
+      prisma.outboundSendAttemptAudit.groupBy({
+        by: ['decision'],
+        where: { customerId, decidedAt: { gte: sinceDate } },
+        _count: { id: true },
+      }),
+      prisma.outboundSendAttemptAudit.groupBy({
+        by: ['reason'],
+        where: { customerId, decidedAt: { gte: sinceDate } },
+        _count: { id: true },
+      }),
+      prisma.outboundSendAttemptAudit.count({
+        where: { customerId, decidedAt: { gte: sinceDate } },
       }),
     ])
 
@@ -412,6 +432,24 @@ router.get('/live-gates', async (req: Request, res: Response) => {
       })
       if (!canaryIdentity) reasons.push('SEND_CANARY_IDENTITY_ID is not active for tenant')
     }
+    const scheduledLiveGate = canaryCustomerId
+      ? assertLiveSendAllowed({ customerId, trigger: 'worker' })
+      : { allowed: false, reason: 'canary_customer_not_configured' }
+    const scheduledMode =
+      !scheduledEngineEnabled
+        ? 'OFF'
+        : scheduledLiveEnabled && scheduledLiveGate.allowed
+          ? 'LIVE_CANARY'
+          : 'DRY_RUN'
+
+    const byDecision: Record<string, number> = {}
+    for (const row of auditByDecision) {
+      byDecision[row.decision] = row._count.id
+    }
+    const byReason: Record<string, number> = {}
+    for (const row of auditByReason) {
+      if (row.reason) byReason[row.reason] = row._count.id
+    }
 
     res.json({
       success: true,
@@ -426,15 +464,39 @@ router.get('/live-gates', async (req: Request, res: Response) => {
           enableSendQueueSending: queueGateEnabled,
           enableLiveSending: liveGateEnabled,
           enableScheduledSendingEngine: scheduledEngineEnabled,
+          enableScheduledSendingLive: scheduledLiveEnabled,
           enableSendQueueWorkerLegacy: legacyWorkerEnabled,
           odcrmAllowLiveTick: allowLiveTick,
           odcrmAllowLiveTickIgnoreWindow: allowLiveTickIgnoreWindow,
+        },
+        mode: {
+          scheduledEngineMode: scheduledMode,
+          scheduledLiveAllowed: scheduledMode === 'LIVE_CANARY',
+          scheduledLiveReason: scheduledMode === 'LIVE_CANARY' ? null : scheduledLiveGate.reason ?? 'scheduled_live_not_enabled',
+        },
+        canary: {
+          customerIdPresent: Boolean(canaryCustomerId),
+          identityIdPresent: Boolean(canaryIdentityId),
+          customerId: canaryCustomerId,
+          identityId: canaryIdentityId,
         },
         canaryCustomerId,
         canaryIdentityId,
         currentCount: {
           queuedDueNow: dueNowCount,
           activeIdentities: activeIdentityCount,
+        },
+        recent: {
+          windowHours: sinceHours,
+          total: auditTotal,
+          counts: {
+            WOULD_SEND: byDecision.WOULD_SEND ?? 0,
+            SENT: byDecision.SENT ?? 0,
+            SEND_FAILED: byDecision.SEND_FAILED ?? 0,
+            SKIP_SUPPRESSED: byDecision.SKIP_SUPPRESSED ?? 0,
+            SKIP_REPLIED_STOP: byReason.SKIP_REPLIED_STOP ?? 0,
+            hard_bounce_invalid_recipient: byReason.hard_bounce_invalid_recipient ?? 0,
+          },
         },
       },
     })
