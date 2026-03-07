@@ -287,6 +287,11 @@ const SequencesTab: React.FC = () => {
   const { isOpen: isQueueOpen, onOpen: onQueueOpen, onClose: onQueueClose } = useDisclosure()
   const { isOpen: isAuditPanelOpen, onOpen: onAuditPanelOpen, onClose: onAuditPanelClose } = useDisclosure({ defaultIsOpen: false })
   const { isOpen: isQueuePreviewPanelOpen, onOpen: onQueuePreviewPanelOpen, onClose: onQueuePreviewPanelClose } = useDisclosure({ defaultIsOpen: false })
+  const {
+    isOpen: isOperatorConsolePanelOpen,
+    onOpen: onOperatorConsolePanelOpen,
+    onClose: onOperatorConsolePanelClose,
+  } = useDisclosure({ defaultIsOpen: true })
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -327,6 +332,44 @@ const SequencesTab: React.FC = () => {
     countsByAction: { SEND: number; WAIT: number; SKIP: number }
     countsByReason: Record<string, number>
   }
+  type OperatorConsoleSampleRow = {
+    queueItemId: string
+    enrollmentId: string
+    recipientEmail: string
+    status: string
+    scheduledFor: string | null
+    lastError: string | null
+  }
+  type OperatorConsoleData = {
+    status: {
+      scheduledEngineMode: string
+      scheduledEnabled: boolean
+      scheduledLiveAllowed: boolean
+      cron: string
+      canaryCustomerIdPresent: boolean
+      liveSendCap: number
+    }
+    queue: {
+      totalQueued: number
+      readyNow: number
+      scheduledLater: number
+      suppressed: number
+      replyStopped: number
+      failedRecently: number
+      sentRecently: number
+      blocked: number
+    }
+    recent: {
+      windowHours: number
+      total?: number
+      counts: Record<string, number>
+    }
+    samples: {
+      readyNow: OperatorConsoleSampleRow[]
+      failedRecently: OperatorConsoleSampleRow[]
+      blocked: OperatorConsoleSampleRow[]
+    }
+  }
   type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
@@ -335,6 +378,10 @@ const SequencesTab: React.FC = () => {
   const [queuePreviewLoading, setQueuePreviewLoading] = useState(false)
   const [queuePreviewLastEndpoint, setQueuePreviewLastEndpoint] = useState<string>('')
   const [queuePreviewSummary, setQueuePreviewSummary] = useState<SendQueuePreviewSummary | null>(null)
+  const [operatorConsoleData, setOperatorConsoleData] = useState<OperatorConsoleData | null>(null)
+  const [operatorConsoleLoading, setOperatorConsoleLoading] = useState(false)
+  const [operatorConsoleError, setOperatorConsoleError] = useState<string | null>(null)
+  const [operatorConsoleSinceHours, setOperatorConsoleSinceHours] = useState<number>(24)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -404,6 +451,28 @@ const SequencesTab: React.FC = () => {
     setQueuePreviewData(Array.isArray(items) ? items : [])
     setQueuePreviewSummary(res.data?.summary ?? null)
     setQueuePreviewError(null)
+  }
+
+  const loadOperatorConsole = async () => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setOperatorConsoleLoading(true)
+    setOperatorConsoleError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/console?sinceHours=${hours}`
+    const res = await api.get<OperatorConsoleData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    setOperatorConsoleLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setOperatorConsoleError('Select a client.')
+      else if (status === 401 || status === 403) setOperatorConsoleError(`Not authorized (${status}).`)
+      else setOperatorConsoleError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setOperatorConsoleData(null)
+      return
+    }
+    setOperatorConsoleData(res.data ?? null)
+    setOperatorConsoleError(null)
   }
 
   function maskEmail(email: string): string {
@@ -549,6 +618,13 @@ const SequencesTab: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: trigger on panel open + tenant only
   }, [isQueuePreviewPanelOpen, selectedCustomerId])
 
+  useEffect(() => {
+    if (!isOperatorConsolePanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    loadOperatorConsole()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: trigger on panel open + tenant + window only
+  }, [isOperatorConsolePanelOpen, selectedCustomerId, operatorConsoleSinceHours])
+
   const openQueueDrill = (enrollmentId: string) => {
     setQueueDrillEnrollmentId(enrollmentId)
     setQueueDrillOpen(true)
@@ -564,6 +640,15 @@ const SequencesTab: React.FC = () => {
     if (enrollmentId && selectedCustomerId?.startsWith('cust_')) loadEnrollmentQueue(enrollmentId)
   }
 
+  const openAuditPanelForQueueItem = (queueItemId: string) => {
+    setAuditQueueItemIdFilter(queueItemId)
+    if (!isAuditPanelOpen) onAuditPanelOpen()
+    if (selectedCustomerId?.startsWith('cust_')) {
+      loadAudits()
+      loadAuditSummary()
+    }
+  }
+
   useEffect(() => {
     if (selectedCustomerId?.startsWith('cust_')) loadSendQueuePreview()
     else {
@@ -571,6 +656,8 @@ const SequencesTab: React.FC = () => {
       setQueuePreviewError(null)
       setQueuePreviewLastEndpoint('')
       setQueuePreviewSummary(null)
+      setOperatorConsoleData(null)
+      setOperatorConsoleError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -2160,6 +2247,164 @@ const SequencesTab: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Card mb={6}>
+        <CardBody>
+          <Heading
+            id="sending-console-panel"
+            data-testid="sending-console-panel"
+            size="sm"
+            mb={3}
+            cursor="pointer"
+            onClick={isOperatorConsolePanelOpen ? onOperatorConsolePanelClose : onOperatorConsolePanelOpen}
+          >
+            Sending Console {isOperatorConsolePanelOpen ? '▼' : '▶'}
+          </Heading>
+          <Collapse in={isOperatorConsolePanelOpen}>
+            <VStack align="stretch" spacing={4}>
+              <Flex gap={3} flexWrap="wrap" align="center">
+                <Button
+                  size="sm"
+                  leftIcon={<RepeatIcon />}
+                  onClick={loadOperatorConsole}
+                  isLoading={operatorConsoleLoading}
+                  isDisabled={!selectedCustomerId?.startsWith('cust_')}
+                >
+                  Refresh
+                </Button>
+                <FormControl width="150px">
+                  <FormLabel fontSize="xs" mb={0}>Window (hours)</FormLabel>
+                  <Select
+                    size="sm"
+                    value={operatorConsoleSinceHours}
+                    onChange={(e) => setOperatorConsoleSinceHours(Number(e.target.value) || 24)}
+                  >
+                    <option value={6}>6</option>
+                    <option value={24}>24</option>
+                    <option value={72}>72</option>
+                    <option value={168}>168</option>
+                  </Select>
+                </FormControl>
+                <Text fontSize="xs" color="gray.500">
+                  Read-only console. Use existing queue drawer actions for operator mutations.
+                </Text>
+              </Flex>
+
+              {operatorConsoleError && (
+                <Alert status="error" size="sm">
+                  <AlertIcon />
+                  <AlertDescription>{operatorConsoleError}</AlertDescription>
+                </Alert>
+              )}
+
+              {!operatorConsoleLoading && !operatorConsoleError && !operatorConsoleData && (
+                <Text fontSize="sm" color="gray.500">No console data yet. Refresh to load queue health.</Text>
+              )}
+
+              {operatorConsoleData && (
+                <>
+                  <SimpleGrid columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
+                    <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Scheduled</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEnabled ? 'On' : 'Off'}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Live Allowed</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledLiveAllowed ? 'Yes' : 'No'}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Cron</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.cron}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Canary</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.canaryCustomerIdPresent ? 'Set' : 'Missing'}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Live Cap</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.liveSendCap}</StatNumber></Stat></CardBody></Card>
+                  </SimpleGrid>
+
+                  <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                    <Card><CardBody py={3}><Stat><StatLabel>Total queued</StatLabel><StatNumber>{operatorConsoleData.queue.totalQueued}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Ready now</StatLabel><StatNumber>{operatorConsoleData.queue.readyNow}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Scheduled later</StatLabel><StatNumber>{operatorConsoleData.queue.scheduledLater}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Blocked</StatLabel><StatNumber>{operatorConsoleData.queue.blocked}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Suppressed</StatLabel><StatNumber>{operatorConsoleData.queue.suppressed}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Reply stopped</StatLabel><StatNumber>{operatorConsoleData.queue.replyStopped}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Failed recent</StatLabel><StatNumber>{operatorConsoleData.queue.failedRecently}</StatNumber></Stat></CardBody></Card>
+                    <Card><CardBody py={3}><Stat><StatLabel>Sent recent</StatLabel><StatNumber>{operatorConsoleData.queue.sentRecently}</StatNumber></Stat></CardBody></Card>
+                  </SimpleGrid>
+
+                  <Card>
+                    <CardBody>
+                      <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                        Recent outcomes ({operatorConsoleData.recent.windowHours}h)
+                      </Text>
+                      <SimpleGrid columns={{ base: 2, md: 3 }} spacing={2}>
+                        {Object.entries(operatorConsoleData.recent.counts).map(([k, v]) => (
+                          <HStack key={k} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                            <Text fontSize="xs" color="gray.600">{k}</Text>
+                            <Badge>{v}</Badge>
+                          </HStack>
+                        ))}
+                      </SimpleGrid>
+                    </CardBody>
+                  </Card>
+
+                  <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={3}>
+                    {([
+                      ['readyNow', 'Ready now'],
+                      ['failedRecently', 'Failed recently'],
+                      ['blocked', 'Blocked'],
+                    ] as Array<[keyof OperatorConsoleData['samples'], string]>).map(([key, label]) => {
+                      const rows = operatorConsoleData.samples[key] ?? []
+                      return (
+                        <Card key={key}>
+                          <CardBody>
+                            <Text fontSize="sm" fontWeight="semibold" mb={2}>{label} ({rows.length})</Text>
+                            <Box overflowX="auto">
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Recipient</Th>
+                                    <Th>Status</Th>
+                                    <Th>Scheduled</Th>
+                                    <Th>Actions</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {rows.length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={4} color="gray.500">No rows.</Td>
+                                    </Tr>
+                                  ) : rows.map((row) => (
+                                    <Tr key={row.queueItemId}>
+                                      <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                      <Td><Badge size="sm" variant="outline">{row.status}</Badge></Td>
+                                      <Td fontSize="xs">{row.scheduledFor ? new Date(row.scheduledFor).toLocaleString() : '—'}</Td>
+                                      <Td>
+                                        <HStack spacing={1}>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            isDisabled={!row.enrollmentId}
+                                            onClick={() => openQueueModal(row.enrollmentId)}
+                                          >
+                                            Queue
+                                          </Button>
+                                          <Button
+                                            size="xs"
+                                            variant="ghost"
+                                            onClick={() => openAuditPanelForQueueItem(row.queueItemId)}
+                                          >
+                                            Audit
+                                          </Button>
+                                        </HStack>
+                                      </Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+                          </CardBody>
+                        </Card>
+                      )
+                    })}
+                  </SimpleGrid>
+                </>
+              )}
+            </VStack>
+          </Collapse>
+        </CardBody>
+      </Card>
 
       <Card mb={6}>
         <CardBody>
