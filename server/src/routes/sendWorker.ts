@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
-import { OutboundSendQueueStatus, OutboundSendAttemptDecision } from '@prisma/client'
+import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, LeadSourceAppliesTo } from '@prisma/client'
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { sendEmail } from '../services/outlookEmailService.js'
@@ -21,6 +21,7 @@ const AUDITS_CSV_MAX = 2000
 const SUMMARY_SINCE_HOURS_DEFAULT = 24
 const SUMMARY_SINCE_HOURS_MAX = 168
 const LIVE_TICK_LOCK_PREFIX = 'live_tick_'
+const LEAD_SOURCE_TYPES: LeadSourceType[] = ['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK']
 
 const VALID_DECISIONS = new Set<string>(Object.values(OutboundSendAttemptDecision))
 
@@ -314,6 +315,208 @@ async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
         hard_bounce_invalid_recipient: byReason.hard_bounce_invalid_recipient ?? 0,
       },
     },
+  }
+}
+
+async function getLeadSourceHealthSnapshot(customerId: string) {
+  const [exactConfigs, globalConfigs] = await Promise.all([
+    prisma.leadSourceSheetConfig.findMany({
+      where: { customerId, sourceType: { in: LEAD_SOURCE_TYPES } },
+      select: { sourceType: true, spreadsheetId: true, lastError: true, lastFetchAt: true },
+    }),
+    prisma.leadSourceSheetConfig.findMany({
+      where: { appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS, sourceType: { in: LEAD_SOURCE_TYPES } },
+      select: { sourceType: true, spreadsheetId: true, lastError: true, lastFetchAt: true },
+      orderBy: [{ updatedAt: 'desc' }],
+    }),
+  ])
+  const exactByType = new Map(exactConfigs.map((row) => [row.sourceType, row]))
+  const globalByType = new Map(globalConfigs.map((row) => [row.sourceType, row]))
+  const rows = LEAD_SOURCE_TYPES.map((sourceType) => {
+    const row = exactByType.get(sourceType) ?? globalByType.get(sourceType) ?? null
+    return {
+      sourceType,
+      configured: Boolean(row?.spreadsheetId),
+      hasError: Boolean(row?.lastError),
+      lastError: row?.lastError ?? null,
+      lastFetchAt: row?.lastFetchAt?.toISOString() ?? null,
+    }
+  })
+  const configuredCount = rows.filter((row) => row.configured).length
+  const erroredCount = rows.filter((row) => row.hasError).length
+  return {
+    total: LEAD_SOURCE_TYPES.length,
+    configuredCount,
+    unconfiguredCount: LEAD_SOURCE_TYPES.length - configuredCount,
+    erroredCount,
+    rows,
+  }
+}
+
+async function getSuppressionHealthSnapshot(customerId: string) {
+  const [customer, emailCount, domainCount] = await Promise.all([
+    prisma.customer.findUnique({ where: { id: customerId }, select: { accountData: true } }),
+    prisma.suppressionEntry.count({ where: { customerId, type: 'email' } }),
+    prisma.suppressionEntry.count({ where: { customerId, type: 'domain' } }),
+  ])
+  const accountData =
+    customer?.accountData && typeof customer.accountData === 'object'
+      ? (customer.accountData as Record<string, unknown>)
+      : {}
+  const dncSheetSources =
+    accountData.dncSheetSources && typeof accountData.dncSheetSources === 'object'
+      ? (accountData.dncSheetSources as Record<string, unknown>)
+      : {}
+  const emailMeta = dncSheetSources.email && typeof dncSheetSources.email === 'object' ? (dncSheetSources.email as Record<string, unknown>) : {}
+  const domainMeta = dncSheetSources.domain && typeof dncSheetSources.domain === 'object' ? (dncSheetSources.domain as Record<string, unknown>) : {}
+  const emailConfigured = typeof emailMeta.sheetUrl === 'string' && emailMeta.sheetUrl.trim().length > 0
+  const domainConfigured = typeof domainMeta.sheetUrl === 'string' && domainMeta.sheetUrl.trim().length > 0
+  const emailError = typeof emailMeta.lastError === 'string' && emailMeta.lastError.trim().length > 0 ? emailMeta.lastError.trim() : null
+  const domainError = typeof domainMeta.lastError === 'string' && domainMeta.lastError.trim().length > 0 ? domainMeta.lastError.trim() : null
+  const emailStatus = typeof emailMeta.lastImportStatus === 'string' ? emailMeta.lastImportStatus : null
+  const domainStatus = typeof domainMeta.lastImportStatus === 'string' ? domainMeta.lastImportStatus : null
+  return {
+    emailConfigured,
+    domainConfigured,
+    configuredCount: Number(emailConfigured) + Number(domainConfigured),
+    erroredCount: Number(Boolean(emailError || emailStatus === 'error')) + Number(Boolean(domainError || domainStatus === 'error')),
+    emailEntries: emailCount,
+    domainEntries: domainCount,
+    emailError,
+    domainError,
+    emailStatus,
+    domainStatus,
+  }
+}
+
+async function getSequenceReadinessSnapshot(customerId: string, sequenceId: string, sinceHours: number) {
+  const sequence = await prisma.emailSequence.findFirst({
+    where: { id: sequenceId, customerId },
+    select: { id: true, name: true },
+  })
+  if (!sequence) return null
+
+  const enrollmentRows = await prisma.enrollment.findMany({
+    where: { customerId, sequenceId: sequence.id },
+    select: { id: true },
+  })
+  const enrollmentIds = enrollmentRows.map((row) => row.id)
+  const now = new Date()
+  const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+
+  if (enrollmentIds.length === 0) {
+    return {
+      sequenceId: sequence.id,
+      sequenceName: sequence.name ?? null,
+      summary: {
+        enrollmentCount: 0,
+        totalRecipients: 0,
+        queueItemsTotal: 0,
+        eligibleCount: 0,
+        excludedCount: 0,
+        blockedCount: 0,
+        failedRecently: 0,
+        sentRecently: 0,
+      },
+      breakdown: {
+        eligible_now: 0,
+        suppressed: 0,
+        reply_stopped: 0,
+        invalid_recipient: 0,
+        no_active_identity: 0,
+        scheduled_later: 0,
+        blocked_other: 0,
+        failed_recently: 0,
+      },
+      lastUpdatedAt: new Date().toISOString(),
+    }
+  }
+
+  const [totalRecipients, queueRows, failedRecently, sentRecently] = await Promise.all([
+    prisma.enrollmentRecipient.count({ where: { enrollmentId: { in: enrollmentIds } } }),
+    prisma.outboundSendQueueItem.findMany({
+      where: { customerId, enrollmentId: { in: enrollmentIds } },
+      select: {
+        id: true,
+        enrollmentId: true,
+        recipientEmail: true,
+        status: true,
+        scheduledFor: true,
+        lastError: true,
+        stepIndex: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.outboundSendQueueItem.count({
+      where: {
+        customerId,
+        enrollmentId: { in: enrollmentIds },
+        status: OutboundSendQueueStatus.FAILED,
+        updatedAt: { gte: sinceDate },
+      },
+    }),
+    prisma.outboundSendQueueItem.count({
+      where: {
+        customerId,
+        enrollmentId: { in: enrollmentIds },
+        status: OutboundSendQueueStatus.SENT,
+        sentAt: { gte: sinceDate },
+      },
+    }),
+  ])
+
+  const byRecipient = new Map<string, QueueShapeRow[]>()
+  for (const row of queueRows) {
+    const recipientEmailNorm = row.recipientEmail.trim().toLowerCase()
+    const key = `${row.enrollmentId}::${recipientEmailNorm}`
+    const existing = byRecipient.get(key)
+    const normalizedRow: QueueShapeRow = { ...row, recipientEmail: recipientEmailNorm }
+    if (existing) existing.push(normalizedRow)
+    else byRecipient.set(key, [normalizedRow])
+  }
+
+  const breakdown = {
+    eligible_now: 0,
+    suppressed: 0,
+    reply_stopped: 0,
+    invalid_recipient: 0,
+    no_active_identity: 0,
+    scheduled_later: 0,
+    blocked_other: 0,
+    failed_recently: 0,
+  }
+  let eligibleCount = 0
+  let excludedCount = 0
+  let blockedCount = 0
+
+  for (const rows of byRecipient.values()) {
+    const classified = classifyRecipientGroup(rows, now)
+    if (classified.bucket === 'eligible') eligibleCount += 1
+    else if (classified.bucket === 'excluded') excludedCount += 1
+    else blockedCount += 1
+    if (Object.prototype.hasOwnProperty.call(breakdown, classified.reason)) {
+      ;(breakdown as Record<string, number>)[classified.reason] += 1
+    } else {
+      breakdown.blocked_other += 1
+    }
+  }
+  breakdown.failed_recently = failedRecently
+
+  return {
+    sequenceId: sequence.id,
+    sequenceName: sequence.name ?? null,
+    summary: {
+      enrollmentCount: enrollmentIds.length,
+      totalRecipients,
+      queueItemsTotal: queueRows.length,
+      eligibleCount,
+      excludedCount,
+      blockedCount,
+      failedRecently,
+      sentRecently,
+    },
+    breakdown,
+    lastUpdatedAt: new Date().toISOString(),
   }
 }
 
@@ -976,6 +1179,129 @@ router.get('/sequence-readiness', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/sequence-readiness] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence readiness failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/sequence-preflight — launch guard summary for one sequence.
+ * Tenant-scoped, read-only. Combines sequence readiness, data-health dependencies, and live gate status.
+ */
+router.get('/sequence-preflight', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const sequenceId = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+  if (!sequenceId) {
+    res.status(400).json({ success: false, error: 'sequenceId is required' })
+    return
+  }
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const [gateData, readiness, leadSourceHealth, suppressionHealth] = await Promise.all([
+      getLiveGatesSnapshot(customerId, sinceHours),
+      getSequenceReadinessSnapshot(customerId, sequenceId, sinceHours),
+      getLeadSourceHealthSnapshot(customerId),
+      getSuppressionHealthSnapshot(customerId),
+    ])
+    if (!readiness) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+
+    const manualLiveGate = assertLiveSendAllowed({ customerId, trigger: 'manual' })
+    const blockers: string[] = []
+    const warnings: string[] = []
+
+    if ((gateData.currentCount.activeIdentities ?? 0) < 1) blockers.push('No active sender identity for this tenant.')
+    if ((readiness.summary.enrollmentCount ?? 0) < 1) blockers.push('Sequence has no enrollments yet.')
+    if ((readiness.summary.eligibleCount ?? 0) < 1) blockers.push('No eligible recipients are sendable now.')
+
+    if (leadSourceHealth.configuredCount < 1) warnings.push('No lead source sheet is connected for this tenant.')
+    if (leadSourceHealth.erroredCount > 0) warnings.push(`${leadSourceHealth.erroredCount} lead source(s) currently report sync/config errors.`)
+    if (suppressionHealth.configuredCount < 1) warnings.push('No suppression sheet source is configured.')
+    if (suppressionHealth.erroredCount > 0) warnings.push('Suppression sheet health reports import/config errors.')
+    if ((readiness.breakdown.suppressed ?? 0) > 0) warnings.push(`${readiness.breakdown.suppressed} recipients currently suppressed.`)
+    if ((readiness.breakdown.reply_stopped ?? 0) > 0) warnings.push(`${readiness.breakdown.reply_stopped} recipients are reply-stopped.`)
+    if ((readiness.breakdown.invalid_recipient ?? 0) > 0) warnings.push(`${readiness.breakdown.invalid_recipient} recipients are invalid/hard-bounced.`)
+    if (!manualLiveGate.allowed) warnings.push(`Live canary currently blocked: ${manualLiveGate.reason ?? 'manual_live_tick_not_allowed'}`)
+    if ((gateData.recent.counts.SEND_FAILED ?? 0) > 0) warnings.push(`Recent SEND_FAILED events in window (${sinceHours}h): ${gateData.recent.counts.SEND_FAILED}`)
+
+    const overallStatus: 'GO' | 'WARNING' | 'NO_GO' =
+      blockers.length > 0
+        ? 'NO_GO'
+        : warnings.length > 0
+          ? 'WARNING'
+          : 'GO'
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: readiness.sequenceId,
+        sequenceName: readiness.sequenceName,
+        overallStatus,
+        blockers,
+        warnings,
+        checks: {
+          sequenceExists: true,
+          activeIdentityReady: (gateData.currentCount.activeIdentities ?? 0) > 0,
+          leadSourcesConfigured: leadSourceHealth.configuredCount > 0,
+          suppressionSourceConfigured: suppressionHealth.configuredCount > 0,
+          recipientsEligibleNow: (readiness.summary.eligibleCount ?? 0) > 0,
+          liveCanaryAllowed: manualLiveGate.allowed,
+        },
+        counts: {
+          enrollmentCount: readiness.summary.enrollmentCount ?? 0,
+          totalRecipients: readiness.summary.totalRecipients ?? 0,
+          queueItemsTotal: readiness.summary.queueItemsTotal ?? 0,
+          eligible: readiness.summary.eligibleCount ?? 0,
+          excluded: readiness.summary.excludedCount ?? 0,
+          blocked: readiness.summary.blockedCount ?? 0,
+          suppressed: readiness.breakdown.suppressed ?? 0,
+          replyStopped: readiness.breakdown.reply_stopped ?? 0,
+          invalidRecipient: readiness.breakdown.invalid_recipient ?? 0,
+          failedRecently: readiness.summary.failedRecently ?? 0,
+          sentRecently: readiness.summary.sentRecently ?? 0,
+        },
+        actions: {
+          canDryRun: true,
+          dryRunRoute: '/api/send-worker/dry-run',
+          dryRunRequiresAdminSecret: true,
+          canLiveCanary: manualLiveGate.allowed,
+          liveCanaryRoute: '/api/send-worker/live-tick',
+          liveCanaryRequiresAdminSecret: true,
+          liveCanaryReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+          nextSafeAction:
+            blockers.length > 0
+              ? 'Resolve blockers, then run Dry-Run Tick.'
+              : manualLiveGate.allowed
+                ? 'Run Live Canary Tick from the Sending Console.'
+                : 'Run Dry-Run Tick and monitor readiness/reporting.',
+        },
+        dependencies: {
+          leadSources: leadSourceHealth,
+          suppression: suppressionHealth,
+          liveGates: {
+            scheduledEngineMode: gateData.mode.scheduledEngineMode,
+            scheduledEnabled: gateData.flags.enableScheduledSendingEngine,
+            scheduledLiveAllowed: gateData.mode.scheduledLiveAllowed,
+            scheduledLiveReason: gateData.mode.scheduledLiveReason ?? null,
+            manualLiveTickAllowed: manualLiveGate.allowed,
+            manualLiveTickReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+            activeIdentityCount: gateData.currentCount.activeIdentities ?? 0,
+            dueNowCount: gateData.currentCount.queuedDueNow ?? 0,
+            liveSendCap: gateData.caps.liveSendCap,
+            cron: gateData.caps.scheduledEngineCron,
+            reasons: Array.isArray(gateData.reasons) ? gateData.reasons : [],
+          },
+          recent: gateData.recent,
+        },
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/sequence-preflight] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence preflight failed' })
   }
 })
 
