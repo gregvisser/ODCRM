@@ -311,6 +311,113 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
 })
 
 /**
+ * PATCH /api/send-queue/items/:itemId — tenant-scoped operator action (no send).
+ * Allows safe queue mutations only: status QUEUED/SKIPPED, sendAt scheduling, and operator note.
+ */
+router.patch('/items/:itemId', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const itemId = (req.params.itemId ?? '').trim()
+    if (!itemId) {
+      res.status(400).json({ success: false, error: 'itemId is required' })
+      return
+    }
+    const body = (req.body ?? {}) as {
+      status?: string
+      sendAt?: string | null
+      skipReason?: string
+      operatorNote?: string
+    }
+    const status = typeof body.status === 'string' ? body.status.trim().toUpperCase() : ''
+    if (status && status !== 'QUEUED' && status !== 'SKIPPED') {
+      res.status(400).json({ success: false, error: 'status must be QUEUED or SKIPPED' })
+      return
+    }
+    let scheduledFor: Date | null | undefined = undefined
+    if (Object.prototype.hasOwnProperty.call(body, 'sendAt')) {
+      if (body.sendAt == null || body.sendAt === '') scheduledFor = null
+      else {
+        const parsed = new Date(String(body.sendAt))
+        if (Number.isNaN(parsed.getTime())) {
+          res.status(400).json({ success: false, error: 'sendAt must be a valid ISO date' })
+          return
+        }
+        scheduledFor = parsed
+      }
+    }
+    const skipReason = typeof body.skipReason === 'string' ? body.skipReason.trim().slice(0, 200) : ''
+    const operatorNote = typeof body.operatorNote === 'string' ? body.operatorNote.trim().slice(0, 200) : ''
+
+    const item = await prisma.outboundSendQueueItem.findFirst({
+      where: { id: itemId, customerId },
+      select: { id: true, status: true, sentAt: true, lastError: true },
+    })
+    if (!item) {
+      res.status(404).json({ success: false, error: 'Queue item not found' })
+      return
+    }
+    if (item.status === OutboundSendQueueStatus.SENT || item.sentAt != null) {
+      res.status(400).json({ success: false, error: 'Cannot update a SENT item' })
+      return
+    }
+
+    const data: {
+      status?: OutboundSendQueueStatus
+      scheduledFor?: Date | null
+      lockedAt?: null
+      lockedBy?: null
+      lastError?: string | null
+    } = {}
+    if (status === 'QUEUED') {
+      data.status = OutboundSendQueueStatus.QUEUED
+      data.lockedAt = null
+      data.lockedBy = null
+      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
+      if (operatorNote) data.lastError = `operator_note: ${operatorNote}`
+      else if (skipReason) data.lastError = `operator_skip_reason: ${skipReason}`
+      else data.lastError = null
+    } else if (status === 'SKIPPED') {
+      data.status = OutboundSendQueueStatus.SKIPPED
+      data.lockedAt = null
+      data.lockedBy = null
+      data.lastError = skipReason ? `skipped: ${skipReason}` : 'skipped_by_operator'
+      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
+    } else {
+      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
+      if (operatorNote) data.lastError = `operator_note: ${operatorNote}`
+    }
+
+    if (Object.keys(data).length === 0) {
+      res.status(400).json({ success: false, error: 'No allowed fields to update' })
+      return
+    }
+    const updated = await prisma.outboundSendQueueItem.update({
+      where: { id: itemId },
+      data,
+      select: { id: true, status: true, scheduledFor: true, sentAt: true, attemptCount: true, lastError: true, lockedAt: true, lockedBy: true },
+    })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      success: true,
+      data: {
+        id: updated.id,
+        status: updated.status,
+        scheduledFor: updated.scheduledFor?.toISOString() ?? null,
+        sentAt: updated.sentAt?.toISOString() ?? null,
+        attemptCount: updated.attemptCount,
+        lastError: updated.lastError ?? null,
+        lockedAt: updated.lockedAt?.toISOString() ?? null,
+        lockedBy: updated.lockedBy ?? null,
+      },
+    })
+  } catch (err) {
+    console.error('[send-queue/items/:itemId PATCH] error:', err)
+    res.status(500).json({ success: false, error: 'An error occurred' })
+  }
+})
+
+/**
  * POST /api/send-queue/items/:itemId/retry — Stage 3H: requeue item (tenant + admin).
  * Requires X-Customer-Id and X-Admin-Secret. Rejects if item is SENT.
  */

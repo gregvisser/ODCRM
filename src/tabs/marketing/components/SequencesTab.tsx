@@ -307,6 +307,7 @@ const SequencesTab: React.FC = () => {
     countsByStatus?: Record<string, number>
   } | null>(null)
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
+  const [queueOperatorActionId, setQueueOperatorActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
 
   // Send Queue Preview (dry-run, read-only)
@@ -894,6 +895,26 @@ const SequencesTab: React.FC = () => {
       setQueueError(msg)
     } finally {
       setQueueRefreshing(false)
+    }
+  }
+
+  const applyQueueOperatorAction = async (
+    itemId: string,
+    payload: { status?: 'QUEUED' | 'SKIPPED'; sendAt?: string | null; skipReason?: string; operatorNote?: string },
+    successTitle: string
+  ) => {
+    if (!selectedCustomerId?.startsWith('cust_') || !queueEnrollmentId) return
+    setQueueOperatorActionId(itemId)
+    try {
+      const res = await api.patch(`/api/send-queue/items/${itemId}`, payload, { headers: { 'X-Customer-Id': selectedCustomerId } })
+      if (res.error) {
+        toast({ title: 'Queue action failed', description: `${res.errorDetails?.status ?? ''} ${res.error}`.trim(), status: 'error' })
+        return
+      }
+      toast({ title: successTitle, status: 'success', duration: 2000 })
+      await loadQueue(queueEnrollmentId)
+    } finally {
+      setQueueOperatorActionId(null)
     }
   }
 
@@ -3587,12 +3608,13 @@ const SequencesTab: React.FC = () => {
                               <Th>SentAt</Th>
                               <Th>Error</Th>
                               <Th w="80px">Details</Th>
+                              <Th w="230px">Operator Actions</Th>
                             </Tr>
                           </Thead>
                           <Tbody>
                             {items.length === 0 ? (
                               <Tr>
-                                <Td colSpan={7} color="gray.500">No items yet. Queue empty: awaiting generation / schedule.</Td>
+                                <Td colSpan={8} color="gray.500">No items yet. Queue empty: awaiting generation / schedule.</Td>
                               </Tr>
                             ) : (
                               items.map((it: { id?: string; scheduledFor?: string | null; status?: string; stepIndex?: number; recipientEmail?: string; sentAt?: string | null; lastError?: string | null }, i: number) => (
@@ -3636,6 +3658,50 @@ const SequencesTab: React.FC = () => {
                                     >
                                       Details
                                     </Button>
+                                  </Td>
+                                  <Td>
+                                    <HStack spacing={1}>
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        colorScheme="green"
+                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                        isLoading={queueOperatorActionId === it.id}
+                                        onClick={() => {
+                                          if (!it.id) return
+                                          void applyQueueOperatorAction(it.id, { status: 'QUEUED', operatorNote: 'approved_by_operator' }, 'Queue item approved')
+                                        }}
+                                      >
+                                        Approve
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        colorScheme="red"
+                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                        isLoading={queueOperatorActionId === it.id}
+                                        onClick={() => {
+                                          if (!it.id) return
+                                          const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'manual_skip'
+                                          void applyQueueOperatorAction(it.id, { status: 'SKIPPED', skipReason: reason }, 'Queue item skipped')
+                                        }}
+                                      >
+                                        Skip
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                        isLoading={queueOperatorActionId === it.id}
+                                        onClick={() => {
+                                          if (!it.id) return
+                                          const sendAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+                                          void applyQueueOperatorAction(it.id, { status: 'QUEUED', sendAt, operatorNote: 'rescheduled_by_operator' }, 'Queue send time updated')
+                                        }}
+                                      >
+                                        Send +15m
+                                      </Button>
+                                    </HStack>
                                   </Td>
                                 </Tr>
                               ))
