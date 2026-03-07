@@ -1,4 +1,5 @@
 import express from 'express'
+import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 
 const router = express.Router()
@@ -148,6 +149,59 @@ router.get('/unsubscribe', async (req, res) => {
         lastStatus: 'unsubscribed',
       },
     })
+
+    // Persist suppression from unsubscribe to enforce downstream send-blocking.
+    const normalizedEmail = String(prospect.contact?.email || '').trim().toLowerCase()
+    const domain = normalizedEmail.includes('@') ? normalizedEmail.split('@')[1].trim().toLowerCase() : ''
+    if (customerId && normalizedEmail) {
+      await prisma.suppressionEntry.upsert({
+        where: {
+          customerId_type_value: {
+            customerId,
+            type: 'email',
+            value: normalizedEmail,
+          },
+        },
+        update: {
+          emailNormalized: normalizedEmail,
+          reason: 'Unsubscribed via tracking link',
+          source: 'tracking-unsubscribe',
+        },
+        create: {
+          id: randomUUID(),
+          customerId,
+          type: 'email',
+          value: normalizedEmail,
+          emailNormalized: normalizedEmail,
+          reason: 'Unsubscribed via tracking link',
+          source: 'tracking-unsubscribe',
+        },
+      })
+      if (domain && !domain.includes('@')) {
+        await prisma.suppressionEntry.upsert({
+          where: {
+            customerId_type_value: {
+              customerId,
+              type: 'domain',
+              value: domain,
+            },
+          },
+          update: {
+            reason: 'Unsubscribed via tracking link',
+            source: 'tracking-unsubscribe',
+          },
+          create: {
+            id: randomUUID(),
+            customerId,
+            type: 'domain',
+            value: domain,
+            emailNormalized: null,
+            reason: 'Unsubscribed via tracking link',
+            source: 'tracking-unsubscribe',
+          },
+        })
+      }
+    }
 
     // Cancel any future unsent steps
     try {
