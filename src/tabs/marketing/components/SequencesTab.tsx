@@ -441,6 +441,54 @@ const SequencesTab: React.FC = () => {
     }
     lastUpdatedAt?: string
   }
+  type LaunchPreviewRow = {
+    queueItemId: string
+    enrollmentId: string
+    enrollmentName?: string | null
+    sequenceId: string
+    sequenceName?: string | null
+    recipientEmail: string
+    identityEmail?: string | null
+    status: string
+    reason: string
+    scheduledFor: string | null
+    sentAt?: string | null
+    stepIndex: number
+    attemptCount: number
+    lastError: string | null
+    subjectPreview?: string | null
+    renderAvailable?: boolean
+    renderRoute?: string
+    detailRoute?: string
+    queueRoute?: string
+    auditRoute?: string
+  }
+  type LaunchPreviewData = {
+    sequenceId: string
+    sequenceName?: string | null
+    batchLimit: number
+    summary: {
+      eligibleCandidatesTotal: number
+      firstBatchCount: number
+      excludedCount: number
+      blockedCount: number
+      notInBatchCount: number
+      totalRecipients: number
+    }
+    firstBatch: LaunchPreviewRow[]
+    excluded: LaunchPreviewRow[]
+    blocked: LaunchPreviewRow[]
+    notInBatch: LaunchPreviewRow[]
+    context?: {
+      preflightStatus?: string | null
+      liveCanaryAllowed?: boolean
+      liveCanaryReason?: string | null
+      scheduledEngineMode?: string
+      dueNowCount?: number
+      activeIdentityCount?: number
+    }
+    lastUpdatedAt?: string
+  }
   type OutreachReportRow = {
     sequenceId?: string
     sequenceName?: string
@@ -526,6 +574,9 @@ const SequencesTab: React.FC = () => {
   const [sequencePreflightData, setSequencePreflightData] = useState<SequencePreflightData | null>(null)
   const [sequencePreflightLoading, setSequencePreflightLoading] = useState(false)
   const [sequencePreflightError, setSequencePreflightError] = useState<string | null>(null)
+  const [launchPreviewData, setLaunchPreviewData] = useState<LaunchPreviewData | null>(null)
+  const [launchPreviewLoading, setLaunchPreviewLoading] = useState(false)
+  const [launchPreviewError, setLaunchPreviewError] = useState<string | null>(null)
   const [opsReportingData, setOpsReportingData] = useState<MarketingOpsReportingData | null>(null)
   const [opsReportingLoading, setOpsReportingLoading] = useState(false)
   const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
@@ -694,6 +745,36 @@ const SequencesTab: React.FC = () => {
     setSequencePreflightError(null)
   }
 
+  const loadLaunchPreview = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_') || !chosenSequenceId) {
+      if (!chosenSequenceId) {
+        setLaunchPreviewData(null)
+        setLaunchPreviewError(null)
+      }
+      return
+    }
+    if (!opts?.silent) setLaunchPreviewLoading(true)
+    setLaunchPreviewError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/launch-preview?sequenceId=${encodeURIComponent(chosenSequenceId)}&sinceHours=${hours}&batchLimit=15`
+    const res = await api.get<LaunchPreviewData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setLaunchPreviewLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setLaunchPreviewError('Choose a sequence first.')
+      else if (status === 401 || status === 403) setLaunchPreviewError(`Not authorized (${status}).`)
+      else if (status === 404) setLaunchPreviewError('Sequence not found for this client.')
+      else setLaunchPreviewError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setLaunchPreviewData(null)
+      return
+    }
+    setLaunchPreviewData(res.data ?? null)
+    setLaunchPreviewError(null)
+  }
+
   const loadOpsReporting = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!opts?.silent) setOpsReportingLoading(true)
@@ -853,6 +934,7 @@ const SequencesTab: React.FC = () => {
     if (sequenceReadinessSequenceId.trim()) {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
       await loadSequencePreflight(sequenceReadinessSequenceId, { silent: true })
+      await loadLaunchPreview(sequenceReadinessSequenceId, { silent: true })
     }
     await loadOpsReporting({ silent: true })
     await loadQueueWorkbench({ silent: true })
@@ -927,6 +1009,23 @@ const SequencesTab: React.FC = () => {
     }
     setQueueDrillData(res.data ?? null)
     setQueueDrillError(null)
+  }
+
+  const previewQueueItemRender = async (itemId: string) => {
+    if (!selectedCustomerId?.startsWith('cust_') || !itemId) return
+    setRenderLoading(true)
+    setRenderError(null)
+    setRenderData(null)
+    const res = await api.get<{ queueItemId: string; enrollmentId: string; stepIndex: number; recipientEmail: string; subject: string; bodyHtml: string }>(
+      `/api/send-queue/items/${itemId}/render`,
+      { headers: { 'X-Customer-Id': selectedCustomerId } }
+    )
+    setRenderLoading(false)
+    if (res.error) {
+      setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
+      return
+    }
+    setRenderData(res.data ? { ...res.data, enrollmentId: res.data.enrollmentId } : null)
   }
 
   const loadAudits = async (cursor?: string | null) => {
@@ -1118,6 +1217,8 @@ const SequencesTab: React.FC = () => {
       setSequenceReadinessError(null)
       setSequencePreflightData(null)
       setSequencePreflightError(null)
+      setLaunchPreviewData(null)
+      setLaunchPreviewError(null)
       setOpsReportingData(null)
       setOpsReportingError(null)
       setQueueWorkbenchData(null)
@@ -3180,12 +3281,15 @@ const SequencesTab: React.FC = () => {
                                 if (nextId) {
                                   loadSequenceReadiness(nextId)
                                   loadSequencePreflight(nextId)
+                                  loadLaunchPreview(nextId)
                                 }
                                 else {
                                   setSequenceReadinessData(null)
                                   setSequenceReadinessError(null)
                                   setSequencePreflightData(null)
                                   setSequencePreflightError(null)
+                                  setLaunchPreviewData(null)
+                                  setLaunchPreviewError(null)
                                 }
                               }}
                             >
@@ -3198,10 +3302,10 @@ const SequencesTab: React.FC = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => loadSequenceReadiness()}
-                            isLoading={sequenceReadinessLoading || sequencePreflightLoading}
+                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
-                            Refresh Preflight + Readiness
+                            Refresh Launch Data
                           </Button>
                           <Text fontSize="xs" color="gray.500">
                             Uses current queue and rule outcomes to show who is sendable now.
@@ -3283,6 +3387,162 @@ const SequencesTab: React.FC = () => {
                                 )
                               })}
                             </SimpleGrid>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="launch-preview-panel" data-testid="launch-preview-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Launch Preview (First Batch Inspection)</Text>
+                          <Button
+                            id="launch-preview-refresh-btn"
+                            data-testid="launch-preview-refresh-btn"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadLaunchPreview()}
+                            isLoading={launchPreviewLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh Launch Preview
+                          </Button>
+                        </Flex>
+                        {launchPreviewError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{launchPreviewError}</AlertDescription>
+                          </Alert>
+                        )}
+                        {!launchPreviewError && launchPreviewData && (
+                          <>
+                            <SimpleGrid id="launch-preview-first-batch-summary" data-testid="launch-preview-first-batch-summary" columns={{ base: 2, md: 3, lg: 6 }} spacing={2}>
+                              <Card><CardBody py={2}><Stat><StatLabel>Total recipients</StatLabel><StatNumber>{launchPreviewData.summary.totalRecipients ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Eligible total</StatLabel><StatNumber>{launchPreviewData.summary.eligibleCandidatesTotal ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>First batch</StatLabel><StatNumber>{launchPreviewData.summary.firstBatchCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Excluded</StatLabel><StatNumber>{launchPreviewData.summary.excludedCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Blocked</StatLabel><StatNumber>{launchPreviewData.summary.blockedCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Not in batch</StatLabel><StatNumber>{launchPreviewData.summary.notInBatchCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+
+                            <Box id="launch-preview-candidate-table" data-testid="launch-preview-candidate-table" overflowX="auto">
+                              <Text fontSize="sm" fontWeight="semibold" mb={2}>First-batch candidates ({launchPreviewData.firstBatch.length})</Text>
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Recipient</Th>
+                                    <Th>Sequence / Enrollment</Th>
+                                    <Th>Identity</Th>
+                                    <Th>Step</Th>
+                                    <Th>Scheduled</Th>
+                                    <Th>Subject preview</Th>
+                                    <Th>Actions</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {launchPreviewData.firstBatch.length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={7} color="gray.500">No first-batch candidates currently available.</Td>
+                                    </Tr>
+                                  ) : launchPreviewData.firstBatch.map((row) => (
+                                    <Tr key={`batch-${row.queueItemId}`}>
+                                      <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                      <Td fontSize="xs">
+                                        <Text>{row.sequenceName || row.sequenceId}</Text>
+                                        <Text color="gray.500">{row.enrollmentName || row.enrollmentId}</Text>
+                                      </Td>
+                                      <Td fontSize="xs">{row.identityEmail || '—'}</Td>
+                                      <Td fontSize="xs">{row.stepIndex + 1}</Td>
+                                      <Td fontSize="xs">{row.scheduledFor ? new Date(row.scheduledFor).toLocaleString() : 'now'}</Td>
+                                      <Td fontSize="xs" maxW="240px">
+                                        <Text noOfLines={2}>{row.subjectPreview || '—'}</Text>
+                                      </Td>
+                                      <Td>
+                                        <HStack spacing={1}>
+                                          <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>Queue</Button>
+                                          <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
+                                          <Button size="xs" leftIcon={<EmailIcon />} isDisabled={!row.queueItemId} onClick={() => void previewQueueItemRender(row.queueItemId)}>Render</Button>
+                                        </HStack>
+                                      </Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+
+                            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
+                              <Box id="launch-preview-excluded-section" data-testid="launch-preview-excluded-section" overflowX="auto">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Excluded / blocked for launch ({launchPreviewData.excluded.length + launchPreviewData.blocked.length})</Text>
+                                <Table size="sm">
+                                  <Thead>
+                                    <Tr>
+                                      <Th>Recipient</Th>
+                                      <Th>Category</Th>
+                                      <Th>Reason</Th>
+                                      <Th>Actions</Th>
+                                    </Tr>
+                                  </Thead>
+                                  <Tbody>
+                                    {[...launchPreviewData.excluded, ...launchPreviewData.blocked].length === 0 ? (
+                                      <Tr>
+                                        <Td colSpan={4} color="gray.500">No excluded or blocked rows in this preview window.</Td>
+                                      </Tr>
+                                    ) : [...launchPreviewData.excluded, ...launchPreviewData.blocked].map((row) => (
+                                      <Tr key={`excluded-${row.queueItemId}`}>
+                                        <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                        <Td fontSize="xs">{launchPreviewData.excluded.some((r) => r.queueItemId === row.queueItemId) ? 'excluded' : 'blocked'}</Td>
+                                        <Td fontSize="xs">{row.reason || row.lastError || '—'}</Td>
+                                        <Td>
+                                          <HStack spacing={1}>
+                                            <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>Queue</Button>
+                                            <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
+                                          </HStack>
+                                        </Td>
+                                      </Tr>
+                                    ))}
+                                  </Tbody>
+                                </Table>
+                              </Box>
+
+                              <Box id="launch-preview-not-in-batch-section" data-testid="launch-preview-not-in-batch-section" overflowX="auto">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Eligible but not in current first batch ({launchPreviewData.notInBatch.length})</Text>
+                                <Table size="sm">
+                                  <Thead>
+                                    <Tr>
+                                      <Th>Recipient</Th>
+                                      <Th>Scheduled</Th>
+                                      <Th>Reason</Th>
+                                      <Th>Actions</Th>
+                                    </Tr>
+                                  </Thead>
+                                  <Tbody>
+                                    {launchPreviewData.notInBatch.length === 0 ? (
+                                      <Tr>
+                                        <Td colSpan={4} color="gray.500">No extra eligible rows beyond first batch.</Td>
+                                      </Tr>
+                                    ) : launchPreviewData.notInBatch.map((row) => (
+                                      <Tr key={`not-in-batch-${row.queueItemId}`}>
+                                        <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                        <Td fontSize="xs">{row.scheduledFor ? new Date(row.scheduledFor).toLocaleString() : 'now'}</Td>
+                                        <Td fontSize="xs">{row.reason || 'eligible_later_in_order'}</Td>
+                                        <Td>
+                                          <HStack spacing={1}>
+                                            <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>Queue</Button>
+                                            <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
+                                          </HStack>
+                                        </Td>
+                                      </Tr>
+                                    ))}
+                                  </Tbody>
+                                </Table>
+                              </Box>
+                            </SimpleGrid>
+
+                            <Text id="launch-preview-last-updated" data-testid="launch-preview-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {launchPreviewData.lastUpdatedAt ? new Date(launchPreviewData.lastUpdatedAt).toLocaleString() : '—'}
+                            </Text>
                           </>
                         )}
                       </VStack>
@@ -3888,21 +4148,9 @@ const SequencesTab: React.FC = () => {
                                     <Button
                                       size="xs"
                                       leftIcon={<EmailIcon />}
-                                      onClick={async () => {
-                                        if (!selectedCustomerId?.startsWith('cust_') || !item.id) return
-                                        setRenderLoading(true)
-                                        setRenderError(null)
-                                        setRenderData(null)
-                                        const res = await api.get<{ queueItemId: string; enrollmentId: string; stepIndex: number; recipientEmail: string; subject: string; bodyHtml: string }>(
-                                          `/api/send-queue/items/${item.id}/render`,
-                                          { headers: { 'X-Customer-Id': selectedCustomerId } }
-                                        )
-                                        setRenderLoading(false)
-                                        if (res.error) {
-                                          setRenderError(res.error + (res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''))
-                                          return
-                                        }
-                                        setRenderData(res.data ? { ...res.data, enrollmentId: res.data.enrollmentId } : null)
+                                      onClick={() => {
+                                        if (!item.id) return
+                                        void previewQueueItemRender(item.id)
                                       }}
                                       isDisabled={renderLoading || !item.id}
                                     >
