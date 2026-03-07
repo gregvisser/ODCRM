@@ -39,6 +39,7 @@ import {
   Tr,
   VStack,
   Badge,
+  Checkbox,
   useDisclosure,
   Modal,
   ModalOverlay,
@@ -461,6 +462,14 @@ const SequencesTab: React.FC = () => {
     lastUpdatedAt: string
     rows: QueueWorkbenchRow[]
   }
+  type QueueWorkbenchBulkResult = {
+    action: 'QUEUED' | 'SKIPPED'
+    requestedCount: number
+    succeededCount: number
+    skippedCount: number
+    reasonCounts: Record<string, number>
+    finishedAt: string
+  }
   type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
@@ -498,6 +507,9 @@ const SequencesTab: React.FC = () => {
   const [queueWorkbenchLoading, setQueueWorkbenchLoading] = useState(false)
   const [queueWorkbenchError, setQueueWorkbenchError] = useState<string | null>(null)
   const [queueWorkbenchActionId, setQueueWorkbenchActionId] = useState<string | null>(null)
+  const [queueWorkbenchSelectedIds, setQueueWorkbenchSelectedIds] = useState<string[]>([])
+  const [queueWorkbenchBulkAction, setQueueWorkbenchBulkAction] = useState<'QUEUED' | 'SKIPPED' | null>(null)
+  const [queueWorkbenchBulkResult, setQueueWorkbenchBulkResult] = useState<QueueWorkbenchBulkResult | null>(null)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -686,6 +698,94 @@ const SequencesTab: React.FC = () => {
       await refreshControlLoopTruth()
     } finally {
       setQueueWorkbenchActionId(null)
+    }
+  }
+
+  const queueActionAllowed = (row: QueueWorkbenchRow, action: 'QUEUED' | 'SKIPPED') => {
+    const status = String(row.status || '').toUpperCase()
+    if (status === 'SENT') return false
+    if (action === 'QUEUED') {
+      return status === 'FAILED' || status === 'SKIPPED' || status === 'LOCKED'
+    }
+    return status === 'QUEUED' || status === 'FAILED' || status === 'LOCKED'
+  }
+
+  const queueWorkbenchRows = useMemo(() => queueWorkbenchData?.rows ?? [], [queueWorkbenchData])
+  const queueWorkbenchVisibleIds = queueWorkbenchRows.map((row) => row.queueItemId)
+  const queueWorkbenchSelectedRows = queueWorkbenchRows.filter((row) => queueWorkbenchSelectedIds.includes(row.queueItemId))
+  const queueWorkbenchRequeueEligibleCount = queueWorkbenchSelectedRows.filter((row) => queueActionAllowed(row, 'QUEUED')).length
+  const queueWorkbenchSkipEligibleCount = queueWorkbenchSelectedRows.filter((row) => queueActionAllowed(row, 'SKIPPED')).length
+  const queueWorkbenchAllVisibleSelected = queueWorkbenchVisibleIds.length > 0 && queueWorkbenchVisibleIds.every((id) => queueWorkbenchSelectedIds.includes(id))
+
+  const toggleQueueWorkbenchSelection = (itemId: string, checked: boolean) => {
+    setQueueWorkbenchSelectedIds((prev) => {
+      if (checked) return prev.includes(itemId) ? prev : [...prev, itemId]
+      return prev.filter((id) => id !== itemId)
+    })
+  }
+
+  const toggleQueueWorkbenchSelectAllVisible = (checked: boolean) => {
+    setQueueWorkbenchSelectedIds((prev) => {
+      if (!checked) return prev.filter((id) => !queueWorkbenchVisibleIds.includes(id))
+      const merged = new Set([...prev, ...queueWorkbenchVisibleIds])
+      return Array.from(merged)
+    })
+  }
+
+  const clearQueueWorkbenchSelection = () => setQueueWorkbenchSelectedIds([])
+
+  const applyQueueWorkbenchBulkAction = async (action: 'QUEUED' | 'SKIPPED') => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const eligibleIds = queueWorkbenchSelectedRows
+      .filter((row) => queueActionAllowed(row, action))
+      .map((row) => row.queueItemId)
+    if (eligibleIds.length === 0) {
+      toast({
+        title: 'No valid rows selected',
+        description: action === 'QUEUED' ? 'Select failed, skipped, or locked rows to requeue.' : 'Select queued, failed, or locked rows to skip.',
+        status: 'warning',
+      })
+      return
+    }
+    setQueueWorkbenchBulkAction(action)
+    setQueueWorkbenchBulkResult(null)
+    const payload: { itemIds: string[]; status: 'QUEUED' | 'SKIPPED'; skipReason?: string } = {
+      itemIds: eligibleIds,
+      status: action,
+    }
+    if (action === 'SKIPPED') {
+      const reason = (typeof window !== 'undefined' && window.prompt?.('Bulk skip reason (optional):'))?.trim().slice(0, 200)
+      if (reason) payload.skipReason = reason
+    }
+    try {
+      const res = await api.patch('/api/send-queue/items/bulk', payload, {
+        headers: { 'X-Customer-Id': selectedCustomerId },
+      })
+      if (res.error) {
+        toast({ title: 'Bulk action failed', description: `${res.errorDetails?.status ?? ''} ${res.error}`.trim(), status: 'error' })
+        return
+      }
+      const data = (res.data as {
+        success?: boolean
+        data?: { requestedCount?: number; succeededCount?: number; skippedCount?: number; reasonCounts?: Record<string, number>; action?: 'QUEUED' | 'SKIPPED' }
+      })?.data
+      setQueueWorkbenchBulkResult({
+        action,
+        requestedCount: Number(data?.requestedCount ?? eligibleIds.length),
+        succeededCount: Number(data?.succeededCount ?? 0),
+        skippedCount: Number(data?.skippedCount ?? 0),
+        reasonCounts: data?.reasonCounts ?? {},
+        finishedAt: new Date().toISOString(),
+      })
+      toast({
+        title: action === 'QUEUED' ? 'Bulk requeue complete' : 'Bulk skip complete',
+        description: `updated=${Number(data?.succeededCount ?? 0)} skipped=${Number(data?.skippedCount ?? 0)}`,
+        status: 'success',
+      })
+      clearQueueWorkbenchSelection()
+      await refreshControlLoopTruth()
+    } finally {
+      setQueueWorkbenchBulkAction(null)
     }
   }
 
@@ -880,6 +980,8 @@ const SequencesTab: React.FC = () => {
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
+    clearQueueWorkbenchSelection()
+    setQueueWorkbenchBulkResult(null)
     loadQueueWorkbench()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- workbench refreshes on panel + tenant + chosen state
   }, [isOperatorConsolePanelOpen, selectedCustomerId, queueWorkbenchState])
@@ -887,12 +989,24 @@ const SequencesTab: React.FC = () => {
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
+    clearQueueWorkbenchSelection()
     const timer = setTimeout(() => {
       loadQueueWorkbench({ silent: true })
     }, 300)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- recipient search refreshes triage list with debounce
   }, [queueWorkbenchSearch])
+
+  useEffect(() => {
+    if (!queueWorkbenchRows.length) {
+      if (queueWorkbenchSelectedIds.length > 0) clearQueueWorkbenchSelection()
+      return
+    }
+    const validIds = new Set(queueWorkbenchRows.map((row) => row.queueItemId))
+    if (queueWorkbenchSelectedIds.some((id) => !validIds.has(id))) {
+      setQueueWorkbenchSelectedIds((prev) => prev.filter((id) => validIds.has(id)))
+    }
+  }, [queueWorkbenchRows, queueWorkbenchSelectedIds])
 
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
@@ -946,6 +1060,8 @@ const SequencesTab: React.FC = () => {
       setOpsReportingError(null)
       setQueueWorkbenchData(null)
       setQueueWorkbenchError(null)
+      setQueueWorkbenchSelectedIds([])
+      setQueueWorkbenchBulkResult(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -3128,10 +3244,86 @@ const SequencesTab: React.FC = () => {
                           </Alert>
                         )}
 
+                        {queueWorkbenchSelectedIds.length > 0 && (
+                          <Card id="queue-workbench-bulk-action-bar" data-testid="queue-workbench-bulk-action-bar" variant="outline">
+                            <CardBody py={3}>
+                              <HStack spacing={2} flexWrap="wrap" id="queue-workbench-bulk-selection" data-testid="queue-workbench-bulk-selection">
+                                <Badge id="queue-workbench-selected-count" data-testid="queue-workbench-selected-count" colorScheme="blue">
+                                  Selected: {queueWorkbenchSelectedIds.length}
+                                </Badge>
+                                <Button
+                                  id="queue-workbench-clear-selection"
+                                  data-testid="queue-workbench-clear-selection"
+                                  size="xs"
+                                  variant="ghost"
+                                  onClick={clearQueueWorkbenchSelection}
+                                >
+                                  Clear
+                                </Button>
+                                <Button
+                                  id="queue-workbench-bulk-requeue-btn"
+                                  data-testid="queue-workbench-bulk-requeue-btn"
+                                  size="sm"
+                                  variant="outline"
+                                  isLoading={queueWorkbenchBulkAction === 'QUEUED'}
+                                  isDisabled={queueWorkbenchRequeueEligibleCount === 0}
+                                  onClick={() => applyQueueWorkbenchBulkAction('QUEUED')}
+                                >
+                                  Requeue ({queueWorkbenchRequeueEligibleCount}/{queueWorkbenchSelectedIds.length})
+                                </Button>
+                                <Button
+                                  id="queue-workbench-bulk-skip-btn"
+                                  data-testid="queue-workbench-bulk-skip-btn"
+                                  size="sm"
+                                  variant="outline"
+                                  isLoading={queueWorkbenchBulkAction === 'SKIPPED'}
+                                  isDisabled={queueWorkbenchSkipEligibleCount === 0}
+                                  onClick={() => applyQueueWorkbenchBulkAction('SKIPPED')}
+                                >
+                                  Skip ({queueWorkbenchSkipEligibleCount}/{queueWorkbenchSelectedIds.length})
+                                </Button>
+                                {queueWorkbenchRequeueEligibleCount === 0 || queueWorkbenchSkipEligibleCount === 0 ? (
+                                  <Text fontSize="xs" color="gray.500">
+                                    Mixed selections are allowed; only rows eligible for each action will be updated.
+                                  </Text>
+                                ) : null}
+                              </HStack>
+                            </CardBody>
+                          </Card>
+                        )}
+
+                        {queueWorkbenchBulkResult && (
+                          <Alert
+                            id="queue-workbench-bulk-result-summary"
+                            data-testid="queue-workbench-bulk-result-summary"
+                            status={queueWorkbenchBulkResult.skippedCount > 0 ? 'warning' : 'success'}
+                            size="sm"
+                          >
+                            <AlertIcon />
+                            <AlertDescription>
+                              {queueWorkbenchBulkResult.action === 'QUEUED' ? 'Bulk requeue' : 'Bulk skip'} complete: requested=
+                              {queueWorkbenchBulkResult.requestedCount} succeeded={queueWorkbenchBulkResult.succeededCount} skipped=
+                              {queueWorkbenchBulkResult.skippedCount}
+                              {Object.keys(queueWorkbenchBulkResult.reasonCounts || {}).length > 0
+                                ? ` reasons=${JSON.stringify(queueWorkbenchBulkResult.reasonCounts)}`
+                                : ''}
+                            </AlertDescription>
+                          </Alert>
+                        )}
+
                         <Box overflowX="auto" id="queue-workbench-table" data-testid="queue-workbench-table">
                           <Table size="sm">
                             <Thead>
                               <Tr>
+                                <Th width="36px">
+                                  <Checkbox
+                                    id="queue-workbench-select-all"
+                                    data-testid="queue-workbench-select-all"
+                                    isChecked={queueWorkbenchAllVisibleSelected}
+                                    isDisabled={queueWorkbenchVisibleIds.length === 0}
+                                    onChange={(e) => toggleQueueWorkbenchSelectAllVisible(e.target.checked)}
+                                  />
+                                </Th>
                                 <Th>Recipient</Th>
                                 <Th>Sequence / Enrollment</Th>
                                 <Th>Status</Th>
@@ -3144,12 +3336,18 @@ const SequencesTab: React.FC = () => {
                             <Tbody>
                               {(queueWorkbenchData?.rows || []).length === 0 ? (
                                 <Tr>
-                                  <Td colSpan={7} color="gray.500">
+                                  <Td colSpan={8} color="gray.500">
                                     No rows in this view. Use refresh or switch view.
                                   </Td>
                                 </Tr>
                               ) : (queueWorkbenchData?.rows || []).map((row) => (
                                 <Tr key={row.queueItemId}>
+                                  <Td>
+                                    <Checkbox
+                                      isChecked={queueWorkbenchSelectedIds.includes(row.queueItemId)}
+                                      onChange={(e) => toggleQueueWorkbenchSelection(row.queueItemId, e.target.checked)}
+                                    />
+                                  </Td>
                                   <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
                                   <Td fontSize="xs">
                                     <Text>{row.sequenceName || row.sequenceId || 'Unknown sequence'}</Text>
@@ -3179,6 +3377,7 @@ const SequencesTab: React.FC = () => {
                                           size="xs"
                                           variant="outline"
                                           isLoading={queueWorkbenchActionId === row.queueItemId}
+                                          isDisabled={!queueActionAllowed(row, 'QUEUED')}
                                           onClick={() => applyQueueWorkbenchAction(row.queueItemId, { status: 'QUEUED' })}
                                         >
                                           Requeue
@@ -3187,6 +3386,7 @@ const SequencesTab: React.FC = () => {
                                           size="xs"
                                           variant="outline"
                                           isLoading={queueWorkbenchActionId === row.queueItemId}
+                                          isDisabled={!queueActionAllowed(row, 'SKIPPED')}
                                           onClick={() => {
                                             const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'triage_skip'
                                             void applyQueueWorkbenchAction(row.queueItemId, { status: 'SKIPPED', skipReason: reason })
@@ -3202,6 +3402,9 @@ const SequencesTab: React.FC = () => {
                             </Tbody>
                           </Table>
                         </Box>
+                        <Text id="queue-workbench-backend-refresh" data-testid="queue-workbench-backend-refresh" fontSize="xs" color="gray.500">
+                          Backend truth refresh marker: {queueWorkbenchData?.lastUpdatedAt ? new Date(queueWorkbenchData.lastUpdatedAt).toLocaleString() : 'pending'}
+                        </Text>
                         <Text fontSize="xs" color="gray.500">
                           Row-level safe actions use existing tenant-scoped queue endpoints. For deep inspection, use Queue and Audit drill-downs.
                         </Text>

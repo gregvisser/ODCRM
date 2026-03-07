@@ -102,6 +102,7 @@
     "test:live-outreach-execution-runtime": "node scripts/self-test-live-outreach-execution-runtime.mjs",
     "test:marketing-ops-reporting-runtime": "node scripts/self-test-marketing-ops-reporting-runtime.mjs",
     "test:queue-workbench-runtime": "node scripts/self-test-queue-workbench-runtime.mjs",
+    "test:queue-remediation-runtime": "node scripts/self-test-queue-remediation-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
