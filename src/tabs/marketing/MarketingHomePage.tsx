@@ -24,6 +24,7 @@ import ReportsTab from './components/ReportsTab'
 import InboxTab from './components/InboxTab'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
+import ReadinessTab from './components/ReadinessTab'
 
 // 'overview' and 'people' removed from the UI (2026-02-22).
 // Kept in the type union for backward compatibility so that deep-link URLs like
@@ -39,6 +40,7 @@ export type OpenDoorsViewId =
   | 'reports'
   | 'inbox'
   | 'schedules'
+  | 'readiness'
 
 export type MarketingViewId = OpenDoorsViewId
 
@@ -53,6 +55,7 @@ function coerceViewId(view?: string): OpenDoorsViewId {
     view === 'templates' ||
     view === 'compliance' ||
     view === 'schedules' ||
+    view === 'readiness' ||
     view === 'reports' ||
     view === 'inbox'
   )
@@ -79,60 +82,67 @@ export default function MarketingHomePage({
   // Old ?view=overview and ?view=people URLs are handled by coerceViewId above.
   const defaultNavItems: SubNavItem[] = [
     {
+      id: 'readiness',
+      label: 'Readiness',
+      icon: CheckCircleIcon,
+      content: <ReadinessTab />,
+      sortOrder: 0,
+    },
+    {
       id: 'reports',
       label: 'Reports',
       icon: SearchIcon,
       content: <ReportsTab />,
-      sortOrder: 0,
+      sortOrder: 1,
     },
     {
       id: 'lists',
       label: 'Lead Sources',
       icon: ViewIcon,
       content: <LeadSourcesTabNew onNavigateToSequences={onNavigate ? () => onNavigate('sequences') : undefined} />,
-      sortOrder: 1,
+      sortOrder: 2,
     },
     {
       id: 'compliance',
       label: 'Suppression List',
       icon: WarningIcon,
       content: <ComplianceTab />,
-      sortOrder: 2,
+      sortOrder: 3,
     },
     {
       id: 'email-accounts',
       label: 'Email Accounts',
       icon: SettingsIcon,
       content: <EmailAccountsTab />,
-      sortOrder: 3,
+      sortOrder: 4,
     },
     {
       id: 'templates',
       label: 'Templates',
       icon: CopyIcon,
       content: <TemplatesTab />,
-      sortOrder: 4,
+      sortOrder: 5,
     },
     {
       id: 'sequences',
       label: 'Sequences',
       icon: RepeatIcon,
       content: <SequencesTab />,
-      sortOrder: 5,
+      sortOrder: 6,
     },
     {
       id: 'schedules',
       label: 'Schedules',
       icon: CalendarIcon,
       content: <SchedulesTab />,
-      sortOrder: 6,
+      sortOrder: 7,
     },
     {
       id: 'inbox',
       label: 'Inbox',
       icon: ChatIcon,
       content: <InboxTab />,
-      sortOrder: 7,
+      sortOrder: 8,
     },
   ]
 
