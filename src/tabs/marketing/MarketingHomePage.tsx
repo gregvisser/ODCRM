@@ -5,6 +5,7 @@
 
 import React, { useMemo } from 'react'
 import {
+  CheckCircleIcon,
   RepeatIcon,
   ViewIcon,
   ChatIcon,
@@ -189,5 +190,4 @@ export default function MarketingHomePage({
     />
   )
 }
-
 
