@@ -85,6 +85,7 @@
     "test:outreach-report-runtime": "node scripts/self-test-outreach-report-runtime.mjs",
     "test:onboarding-readiness-runtime": "node scripts/self-test-onboarding-readiness-runtime.mjs",
     "test:live-send-gates-runtime": "node scripts/self-test-live-send-gates-runtime.mjs",
+    "test:identities-email-runtime": "node scripts/self-test-identities-email-runtime.mjs",
     "test:schedules-emails-runtime": "node scripts/self-test-schedules-emails-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },

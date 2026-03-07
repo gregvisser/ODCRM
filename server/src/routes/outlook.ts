@@ -709,10 +709,12 @@ router.get('/identities', async (req, res, next) => {
       const delegatedReady = i.provider === 'outlook' ? Boolean(i.refreshToken) : true
       const tokenExpired =
         i.provider === 'outlook' && i.tokenExpiresAt ? new Date(i.tokenExpiresAt) < new Date() : false
+      const email = String(i.emailAddress || i.smtpUsername || '').trim().toLowerCase()
       delete i.refreshToken
       delete i.tokenExpiresAt
       return {
         ...i,
+        email,
         delegatedReady,
         tokenExpired,
       }
