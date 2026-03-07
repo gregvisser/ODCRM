@@ -489,6 +489,52 @@ const SequencesTab: React.FC = () => {
     }
     lastUpdatedAt?: string
   }
+  type RunHistoryRow = {
+    auditId: string
+    queueItemId: string
+    recipientEmail: string | null
+    decision: string
+    outcome: string
+    reason: string | null
+    occurredAt: string
+    sequenceId: string | null
+    sequenceName: string | null
+    enrollmentId: string | null
+    enrollmentName: string | null
+    identityEmail: string | null
+    status: string | null
+    scheduledFor: string | null
+    sentAt: string | null
+    stepIndex: number | null
+    attemptCount: number | null
+    lastError: string | null
+    renderAvailable: boolean
+    renderRoute: string | null
+    detailRoute: string | null
+    queueRoute: string | null
+    auditRoute: string | null
+  }
+  type RunHistoryData = {
+    sequenceId: string | null
+    sequenceName?: string | null
+    sinceHours: number
+    limit: number
+    totalReturned: number
+    summary: {
+      byDecision: Record<string, number>
+      byOutcome: Record<string, number>
+    }
+    recentRuns: Array<{
+      runKey: string
+      startedAt: string
+      endedAt: string
+      modeGuess: 'DRY_RUN' | 'LIVE_CANARY' | 'MIXED'
+      total: number
+      counts: Record<string, number>
+    }>
+    rows: RunHistoryRow[]
+    lastUpdatedAt?: string
+  }
   type OutreachReportRow = {
     sequenceId?: string
     sequenceName?: string
@@ -577,6 +623,10 @@ const SequencesTab: React.FC = () => {
   const [launchPreviewData, setLaunchPreviewData] = useState<LaunchPreviewData | null>(null)
   const [launchPreviewLoading, setLaunchPreviewLoading] = useState(false)
   const [launchPreviewError, setLaunchPreviewError] = useState<string | null>(null)
+  const [runHistoryData, setRunHistoryData] = useState<RunHistoryData | null>(null)
+  const [runHistoryLoading, setRunHistoryLoading] = useState(false)
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null)
+  const [runHistoryOutcomeFilter, setRunHistoryOutcomeFilter] = useState<string>('all')
   const [opsReportingData, setOpsReportingData] = useState<MarketingOpsReportingData | null>(null)
   const [opsReportingLoading, setOpsReportingLoading] = useState(false)
   const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
@@ -775,6 +825,34 @@ const SequencesTab: React.FC = () => {
     setLaunchPreviewError(null)
   }
 
+  const loadRunHistory = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!opts?.silent) setRunHistoryLoading(true)
+    setRunHistoryError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const params = new URLSearchParams()
+    params.set('sinceHours', String(hours))
+    params.set('limit', '60')
+    if (chosenSequenceId) params.set('sequenceId', chosenSequenceId)
+    const endpoint = `/api/send-worker/run-history?${params.toString()}`
+    const res = await api.get<RunHistoryData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setRunHistoryLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setRunHistoryError('Select a client.')
+      else if (status === 401 || status === 403) setRunHistoryError(`Not authorized (${status}).`)
+      else if (status === 404) setRunHistoryError('Sequence not found for this client.')
+      else setRunHistoryError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setRunHistoryData(null)
+      return
+    }
+    setRunHistoryData(res.data ?? null)
+    setRunHistoryError(null)
+  }
+
   const loadOpsReporting = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!opts?.silent) setOpsReportingLoading(true)
@@ -851,6 +929,14 @@ const SequencesTab: React.FC = () => {
   }
 
   const queueWorkbenchRows = useMemo(() => queueWorkbenchData?.rows ?? [], [queueWorkbenchData])
+  const runHistoryRows = useMemo(() => {
+    const rows = runHistoryData?.rows ?? []
+    if (runHistoryOutcomeFilter === 'all') return rows
+    return rows.filter((row) => row.outcome === runHistoryOutcomeFilter || row.decision === runHistoryOutcomeFilter)
+  }, [runHistoryData, runHistoryOutcomeFilter])
+  const launchPreviewFirstBatchIds = useMemo(() => {
+    return new Set((launchPreviewData?.firstBatch ?? []).map((row) => row.queueItemId))
+  }, [launchPreviewData])
   const queueWorkbenchVisibleIds = queueWorkbenchRows.map((row) => row.queueItemId)
   const queueWorkbenchSelectedRows = queueWorkbenchRows.filter((row) => queueWorkbenchSelectedIds.includes(row.queueItemId))
   const queueWorkbenchRequeueEligibleCount = queueWorkbenchSelectedRows.filter((row) => queueActionAllowed(row, 'QUEUED')).length
@@ -935,7 +1021,9 @@ const SequencesTab: React.FC = () => {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
       await loadSequencePreflight(sequenceReadinessSequenceId, { silent: true })
       await loadLaunchPreview(sequenceReadinessSequenceId, { silent: true })
+      await loadRunHistory(sequenceReadinessSequenceId, { silent: true })
     }
+    if (!sequenceReadinessSequenceId.trim()) await loadRunHistory('', { silent: true })
     await loadOpsReporting({ silent: true })
     await loadQueueWorkbench({ silent: true })
     loadAuditSummary()
@@ -1219,6 +1307,8 @@ const SequencesTab: React.FC = () => {
       setSequencePreflightError(null)
       setLaunchPreviewData(null)
       setLaunchPreviewError(null)
+      setRunHistoryData(null)
+      setRunHistoryError(null)
       setOpsReportingData(null)
       setOpsReportingError(null)
       setQueueWorkbenchData(null)
@@ -3282,6 +3372,7 @@ const SequencesTab: React.FC = () => {
                                   loadSequenceReadiness(nextId)
                                   loadSequencePreflight(nextId)
                                   loadLaunchPreview(nextId)
+                                  loadRunHistory(nextId)
                                 }
                                 else {
                                   setSequenceReadinessData(null)
@@ -3290,6 +3381,7 @@ const SequencesTab: React.FC = () => {
                                   setSequencePreflightError(null)
                                   setLaunchPreviewData(null)
                                   setLaunchPreviewError(null)
+                                  loadRunHistory('')
                                 }
                               }}
                             >
@@ -3301,8 +3393,13 @@ const SequencesTab: React.FC = () => {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => loadSequenceReadiness()}
-                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading}
+                            onClick={() => {
+                              loadSequenceReadiness()
+                              loadSequencePreflight()
+                              loadLaunchPreview()
+                              loadRunHistory()
+                            }}
+                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
                             Refresh Launch Data
@@ -3542,6 +3639,166 @@ const SequencesTab: React.FC = () => {
 
                             <Text id="launch-preview-last-updated" data-testid="launch-preview-last-updated" fontSize="xs" color="gray.500">
                               Last updated: {launchPreviewData.lastUpdatedAt ? new Date(launchPreviewData.lastUpdatedAt).toLocaleString() : '—'}
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="run-history-panel" data-testid="run-history-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Run History (Batch Outcome Review)</Text>
+                          <HStack spacing={2}>
+                            <Select
+                              size="sm"
+                              maxW="240px"
+                              value={runHistoryOutcomeFilter}
+                              onChange={(e) => setRunHistoryOutcomeFilter(e.target.value)}
+                            >
+                              <option value="all">All outcomes</option>
+                              <option value="WOULD_SEND">WOULD_SEND</option>
+                              <option value="SENT">SENT</option>
+                              <option value="SEND_FAILED">SEND_FAILED</option>
+                              <option value="SKIP_SUPPRESSED">SKIP_SUPPRESSED</option>
+                              <option value="SKIP_REPLIED_STOP">SKIP_REPLIED_STOP</option>
+                              <option value="hard_bounce_invalid_recipient">hard_bounce_invalid_recipient</option>
+                            </Select>
+                            <Button
+                              id="run-history-refresh-btn"
+                              data-testid="run-history-refresh-btn"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => loadRunHistory()}
+                              isLoading={runHistoryLoading}
+                            >
+                              Refresh Run History
+                            </Button>
+                          </HStack>
+                        </Flex>
+
+                        {runHistoryError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{runHistoryError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!runHistoryError && runHistoryData && (
+                          <>
+                            <SimpleGrid id="run-history-outcomes-summary" data-testid="run-history-outcomes-summary" columns={{ base: 2, md: 3, lg: 6 }} spacing={2}>
+                              <Card><CardBody py={2}><Stat><StatLabel>Rows</StatLabel><StatNumber>{runHistoryData.totalReturned ?? 0}</StatNumber></Stat></CardBody></Card>
+                              {Object.entries(runHistoryData.summary?.byOutcome ?? {}).slice(0, 5).map(([k, v]) => (
+                                <Card key={k}><CardBody py={2}><Stat><StatLabel>{k}</StatLabel><StatNumber>{v}</StatNumber></Stat></CardBody></Card>
+                              ))}
+                            </SimpleGrid>
+
+                            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
+                              <Card>
+                                <CardBody>
+                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>Recent runs ({runHistoryData.recentRuns?.length ?? 0})</Text>
+                                  <VStack align="stretch" spacing={2}>
+                                    {(runHistoryData.recentRuns || []).length === 0 ? (
+                                      <Text fontSize="sm" color="gray.500">No recent run groups found in this window.</Text>
+                                    ) : (runHistoryData.recentRuns || []).map((run) => (
+                                      <HStack key={run.runKey} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                        <Box>
+                                          <Text fontSize="sm">{new Date(run.startedAt).toLocaleString()}</Text>
+                                          <Text fontSize="xs" color="gray.500">
+                                            mode={run.modeGuess} total={run.total}
+                                          </Text>
+                                        </Box>
+                                        <HStack spacing={1} flexWrap="wrap" justify="flex-end">
+                                          {Object.entries(run.counts || {}).map(([k, v]) => (
+                                            <Badge key={`${run.runKey}-${k}`} variant="subtle">{k}:{v}</Badge>
+                                          ))}
+                                        </HStack>
+                                      </HStack>
+                                    ))}
+                                  </VStack>
+                                </CardBody>
+                              </Card>
+
+                              <Card>
+                                <CardBody>
+                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>How to compare preview vs actual</Text>
+                                  <Text fontSize="sm" color="gray.600">
+                                    Rows marked as “in first batch preview” align queue item IDs with the current Launch Preview panel.
+                                    Use Queue / Audit / Render actions on each row to inspect the backend-truth details.
+                                  </Text>
+                                </CardBody>
+                              </Card>
+                            </SimpleGrid>
+
+                            <Box id="run-history-attempt-rows" data-testid="run-history-attempt-rows" overflowX="auto">
+                              <Text fontSize="sm" fontWeight="semibold" mb={2}>Recent attempt rows ({runHistoryRows.length})</Text>
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Occurred</Th>
+                                    <Th>Recipient</Th>
+                                    <Th>Outcome</Th>
+                                    <Th>Sequence / Enrollment</Th>
+                                    <Th>Identity</Th>
+                                    <Th>Reason</Th>
+                                    <Th>Preview match</Th>
+                                    <Th>Actions</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {runHistoryRows.length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={8} color="gray.500">No run-history rows in this filter/window.</Td>
+                                    </Tr>
+                                  ) : runHistoryRows.map((row) => (
+                                    <Tr key={row.auditId}>
+                                      <Td fontSize="xs">{row.occurredAt ? new Date(row.occurredAt).toLocaleString() : '—'}</Td>
+                                      <Td fontSize="xs">{row.recipientEmail ? maskEmail(row.recipientEmail) : '—'}</Td>
+                                      <Td>
+                                        <VStack align="start" spacing={0}>
+                                          <Badge size="sm" variant="outline">{row.outcome}</Badge>
+                                          <Text fontSize="xs" color="gray.500">{row.decision}</Text>
+                                        </VStack>
+                                      </Td>
+                                      <Td fontSize="xs">
+                                        <Text>{row.sequenceName || row.sequenceId || 'Unknown sequence'}</Text>
+                                        <Text color="gray.500">{row.enrollmentName || row.enrollmentId || '—'}</Text>
+                                      </Td>
+                                      <Td fontSize="xs">{row.identityEmail || '—'}</Td>
+                                      <Td fontSize="xs" maxW="280px">
+                                        <Text>{row.reason || row.lastError || '—'}</Text>
+                                        {row.lastError && row.reason !== row.lastError ? <Text color="gray.500" noOfLines={2}>{row.lastError}</Text> : null}
+                                      </Td>
+                                      <Td fontSize="xs">
+                                        {launchPreviewFirstBatchIds.has(row.queueItemId) ? (
+                                          <Badge colorScheme="green">in first batch preview</Badge>
+                                        ) : (
+                                          <Text color="gray.500">—</Text>
+                                        )}
+                                      </Td>
+                                      <Td>
+                                        <HStack spacing={1}>
+                                          <Button size="xs" variant="ghost" isDisabled={!row.enrollmentId} onClick={() => row.enrollmentId && openQueueModal(row.enrollmentId)}>
+                                            Queue
+                                          </Button>
+                                          <Button size="xs" variant="ghost" isDisabled={!row.queueItemId} onClick={() => row.queueItemId && openAuditPanelForQueueItem(row.queueItemId)}>
+                                            Audit
+                                          </Button>
+                                          <Button size="xs" leftIcon={<EmailIcon />} isDisabled={!row.queueItemId} onClick={() => row.queueItemId && void previewQueueItemRender(row.queueItemId)}>
+                                            Render
+                                          </Button>
+                                        </HStack>
+                                      </Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+
+                            <Text id="run-history-last-updated" data-testid="run-history-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {runHistoryData.lastUpdatedAt ? new Date(runHistoryData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/run-history
                             </Text>
                           </>
                         )}
