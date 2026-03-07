@@ -127,3 +127,38 @@ export function injectTracking(html: string, trackingData?: any): string {
   // Placeholder - would inject tracking pixel and link rewriting
   return html;
 }
+
+export function enforceUnsubscribeFooter(
+  htmlBody: string,
+  textBody: string | undefined,
+  unsubscribeUrl: string
+): { htmlBody: string; textBody: string | undefined } {
+  const marker = 'data-odcrm-unsubscribe-footer="true"'
+  const safeHtml = typeof htmlBody === 'string' ? htmlBody : ''
+  const safeText = typeof textBody === 'string' ? textBody : undefined
+  const alreadyHasFooter =
+    safeHtml.includes(marker) ||
+    safeHtml.includes(unsubscribeUrl)
+
+  let nextHtml = safeHtml
+  if (!alreadyHasFooter) {
+    const escapedUrl = unsubscribeUrl.replace(/"/g, '&quot;')
+    nextHtml +=
+      `<div ${marker} style="margin-top:24px;font-size:12px;color:#666;">` +
+      `If you no longer wish to receive these emails, ` +
+      `<a href="${escapedUrl}">unsubscribe here</a>.` +
+      `</div>`
+  }
+
+  let nextText = safeText
+  if (typeof nextText === 'string') {
+    const alreadyHasTextFooter =
+      nextText.toLowerCase().includes('unsubscribe') ||
+      nextText.includes(unsubscribeUrl)
+    if (!alreadyHasTextFooter) {
+      nextText += `\n\nTo unsubscribe: ${unsubscribeUrl}`
+    }
+  }
+
+  return { htmlBody: nextHtml, textBody: nextText }
+}

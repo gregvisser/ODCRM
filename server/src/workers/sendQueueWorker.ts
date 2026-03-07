@@ -9,7 +9,7 @@ import cron from 'node-cron'
 import os from 'node:os'
 import { OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 
@@ -54,6 +54,22 @@ function getSuppressionReason(
   const domainEntry = suppressionEntries.find((s) => s.type === 'domain' && s.value === domain)
   if (domainEntry) return domainEntry.reason ?? 'suppressed'
   return null
+}
+
+function getTrackingBaseUrl(): string {
+  const raw =
+    process.env.EMAIL_TRACKING_DOMAIN ||
+    process.env.FRONTDOOR_URL ||
+    process.env.FRONTEND_URL ||
+    'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed.replace(/\/$/, '')
+  return `https://${trimmed.replace(/\/$/, '')}`
+}
+
+function buildEnrollmentUnsubscribeUrl(enrollmentId: string, recipientEmailNorm: string): string {
+  const base = getTrackingBaseUrl()
+  return `${base}/api/email/unsubscribe?enrollmentId=${encodeURIComponent(enrollmentId)}&email=${encodeURIComponent(recipientEmailNorm)}`
 }
 
 function inSendWindow(identity: { sendWindowTimeZone?: string | null; sendWindowHoursStart?: number; sendWindowHoursEnd?: number }): boolean {
@@ -653,8 +669,14 @@ export async function processOne(
     senderIdentityId: identity.id,
     toEmail: recipientEmail,
     subject,
-    htmlBody,
-    textBody,
+    ...(() => {
+      const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(enrollmentId, recipientEmailNorm)
+      const enforced = enforceUnsubscribeFooter(htmlBody, textBody, unsubscribeUrl)
+      return {
+        htmlBody: enforced.htmlBody,
+        textBody: enforced.textBody,
+      }
+    })(),
   })
 
   if (result.success) {

@@ -11,12 +11,28 @@ import { OutboundSendQueueStatus } from '@prisma/client'
 import { randomUUID } from 'node:crypto'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
-import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 
 const router = Router()
 const TICK_LOCK_PREFIX = 'tick_'
+
+function getTrackingBaseUrl(): string {
+  const raw =
+    process.env.EMAIL_TRACKING_DOMAIN ||
+    process.env.FRONTDOOR_URL ||
+    process.env.FRONTEND_URL ||
+    'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed.replace(/\/$/, '')
+  return `https://${trimmed.replace(/\/$/, '')}`
+}
+
+function buildEnrollmentUnsubscribeUrl(enrollmentId: string, recipientEmailNorm: string): string {
+  const base = getTrackingBaseUrl()
+  return `${base}/api/email/unsubscribe?enrollmentId=${encodeURIComponent(enrollmentId)}&email=${encodeURIComponent(recipientEmailNorm)}`
+}
 
 type TickBody = {
   customerId?: string
@@ -291,7 +307,12 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
         phone: '',
       }
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
-      bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+      const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+      bodyHtml = enforceUnsubscribeFooter(
+        renderedHtml,
+        undefined,
+        buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmail.toLowerCase())
+      ).htmlBody
     }
     res.setHeader('x-odcrm-customer-id', customerId)
     res.json({
