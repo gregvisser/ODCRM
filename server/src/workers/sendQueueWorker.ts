@@ -11,6 +11,7 @@ import { OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } fr
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
+import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
@@ -51,15 +52,24 @@ function inSendWindow(identity: { sendWindowTimeZone?: string | null; sendWindow
 export function startSendQueueWorker(prisma: PrismaClient) {
   const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
   const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
+  const canaryCustomerId = SEND_CANARY_CUSTOMER_ID
   if (!scheduledEngineEnabled && !legacyWorkerEnabled) {
     return
   }
+
+  console.log(
+    `[sendQueueWorker] config: scheduledEngine=${scheduledEngineEnabled} legacyWorker=${legacyWorkerEnabled} cron=${SCHEDULED_SENDING_CRON} canaryCustomerId=${canaryCustomerId ?? 'unset'} mode=DRY-RUN only for scheduled engine (no live sends)`
+  )
 
   cron.schedule(SCHEDULED_SENDING_CRON, async () => {
     const now = new Date()
     const leaseExpiry = new Date(now.getTime() - LEASE_MS)
     try {
-      await tick(prisma, now, leaseExpiry)
+      if (scheduledEngineEnabled) {
+        await runScheduledDryRunTick(prisma)
+      } else if (legacyWorkerEnabled) {
+        await tick(prisma, now, leaseExpiry)
+      }
     } catch (err) {
       console.error(`[sendQueueWorker] ${WORKER_ID} tick error:`, err)
     }
@@ -67,6 +77,24 @@ export function startSendQueueWorker(prisma: PrismaClient) {
 
   console.log(
     `✅ [sendQueueWorker] ${WORKER_ID} started (scheduledEngine=${scheduledEngineEnabled}, legacyWorker=${legacyWorkerEnabled}, cron=${SCHEDULED_SENDING_CRON}, ENABLE_SEND_QUEUE_SENDING=${ENABLE_SEND_QUEUE_SENDING}, ENABLE_LIVE_SENDING=${ENABLE_LIVE_SENDING})`
+  )
+}
+
+async function runScheduledDryRunTick(prisma: PrismaClient) {
+  const canaryCustomerId = SEND_CANARY_CUSTOMER_ID
+  if (!canaryCustomerId) {
+    console.log(`[sendQueueWorker] ${WORKER_ID} scheduled dry-run tick skipped: SEND_CANARY_CUSTOMER_ID is not configured`)
+    return
+  }
+  const startedAt = Date.now()
+  console.log(`[sendQueueWorker] ${WORKER_ID} scheduled dry-run tick start customerId=${canaryCustomerId}`)
+  const result = await runSendWorkerDryRunBatch(prisma, {
+    customerId: canaryCustomerId,
+    limit: BATCH_SIZE,
+  })
+  const elapsedMs = Date.now() - startedAt
+  console.log(
+    `[sendQueueWorker] ${WORKER_ID} scheduled dry-run tick end customerId=${canaryCustomerId} processed=${result.processedCount} audits=${result.auditsCreated} elapsedMs=${elapsedMs}`
   )
 }
 

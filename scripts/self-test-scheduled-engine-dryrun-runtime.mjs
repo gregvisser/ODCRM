@@ -31,8 +31,7 @@ async function run() {
 
   const flags = data.flags || {}
   if (typeof flags.enableScheduledSendingEngine !== 'boolean') {
-    console.log('SKIP scheduled engine flags not available on target BASE_URL yet')
-    console.log('self-test-scheduled-engine-dryrun-runtime: PASS')
+    fail('missing flags.enableScheduledSendingEngine boolean')
     return
   }
 
@@ -47,12 +46,34 @@ async function run() {
     return
   }
 
+  const auditsRes = await fetch(`${BASE_URL}/api/send-worker/audits?limit=10`, {
+    headers: { Accept: 'application/json', 'X-Customer-Id': CUSTOMER_ID },
+  })
+  if (!auditsRes.ok) {
+    const body = await auditsRes.text()
+    fail(`GET /api/send-worker/audits?limit=10 returned ${auditsRes.status} ${body.slice(0, 200)}`)
+    return
+  }
+  const auditsJson = await auditsRes.json()
+  const rows = Array.isArray(auditsJson?.data?.items)
+    ? auditsJson.data.items
+    : Array.isArray(auditsJson?.data)
+      ? auditsJson.data
+      : Array.isArray(auditsJson)
+        ? auditsJson
+        : null
+  if (!rows) {
+    fail('audits response shape invalid (expected items array)')
+    return
+  }
+
   if (flags.enableLiveSending === true || flags.enableSendQueueSending === true) {
     console.log('PASS live sending gates enabled in target environment (expected only for canary ops).')
   } else {
     console.log('PASS live sending gates are OFF (safe default).')
   }
   console.log(`PASS scheduled engine flags present (engine=${flags.enableScheduledSendingEngine}, legacyWorker=${flags.enableSendQueueWorkerLegacy}, cron=${cron})`)
+  console.log(`PASS send-worker audits reachable (rows=${rows.length})`)
   console.log('self-test-scheduled-engine-dryrun-runtime: PASS')
 }
 
