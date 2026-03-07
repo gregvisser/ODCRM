@@ -24,6 +24,24 @@ const ENABLE_SEND_QUEUE_SENDING = process.env.ENABLE_SEND_QUEUE_SENDING === 'tru
 const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
 const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
 const SEND_QUEUE_PER_MINUTE_CAP = Number(process.env.SEND_QUEUE_PER_MINUTE_CAP) || 0
+const HARD_BOUNCE_REASON = 'hard_bounce_invalid_recipient'
+
+function isHardInvalidRecipientFailure(errorMessage: string): boolean {
+  const e = String(errorMessage || '').trim().toLowerCase()
+  if (!e) return false
+  const patterns = [
+    'errorinvalidrecipients',
+    'recipientnotfound',
+    'recipient not found',
+    'invalid recipient',
+    'mailbox not found',
+    'does not have a mailbox',
+    'invalid smtp address',
+    'address rejected',
+    '550 5.1.1',
+  ]
+  return patterns.some((p) => e.includes(p))
+}
 
 function getSuppressionReason(
   suppressionEntries: Array<{ type: string; value: string; emailNormalized: string | null; reason: string | null }>,
@@ -664,6 +682,69 @@ export async function processOne(
   }
 
   const errMsg = (result.error ?? 'Unknown error').slice(0, 500)
+  const hardInvalidRecipient = isHardInvalidRecipientFailure(errMsg)
+  if (hardInvalidRecipient) {
+    const suppressionValue = recipientEmailNorm
+    const suppressionReason = HARD_BOUNCE_REASON
+    await prisma.suppressionEntry.upsert({
+      where: {
+        customerId_type_value: {
+          customerId,
+          type: 'email',
+          value: suppressionValue,
+        },
+      },
+      update: {
+        reason: suppressionReason,
+        source: 'send_worker',
+        emailNormalized: suppressionValue,
+      },
+      create: {
+        customerId,
+        type: 'email',
+        value: suppressionValue,
+        emailNormalized: suppressionValue,
+        reason: suppressionReason,
+        source: 'send_worker',
+      },
+    })
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail: recipientEmailNorm,
+        eventType: 'send_skipped',
+        message: 'hard_bounce_invalid_recipient',
+        meta: {
+          reason: suppressionReason,
+          stepIndex,
+          identityId: identity.id,
+          error: errMsg,
+          suppressionApplied: true,
+        },
+      },
+    })
+    await prisma.outboundSendAttemptAudit.create({
+      data: {
+        customerId,
+        queueItemId: item.id,
+        decision: OutboundSendAttemptDecision.SEND_FAILED,
+        reason: suppressionReason,
+        snapshot: {
+          enrollmentId,
+          recipientEmailNorm,
+          identityEmailNorm,
+          stepIndex,
+          identityId: identity.id,
+          error: errMsg,
+          suppressionApplied: true,
+        },
+      },
+    })
+    await unlockItem(prisma, item.id, OutboundSendQueueStatus.SKIPPED, suppressionReason)
+    return 'skipped'
+  }
+
   await prisma.enrollmentAuditEvent.create({
     data: {
       customerId,
