@@ -77,6 +77,7 @@
     "test:marketing-runtime-smoke": "node scripts/self-test-marketing-runtime-smoke.mjs",
     "test:enrollment-queue-determinism-runtime": "node scripts/self-test-enrollment-queue-determinism-runtime.mjs",
     "test:operator-sequence-validation": "node scripts/self-test-operator-sequence-validation.mjs",
+    "test:operator-enrollment-ui": "node scripts/self-test-operator-enrollment-ui.mjs",
     "test:live-send-gates-runtime": "node scripts/self-test-live-send-gates-runtime.mjs",
     "test:schedules-emails-runtime": "node scripts/self-test-schedules-emails-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
