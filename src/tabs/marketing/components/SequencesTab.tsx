@@ -247,6 +247,7 @@ const SequencesTab: React.FC = () => {
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
   const [createEnrollmentRecipientSource, setCreateEnrollmentRecipientSource] = useState<'snapshot' | 'manual'>('manual')
   const [createEnrollmentSubmitting, setCreateEnrollmentSubmitting] = useState(false)
+  const [lastCreatedEnrollment, setLastCreatedEnrollment] = useState<{ id: string; recipientCount?: number } | null>(null)
   const { isOpen: isRecipientsModalOpen, onOpen: onRecipientsModalOpen, onClose: onRecipientsModalClose } = useDisclosure()
   const [selectedEnrollmentId, setSelectedEnrollmentId] = useState<string | null>(null)
   const [selectedEnrollment, setSelectedEnrollment] = useState<{
@@ -582,7 +583,7 @@ const SequencesTab: React.FC = () => {
       }
       setCreateEnrollmentSubmitting(true)
       try {
-        const { data, error } = await api.post<{ data?: { recipientCount?: number; recipientSource?: string } }>(
+        const { data, error } = await api.post<{ data?: { id?: string; enrollmentId?: string; recipientCount?: number; recipientSource?: string } }>(
           `/api/sequences/${editingSequence.id}/enrollments`,
           { name: createEnrollmentName.trim() || undefined, recipientSource: 'snapshot' },
           { headers: { 'X-Customer-Id': selectedCustomerId } }
@@ -591,7 +592,9 @@ const SequencesTab: React.FC = () => {
           toast({ title: 'Create enrollment failed', description: error, status: 'error' })
           return
         }
+        const enrollmentId = data?.data?.id || data?.data?.enrollmentId
         const count = data?.data?.recipientCount ?? 0
+        if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: count })
         toast({ title: 'Enrollment created', description: count ? `${count} recipients from snapshot.` : undefined, status: 'success' })
         onCreateEnrollmentClose()
         setCreateEnrollmentName('')
@@ -609,7 +612,7 @@ const SequencesTab: React.FC = () => {
     }
     setCreateEnrollmentSubmitting(true)
     try {
-      const { error } = await api.post<unknown>(
+      const { data, error } = await api.post<{ data?: { id?: string; enrollmentId?: string; recipientCount?: number } }>(
         `/api/sequences/${editingSequence.id}/enrollments`,
         { name: createEnrollmentName.trim() || undefined, recipientSource: 'manual', recipients: emails.map((email) => ({ email })) },
         { headers: { 'X-Customer-Id': selectedCustomerId } }
@@ -618,7 +621,9 @@ const SequencesTab: React.FC = () => {
         toast({ title: 'Create enrollment failed', description: error, status: 'error' })
         return
       }
-      toast({ title: 'Enrollment created', status: 'success' })
+      const enrollmentId = data?.data?.id || data?.data?.enrollmentId
+      if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: data?.data?.recipientCount ?? emails.length })
+      toast({ title: 'Enrollment created', description: `${emails.length} recipients queued for enrollment processing.`, status: 'success' })
       onCreateEnrollmentClose()
       setCreateEnrollmentName('')
       setCreateEnrollmentRecipients('')
@@ -3008,6 +3013,20 @@ const SequencesTab: React.FC = () => {
                       Create enrollment
                     </Button>
                   </Flex>
+                  {lastCreatedEnrollment?.id && (
+                    <Alert status="success" mb={4} borderRadius="md">
+                      <AlertIcon />
+                      <Box flex="1">
+                        <AlertTitle fontSize="sm">Enrollment created</AlertTitle>
+                        <AlertDescription fontSize="xs">
+                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} recipients. ` : ''}Open queue items to verify generated sends.
+                        </AlertDescription>
+                      </Box>
+                      <Button size="xs" variant="outline" ml={3} onClick={() => openQueueModal(lastCreatedEnrollment.id)}>
+                        View Queue Items
+                      </Button>
+                    </Alert>
+                  )}
                   {enrollmentsError && (
                     <Alert status="error" mb={4}>
                       <AlertIcon />
@@ -3167,6 +3186,15 @@ const SequencesTab: React.FC = () => {
           <ModalHeader>Create enrollment</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
+            <Alert status="info" mb={4} borderRadius="md">
+              <AlertIcon />
+              <Box>
+                <AlertTitle fontSize="sm">Enrollment flow</AlertTitle>
+                <AlertDescription fontSize="xs">
+                  Step 1: choose source. Step 2: preview recipients. Step 3: create enrollment. Step 4: open queue items.
+                </AlertDescription>
+              </Box>
+            </Alert>
             <FormControl mb={4}>
               <FormLabel>Enrollment name (optional)</FormLabel>
               <Input
@@ -3206,6 +3234,9 @@ const SequencesTab: React.FC = () => {
                     </AlertDescription>
                   </Alert>
                 )}
+                <FormHelperText mt={2}>
+                  Recipient preview: {leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0} recipients from the selected snapshot.
+                </FormHelperText>
               </Box>
             ) : (
               <FormControl mb={4} isRequired>
@@ -3219,6 +3250,9 @@ const SequencesTab: React.FC = () => {
                 <Text fontSize="xs" color="gray.500" mt={1}>
                   Paste emails separated by new lines or commas.
                 </Text>
+                <FormHelperText mt={1}>
+                  Recipient preview: {parseRecipientEmails(createEnrollmentRecipients).length} valid recipients.
+                </FormHelperText>
               </FormControl>
             )}
             <Flex justify="flex-end" gap={2} mt={4}>
@@ -3539,7 +3573,7 @@ const SequencesTab: React.FC = () => {
                           </Badge>
                         ))}
                         {Object.keys(countsByStatus).length === 0 && items.length === 0 && (
-                          <Text fontSize="sm" color="gray.500">No queue items.</Text>
+                          <Text fontSize="sm" color="gray.500">Queue empty: awaiting generation / schedule.</Text>
                         )}
                       </Flex>
                       <Box overflowX="auto" maxH="280px">
@@ -3558,7 +3592,7 @@ const SequencesTab: React.FC = () => {
                           <Tbody>
                             {items.length === 0 ? (
                               <Tr>
-                                <Td colSpan={7} color="gray.500">No items</Td>
+                                <Td colSpan={7} color="gray.500">No items yet. Queue empty: awaiting generation / schedule.</Td>
                               </Tr>
                             ) : (
                               items.map((it: { id?: string; scheduledFor?: string | null; status?: string; stepIndex?: number; recipientEmail?: string; sentAt?: string | null; lastError?: string | null }, i: number) => (
