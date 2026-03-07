@@ -219,7 +219,7 @@ router.get('/outreach', async (req, res, next) => {
 
     const audits = await prisma.outboundSendAttemptAudit.findMany({
       where: { customerId, decidedAt: { gte: since } },
-      select: { queueItemId: true, decision: true },
+      select: { queueItemId: true, decision: true, reason: true },
       orderBy: { decidedAt: 'desc' },
       take: 5000,
     })
@@ -261,6 +261,10 @@ router.get('/outreach', async (req, res, next) => {
     const bySequence = new Map<string, Metrics>()
     const byIdentity = new Map<string, Metrics>()
     const zero = (): Metrics => ({ sent: 0, sendFailed: 0, suppressed: 0, skipped: 0, replies: 0, optOuts: 0 })
+    const recentReasons: Record<string, number> = {
+      SKIP_REPLIED_STOP: 0,
+      hard_bounce_invalid_recipient: 0,
+    }
 
     for (const audit of audits) {
       const enrollmentId = queueToEnrollment.get(audit.queueItemId)
@@ -278,6 +282,8 @@ router.get('/outreach', async (req, res, next) => {
       if (audit.decision === 'SEND_FAILED') { seqM.sendFailed += 1; idM.sendFailed += 1; continue }
       if (audit.decision === 'SKIP_SUPPRESSED') { seqM.suppressed += 1; idM.suppressed += 1; continue }
       if (String(audit.decision).startsWith('SKIP_')) { seqM.skipped += 1; idM.skipped += 1 }
+      if (audit.reason === 'SKIP_REPLIED_STOP') recentReasons.SKIP_REPLIED_STOP += 1
+      if (audit.reason === 'hard_bounce_invalid_recipient') recentReasons.hard_bounce_invalid_recipient += 1
     }
 
     const repliesByIdentity = await prisma.emailEvent.groupBy({
@@ -335,6 +341,7 @@ router.get('/outreach', async (req, res, next) => {
         sinceDays,
         bySequence: sequenceRows,
         byIdentity: identityRows,
+        recentReasons,
         generatedAt: new Date().toISOString(),
       },
     })

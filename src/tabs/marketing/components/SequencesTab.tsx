@@ -414,6 +414,27 @@ const SequencesTab: React.FC = () => {
     windowHours?: number
     lastUpdatedAt?: string
   }
+  type OutreachReportRow = {
+    sequenceId?: string
+    sequenceName?: string
+    identityId?: string
+    email?: string | null
+    name?: string | null
+    sent: number
+    sendFailed: number
+    suppressed: number
+    skipped: number
+    replies: number
+    optOuts: number
+  }
+  type MarketingOpsReportingData = {
+    customerId: string
+    sinceDays: number
+    bySequence: OutreachReportRow[]
+    byIdentity: OutreachReportRow[]
+    generatedAt?: string
+    recentReasons?: Record<string, number>
+  }
   type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
@@ -441,6 +462,10 @@ const SequencesTab: React.FC = () => {
   const [sequenceReadinessData, setSequenceReadinessData] = useState<SequenceReadinessData | null>(null)
   const [sequenceReadinessLoading, setSequenceReadinessLoading] = useState(false)
   const [sequenceReadinessError, setSequenceReadinessError] = useState<string | null>(null)
+  const [opsReportingData, setOpsReportingData] = useState<MarketingOpsReportingData | null>(null)
+  const [opsReportingLoading, setOpsReportingLoading] = useState(false)
+  const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
+  const [opsReportingSinceDays, setOpsReportingSinceDays] = useState<number>(30)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -566,11 +591,34 @@ const SequencesTab: React.FC = () => {
     setSequenceReadinessError(null)
   }
 
+  const loadOpsReporting = async (opts?: { silent?: boolean }) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!opts?.silent) setOpsReportingLoading(true)
+    setOpsReportingError(null)
+    const sinceDays = Math.min(90, Math.max(1, opsReportingSinceDays || 30))
+    const endpoint = `/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${sinceDays}`
+    const res = await api.get<MarketingOpsReportingData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setOpsReportingLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setOpsReportingError('Select a client.')
+      else if (status === 401 || status === 403) setOpsReportingError(`Not authorized (${status}).`)
+      else setOpsReportingError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setOpsReportingData(null)
+      return
+    }
+    setOpsReportingData(res.data ?? null)
+    setOpsReportingError(null)
+  }
+
   const refreshControlLoopTruth = async (opts?: { silent?: boolean }) => {
     await loadOperatorConsole(opts)
     if (sequenceReadinessSequenceId.trim()) {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
     }
+    await loadOpsReporting({ silent: true })
     loadAuditSummary()
     loadAudits()
     loadSendQueuePreview()
@@ -748,6 +796,13 @@ const SequencesTab: React.FC = () => {
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
+    loadOpsReporting()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ops reporting refreshes on panel + tenant + selected window
+  }, [isOperatorConsolePanelOpen, selectedCustomerId, opsReportingSinceDays])
+
+  useEffect(() => {
+    if (!isOperatorConsolePanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
     const timer = setInterval(() => {
       refreshControlLoopTruth({ silent: true })
     }, 30000)
@@ -793,6 +848,8 @@ const SequencesTab: React.FC = () => {
       setSequenceReadinessSequenceId('')
       setSequenceReadinessData(null)
       setSequenceReadinessError(null)
+      setOpsReportingData(null)
+      setOpsReportingError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -2831,6 +2888,92 @@ const SequencesTab: React.FC = () => {
                           </HStack>
                         ))}
                       </SimpleGrid>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="marketing-ops-reporting-panel" data-testid="marketing-ops-reporting-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex gap={3} flexWrap="wrap" align="center">
+                          <Text fontSize="sm" fontWeight="semibold">Marketing Ops Reporting</Text>
+                          <FormControl width="140px">
+                            <FormLabel fontSize="xs" mb={0}>Since (days)</FormLabel>
+                            <Select size="sm" value={opsReportingSinceDays} onChange={(e) => setOpsReportingSinceDays(Number(e.target.value) || 30)}>
+                              <option value={7}>7</option>
+                              <option value={30}>30</option>
+                            </Select>
+                          </FormControl>
+                          <Button size="sm" variant="outline" onClick={() => loadOpsReporting()} isLoading={opsReportingLoading}>
+                            Refresh Reporting
+                          </Button>
+                          <Text fontSize="xs" color="gray.500">
+                            Uses /api/reports/outreach with tenant-scoped backend truth.
+                          </Text>
+                        </Flex>
+                        {opsReportingError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{opsReportingError}</AlertDescription>
+                          </Alert>
+                        )}
+                        {!opsReportingError && opsReportingData && (
+                          <>
+                            <SimpleGrid id="marketing-ops-reporting-summary" data-testid="marketing-ops-reporting-summary" columns={{ base: 2, md: 4 }} spacing={3}>
+                              <Card><CardBody py={3}><Stat><StatLabel>Sends</StatLabel><StatNumber>{(opsReportingData.bySequence || []).reduce((sum, row) => sum + (row.sent || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Failures</StatLabel><StatNumber>{(opsReportingData.bySequence || []).reduce((sum, row) => sum + (row.sendFailed || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Suppressions</StatLabel><StatNumber>{(opsReportingData.bySequence || []).reduce((sum, row) => sum + (row.suppressed || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Reply-stops</StatLabel><StatNumber>{opsReportingData.recentReasons?.SKIP_REPLIED_STOP ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Hard bounces</StatLabel><StatNumber>{opsReportingData.recentReasons?.hard_bounce_invalid_recipient ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Skipped</StatLabel><StatNumber>{(opsReportingData.bySequence || []).reduce((sum, row) => sum + (row.skipped || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Replies</StatLabel><StatNumber>{(opsReportingData.byIdentity || []).reduce((sum, row) => sum + (row.replies || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Opt-outs</StatLabel><StatNumber>{(opsReportingData.byIdentity || []).reduce((sum, row) => sum + (row.optOuts || 0), 0)}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+                            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
+                              <Card>
+                                <CardBody>
+                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>Top sequences</Text>
+                                  <VStack align="stretch" spacing={2}>
+                                    {(opsReportingData.bySequence || []).slice(0, 5).map((row, idx) => (
+                                      <HStack key={`${row.sequenceId || row.sequenceName || 'seq'}-${idx}`} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                        <Box>
+                                          <Text fontSize="sm">{row.sequenceName || row.sequenceId || 'Unknown sequence'}</Text>
+                                          <Text fontSize="xs" color="gray.500">sent={row.sent} failed={row.sendFailed} suppressed={row.suppressed} skipped={row.skipped}</Text>
+                                        </Box>
+                                        <Badge>{row.sent}</Badge>
+                                      </HStack>
+                                    ))}
+                                    {(opsReportingData.bySequence || []).length === 0 && (
+                                      <Text fontSize="sm" color="gray.500">No sequence reporting rows yet.</Text>
+                                    )}
+                                  </VStack>
+                                </CardBody>
+                              </Card>
+                              <Card>
+                                <CardBody>
+                                  <Text fontSize="sm" fontWeight="semibold" mb={2}>Top identities</Text>
+                                  <VStack align="stretch" spacing={2}>
+                                    {(opsReportingData.byIdentity || []).slice(0, 5).map((row, idx) => (
+                                      <HStack key={`${row.identityId || row.email || 'id'}-${idx}`} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                        <Box>
+                                          <Text fontSize="sm">{row.email || row.name || row.identityId || 'Unknown identity'}</Text>
+                                          <Text fontSize="xs" color="gray.500">sent={row.sent} failed={row.sendFailed} replies={row.replies} optOuts={row.optOuts}</Text>
+                                        </Box>
+                                        <Badge>{row.sent}</Badge>
+                                      </HStack>
+                                    ))}
+                                    {(opsReportingData.byIdentity || []).length === 0 && (
+                                      <Text fontSize="sm" color="gray.500">No identity reporting rows yet.</Text>
+                                    )}
+                                  </VStack>
+                                </CardBody>
+                              </Card>
+                            </SimpleGrid>
+                            <Text fontSize="xs" color="gray.500">
+                              Generated: {opsReportingData.generatedAt ? new Date(opsReportingData.generatedAt).toLocaleString() : '—'}
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
                     </CardBody>
                   </Card>
 
