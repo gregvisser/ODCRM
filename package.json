@@ -90,6 +90,7 @@
     "test:scheduled-sending-pack-runtime": "node scripts/self-test-scheduled-sending-pack-runtime.mjs",
     "test:operator-console-runtime": "node scripts/self-test-operator-console-runtime.mjs",
     "test:operator-console-ui-runtime": "node scripts/self-test-operator-console-ui-runtime.mjs",
+    "test:multi-operator-live-loop-runtime": "node scripts/self-test-multi-operator-live-loop-runtime.mjs",
     "test:bounce-suppression-runtime": "node scripts/self-test-bounce-suppression-runtime.mjs",
     "test:unsubscribe-link-runtime": "node scripts/self-test-unsubscribe-link-runtime.mjs",
     "test:reply-stop-runtime": "node scripts/self-test-reply-stop-runtime.mjs",
