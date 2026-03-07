@@ -1,84 +1,41 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   AlertDescription,
   AlertIcon,
-  AlertTitle,
+  Badge,
   Box,
   Button,
   Card,
   CardBody,
   CardHeader,
-  Flex,
   Heading,
   HStack,
   Select,
   SimpleGrid,
+  Spinner,
   Stat,
   StatLabel,
   StatNumber,
+  Table,
+  Tbody,
+  Td,
   Text,
+  Th,
+  Thead,
+  Tr,
   VStack,
-  Spinner,
-  Progress,
-  FormControl,
-  FormLabel,
-  Badge,
 } from '@chakra-ui/react'
-import {
-  EmailIcon,
-  CheckCircleIcon,
-  WarningIcon,
-} from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { getCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
-// Customer and report response types
-type CustomerOption = {
-  id: string
-  name: string
-  totalEvents: number
-}
+type WindowDays = 7 | 30 | 90
 
-type CustomerReportResponse = {
-  customerId: string
-  dateRange: string
-  startDate: string
-  endDate: string
-  timezone: string
-  sent: number
-  delivered: number
-  opened: number
-  clicked: number
-  replied: number
-  bounced: number
-  optedOut: number
-  spamComplaints: number
-  failed: number
-  notReached: number
-  sequencesCompleted: number
-  deliveryRate: number
-  openRate: number
-  clickRate: number
-  replyRate: number
-  bounceRate: number
-  optOutRate: number
-  notReachedRate: number
-  uniqueSenders: number
-  senders: Array<{
-    identityId: string | null
-    email: string | null
-    name: string | null
-  }>
-  generatedAt: string
-}
-
-type DateRange = 'today' | 'week' | 'month'
 type OutreachMetricsRow = {
-  sequenceId?: string
-  sequenceName?: string
-  identityId?: string
+  sequenceId?: string | null
+  sequenceName?: string | null
+  identityId?: string | null
   email?: string | null
   name?: string | null
   sent: number
@@ -88,101 +45,125 @@ type OutreachMetricsRow = {
   replies: number
   optOuts: number
 }
+
 type OutreachReportResponse = {
   customerId: string
   sinceDays: number
   bySequence: OutreachMetricsRow[]
   byIdentity: OutreachMetricsRow[]
-  generatedAt: string
+  recentReasons?: Array<{ reason: string; count: number }>
+  generatedAt?: string
+}
+
+type RunHistoryRow = {
+  recipientEmail?: string | null
+  decision?: string | null
+  reason?: string | null
+  sequenceName?: string | null
+  identityEmail?: string | null
+  createdAt?: string | null
+}
+
+type RunHistoryResponse = {
+  summary?: {
+    WOULD_SEND?: number
+    SENT?: number
+    SEND_FAILED?: number
+    SKIP_SUPPRESSED?: number
+    SKIP_REPLIED_STOP?: number
+    hard_bounce_invalid_recipient?: number
+  }
+  rows?: RunHistoryRow[]
+}
+
+type IdentityCapacityResponse = {
+  summary?: {
+    total?: number
+    usable?: number
+    unavailable?: number
+    risky?: number
+  }
 }
 
 const ReportsTab: React.FC = () => {
-  const [customers, setCustomers] = useState<CustomerOption[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
-  const [dateRange, setDateRange] = useState<DateRange>('today')
-  const [report, setReport] = useState<CustomerReportResponse | null>(null)
-  const [outreach, setOutreach] = useState<OutreachReportResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
+  const [windowDays, setWindowDays] = useState<WindowDays>(30)
+  const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [outreachData, setOutreachData] = useState<OutreachReportResponse | null>(null)
+  const [runHistoryData, setRunHistoryData] = useState<RunHistoryResponse | null>(null)
+  const [identityData, setIdentityData] = useState<IdentityCapacityResponse | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
-  // Load customers on mount
   useEffect(() => {
-    const loadCustomers = async () => {
-      const response = await api.get<{ customers: CustomerOption[] }>('/api/reports/customers')
-      if (response.error) {
-        setCustomers([])
-        setError(response.error)
-        setLoading(false)
-        return
-      }
-      const list = response.data?.customers || []
-      setCustomers(list)
-      const current = getCurrentCustomerId()
-      const selected = list.find((c) => c.id === current)
-      if (selected) {
-        setSelectedCustomerId(selected.id)
-      } else if (list.length > 0 && !selectedCustomerId) {
-        setSelectedCustomerId(list[0].id)
-        setCurrentCustomerId(list[0].id)
-      }
-    }
-
-    void loadCustomers()
-
     const unsubscribe = onSettingsUpdated((detail) => {
-      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
-      if (next) setSelectedCustomerId(next)
+      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId || ''
+      setSelectedCustomerId(next)
     })
     return () => unsubscribe()
   }, [])
 
-  // Load report when customer or date range changes
-  useEffect(() => {
-    if (selectedCustomerId) {
-      void loadReport()
-      void loadOutreach()
+  const loadData = useCallback(async (isRefresh = false) => {
+    if (!selectedCustomerId?.startsWith('cust_')) {
+      setError('Select an active client to view reports.')
+      return
     }
-  }, [selectedCustomerId, dateRange])
 
-  const loadReport = async () => {
-    if (!selectedCustomerId) return
-
-    setLoading(true)
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
     setError(null)
 
-    const response = await api.get<CustomerReportResponse>(
-      `/api/reports/customer?customerId=${selectedCustomerId}&dateRange=${dateRange}`
-    )
-    if (response.error) {
-      setError(response.error)
-      setReport(null)
+    const sinceHours = Math.min(windowDays * 24, 168)
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+
+    const [outreachRes, runHistoryRes, identityRes] = await Promise.all([
+      api.get<{ data?: OutreachReportResponse }>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers }),
+      api.get<{ success?: boolean; data?: RunHistoryResponse }>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers }),
+      api.get<{ success?: boolean; data?: IdentityCapacityResponse }>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers }),
+    ])
+
+    const firstErr = [outreachRes, runHistoryRes, identityRes].find((row) => row.error)
+    if (firstErr?.error) {
+      setError(firstErr.error)
       setLoading(false)
+      setRefreshing(false)
       return
     }
-    setReport(response.data || null)
+
+    setOutreachData(outreachRes.data?.data ?? null)
+    setRunHistoryData(runHistoryRes.data?.data ?? null)
+    setIdentityData(identityRes.data?.data ?? null)
+    setLastUpdatedAt(new Date().toISOString())
     setLoading(false)
-  }
+    setRefreshing(false)
+  }, [selectedCustomerId, windowDays])
 
-  const loadOutreach = async () => {
-    if (!selectedCustomerId) return
-    const response = await api.get<{ data?: OutreachReportResponse }>(
-      `/api/reports/outreach?customerId=${selectedCustomerId}&sinceDays=30`
-    )
-    if (response.error) {
-      setOutreach(null)
-      return
+  useEffect(() => {
+    void loadData(false)
+  }, [loadData])
+
+  const bySequence = outreachData?.bySequence ?? []
+  const byIdentity = outreachData?.byIdentity ?? []
+  const runRows = runHistoryData?.rows ?? []
+
+  const topReasons = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const row of runRows) {
+      const reason = String(row.reason || row.decision || 'UNKNOWN')
+      counts.set(reason, (counts.get(reason) || 0) + 1)
     }
-    setOutreach(response.data?.data ?? null)
-  }
+    return Array.from(counts.entries())
+      .map(([reason, count]) => ({ reason, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 8)
+  }, [runRows])
 
-  const selectedCustomer = customers.find(c => c.id === selectedCustomerId)
-
-  if (loading && customers.length === 0) {
+  if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <RequireActiveClient>
-        <Box textAlign="center" py={10}>
-          <Spinner size="lg" />
-          <Text mt={4}>Loading customer reports...</Text>
+        <Box py={6}>
+          <Text>Select an active client to open Reports.</Text>
         </Box>
       </RequireActiveClient>
     )
@@ -190,336 +171,201 @@ const ReportsTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
-      {/* Header */}
-      <Flex justify="space-between" align="center" mb={6}>
-        <VStack align="start" spacing={1}>
-          <Heading size="lg">Client Email Reports</Heading>
-          <Text color="gray.600">
-            Detailed analytics for individual OpenDoors customers
-          </Text>
-        </VStack>
-      </Flex>
-
-      {/* Customer and Date Range Selection */}
-      <Card mb={6}>
-        <CardBody>
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-            <FormControl>
-              <FormLabel>Select Client</FormLabel>
-              <Select
-                value={selectedCustomerId}
-                onChange={(e) => {
-                  setSelectedCustomerId(e.target.value)
-                  setCurrentCustomerId(e.target.value)
-                }}
-                placeholder="Choose a customer"
-              >
-                {customers.map(customer => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name} ({customer.totalEvents} events)
-                  </option>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl>
-              <FormLabel>Date Range</FormLabel>
-              <Select
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value as DateRange)}
-              >
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-              </Select>
-            </FormControl>
-          </SimpleGrid>
-        </CardBody>
-      </Card>
-
-      {/* Error Display */}
-      {error && (
-        <Alert status="error" mb={4}>
-          <AlertIcon />
-          <Box flex="1">
-            <AlertTitle>Failed to load reports</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Box>
-          <Button size="sm" onClick={() => loadReport()} ml={4}>
-            Retry
-          </Button>
-        </Alert>
-      )}
-
-      {/* Customer Info */}
-      {selectedCustomer && report && (
-        <Card mb={6}>
-          <CardBody>
-            <HStack justify="space-between">
-              <Box>
-                <Heading size="md">{selectedCustomer.name}</Heading>
-                <Text color="gray.600" fontSize="sm">
-                  Report for {report.dateRange} • {report.timezone} timezone
-                </Text>
-                <Text color="gray.500" fontSize="xs">
-                  {new Date(report.startDate).toLocaleDateString()} - {new Date(report.endDate).toLocaleDateString()}
-                </Text>
-              </Box>
-              <VStack align="end" spacing={1}>
-                <Badge colorScheme="blue" fontSize="xs">
-                  {report.uniqueSenders} active sender{report.uniqueSenders !== 1 ? 's' : ''}
-                </Badge>
-                <Text fontSize="xs" color="gray.500">
-                  Generated {new Date(report.generatedAt).toLocaleTimeString()}
-                </Text>
-              </VStack>
-            </HStack>
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Loading State */}
-      {loading && selectedCustomerId && (
-        <Card mb={6}>
-          <CardBody textAlign="center" py={8}>
-            <Spinner size="lg" mb={4} />
-            <Text>Loading report data for {selectedCustomer?.name}...</Text>
-          </CardBody>
-        </Card>
-      )}
-
-      {/* Key Metrics */}
-      {report && !loading && (
-        <>
-          <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4} mb={6}>
-            <Card>
-              <CardBody>
-                <Stat>
-                  <StatLabel fontSize="sm" color="gray.600">Total Sequences Completed</StatLabel>
-                  <StatNumber fontSize="3xl" color="blue.600">
-                    {report.sequencesCompleted.toLocaleString()}
-                  </StatNumber>
-                </Stat>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardBody>
-                <Stat>
-                  <StatLabel fontSize="sm" color="gray.600">Emails Sent</StatLabel>
-                  <StatNumber fontSize="3xl" color="purple.600">
-                    {report.sent.toLocaleString()}
-                  </StatNumber>
-                </Stat>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardBody>
-                <Stat>
-                  <StatLabel fontSize="sm" color="gray.600">Delivery Rate</StatLabel>
-                  <StatNumber fontSize="3xl" color="green.600">
-                    {report.deliveryRate}%
-                  </StatNumber>
-                  <Text fontSize="sm" color="gray.500">
-                    {report.delivered}/{report.sent} delivered
-                  </Text>
-                </Stat>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardBody>
-                <Stat>
-                  <StatLabel fontSize="sm" color="gray.600">Reply Rate</StatLabel>
-                  <StatNumber fontSize="3xl" color="orange.600">
-                    {report.replyRate}%
-                  </StatNumber>
-                  <Text fontSize="sm" color="gray.500">
-                    {report.replied} replies
-                  </Text>
-                </Stat>
-              </CardBody>
-            </Card>
-          </SimpleGrid>
-
-          {/* Detailed Metrics */}
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6} mb={6}>
-            <Card>
-              <CardHeader>
-                <Heading size="md">Email Performance</Heading>
-              </CardHeader>
-              <CardBody>
-                <VStack spacing={4} align="stretch">
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Open Rate</Text>
-                      <Text fontSize="sm" color="gray.600">{report.openRate}%</Text>
-                    </Flex>
-                    <Progress value={report.openRate} colorScheme="blue" size="lg" borderRadius="md" />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      {report.opened} opened of {report.delivered} delivered
-                    </Text>
-                  </Box>
-
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Click Rate</Text>
-                      <Text fontSize="sm" color="gray.600">{report.clickRate}%</Text>
-                    </Flex>
-                    <Progress value={report.clickRate} colorScheme="green" size="lg" borderRadius="md" />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      {report.clicked} clicks of {report.delivered} delivered
-                    </Text>
-                  </Box>
-
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Bounce Rate</Text>
-                      <Text fontSize="sm" color="gray.600">{report.bounceRate}%</Text>
-                    </Flex>
-                    <Progress value={report.bounceRate} colorScheme="red" size="lg" borderRadius="md" />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      {report.bounced} bounces of {report.sent} sent
-                    </Text>
-                  </Box>
-                </VStack>
-              </CardBody>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <Heading size="md">Issues & Compliance</Heading>
-              </CardHeader>
-              <CardBody>
-                <VStack spacing={4} align="stretch">
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Opt-out Rate</Text>
-                      <Text fontSize="sm" color="gray.600">{report.optOutRate}%</Text>
-                    </Flex>
-                    <Progress value={report.optOutRate} colorScheme="orange" size="lg" borderRadius="md" />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      {report.optedOut} unsubscribes
-                    </Text>
-                  </Box>
-
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Spam Complaints</Text>
-                      <Text fontSize="sm" color="gray.600">{report.spamComplaints}</Text>
-                    </Flex>
-                    <Text fontSize="xs" color="gray.500">
-                      Reported as spam
-                    </Text>
-                  </Box>
-
-                  <Box>
-                    <Flex justify="space-between" mb={2}>
-                      <Text fontSize="sm" fontWeight="medium">Not Reached Rate</Text>
-                      <Text fontSize="sm" color="gray.600">{report.notReachedRate}%</Text>
-                    </Flex>
-                    <Progress value={report.notReachedRate} colorScheme="gray" size="lg" borderRadius="md" />
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      {report.failed + report.notReached} failures of {report.sent} sent
-                    </Text>
-                  </Box>
-                </VStack>
-              </CardBody>
-            </Card>
-          </SimpleGrid>
-
-          {/* Raw Event Counts */}
-          <Card>
+      <Box id="reports-tab-panel" data-testid="reports-tab-panel">
+        <VStack align="stretch" spacing={4}>
+          <Card id="reports-tab-controls" data-testid="reports-tab-controls">
             <CardHeader>
-              <Heading size="md">Raw Event Counts</Heading>
-              <Text fontSize="sm" color="gray.600">
-                Detailed breakdown of all email events for this period
-              </Text>
+              <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
+                <Heading size="md">Outreach Operations Reports</Heading>
+                <HStack>
+                  <Select
+                    id="reports-tab-window-select"
+                    data-testid="reports-tab-window-select"
+                    size="sm"
+                    value={String(windowDays)}
+                    onChange={(event) => setWindowDays(Number(event.target.value) as WindowDays)}
+                    minW="180px"
+                  >
+                    <option value="7">Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                  </Select>
+                  <Button
+                    size="sm"
+                    id="reports-tab-refresh-btn"
+                    data-testid="reports-tab-refresh-btn"
+                    onClick={() => void loadData(true)}
+                    isLoading={refreshing}
+                    leftIcon={refreshing ? <Spinner size="xs" /> : undefined}
+                  >
+                    Refresh
+                  </Button>
+                </HStack>
+              </HStack>
             </CardHeader>
             <CardBody>
-              <SimpleGrid columns={{ base: 2, md: 4, lg: 6 }} spacing={4}>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="blue.600">{report.sent}</Text>
-                  <Text fontSize="sm" color="gray.600">Sent</Text>
-                </Box>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="green.600">{report.delivered}</Text>
-                  <Text fontSize="sm" color="gray.600">Delivered</Text>
-                </Box>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="cyan.600">{report.opened}</Text>
-                  <Text fontSize="sm" color="gray.600">Opened</Text>
-                </Box>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="purple.600">{report.clicked}</Text>
-                  <Text fontSize="sm" color="gray.600">Clicked</Text>
-                </Box>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="orange.600">{report.replied}</Text>
-                  <Text fontSize="sm" color="gray.600">Replied</Text>
-                </Box>
-                <Box textAlign="center">
-                  <Text fontSize="2xl" fontWeight="bold" color="red.600">{report.bounced}</Text>
-                  <Text fontSize="sm" color="gray.600">Bounced</Text>
-                </Box>
+              {loading ? (
+                <HStack><Spinner size="sm" /><Text>Loading reports…</Text></HStack>
+              ) : null}
+              {error ? (
+                <Alert status="error" mb={3}>
+                  <AlertIcon />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
+              <SimpleGrid id="reports-tab-summary-cards" data-testid="reports-tab-summary-cards" columns={{ base: 2, md: 4, lg: 6 }} spacing={3}>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>SENT</StatLabel>
+                  <StatNumber>{runHistoryData?.summary?.SENT ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>SEND_FAILED</StatLabel>
+                  <StatNumber>{runHistoryData?.summary?.SEND_FAILED ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>SKIP_SUPPRESSED</StatLabel>
+                  <StatNumber>{runHistoryData?.summary?.SKIP_SUPPRESSED ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>SKIP_REPLIED_STOP</StatLabel>
+                  <StatNumber>{runHistoryData?.summary?.SKIP_REPLIED_STOP ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>Usable Identities</StatLabel>
+                  <StatNumber>{identityData?.summary?.usable ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>Risky Identities</StatLabel>
+                  <StatNumber>{identityData?.summary?.risky ?? 0}</StatNumber>
+                </Stat>
               </SimpleGrid>
+              <Text id="reports-tab-last-updated" data-testid="reports-tab-last-updated" mt={3} fontSize="xs" color="gray.500">
+                Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Routes: /api/reports/outreach, /api/send-worker/run-history, /api/send-worker/identity-capacity
+              </Text>
             </CardBody>
           </Card>
 
-          {/* Outreach Health */}
-          <Card mt={6}>
-            <CardHeader>
-              <Heading size="md">Outreach Health (Last 30 Days)</Heading>
-            </CardHeader>
-            <CardBody>
-              {!outreach ? (
-                <Text fontSize="sm" color="gray.500">Outreach health is loading or unavailable.</Text>
-              ) : (
-                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
-                  <Box>
-                    <Text fontWeight="semibold" mb={2}>Top Sequences</Text>
-                    <VStack align="stretch" spacing={2}>
-                      {(outreach.bySequence || []).slice(0, 3).map((row) => (
-                        <Box key={row.sequenceId || row.sequenceName} p={2} borderWidth="1px" borderRadius="md">
-                          <Text fontSize="sm" fontWeight="medium">{row.sequenceName || 'Unknown sequence'}</Text>
-                          <Text fontSize="xs" color="gray.600">sent={row.sent} failed={row.sendFailed} suppressed={row.suppressed} skipped={row.skipped}</Text>
-                        </Box>
-                      ))}
-                      {(outreach.bySequence || []).length === 0 && <Text fontSize="sm" color="gray.500">No sequence outreach metrics yet.</Text>}
-                    </VStack>
-                  </Box>
-                  <Box>
-                    <Text fontWeight="semibold" mb={2}>Top Identities</Text>
-                    <VStack align="stretch" spacing={2}>
-                      {(outreach.byIdentity || []).slice(0, 3).map((row) => (
-                        <Box key={row.identityId || row.email || 'unknown'} p={2} borderWidth="1px" borderRadius="md">
-                          <Text fontSize="sm" fontWeight="medium">{row.name || row.email || 'Unknown identity'}</Text>
-                          <Text fontSize="xs" color="gray.600">sent={row.sent} failed={row.sendFailed} replies={row.replies} optOuts={row.optOuts}</Text>
-                        </Box>
-                      ))}
-                      {(outreach.byIdentity || []).length === 0 && <Text fontSize="sm" color="gray.500">No identity outreach metrics yet.</Text>}
-                    </VStack>
-                  </Box>
-                </SimpleGrid>
-              )}
-            </CardBody>
-          </Card>
-        </>
-      )}
+          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+            <Card id="reports-tab-by-sequence" data-testid="reports-tab-by-sequence">
+              <CardHeader><Heading size="sm">By Sequence</Heading></CardHeader>
+              <CardBody>
+                <Box overflowX="auto">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Sequence</Th>
+                        <Th isNumeric>Sent</Th>
+                        <Th isNumeric>Failed</Th>
+                        <Th isNumeric>Suppressed</Th>
+                        <Th isNumeric>Replies</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {bySequence.length === 0 ? (
+                        <Tr><Td colSpan={5} color="gray.500">No sequence metrics in this window.</Td></Tr>
+                      ) : (
+                        bySequence.slice(0, 12).map((row, idx) => (
+                          <Tr key={row.sequenceId || row.sequenceName || `seq-${idx}`}>
+                            <Td>{row.sequenceName || row.sequenceId || 'Unknown sequence'}</Td>
+                            <Td isNumeric>{row.sent ?? 0}</Td>
+                            <Td isNumeric>{row.sendFailed ?? 0}</Td>
+                            <Td isNumeric>{row.suppressed ?? 0}</Td>
+                            <Td isNumeric>{row.replies ?? 0}</Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+              </CardBody>
+            </Card>
 
-      {/* No client selected */}
-      {!selectedCustomerId && customers.length > 0 && (
-        <Card>
-          <CardBody textAlign="center" py={12}>
-            <Text fontSize="lg" color="gray.600">
-              Select a client from the dropdown above to view their email reports
-            </Text>
-          </CardBody>
-        </Card>
-      )}
-    </Box>
+            <Card id="reports-tab-by-identity" data-testid="reports-tab-by-identity">
+              <CardHeader><Heading size="sm">By Identity</Heading></CardHeader>
+              <CardBody>
+                <Box overflowX="auto">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Identity</Th>
+                        <Th isNumeric>Sent</Th>
+                        <Th isNumeric>Failed</Th>
+                        <Th isNumeric>Replies</Th>
+                        <Th isNumeric>Opt-Outs</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {byIdentity.length === 0 ? (
+                        <Tr><Td colSpan={5} color="gray.500">No identity metrics in this window.</Td></Tr>
+                      ) : (
+                        byIdentity.slice(0, 12).map((row, idx) => (
+                          <Tr key={row.identityId || row.email || `identity-${idx}`}>
+                            <Td>{row.name || row.email || row.identityId || 'Unknown identity'}</Td>
+                            <Td isNumeric>{row.sent ?? 0}</Td>
+                            <Td isNumeric>{row.sendFailed ?? 0}</Td>
+                            <Td isNumeric>{row.replies ?? 0}</Td>
+                            <Td isNumeric>{row.optOuts ?? 0}</Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+              </CardBody>
+            </Card>
+
+            <Card id="reports-tab-recent-reasons" data-testid="reports-tab-recent-reasons">
+              <CardHeader><Heading size="sm">Recent Reasons</Heading></CardHeader>
+              <CardBody>
+                {topReasons.length === 0 ? (
+                  <Text color="gray.500">No recent reason rows in this window.</Text>
+                ) : (
+                  <VStack align="stretch" spacing={2}>
+                    {topReasons.map((row) => (
+                      <HStack key={row.reason} justify="space-between" borderWidth="1px" borderRadius="md" p={2}>
+                        <Text fontSize="sm">{row.reason}</Text>
+                        <Badge>{row.count}</Badge>
+                      </HStack>
+                    ))}
+                  </VStack>
+                )}
+              </CardBody>
+            </Card>
+
+            <Card id="reports-tab-recent-attempts" data-testid="reports-tab-recent-attempts">
+              <CardHeader><Heading size="sm">Recent Attempts</Heading></CardHeader>
+              <CardBody>
+                <Box overflowX="auto">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Recipient</Th>
+                        <Th>Outcome</Th>
+                        <Th>Reason</Th>
+                        <Th>Time</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {runRows.length === 0 ? (
+                        <Tr><Td colSpan={4} color="gray.500">No recent attempts in this window.</Td></Tr>
+                      ) : (
+                        runRows.slice(0, 14).map((row, idx) => (
+                          <Tr key={`${row.recipientEmail || 'unknown'}-${row.createdAt || idx}`}>
+                            <Td>{row.recipientEmail || 'unknown'}</Td>
+                            <Td>{row.decision || '—'}</Td>
+                            <Td>{row.reason || '—'}</Td>
+                            <Td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+        </VStack>
+      </Box>
     </RequireActiveClient>
   )
 }
