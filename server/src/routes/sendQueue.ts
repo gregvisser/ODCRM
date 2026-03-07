@@ -331,6 +331,173 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
   }
 })
 
+type QueueOperatorPatchBody = {
+  status?: string
+  sendAt?: string | null
+  skipReason?: string
+  operatorNote?: string
+}
+
+type ParsedQueueOperatorPatch = {
+  status: 'QUEUED' | 'SKIPPED' | ''
+  scheduledFor: Date | null | undefined
+  skipReason: string
+  operatorNote: string
+}
+
+function parseQueueOperatorPatchBody(body: QueueOperatorPatchBody): { ok: true; value: ParsedQueueOperatorPatch } | { ok: false; error: string } {
+  const status = typeof body.status === 'string' ? body.status.trim().toUpperCase() : ''
+  if (status && status !== 'QUEUED' && status !== 'SKIPPED') {
+    return { ok: false, error: 'status must be QUEUED or SKIPPED' }
+  }
+  let scheduledFor: Date | null | undefined = undefined
+  if (Object.prototype.hasOwnProperty.call(body, 'sendAt')) {
+    if (body.sendAt == null || body.sendAt === '') scheduledFor = null
+    else {
+      const parsed = new Date(String(body.sendAt))
+      if (Number.isNaN(parsed.getTime())) {
+        return { ok: false, error: 'sendAt must be a valid ISO date' }
+      }
+      scheduledFor = parsed
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      status: status as 'QUEUED' | 'SKIPPED' | '',
+      scheduledFor,
+      skipReason: typeof body.skipReason === 'string' ? body.skipReason.trim().slice(0, 200) : '',
+      operatorNote: typeof body.operatorNote === 'string' ? body.operatorNote.trim().slice(0, 200) : '',
+    },
+  }
+}
+
+function buildQueueOperatorPatchData(parsed: ParsedQueueOperatorPatch): {
+  status?: OutboundSendQueueStatus
+  scheduledFor?: Date | null
+  lockedAt?: null
+  lockedBy?: null
+  lastError?: string | null
+} {
+  const data: {
+    status?: OutboundSendQueueStatus
+    scheduledFor?: Date | null
+    lockedAt?: null
+    lockedBy?: null
+    lastError?: string | null
+  } = {}
+  if (parsed.status === 'QUEUED') {
+    data.status = OutboundSendQueueStatus.QUEUED
+    data.lockedAt = null
+    data.lockedBy = null
+    if (parsed.scheduledFor !== undefined) data.scheduledFor = parsed.scheduledFor
+    if (parsed.operatorNote) data.lastError = `operator_note: ${parsed.operatorNote}`
+    else if (parsed.skipReason) data.lastError = `operator_skip_reason: ${parsed.skipReason}`
+    else data.lastError = null
+  } else if (parsed.status === 'SKIPPED') {
+    data.status = OutboundSendQueueStatus.SKIPPED
+    data.lockedAt = null
+    data.lockedBy = null
+    data.lastError = parsed.skipReason ? `skipped: ${parsed.skipReason}` : 'skipped_by_operator'
+    if (parsed.scheduledFor !== undefined) data.scheduledFor = parsed.scheduledFor
+  } else {
+    if (parsed.scheduledFor !== undefined) data.scheduledFor = parsed.scheduledFor
+    if (parsed.operatorNote) data.lastError = `operator_note: ${parsed.operatorNote}`
+  }
+  return data
+}
+
+/**
+ * PATCH /api/send-queue/items/bulk — tenant-scoped bulk operator action (no send).
+ * Supports bulk QUEUED/SKIPPED using the same semantics as single-item PATCH and returns per-item outcomes.
+ */
+router.patch('/items/bulk', async (req: Request, res: Response) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const body = (req.body ?? {}) as QueueOperatorPatchBody & { itemIds?: string[] }
+    const itemIds = Array.from(
+      new Set(
+        (Array.isArray(body.itemIds) ? body.itemIds : [])
+          .map((id) => String(id ?? '').trim())
+          .filter(Boolean)
+      )
+    )
+    if (itemIds.length === 0) {
+      res.status(400).json({ success: false, error: 'itemIds must include at least one id' })
+      return
+    }
+    if (itemIds.length > 100) {
+      res.status(400).json({ success: false, error: 'itemIds cannot exceed 100' })
+      return
+    }
+
+    const parsed = parseQueueOperatorPatchBody(body)
+    if (!parsed.ok) {
+      res.status(400).json({ success: false, error: 'error' in parsed ? parsed.error : 'Invalid bulk payload' })
+      return
+    }
+    if (!parsed.value.status) {
+      res.status(400).json({ success: false, error: 'status is required for bulk action and must be QUEUED or SKIPPED' })
+      return
+    }
+
+    const items = await prisma.outboundSendQueueItem.findMany({
+      where: { id: { in: itemIds }, customerId },
+      select: { id: true, status: true, sentAt: true },
+    })
+    const itemById = new Map(items.map((row) => [row.id, row]))
+    const patchData = buildQueueOperatorPatchData(parsed.value)
+    const resultRows: Array<{ itemId: string; success: boolean; code: string; message: string }> = []
+    const reasonCounts: Record<string, number> = {}
+    let succeededCount = 0
+
+    for (const itemId of itemIds) {
+      const item = itemById.get(itemId)
+      if (!item) {
+        resultRows.push({ itemId, success: false, code: 'NOT_FOUND', message: 'Queue item not found for tenant' })
+        reasonCounts.NOT_FOUND = (reasonCounts.NOT_FOUND ?? 0) + 1
+        continue
+      }
+      if (item.status === OutboundSendQueueStatus.SENT || item.sentAt != null) {
+        resultRows.push({ itemId, success: false, code: 'SENT_IMMUTABLE', message: 'Cannot update a SENT item' })
+        reasonCounts.SENT_IMMUTABLE = (reasonCounts.SENT_IMMUTABLE ?? 0) + 1
+        continue
+      }
+      try {
+        await prisma.outboundSendQueueItem.update({
+          where: { id: itemId },
+          data: patchData,
+          select: { id: true },
+        })
+        succeededCount += 1
+        resultRows.push({ itemId, success: true, code: 'UPDATED', message: 'Updated' })
+        reasonCounts.UPDATED = (reasonCounts.UPDATED ?? 0) + 1
+      } catch {
+        resultRows.push({ itemId, success: false, code: 'UPDATE_FAILED', message: 'Failed to update queue item' })
+        reasonCounts.UPDATE_FAILED = (reasonCounts.UPDATE_FAILED ?? 0) + 1
+      }
+    }
+
+    const skippedCount = itemIds.length - succeededCount
+    res.setHeader('x-odcrm-customer-id', customerId)
+    res.json({
+      success: true,
+      data: {
+        requestedCount: itemIds.length,
+        succeededCount,
+        skippedCount,
+        action: parsed.value.status,
+        reasonCounts,
+        results: resultRows,
+      },
+    })
+  } catch (err) {
+    console.error('[send-queue/items/bulk PATCH] error:', err)
+    res.status(500).json({ success: false, error: 'An error occurred' })
+  }
+})
+
 /**
  * PATCH /api/send-queue/items/:itemId — tenant-scoped operator action (no send).
  * Allows safe queue mutations only: status QUEUED/SKIPPED, sendAt scheduling, and operator note.
@@ -344,31 +511,12 @@ router.patch('/items/:itemId', async (req: Request, res: Response) => {
       res.status(400).json({ success: false, error: 'itemId is required' })
       return
     }
-    const body = (req.body ?? {}) as {
-      status?: string
-      sendAt?: string | null
-      skipReason?: string
-      operatorNote?: string
-    }
-    const status = typeof body.status === 'string' ? body.status.trim().toUpperCase() : ''
-    if (status && status !== 'QUEUED' && status !== 'SKIPPED') {
-      res.status(400).json({ success: false, error: 'status must be QUEUED or SKIPPED' })
+    const body = (req.body ?? {}) as QueueOperatorPatchBody
+    const parsed = parseQueueOperatorPatchBody(body)
+    if (!parsed.ok) {
+      res.status(400).json({ success: false, error: 'error' in parsed ? parsed.error : 'Invalid payload' })
       return
     }
-    let scheduledFor: Date | null | undefined = undefined
-    if (Object.prototype.hasOwnProperty.call(body, 'sendAt')) {
-      if (body.sendAt == null || body.sendAt === '') scheduledFor = null
-      else {
-        const parsed = new Date(String(body.sendAt))
-        if (Number.isNaN(parsed.getTime())) {
-          res.status(400).json({ success: false, error: 'sendAt must be a valid ISO date' })
-          return
-        }
-        scheduledFor = parsed
-      }
-    }
-    const skipReason = typeof body.skipReason === 'string' ? body.skipReason.trim().slice(0, 200) : ''
-    const operatorNote = typeof body.operatorNote === 'string' ? body.operatorNote.trim().slice(0, 200) : ''
 
     const item = await prisma.outboundSendQueueItem.findFirst({
       where: { id: itemId, customerId },
@@ -383,31 +531,7 @@ router.patch('/items/:itemId', async (req: Request, res: Response) => {
       return
     }
 
-    const data: {
-      status?: OutboundSendQueueStatus
-      scheduledFor?: Date | null
-      lockedAt?: null
-      lockedBy?: null
-      lastError?: string | null
-    } = {}
-    if (status === 'QUEUED') {
-      data.status = OutboundSendQueueStatus.QUEUED
-      data.lockedAt = null
-      data.lockedBy = null
-      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
-      if (operatorNote) data.lastError = `operator_note: ${operatorNote}`
-      else if (skipReason) data.lastError = `operator_skip_reason: ${skipReason}`
-      else data.lastError = null
-    } else if (status === 'SKIPPED') {
-      data.status = OutboundSendQueueStatus.SKIPPED
-      data.lockedAt = null
-      data.lockedBy = null
-      data.lastError = skipReason ? `skipped: ${skipReason}` : 'skipped_by_operator'
-      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
-    } else {
-      if (scheduledFor !== undefined) data.scheduledFor = scheduledFor
-      if (operatorNote) data.lastError = `operator_note: ${operatorNote}`
-    }
+    const data = buildQueueOperatorPatchData(parsed.value)
 
     if (Object.keys(data).length === 0) {
       res.status(400).json({ success: false, error: 'No allowed fields to update' })
