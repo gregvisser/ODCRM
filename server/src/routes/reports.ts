@@ -209,6 +209,132 @@ router.get('/customer', async (req, res, next) => {
   }
 })
 
+// GET /api/reports/outreach?customerId=X&sinceDays=7|30
+router.get('/outreach', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const rawSinceDays = typeof req.query.sinceDays === 'string' ? parseInt(req.query.sinceDays, 10) : 30
+    const sinceDays = Number.isFinite(rawSinceDays) ? Math.min(Math.max(rawSinceDays, 1), 90) : 30
+    const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
+
+    const audits = await prisma.outboundSendAttemptAudit.findMany({
+      where: { customerId, decidedAt: { gte: since } },
+      select: { queueItemId: true, decision: true },
+      orderBy: { decidedAt: 'desc' },
+      take: 5000,
+    })
+    const queueItemIds = Array.from(new Set(audits.map((a) => a.queueItemId).filter(Boolean)))
+    const queueItems = queueItemIds.length
+      ? await prisma.outboundSendQueueItem.findMany({
+          where: { id: { in: queueItemIds }, customerId },
+          select: { id: true, enrollmentId: true },
+        })
+      : []
+    const enrollmentIds = Array.from(new Set(queueItems.map((q) => q.enrollmentId).filter(Boolean)))
+    const enrollments = enrollmentIds.length
+      ? await prisma.enrollment.findMany({
+          where: { id: { in: enrollmentIds }, customerId },
+          select: { id: true, sequenceId: true },
+        })
+      : []
+    const sequenceIds = Array.from(new Set(enrollments.map((e) => e.sequenceId).filter(Boolean)))
+    const sequences = sequenceIds.length
+      ? await prisma.emailSequence.findMany({
+          where: { id: { in: sequenceIds }, customerId },
+          select: { id: true, name: true, senderIdentityId: true },
+        })
+      : []
+    const senderIds = Array.from(new Set(sequences.map((s) => s.senderIdentityId).filter((v): v is string => !!v)))
+    const identities = senderIds.length
+      ? await prisma.emailIdentity.findMany({
+          where: { id: { in: senderIds }, customerId },
+          select: { id: true, emailAddress: true, displayName: true },
+        })
+      : []
+
+    const queueToEnrollment = new Map(queueItems.map((q) => [q.id, q.enrollmentId]))
+    const enrollmentToSequence = new Map(enrollments.map((e) => [e.id, e.sequenceId]))
+    const sequenceById = new Map(sequences.map((s) => [s.id, s]))
+    const identityById = new Map(identities.map((i) => [i.id, i]))
+
+    type Metrics = { sent: number; sendFailed: number; suppressed: number; skipped: number; replies: number; optOuts: number }
+    const bySequence = new Map<string, Metrics>()
+    const byIdentity = new Map<string, Metrics>()
+    const zero = (): Metrics => ({ sent: 0, sendFailed: 0, suppressed: 0, skipped: 0, replies: 0, optOuts: 0 })
+
+    for (const audit of audits) {
+      const enrollmentId = queueToEnrollment.get(audit.queueItemId)
+      const sequenceId = enrollmentId ? enrollmentToSequence.get(enrollmentId) : null
+      const sequence = sequenceId ? sequenceById.get(sequenceId) : null
+      const identityId = sequence?.senderIdentityId ?? null
+      const seqKey = sequenceId ?? 'unknown'
+      const identKey = identityId ?? 'unknown'
+      if (!bySequence.has(seqKey)) bySequence.set(seqKey, zero())
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      const seqM = bySequence.get(seqKey)!
+      const idM = byIdentity.get(identKey)!
+
+      if (audit.decision === 'SENT') { seqM.sent += 1; idM.sent += 1; continue }
+      if (audit.decision === 'SEND_FAILED') { seqM.sendFailed += 1; idM.sendFailed += 1; continue }
+      if (audit.decision === 'SKIP_SUPPRESSED') { seqM.suppressed += 1; idM.suppressed += 1; continue }
+      if (String(audit.decision).startsWith('SKIP_')) { seqM.skipped += 1; idM.skipped += 1 }
+    }
+
+    const [repliesByIdentity, optOutsByIdentity] = await Promise.all([
+      prisma.emailEvent.groupBy({
+        by: ['senderIdentityId'],
+        where: { customerId, type: 'replied', occurredAt: { gte: since } },
+        _count: { id: true },
+      }),
+      prisma.emailEvent.groupBy({
+        by: ['senderIdentityId'],
+        where: { customerId, type: 'opted_out', occurredAt: { gte: since } },
+        _count: { id: true },
+      }),
+    ])
+
+    for (const row of repliesByIdentity) {
+      const identKey = row.senderIdentityId ?? 'unknown'
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      byIdentity.get(identKey)!.replies += row._count.id
+    }
+    for (const row of optOutsByIdentity) {
+      const identKey = row.senderIdentityId ?? 'unknown'
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      byIdentity.get(identKey)!.optOuts += row._count.id
+    }
+
+    const sequenceRows = Array.from(bySequence.entries()).map(([sequenceId, metrics]) => ({
+      sequenceId,
+      sequenceName: sequenceById.get(sequenceId)?.name ?? 'Unknown sequence',
+      ...metrics,
+    })).sort((a, b) => b.sent - a.sent)
+
+    const identityRows = Array.from(byIdentity.entries()).map(([identityId, metrics]) => {
+      const identity = identityById.get(identityId)
+      return {
+        identityId,
+        email: identity?.emailAddress ?? null,
+        name: identity?.displayName ?? null,
+        ...metrics,
+      }
+    }).sort((a, b) => b.sent - a.sent)
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        bySequence: sequenceRows,
+        byIdentity: identityRows,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (error) {
+    next(error)
+  }
+})
+
 // GET /api/reports/customers — list all customers for dropdown
 router.get('/customers', async (req, res, next) => {
   try {
