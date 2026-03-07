@@ -36,6 +36,7 @@ import meRoutes from './routes/me.js'
 import enrollmentsRoutes from './routes/enrollments.js'
 import sendQueueRoutes from './routes/sendQueue.js'
 import sendWorkerRoutes from './routes/sendWorker.js'
+import onboardingReadinessRoutes from './routes/onboardingReadiness.js'
 import { generalRateLimiter } from './middleware/rateLimiter.js'
 
 // Load server/.env (canonical). Do NOT load .env.local unless ALLOW_ENV_LOCAL=true.
@@ -477,6 +478,7 @@ app.use('/api/outlook', observabilityHeaders, outlookRoutes)
 app.use('/api/email', trackingRoutes)
 app.use('/api/schedules', schedulesRoutes)
 app.use('/api/reports', reportsRoutes)
+app.use('/api/onboarding', onboardingReadinessRoutes)
 app.use('/api/inbox', observabilityHeaders, inboxRoutes)
 app.use('/api/lists', listsRoutes)
 app.use('/api/sequences', observabilityHeaders, sequencesRoutes)
