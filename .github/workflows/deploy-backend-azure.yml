@@ -8,6 +8,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-backend-main
+  cancel-in-progress: true
+
 env:
   ALWAYS_DEPLOY_BACKEND: true
   # Must match frontend VITE_API_URL / staticwebapp proxy — same App Service

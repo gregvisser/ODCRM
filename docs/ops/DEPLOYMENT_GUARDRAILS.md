@@ -20,3 +20,15 @@ The tick endpoint accepts `ignoreWindow=true` (with `dryRun=false`) to bypass th
 
 Canonical rules for Cursor when working on this repo (do everything yourself, no user commands, gates, prod parity, file-lock Handle, bootstrap proof).  
 → **[docs/ops/CURSOR_CONSTITUTION.md](./CURSOR_CONSTITUTION.md)**
+
+---
+
+## Prod parity + backend auto-recovery
+
+- `prod-parity-after-merge` now runs `scripts/prod-check.cjs` with bounded retries and strict `EXPECT_SHA`.
+- If FE reaches expected SHA but BE remains stale past the configured threshold, parity flow auto-dispatches `deploy-backend-azure.yml` once for bounded recovery.
+- Parity still fails if FE/BE do not both reach the expected SHA within the retry window.
+- Human intervention is still required when:
+  - backend deploy workflow dispatch fails (token/permissions),
+  - backend deploy workflow fails repeatedly,
+  - FE and BE remain stale after recovery window.
