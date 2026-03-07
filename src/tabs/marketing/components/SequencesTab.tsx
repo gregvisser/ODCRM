@@ -355,6 +355,12 @@ const SequencesTab: React.FC = () => {
       cron: string
       canaryCustomerIdPresent: boolean
       liveSendCap: number
+      dryRunTickRoute?: string
+      dryRunTickRequiresAdminSecret?: boolean
+      liveCanaryTickRoute?: string
+      liveCanaryTickRequiresAdminSecret?: boolean
+      liveCanaryTickAllowed?: boolean
+      liveCanaryTickReason?: string | null
     }
     queue: {
       totalQueued: number
@@ -422,6 +428,14 @@ const SequencesTab: React.FC = () => {
   const [operatorConsoleSinceHours, setOperatorConsoleSinceHours] = useState<number>(24)
   const [operatorConsoleLastUpdatedAt, setOperatorConsoleLastUpdatedAt] = useState<string | null>(null)
   const [operatorActionStatus, setOperatorActionStatus] = useState<string | null>(null)
+  const [operatorLastActionResult, setOperatorLastActionResult] = useState<{
+    action: 'DRY_RUN' | 'LIVE_CANARY'
+    success: boolean
+    startedAt: string
+    finishedAt: string
+    summary: string
+    refreshedAt?: string | null
+  } | null>(null)
   const [liveCanaryTickLoading, setLiveCanaryTickLoading] = useState(false)
   const [sequenceReadinessSequenceId, setSequenceReadinessSequenceId] = useState<string>('')
   const [sequenceReadinessData, setSequenceReadinessData] = useState<SequenceReadinessData | null>(null)
@@ -1161,6 +1175,7 @@ const SequencesTab: React.FC = () => {
 
   const handleRunDryRunWorker = async () => {
     if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
+    const startedAt = new Date().toISOString()
     setDryRunWorkerLoading(true)
     setOperatorActionStatus('Running dry-run worker...')
     try {
@@ -1171,21 +1186,46 @@ const SequencesTab: React.FC = () => {
       )
       if (res.error) {
         toast({ title: 'Dry-run worker failed', description: res.error, status: 'error' })
+        setOperatorLastActionResult({
+          action: 'DRY_RUN',
+          success: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          summary: `Dry-run failed: ${res.error}`,
+          refreshedAt: null,
+        })
         return
       }
       const d = res.data?.data
+      const summary = d ? `processed=${d.processedCount ?? 0} audits=${d.auditsCreated ?? 0}` : 'completed'
       toast({
         title: 'Dry-run worker done',
-        description: d ? `processed=${d.processedCount ?? 0} audits=${d.auditsCreated ?? 0}` : undefined,
+        description: summary,
         status: 'success',
         duration: 4000,
       })
       await refreshControlLoopTruth()
+      setOperatorLastActionResult({
+        action: 'DRY_RUN',
+        success: true,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary,
+        refreshedAt: new Date().toISOString(),
+      })
       setOperatorActionStatus('Dry-run worker complete. Console refreshed from backend truth.')
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
       toast({ title: 'Dry-run worker failed', description: msg, status: 'error' })
       setOperatorActionStatus(`Dry-run worker failed: ${msg}`)
+      setOperatorLastActionResult({
+        action: 'DRY_RUN',
+        success: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary: `Dry-run failed: ${msg}`,
+        refreshedAt: null,
+      })
     } finally {
       setDryRunWorkerLoading(false)
     }
@@ -1193,6 +1233,7 @@ const SequencesTab: React.FC = () => {
 
   const handleRunLiveCanaryTick = async () => {
     if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
+    const startedAt = new Date().toISOString()
     setLiveCanaryTickLoading(true)
     setOperatorActionStatus('Running live canary tick...')
     try {
@@ -1206,21 +1247,46 @@ const SequencesTab: React.FC = () => {
         const msg = `${res.errorDetails?.status ?? ''} ${res.error}`.trim()
         toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
         setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+        setOperatorLastActionResult({
+          action: 'LIVE_CANARY',
+          success: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          summary: `Live canary failed: ${msg}`,
+          refreshedAt: null,
+        })
         return
       }
       const d = res.data?.data
+      const summary = d ? `processed=${d.processed ?? 0} sent=${d.sent ?? 0} failed=${d.failed ?? 0} skipped=${d.skipped ?? 0}` : 'completed'
       toast({
         title: 'Live canary tick done',
-        description: d ? `processed=${d.processed ?? 0} sent=${d.sent ?? 0} failed=${d.failed ?? 0} skipped=${d.skipped ?? 0}` : undefined,
+        description: summary,
         status: 'success',
         duration: 4500,
       })
       await refreshControlLoopTruth()
+      setOperatorLastActionResult({
+        action: 'LIVE_CANARY',
+        success: true,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary,
+        refreshedAt: new Date().toISOString(),
+      })
       setOperatorActionStatus('Live canary tick complete. Console refreshed from backend truth.')
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
       toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
       setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+      setOperatorLastActionResult({
+        action: 'LIVE_CANARY',
+        success: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary: `Live canary failed: ${msg}`,
+        refreshedAt: null,
+      })
     } finally {
       setLiveCanaryTickLoading(false)
     }
@@ -2556,6 +2622,50 @@ const SequencesTab: React.FC = () => {
                             {operatorActionStatus || 'Idle. Use actions, then refresh/inspect samples to verify shared state.'}
                           </Text>
                         </VStack>
+                        <Card id="sending-console-action-readiness" data-testid="sending-console-action-readiness" variant="outline">
+                          <CardBody py={3}>
+                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
+                              <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                <Text fontSize="xs" color="gray.600">Dry-run tick</Text>
+                                <Badge colorScheme={dryRunActionDisabledReason ? 'orange' : 'green'}>
+                                  {dryRunActionDisabledReason ? 'Blocked' : 'Ready'}
+                                </Badge>
+                              </HStack>
+                              <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                <Text fontSize="xs" color="gray.600">Live canary tick</Text>
+                                <Badge colorScheme={liveCanaryActionDisabledReason ? 'orange' : 'green'}>
+                                  {liveCanaryActionDisabledReason ? 'Blocked' : 'Ready'}
+                                </Badge>
+                              </HStack>
+                            </SimpleGrid>
+                            <Text fontSize="xs" color="gray.500" mt={2}>
+                              Routes: {operatorConsoleData.status.dryRunTickRoute || '/api/send-worker/dry-run'} · {operatorConsoleData.status.liveCanaryTickRoute || '/api/send-worker/live-tick'}
+                            </Text>
+                          </CardBody>
+                        </Card>
+                        <Card id="sending-console-last-action-result" data-testid="sending-console-last-action-result" variant="outline">
+                          <CardBody py={3}>
+                            {!operatorLastActionResult ? (
+                              <Text fontSize="xs" color="gray.500">No action run yet in this session.</Text>
+                            ) : (
+                              <VStack align="stretch" spacing={1}>
+                                <HStack justify="space-between">
+                                  <Text fontSize="xs" color="gray.600">Last action</Text>
+                                  <Badge colorScheme={operatorLastActionResult.success ? 'green' : 'red'}>
+                                    {operatorLastActionResult.action}
+                                  </Badge>
+                                </HStack>
+                                <Text fontSize="xs">{operatorLastActionResult.summary}</Text>
+                                <Text fontSize="xs" color="gray.500">
+                                  Started {new Date(operatorLastActionResult.startedAt).toLocaleString()} · Finished {new Date(operatorLastActionResult.finishedAt).toLocaleString()}
+                                </Text>
+                                <Text id="sending-console-backend-truth-refresh" data-testid="sending-console-backend-truth-refresh" fontSize="xs" color="gray.500">
+                                  Backend truth refresh: {operatorLastActionResult.refreshedAt ? new Date(operatorLastActionResult.refreshedAt).toLocaleString() : 'not completed'}
+                                </Text>
+                              </VStack>
+                            )}
+                          </CardBody>
+                        </Card>
                       </VStack>
                     </CardBody>
                   </Card>

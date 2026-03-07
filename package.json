@@ -99,6 +99,7 @@
     "test:deploy-reliability-runtime": "node scripts/self-test-deploy-reliability-runtime.mjs",
     "test:marketing-data-health-runtime": "node scripts/self-test-marketing-data-health-runtime.mjs",
     "test:sequence-readiness-runtime": "node scripts/self-test-sequence-readiness-runtime.mjs",
+    "test:live-outreach-execution-runtime": "node scripts/self-test-live-outreach-execution-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
