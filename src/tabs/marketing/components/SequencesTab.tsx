@@ -436,8 +436,62 @@ const SequencesTab: React.FC = () => {
     dependencies?: {
       leadSources?: { configuredCount?: number; total?: number; erroredCount?: number }
       suppression?: { configuredCount?: number; erroredCount?: number; emailEntries?: number; domainEntries?: number }
+      identityCapacity?: {
+        summary?: {
+          total?: number
+          usable?: number
+          unavailable?: number
+          risky?: number
+          preferredIdentityId?: string | null
+          preferredIdentityState?: string | null
+          recommendedIdentityId?: string | null
+        }
+      }
       liveGates?: { scheduledEngineMode?: string; manualLiveTickAllowed?: boolean; manualLiveTickReason?: string | null; activeIdentityCount?: number; dueNowCount?: number; cron?: string }
       recent?: { windowHours?: number; counts?: Record<string, number> }
+    }
+    lastUpdatedAt?: string
+  }
+  type IdentityCapacityRow = {
+    identityId: string
+    email: string
+    label?: string | null
+    provider: string
+    isActive: boolean
+    state: 'usable' | 'unavailable' | 'risky'
+    reasons: string[]
+    recent: {
+      windowHours: number
+      sent: number
+      sendFailed: number
+      wouldSend: number
+      skipped: number
+    }
+    queuePressure?: {
+      queuedNow?: number
+    }
+    guardrails?: {
+      dailySendLimit?: number | null
+      sendWindowTimeZone?: string | null
+      sendWindowHoursStart?: number | null
+      sendWindowHoursEnd?: number | null
+    }
+  }
+  type IdentityCapacityData = {
+    sinceHours: number
+    summary: {
+      total: number
+      usable: number
+      unavailable: number
+      risky: number
+      preferredIdentityId?: string | null
+      preferredIdentityState?: string | null
+      recommendedIdentityId?: string | null
+    }
+    rows: IdentityCapacityRow[]
+    guardrails?: {
+      warnings?: string[]
+      liveGateReasons?: string[]
     }
     lastUpdatedAt?: string
   }
@@ -627,6 +681,9 @@ const SequencesTab: React.FC = () => {
   const [runHistoryLoading, setRunHistoryLoading] = useState(false)
   const [runHistoryError, setRunHistoryError] = useState<string | null>(null)
   const [runHistoryOutcomeFilter, setRunHistoryOutcomeFilter] = useState<string>('all')
+  const [identityCapacityData, setIdentityCapacityData] = useState<IdentityCapacityData | null>(null)
+  const [identityCapacityLoading, setIdentityCapacityLoading] = useState(false)
+  const [identityCapacityError, setIdentityCapacityError] = useState<string | null>(null)
   const [opsReportingData, setOpsReportingData] = useState<MarketingOpsReportingData | null>(null)
   const [opsReportingLoading, setOpsReportingLoading] = useState(false)
   const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
@@ -853,6 +910,28 @@ const SequencesTab: React.FC = () => {
     setRunHistoryError(null)
   }
 
+  const loadIdentityCapacity = async (opts?: { silent?: boolean }) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!opts?.silent) setIdentityCapacityLoading(true)
+    setIdentityCapacityError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/identity-capacity?sinceHours=${hours}`
+    const res = await api.get<IdentityCapacityData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setIdentityCapacityLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setIdentityCapacityError('Select a client.')
+      else if (status === 401 || status === 403) setIdentityCapacityError(`Not authorized (${status}).`)
+      else setIdentityCapacityError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setIdentityCapacityData(null)
+      return
+    }
+    setIdentityCapacityData(res.data ?? null)
+    setIdentityCapacityError(null)
+  }
+
   const loadOpsReporting = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!opts?.silent) setOpsReportingLoading(true)
@@ -1017,6 +1096,7 @@ const SequencesTab: React.FC = () => {
 
   const refreshControlLoopTruth = async (opts?: { silent?: boolean }) => {
     await loadOperatorConsole(opts)
+    await loadIdentityCapacity({ silent: true })
     if (sequenceReadinessSequenceId.trim()) {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
       await loadSequencePreflight(sequenceReadinessSequenceId, { silent: true })
@@ -1309,6 +1389,8 @@ const SequencesTab: React.FC = () => {
       setLaunchPreviewError(null)
       setRunHistoryData(null)
       setRunHistoryError(null)
+      setIdentityCapacityData(null)
+      setIdentityCapacityError(null)
       setOpsReportingData(null)
       setOpsReportingError(null)
       setQueueWorkbenchData(null)
@@ -3311,6 +3393,17 @@ const SequencesTab: React.FC = () => {
                                     Dry-run: {sequencePreflightData.actions?.canDryRun ? 'ready' : 'blocked'} · Live canary: {sequencePreflightData.actions?.canLiveCanary ? 'ready' : 'blocked'}
                                     {sequencePreflightData.actions?.liveCanaryReason ? ` (${sequencePreflightData.actions.liveCanaryReason})` : ''}
                                   </Text>
+                                  <Text
+                                    id="sequence-preflight-identity-guardrail"
+                                    data-testid="sequence-preflight-identity-guardrail"
+                                    fontSize="xs"
+                                    color="gray.500"
+                                  >
+                                    Identity guardrails: usable={sequencePreflightData.dependencies?.identityCapacity?.summary?.usable ?? 0}
+                                    {' '}risky={sequencePreflightData.dependencies?.identityCapacity?.summary?.risky ?? 0}
+                                    {' '}unavailable={sequencePreflightData.dependencies?.identityCapacity?.summary?.unavailable ?? 0}
+                                    {' '}preferredState={sequencePreflightData.dependencies?.identityCapacity?.summary?.preferredIdentityState ?? 'n/a'}
+                                  </Text>
                                   <HStack spacing={2}>
                                     <Button
                                       size="xs"
@@ -3346,6 +3439,114 @@ const SequencesTab: React.FC = () => {
                             </Card>
                             <Text id="sequence-preflight-last-updated" data-testid="sequence-preflight-last-updated" fontSize="xs" color="gray.500">
                               Last updated: {sequencePreflightData.lastUpdatedAt ? new Date(sequencePreflightData.lastUpdatedAt).toLocaleString() : '—'}
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="identity-capacity-panel" data-testid="identity-capacity-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Identity Capacity & Sending Guardrails</Text>
+                          <Button
+                            id="identity-capacity-refresh-btn"
+                            data-testid="identity-capacity-refresh-btn"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadIdentityCapacity()}
+                            isLoading={identityCapacityLoading}
+                          >
+                            Refresh Identity Capacity
+                          </Button>
+                        </Flex>
+
+                        {identityCapacityError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{identityCapacityError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!identityCapacityError && identityCapacityData && (
+                          <>
+                            <SimpleGrid id="identity-capacity-summary" data-testid="identity-capacity-summary" columns={{ base: 2, md: 5 }} spacing={2}>
+                              <Card><CardBody py={2}><Stat><StatLabel>Total identities</StatLabel><StatNumber>{identityCapacityData.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Usable</StatLabel><StatNumber color="green.600">{identityCapacityData.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Unavailable</StatLabel><StatNumber color="gray.600">{identityCapacityData.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Risky</StatLabel><StatNumber color="orange.600">{identityCapacityData.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="sm">{identityCapacityData.summary.recommendedIdentityId ? '1' : '0'}</StatNumber><StatHelpText>{identityCapacityData.summary.recommendedIdentityId || 'none'}</StatHelpText></Stat></CardBody></Card>
+                            </SimpleGrid>
+
+                            {(identityCapacityData.guardrails?.warnings || []).length > 0 && (
+                              <Alert id="identity-capacity-guardrails" data-testid="identity-capacity-guardrails" status="warning" size="sm">
+                                <AlertIcon />
+                                <AlertDescription>
+                                  {(identityCapacityData.guardrails?.warnings || []).join(' | ')}
+                                </AlertDescription>
+                              </Alert>
+                            )}
+
+                            <Box id="identity-capacity-rows" data-testid="identity-capacity-rows" overflowX="auto">
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Identity</Th>
+                                    <Th>Provider</Th>
+                                    <Th>State</Th>
+                                    <Th>Recent outcomes</Th>
+                                    <Th>Queue pressure</Th>
+                                    <Th>Guardrails</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {(identityCapacityData.rows || []).length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={6} color="gray.500">No identities found for this client.</Td>
+                                    </Tr>
+                                  ) : (identityCapacityData.rows || []).map((row) => (
+                                    <Tr key={row.identityId}>
+                                      <Td fontSize="xs">
+                                        <Text>{row.label || row.email}</Text>
+                                        <Text color="gray.500">{row.email}</Text>
+                                        {row.identityId === identityCapacityData.summary.preferredIdentityId ? (
+                                          <Badge size="sm" colorScheme="blue" mt={1}>Preferred for selected sequence</Badge>
+                                        ) : null}
+                                        {row.identityId === identityCapacityData.summary.recommendedIdentityId ? (
+                                          <Badge size="sm" colorScheme="green" mt={1} ml={1}>Recommended now</Badge>
+                                        ) : null}
+                                      </Td>
+                                      <Td fontSize="xs">{row.provider}</Td>
+                                      <Td>
+                                        <Badge
+                                          id="identity-capacity-state-badge"
+                                          data-testid="identity-capacity-state-badge"
+                                          colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'gray'}
+                                        >
+                                          {row.state}
+                                        </Badge>
+                                        {!row.isActive ? <Text fontSize="xs" color="gray.500">inactive</Text> : null}
+                                        {(row.reasons || []).length > 0 ? <Text fontSize="xs" color="gray.500">{row.reasons.join(', ')}</Text> : null}
+                                      </Td>
+                                      <Td fontSize="xs">
+                                        sent={row.recent?.sent ?? 0} failed={row.recent?.sendFailed ?? 0} would_send={row.recent?.wouldSend ?? 0}
+                                      </Td>
+                                      <Td fontSize="xs">queuedNow={row.queuePressure?.queuedNow ?? 0}</Td>
+                                      <Td fontSize="xs">
+                                        {row.guardrails?.dailySendLimit ? `dailyCap=${row.guardrails.dailySendLimit}` : 'dailyCap=—'}
+                                        <br />
+                                        {row.guardrails?.sendWindowTimeZone ? `${row.guardrails.sendWindowTimeZone} ${row.guardrails.sendWindowHoursStart ?? '—'}-${row.guardrails.sendWindowHoursEnd ?? '—'}` : 'window=—'}
+                                      </Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+
+                            <Text id="identity-capacity-last-updated" data-testid="identity-capacity-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {identityCapacityData.lastUpdatedAt ? new Date(identityCapacityData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/identity-capacity
                             </Text>
                           </>
                         )}
