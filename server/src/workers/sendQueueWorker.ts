@@ -7,8 +7,7 @@
  */
 import cron from 'node-cron'
 import os from 'node:os'
-import { PrismaClient } from '@prisma/client'
-import { OutboundSendAttemptDecision, OutboundSendQueueStatus } from '@prisma/client'
+import { OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
@@ -335,12 +334,14 @@ export async function processOne(
     await requeueAfterSendFailure(prisma, item.id, 'no_sender_identity')
     return 'requeued'
   }
+  const recipientEmailNorm = String(recipientEmail || '').trim().toLowerCase()
+  const identityEmailNorm = String(identity.emailAddress || '').trim().toLowerCase()
 
   const firstOutbound = await prisma.emailMessageMetadata.findFirst({
     where: {
       senderIdentityId: identity.id,
       direction: 'outbound',
-      toAddress: { equals: recipientEmail, mode: 'insensitive' },
+      toAddress: { equals: recipientEmailNorm, mode: 'insensitive' },
     },
     orderBy: { createdAt: 'asc' },
     select: { createdAt: true },
@@ -350,8 +351,8 @@ export async function processOne(
       where: {
         senderIdentityId: identity.id,
         direction: 'inbound',
-        fromAddress: { equals: recipientEmail, mode: 'insensitive' },
-        toAddress: { equals: identity.emailAddress, mode: 'insensitive' },
+        fromAddress: { equals: recipientEmailNorm, mode: 'insensitive' },
+        toAddress: { equals: identityEmailNorm, mode: 'insensitive' },
         createdAt: { gte: firstOutbound.createdAt },
       },
     })
@@ -375,7 +376,8 @@ export async function processOne(
           reason: 'SKIP_REPLIED_STOP',
           snapshot: {
             enrollmentId,
-            recipientEmail,
+            recipientEmailNorm,
+            identityEmailNorm,
             stepIndex,
             identityId: identity.id,
             replyCount,
