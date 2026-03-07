@@ -589,6 +589,38 @@ const SequencesTab: React.FC = () => {
     rows: RunHistoryRow[]
     lastUpdatedAt?: string
   }
+  type PreviewVsOutcomeMatchRow = {
+    matchKind: 'queue_item_id' | 'recipient_enrollment'
+    preview: LaunchPreviewRow
+    outcome: RunHistoryRow
+    differs: {
+      outcome: boolean
+      reason: boolean
+      identity: boolean
+    }
+  }
+  type PreviewVsOutcomeData = {
+    sequenceId: string
+    sequenceName?: string | null
+    sinceHours: number
+    batchLimit: number
+    outcomeLimit: number
+    summary: {
+      previewCandidates: number
+      outcomeRows: number
+      matchedRows: number
+      previewOnlyRows: number
+      outcomeOnlyRows: number
+      matchByQueueItemId: number
+      matchByRecipientEnrollment: number
+    }
+    previewRows: LaunchPreviewRow[]
+    outcomeRows: RunHistoryRow[]
+    matchedRows: PreviewVsOutcomeMatchRow[]
+    previewOnlyRows: LaunchPreviewRow[]
+    outcomeOnlyRows: RunHistoryRow[]
+    lastUpdatedAt?: string
+  }
   type OutreachReportRow = {
     sequenceId?: string
     sequenceName?: string
@@ -681,6 +713,9 @@ const SequencesTab: React.FC = () => {
   const [runHistoryLoading, setRunHistoryLoading] = useState(false)
   const [runHistoryError, setRunHistoryError] = useState<string | null>(null)
   const [runHistoryOutcomeFilter, setRunHistoryOutcomeFilter] = useState<string>('all')
+  const [previewVsOutcomeData, setPreviewVsOutcomeData] = useState<PreviewVsOutcomeData | null>(null)
+  const [previewVsOutcomeLoading, setPreviewVsOutcomeLoading] = useState(false)
+  const [previewVsOutcomeError, setPreviewVsOutcomeError] = useState<string | null>(null)
   const [identityCapacityData, setIdentityCapacityData] = useState<IdentityCapacityData | null>(null)
   const [identityCapacityLoading, setIdentityCapacityLoading] = useState(false)
   const [identityCapacityError, setIdentityCapacityError] = useState<string | null>(null)
@@ -910,6 +945,36 @@ const SequencesTab: React.FC = () => {
     setRunHistoryError(null)
   }
 
+  const loadPreviewVsOutcome = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_') || !chosenSequenceId) {
+      if (!chosenSequenceId) {
+        setPreviewVsOutcomeData(null)
+        setPreviewVsOutcomeError(null)
+      }
+      return
+    }
+    if (!opts?.silent) setPreviewVsOutcomeLoading(true)
+    setPreviewVsOutcomeError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/preview-vs-outcome?sequenceId=${encodeURIComponent(chosenSequenceId)}&sinceHours=${hours}&batchLimit=15&outcomeLimit=80`
+    const res = await api.get<PreviewVsOutcomeData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setPreviewVsOutcomeLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setPreviewVsOutcomeError('Choose a sequence first.')
+      else if (status === 401 || status === 403) setPreviewVsOutcomeError(`Not authorized (${status}).`)
+      else if (status === 404) setPreviewVsOutcomeError('Sequence not found for this client.')
+      else setPreviewVsOutcomeError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setPreviewVsOutcomeData(null)
+      return
+    }
+    setPreviewVsOutcomeData(res.data ?? null)
+    setPreviewVsOutcomeError(null)
+  }
+
   const loadIdentityCapacity = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!opts?.silent) setIdentityCapacityLoading(true)
@@ -1102,8 +1167,13 @@ const SequencesTab: React.FC = () => {
       await loadSequencePreflight(sequenceReadinessSequenceId, { silent: true })
       await loadLaunchPreview(sequenceReadinessSequenceId, { silent: true })
       await loadRunHistory(sequenceReadinessSequenceId, { silent: true })
+      await loadPreviewVsOutcome(sequenceReadinessSequenceId, { silent: true })
     }
-    if (!sequenceReadinessSequenceId.trim()) await loadRunHistory('', { silent: true })
+    if (!sequenceReadinessSequenceId.trim()) {
+      await loadRunHistory('', { silent: true })
+      setPreviewVsOutcomeData(null)
+      setPreviewVsOutcomeError(null)
+    }
     await loadOpsReporting({ silent: true })
     await loadQueueWorkbench({ silent: true })
     loadAuditSummary()
@@ -1389,6 +1459,8 @@ const SequencesTab: React.FC = () => {
       setLaunchPreviewError(null)
       setRunHistoryData(null)
       setRunHistoryError(null)
+      setPreviewVsOutcomeData(null)
+      setPreviewVsOutcomeError(null)
       setIdentityCapacityData(null)
       setIdentityCapacityError(null)
       setOpsReportingData(null)
@@ -2220,6 +2292,14 @@ const SequencesTab: React.FC = () => {
       setSequenceReadinessSequenceId('')
       setSequenceReadinessData(null)
       setSequenceReadinessError(null)
+      setSequencePreflightData(null)
+      setSequencePreflightError(null)
+      setLaunchPreviewData(null)
+      setLaunchPreviewError(null)
+      setRunHistoryData(null)
+      setRunHistoryError(null)
+      setPreviewVsOutcomeData(null)
+      setPreviewVsOutcomeError(null)
     }
   }, [readinessSequenceOptions, sequenceReadinessSequenceId])
 
@@ -3574,6 +3654,7 @@ const SequencesTab: React.FC = () => {
                                   loadSequencePreflight(nextId)
                                   loadLaunchPreview(nextId)
                                   loadRunHistory(nextId)
+                                  loadPreviewVsOutcome(nextId)
                                 }
                                 else {
                                   setSequenceReadinessData(null)
@@ -3583,6 +3664,8 @@ const SequencesTab: React.FC = () => {
                                   setLaunchPreviewData(null)
                                   setLaunchPreviewError(null)
                                   loadRunHistory('')
+                                  setPreviewVsOutcomeData(null)
+                                  setPreviewVsOutcomeError(null)
                                 }
                               }}
                             >
@@ -3599,8 +3682,9 @@ const SequencesTab: React.FC = () => {
                               loadSequencePreflight()
                               loadLaunchPreview()
                               loadRunHistory()
+                              loadPreviewVsOutcome()
                             }}
-                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading}
+                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading || previewVsOutcomeLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
                             Refresh Launch Data
@@ -3758,7 +3842,7 @@ const SequencesTab: React.FC = () => {
                                         <Text noOfLines={2}>{row.subjectPreview || '—'}</Text>
                                       </Td>
                                       <Td>
-                                        <HStack spacing={1}>
+                                        <HStack id="preview-vs-outcome-detail-wiring" data-testid="preview-vs-outcome-detail-wiring" spacing={1}>
                                           <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>Queue</Button>
                                           <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
                                           <Button size="xs" leftIcon={<EmailIcon />} isDisabled={!row.queueItemId} onClick={() => void previewQueueItemRender(row.queueItemId)}>Render</Button>
@@ -4000,6 +4084,176 @@ const SequencesTab: React.FC = () => {
 
                             <Text id="run-history-last-updated" data-testid="run-history-last-updated" fontSize="xs" color="gray.500">
                               Last updated: {runHistoryData.lastUpdatedAt ? new Date(runHistoryData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/run-history
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="preview-vs-outcome-panel" data-testid="preview-vs-outcome-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Preview vs Outcome Comparison</Text>
+                          <Button
+                            id="preview-vs-outcome-refresh-btn"
+                            data-testid="preview-vs-outcome-refresh-btn"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadPreviewVsOutcome()}
+                            isLoading={previewVsOutcomeLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh Comparison
+                          </Button>
+                        </Flex>
+
+                        {previewVsOutcomeError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{previewVsOutcomeError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!previewVsOutcomeError && previewVsOutcomeData && (
+                          <>
+                            <SimpleGrid id="preview-vs-outcome-summary-cards" data-testid="preview-vs-outcome-summary-cards" columns={{ base: 2, md: 4, lg: 7 }} spacing={2}>
+                              <Card><CardBody py={2}><Stat><StatLabel>Preview candidates</StatLabel><StatNumber>{previewVsOutcomeData.summary.previewCandidates ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Outcome rows</StatLabel><StatNumber>{previewVsOutcomeData.summary.outcomeRows ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Matched</StatLabel><StatNumber color="green.600">{previewVsOutcomeData.summary.matchedRows ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Preview-only</StatLabel><StatNumber color="orange.600">{previewVsOutcomeData.summary.previewOnlyRows ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Outcome-only</StatLabel><StatNumber color="purple.600">{previewVsOutcomeData.summary.outcomeOnlyRows ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Match by itemId</StatLabel><StatNumber>{previewVsOutcomeData.summary.matchByQueueItemId ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Match by recipient</StatLabel><StatNumber>{previewVsOutcomeData.summary.matchByRecipientEnrollment ?? 0}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+
+                            <Box id="preview-vs-outcome-matched-rows" data-testid="preview-vs-outcome-matched-rows" overflowX="auto">
+                              <Text fontSize="sm" fontWeight="semibold" mb={2}>Matched rows ({previewVsOutcomeData.matchedRows.length})</Text>
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>Recipient</Th>
+                                    <Th>Preview reason</Th>
+                                    <Th>Actual outcome</Th>
+                                    <Th>Match type</Th>
+                                    <Th>Diff flags</Th>
+                                    <Th>Actions</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {previewVsOutcomeData.matchedRows.length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={6} color="gray.500">No matched rows in current window.</Td>
+                                    </Tr>
+                                  ) : previewVsOutcomeData.matchedRows.map((row) => (
+                                    <Tr key={`pvo-match-${row.outcome.auditId}`}>
+                                      <Td fontSize="xs">{maskEmail(row.preview.recipientEmail)}</Td>
+                                      <Td fontSize="xs">{row.preview.reason || 'eligible_now'}</Td>
+                                      <Td fontSize="xs">
+                                        <VStack align="start" spacing={0}>
+                                          <Badge size="sm" variant="outline">{row.outcome.outcome}</Badge>
+                                          <Text color="gray.500">{row.outcome.reason || row.outcome.lastError || '—'}</Text>
+                                        </VStack>
+                                      </Td>
+                                      <Td fontSize="xs">
+                                        <Badge variant="subtle">{row.matchKind}</Badge>
+                                      </Td>
+                                      <Td fontSize="xs">
+                                        <HStack spacing={1} flexWrap="wrap">
+                                          {row.differs.outcome ? <Badge colorScheme="orange">outcome</Badge> : <Badge colorScheme="green">outcome ok</Badge>}
+                                          {row.differs.reason ? <Badge colorScheme="orange">reason</Badge> : <Badge colorScheme="green">reason ok</Badge>}
+                                          {row.differs.identity ? <Badge colorScheme="orange">identity</Badge> : <Badge colorScheme="green">identity ok</Badge>}
+                                        </HStack>
+                                      </Td>
+                                      <Td>
+                                        <HStack spacing={1}>
+                                          <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.preview.enrollmentId)}>Queue</Button>
+                                          <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.preview.queueItemId)}>Audit</Button>
+                                          <Button size="xs" leftIcon={<EmailIcon />} onClick={() => void previewQueueItemRender(row.preview.queueItemId)}>Render</Button>
+                                        </HStack>
+                                      </Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+
+                            <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
+                              <Box id="preview-vs-outcome-preview-only" data-testid="preview-vs-outcome-preview-only" overflowX="auto">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Preview-only rows ({previewVsOutcomeData.previewOnlyRows.length})</Text>
+                                <Table size="sm">
+                                  <Thead>
+                                    <Tr>
+                                      <Th>Recipient</Th>
+                                      <Th>Reason</Th>
+                                      <Th>Scheduled</Th>
+                                      <Th>Actions</Th>
+                                    </Tr>
+                                  </Thead>
+                                  <Tbody>
+                                    {previewVsOutcomeData.previewOnlyRows.length === 0 ? (
+                                      <Tr>
+                                        <Td colSpan={4} color="gray.500">No preview-only rows.</Td>
+                                      </Tr>
+                                    ) : previewVsOutcomeData.previewOnlyRows.map((row) => (
+                                      <Tr key={`pvo-preview-only-${row.queueItemId}`}>
+                                        <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                        <Td fontSize="xs">{row.reason || 'eligible_now'}</Td>
+                                        <Td fontSize="xs">{row.scheduledFor ? new Date(row.scheduledFor).toLocaleString() : 'now'}</Td>
+                                        <Td>
+                                          <HStack spacing={1}>
+                                            <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>Queue</Button>
+                                            <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
+                                          </HStack>
+                                        </Td>
+                                      </Tr>
+                                    ))}
+                                  </Tbody>
+                                </Table>
+                              </Box>
+
+                              <Box id="preview-vs-outcome-outcome-only" data-testid="preview-vs-outcome-outcome-only" overflowX="auto">
+                                <Text fontSize="sm" fontWeight="semibold" mb={2}>Outcome-only rows ({previewVsOutcomeData.outcomeOnlyRows.length})</Text>
+                                <Table size="sm">
+                                  <Thead>
+                                    <Tr>
+                                      <Th>Occurred</Th>
+                                      <Th>Recipient</Th>
+                                      <Th>Outcome</Th>
+                                      <Th>Reason</Th>
+                                      <Th>Actions</Th>
+                                    </Tr>
+                                  </Thead>
+                                  <Tbody>
+                                    {previewVsOutcomeData.outcomeOnlyRows.length === 0 ? (
+                                      <Tr>
+                                        <Td colSpan={5} color="gray.500">No outcome-only rows.</Td>
+                                      </Tr>
+                                    ) : previewVsOutcomeData.outcomeOnlyRows.map((row) => (
+                                      <Tr key={`pvo-outcome-only-${row.auditId}`}>
+                                        <Td fontSize="xs">{row.occurredAt ? new Date(row.occurredAt).toLocaleString() : '—'}</Td>
+                                        <Td fontSize="xs">{row.recipientEmail ? maskEmail(row.recipientEmail) : '—'}</Td>
+                                        <Td fontSize="xs">
+                                          <Badge size="sm" variant="outline">{row.outcome}</Badge>
+                                        </Td>
+                                        <Td fontSize="xs">{row.reason || row.lastError || '—'}</Td>
+                                        <Td>
+                                          <HStack spacing={1}>
+                                            <Button size="xs" variant="ghost" isDisabled={!row.enrollmentId} onClick={() => row.enrollmentId && openQueueModal(row.enrollmentId)}>Queue</Button>
+                                            <Button size="xs" variant="ghost" isDisabled={!row.queueItemId} onClick={() => row.queueItemId && openAuditPanelForQueueItem(row.queueItemId)}>Audit</Button>
+                                            <Button size="xs" leftIcon={<EmailIcon />} isDisabled={!row.queueItemId} onClick={() => row.queueItemId && void previewQueueItemRender(row.queueItemId)}>Render</Button>
+                                          </HStack>
+                                        </Td>
+                                      </Tr>
+                                    ))}
+                                  </Tbody>
+                                </Table>
+                              </Box>
+                            </SimpleGrid>
+
+                            <Text id="preview-vs-outcome-last-updated" data-testid="preview-vs-outcome-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {previewVsOutcomeData.lastUpdatedAt ? new Date(previewVsOutcomeData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/preview-vs-outcome
                             </Text>
                           </>
                         )}
