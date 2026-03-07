@@ -108,12 +108,12 @@ function SourcesOverview({
   onPoll: (sourceType: LeadSourceType) => void
 }) {
   return (
-    <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
+    <SimpleGrid id="lead-sources-overview-grid" data-testid="lead-sources-overview-grid" columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
       {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
         const src = sources.find((s) => s.sourceType === sourceType)
         const connected = !!src?.connected
         return (
-          <Card key={sourceType}>
+          <Card key={sourceType} id="lead-sources-source-card" data-testid="lead-sources-source-card">
             <CardHeader>
               <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
                 <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
@@ -144,6 +144,8 @@ function SourcesOverview({
               )}
               <VStack align="stretch" spacing={2}>
                 <Button
+                  id="lead-sources-view-batches-btn"
+                  data-testid="lead-sources-view-batches-btn"
                   size="sm"
                   leftIcon={<ViewIcon />}
                   isDisabled={!connected}
@@ -153,6 +155,8 @@ function SourcesOverview({
                 </Button>
                 {connected && (
                   <Link
+                    id="lead-sources-open-sheet-link"
+                    data-testid="lead-sources-open-sheet-link"
                     href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
                     isExternal
                     _hover={{ textDecoration: 'none' }}
@@ -162,11 +166,25 @@ function SourcesOverview({
                     </Button>
                   </Link>
                 )}
-                <Button size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => onOpenConnect(sourceType)}>
+                <Button
+                  id="lead-sources-connect-btn"
+                  data-testid="lead-sources-connect-btn"
+                  size="sm"
+                  leftIcon={<AddIcon />}
+                  variant="outline"
+                  onClick={() => onOpenConnect(sourceType)}
+                >
                   Connect
                 </Button>
                 {connected && (
-                  <Button size="sm" leftIcon={<RepeatIcon />} variant="ghost" onClick={() => onPoll(sourceType)}>
+                  <Button
+                    id="lead-sources-poll-now-btn"
+                    data-testid="lead-sources-poll-now-btn"
+                    size="sm"
+                    leftIcon={<RepeatIcon />}
+                    variant="ghost"
+                    onClick={() => onPoll(sourceType)}
+                  >
                     Poll now
                   </Button>
                 )}
@@ -202,7 +220,7 @@ function BatchesBlock({
 }) {
   const safeBatches = asArray<LeadSourceBatch>(batches)
   return (
-    <Box mt={6}>
+    <Box mt={6} id="lead-sources-batches-panel" data-testid="lead-sources-batches-panel">
       <Flex justify="space-between" align="center" mb={3}>
         <Heading size="md">Batches — {sourceLabel}</Heading>
         <HStack>
@@ -230,7 +248,7 @@ function BatchesBlock({
               No batches for selected date; showing most recent batches.
             </Text>
           )}
-          <Box overflowX="auto" borderWidth="1px" borderRadius="md">
+          <Box id="lead-sources-batches-table" data-testid="lead-sources-batches-table" overflowX="auto" borderWidth="1px" borderRadius="md">
             <Table size="sm">
               <Thead>
                 <Tr>
@@ -330,7 +348,7 @@ function ContactsBlock({
   const cols = visibleCols.length ? visibleCols : normalizedColumns
   const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
   return (
-    <Card overflow="visible">
+    <Card id="lead-sources-contacts-panel" data-testid="lead-sources-contacts-panel" overflow="visible">
       <CardHeader>
         <Flex justify="space-between" align="center">
           <Heading size="md">Contacts — {sourceLabel}</Heading>
@@ -345,6 +363,8 @@ function ContactsBlock({
         ) : (
           <>
             <TableContainer
+              id="lead-sources-contacts-table"
+              data-testid="lead-sources-contacts-table"
               w="100%"
               overflowX="auto"
               overflowY="auto"
@@ -455,7 +475,6 @@ export default function LeadSourcesTabNew({
       setCustomers(list.map((c) => ({ id: c.id, name: c.name })))
       const current = getCurrentCustomerId()
       if (current && list.some((c: { id: string }) => c.id === current)) setCustomerId(current)
-      else if (list.length) setCustomerId(list[0].id)
     } catch {
       setCustomers([])
     }
@@ -544,7 +563,7 @@ export default function LeadSourcesTabNew({
         }
         setContacts(asArray<Record<string, string>>(data?.contacts))
         setContactsColumns(asArray<string>(data?.columns))
-        setContactsTotal(Number(data?.total) ?? 0)
+        setContactsTotal(Number(data?.total ?? 0))
       } catch {
         if (!opts?.keepPrevious) {
           setContacts([])
@@ -637,7 +656,7 @@ export default function LeadSourcesTabNew({
   const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
 
   return (
-    <Box p={4}>
+    <Box p={4} id="lead-sources-tab-panel" data-testid="lead-sources-tab-panel">
       <VStack align="stretch" spacing={6}>
         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
           <Box>
@@ -649,6 +668,8 @@ export default function LeadSourcesTabNew({
             )}
           </Box>
           <Select
+            id="lead-sources-customer-select"
+            data-testid="lead-sources-customer-select"
             maxW="280px"
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
@@ -663,7 +684,7 @@ export default function LeadSourcesTabNew({
         </Flex>
 
         {!customerId ? (
-          <Card>
+          <Card id="lead-sources-no-customer-state" data-testid="lead-sources-no-customer-state">
             <CardBody>
               <VStack py={8} spacing={2}>
                 <Text color="gray.600" fontSize="md">
@@ -677,13 +698,19 @@ export default function LeadSourcesTabNew({
           </Card>
         ) : (
           <>
+            <Alert id="lead-sources-sheet-truth-banner" data-testid="lead-sources-sheet-truth-banner" status="info">
+              <AlertIcon />
+              <AlertDescription fontSize="sm">
+                Lead Sources are Google Sheets-linked. The linked sheet remains the source of truth for this tab.
+              </AlertDescription>
+            </Alert>
             {loading && (
               <Flex justify="center" py={8}>
                 <Spinner size="lg" />
               </Flex>
             )}
             {error && (
-              <Alert status="error">
+              <Alert id="lead-sources-error-state" data-testid="lead-sources-error-state" status="error">
                 <AlertIcon />
                 <AlertTitle>Error</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
