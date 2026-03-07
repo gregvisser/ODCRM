@@ -88,6 +88,7 @@
     "test:identities-email-runtime": "node scripts/self-test-identities-email-runtime.mjs",
     "test:sending-engine-status-runtime": "node scripts/self-test-sending-engine-status-runtime.mjs",
     "test:reply-stop-runtime": "node scripts/self-test-reply-stop-runtime.mjs",
+    "test:reply-stop-propagation-runtime": "node scripts/self-test-reply-stop-propagation-runtime.mjs",
     "test:schedules-emails-runtime": "node scripts/self-test-schedules-emails-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },

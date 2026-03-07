@@ -188,6 +188,74 @@ async function unlockItem(
   })
 }
 
+async function propagateReplyStopToSiblingQueuedItems(
+  prisma: PrismaClient,
+  args: {
+    customerId: string
+    enrollmentId: string
+    currentQueueItemId: string
+    recipientEmailNorm: string
+    identityEmailNorm: string
+    identityId: string
+    replyCount: number
+    firstOutboundAt: Date
+  }
+): Promise<{ siblingQueuedCount: number; siblingAuditsCreated: number }> {
+  const siblingItems = await prisma.outboundSendQueueItem.findMany({
+    where: {
+      customerId: args.customerId,
+      enrollmentId: args.enrollmentId,
+      status: OutboundSendQueueStatus.QUEUED,
+      id: { not: args.currentQueueItemId },
+      recipientEmail: { equals: args.recipientEmailNorm, mode: 'insensitive' },
+    },
+    select: { id: true, stepIndex: true, recipientEmail: true },
+  })
+  if (siblingItems.length === 0) return { siblingQueuedCount: 0, siblingAuditsCreated: 0 }
+
+  const siblingIds = siblingItems.map((row) => row.id)
+  await prisma.outboundSendQueueItem.updateMany({
+    where: {
+      id: { in: siblingIds },
+      customerId: args.customerId,
+      enrollmentId: args.enrollmentId,
+      status: OutboundSendQueueStatus.QUEUED,
+    },
+    data: {
+      status: OutboundSendQueueStatus.SKIPPED,
+      lockedAt: null,
+      lockedBy: null,
+      lastError: 'replied_stop',
+    },
+  })
+
+  let siblingAuditsCreated = 0
+  for (const sibling of siblingItems) {
+    await prisma.outboundSendAttemptAudit.create({
+      data: {
+        customerId: args.customerId,
+        queueItemId: sibling.id,
+        decision: OutboundSendAttemptDecision.SKIP_INVALID,
+        reason: 'SKIP_REPLIED_STOP',
+        snapshot: {
+          enrollmentId: args.enrollmentId,
+          recipientEmailNorm: args.recipientEmailNorm,
+          identityEmailNorm: args.identityEmailNorm,
+          stepIndex: sibling.stepIndex,
+          identityId: args.identityId,
+          replyCount: args.replyCount,
+          firstOutboundAt: args.firstOutboundAt.toISOString(),
+          propagatedFromQueueItemId: args.currentQueueItemId,
+          propagated: true,
+        },
+      },
+    })
+    siblingAuditsCreated += 1
+  }
+
+  return { siblingQueuedCount: siblingItems.length, siblingAuditsCreated }
+}
+
 /** Options for processOne (Stage 1G: ignoreWindow only from tick when env gate set). */
 export type ProcessOneOptions = { ignoreWindow?: boolean }
 export type ProcessOneResult = 'sent' | 'requeued' | 'skipped' | 'failed_terminal'
@@ -385,6 +453,17 @@ export async function processOne(
       },
     })
     if (replyCount > 0) {
+      const propagation = await propagateReplyStopToSiblingQueuedItems(prisma, {
+        customerId,
+        enrollmentId,
+        currentQueueItemId: item.id,
+        recipientEmailNorm,
+        identityEmailNorm,
+        identityId: identity.id,
+        replyCount,
+        firstOutboundAt: firstOutbound.createdAt,
+      })
+
       await prisma.enrollmentAuditEvent.create({
         data: {
           customerId,
@@ -392,7 +471,14 @@ export async function processOne(
           recipientEmail,
           eventType: 'send_skipped',
           message: 'reply_stop',
-          meta: { reason: 'SKIP_REPLIED_STOP', stepIndex, identityId: identity.id, replyCount },
+          meta: {
+            reason: 'SKIP_REPLIED_STOP',
+            stepIndex,
+            identityId: identity.id,
+            replyCount,
+            siblingQueuedStoppedCount: propagation.siblingQueuedCount,
+            siblingAuditsCreated: propagation.siblingAuditsCreated,
+          },
         },
       })
       await prisma.outboundSendAttemptAudit.create({
@@ -409,6 +495,8 @@ export async function processOne(
             stepIndex,
             identityId: identity.id,
             replyCount,
+            siblingQueuedStoppedCount: propagation.siblingQueuedCount,
+            firstOutboundAt: firstOutbound.createdAt.toISOString(),
           },
         },
       })
