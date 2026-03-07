@@ -2329,6 +2329,467 @@ router.get('/preview-vs-outcome', async (req: Request, res: Response) => {
 })
 
 /**
+ * GET /api/send-worker/exception-center — grouped operational exceptions + next-step routing hints.
+ * Tenant-scoped, read-only.
+ * Query: sequenceId(optional), sinceHours<=168
+ */
+router.get('/exception-center', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const sequenceIdParam = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+    const now = new Date()
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+
+    const [gateData, leadSourceHealth, suppressionHealth, identityCapacity, manualLiveGate] = await Promise.all([
+      getLiveGatesSnapshot(customerId, sinceHours),
+      getLeadSourceHealthSnapshot(customerId),
+      getSuppressionHealthSnapshot(customerId),
+      getIdentityCapacitySnapshot(customerId, sinceHours),
+      Promise.resolve(assertLiveSendAllowed({ customerId, trigger: 'manual' })),
+    ])
+
+    const blockedErrorClauses = buildBlockedErrorClauses()
+    const blockedWhere = {
+      customerId,
+      ...buildBlockedQueuedWhere(now),
+    }
+    const failedWhere = {
+      customerId,
+      status: OutboundSendQueueStatus.FAILED,
+      updatedAt: { gte: sinceDate },
+    }
+
+    const [blockedCount, failedCount, blockedRows, failedRows] = await Promise.all([
+      prisma.outboundSendQueueItem.count({ where: blockedWhere }),
+      prisma.outboundSendQueueItem.count({ where: failedWhere }),
+      prisma.outboundSendQueueItem.findMany({
+        where: blockedWhere,
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          enrollmentId: true,
+          recipientEmail: true,
+          status: true,
+          scheduledFor: true,
+          lastError: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.outboundSendQueueItem.findMany({
+        where: failedWhere,
+        orderBy: { updatedAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          enrollmentId: true,
+          recipientEmail: true,
+          status: true,
+          scheduledFor: true,
+          lastError: true,
+          updatedAt: true,
+        },
+      }),
+    ])
+
+    type ExceptionSampleRow = {
+      queueItemId: string | null
+      enrollmentId: string | null
+      sequenceId: string | null
+      recipientEmail: string | null
+      status: string | null
+      reason: string | null
+      occurredAt: string | null
+      detailRoute: string | null
+      queueRoute: string | null
+      auditRoute: string | null
+    }
+    type ExceptionGroup = {
+      key: string
+      title: string
+      severity: 'HIGH' | 'MEDIUM' | 'LOW'
+      priority: number
+      count: number
+      status: 'open' | 'clear'
+      summary: string
+      nextStep: { label: string; target: string }
+      samples: ExceptionSampleRow[]
+    }
+
+    const groups: ExceptionGroup[] = []
+    const addGroup = (group: ExceptionGroup) => groups.push(group)
+
+    if (identityCapacity.summary.usable <= 0) {
+      addGroup({
+        key: 'identity_unavailable',
+        title: 'No usable sending identity',
+        severity: 'HIGH',
+        priority: 1,
+        count: identityCapacity.summary.unavailable + identityCapacity.summary.risky,
+        status: 'open',
+        summary: 'No active/usable identity is available for safe launch execution.',
+        nextStep: { label: 'Inspect Identity Capacity', target: 'identity-capacity' },
+        samples: identityCapacity.rows
+          .filter((row) => row.state !== 'usable')
+          .slice(0, 5)
+          .map((row) => ({
+            queueItemId: null,
+            enrollmentId: null,
+            sequenceId: null,
+            recipientEmail: row.email,
+            status: row.state,
+            reason: row.reasons.join('; ') || 'identity_unavailable',
+            occurredAt: identityCapacity.lastUpdatedAt ?? null,
+            detailRoute: null,
+            queueRoute: null,
+            auditRoute: null,
+          })),
+      })
+    } else if (identityCapacity.summary.risky > 0) {
+      addGroup({
+        key: 'identity_risk',
+        title: 'Identity risk signals',
+        severity: 'MEDIUM',
+        priority: 2,
+        count: identityCapacity.summary.risky,
+        status: 'open',
+        summary: 'One or more identities show elevated failure pressure.',
+        nextStep: { label: 'Inspect Identity Capacity', target: 'identity-capacity' },
+        samples: identityCapacity.rows
+          .filter((row) => row.state === 'risky')
+          .slice(0, 5)
+          .map((row) => ({
+            queueItemId: null,
+            enrollmentId: null,
+            sequenceId: null,
+            recipientEmail: row.email,
+            status: row.state,
+            reason: row.reasons.join('; ') || 'identity_risk',
+            occurredAt: identityCapacity.lastUpdatedAt ?? null,
+            detailRoute: null,
+            queueRoute: null,
+            auditRoute: null,
+          })),
+      })
+    }
+
+    if (leadSourceHealth.erroredCount > 0 || leadSourceHealth.configuredCount === 0) {
+      const hasErrors = leadSourceHealth.erroredCount > 0
+      addGroup({
+        key: 'lead_source_health',
+        title: 'Lead source data health',
+        severity: hasErrors ? 'HIGH' : 'MEDIUM',
+        priority: hasErrors ? 3 : 5,
+        count: hasErrors ? leadSourceHealth.erroredCount : leadSourceHealth.total - leadSourceHealth.configuredCount,
+        status: 'open',
+        summary: hasErrors ? 'One or more lead-source sheets are failing.' : 'Lead sources are not configured.',
+        nextStep: { label: 'Review Data Health', target: 'marketing-data-health' },
+        samples: leadSourceHealth.rows
+          .filter((row) => row.hasError || !row.configured)
+          .slice(0, 5)
+          .map((row) => ({
+            queueItemId: null,
+            enrollmentId: null,
+            sequenceId: null,
+            recipientEmail: null,
+            status: row.configured ? 'configured' : 'missing',
+            reason: row.lastError ?? (row.configured ? 'lead_source_error' : 'lead_source_unconfigured'),
+            occurredAt: row.lastFetchAt ?? null,
+            detailRoute: null,
+            queueRoute: null,
+            auditRoute: null,
+          })),
+      })
+    }
+
+    if (suppressionHealth.erroredCount > 0) {
+      addGroup({
+        key: 'suppression_health',
+        title: 'Suppression source errors',
+        severity: 'MEDIUM',
+        priority: 4,
+        count: suppressionHealth.erroredCount,
+        status: 'open',
+        summary: 'Suppression imports report errors and may be stale.',
+        nextStep: { label: 'Review Data Health', target: 'marketing-data-health' },
+        samples: [
+          {
+            queueItemId: null,
+            enrollmentId: null,
+            sequenceId: null,
+            recipientEmail: null,
+            status: suppressionHealth.emailStatus ?? null,
+            reason: suppressionHealth.emailError ?? suppressionHealth.domainError ?? 'suppression_source_error',
+            occurredAt: null,
+            detailRoute: null,
+            queueRoute: null,
+            auditRoute: null,
+          },
+        ],
+      })
+    }
+
+    if (blockedCount > 0) {
+      addGroup({
+        key: 'queue_blocked',
+        title: 'Blocked queue items',
+        severity: 'MEDIUM',
+        priority: 6,
+        count: blockedCount,
+        status: 'open',
+        summary: 'Queued rows are due but blocked by current guardrails/state.',
+        nextStep: { label: 'Open Queue Workbench', target: 'queue-workbench-blocked' },
+        samples: blockedRows.map((row) => ({
+          queueItemId: row.id,
+          enrollmentId: row.enrollmentId,
+          sequenceId: null,
+          recipientEmail: row.recipientEmail,
+          status: row.status,
+          reason: row.lastError ?? 'blocked',
+          occurredAt: row.updatedAt.toISOString(),
+          detailRoute: `/api/send-queue/items/${row.id}`,
+          queueRoute: `/api/enrollments/${row.enrollmentId}/queue`,
+          auditRoute: `/api/send-worker/audits?queueItemId=${row.id}&limit=20`,
+        })),
+      })
+    }
+
+    if (failedCount > 0) {
+      addGroup({
+        key: 'queue_failures',
+        title: 'Recent send failures',
+        severity: 'HIGH',
+        priority: 2,
+        count: failedCount,
+        status: 'open',
+        summary: 'Recent queue rows failed and need remediation triage.',
+        nextStep: { label: 'Open Queue Workbench (Failed)', target: 'queue-workbench-failed' },
+        samples: failedRows.map((row) => ({
+          queueItemId: row.id,
+          enrollmentId: row.enrollmentId,
+          sequenceId: null,
+          recipientEmail: row.recipientEmail,
+          status: row.status,
+          reason: row.lastError ?? 'send_failed',
+          occurredAt: row.updatedAt.toISOString(),
+          detailRoute: `/api/send-queue/items/${row.id}`,
+          queueRoute: `/api/enrollments/${row.enrollmentId}/queue`,
+          auditRoute: `/api/send-worker/audits?queueItemId=${row.id}&limit=20`,
+        })),
+      })
+    }
+
+    if (sequenceIdParam) {
+      const sequence = await prisma.emailSequence.findFirst({
+        where: { id: sequenceIdParam, customerId },
+        select: { id: true, name: true },
+      })
+      if (!sequence) {
+        res.status(404).json({ success: false, error: 'sequence_not_found' })
+        return
+      }
+
+      const [readiness, enrollmentRows] = await Promise.all([
+        getSequenceReadinessSnapshot(customerId, sequence.id, sinceHours),
+        prisma.enrollment.findMany({
+          where: { customerId, sequenceId: sequence.id },
+          select: { id: true, name: true },
+        }),
+      ])
+      const enrollmentIds = enrollmentRows.map((row) => row.id)
+      const enrollmentById = new Map(enrollmentRows.map((row) => [row.id, row]))
+
+      if (!readiness) {
+        res.status(404).json({ success: false, error: 'sequence_not_found' })
+        return
+      }
+
+      const preflightBlockers: string[] = []
+      const preflightWarnings: string[] = []
+      if ((identityCapacity.summary.usable ?? 0) <= 0) preflightBlockers.push('no_usable_identity_capacity')
+      if (leadSourceHealth.configuredCount <= 0) preflightBlockers.push('lead_sources_unconfigured')
+      if ((readiness.summary.eligibleCount ?? 0) <= 0) preflightBlockers.push('no_eligible_recipients')
+      if (!manualLiveGate.allowed) preflightWarnings.push(`manual_live_blocked:${manualLiveGate.reason ?? 'manual_live_tick_not_allowed'}`)
+      if ((readiness.summary.failedRecently ?? 0) > 0) preflightWarnings.push('recent_failures_present')
+      if ((readiness.summary.blockedCount ?? 0) > 0) preflightWarnings.push('blocked_recipients_present')
+      if ((identityCapacity.summary.risky ?? 0) > 0) preflightWarnings.push('risky_identities_present')
+
+      if (preflightBlockers.length > 0 || preflightWarnings.length > 0) {
+        addGroup({
+          key: 'sequence_launch_guardrails',
+          title: `Sequence launch guardrails (${sequence.name ?? sequence.id})`,
+          severity: preflightBlockers.length > 0 ? 'HIGH' : 'MEDIUM',
+          priority: preflightBlockers.length > 0 ? 1 : 4,
+          count: preflightBlockers.length + preflightWarnings.length,
+          status: 'open',
+          summary:
+            preflightBlockers.length > 0
+              ? 'Launch blockers are present for this sequence.'
+              : 'Launch warnings are present for this sequence.',
+          nextStep: { label: 'Open Sequence Preflight', target: 'sequence-preflight' },
+          samples: [...preflightBlockers, ...preflightWarnings].slice(0, 5).map((reason) => ({
+            queueItemId: null,
+            enrollmentId: null,
+            sequenceId: sequence.id,
+            recipientEmail: null,
+            status: preflightBlockers.includes(reason) ? 'blocker' : 'warning',
+            reason,
+            occurredAt: new Date().toISOString(),
+            detailRoute: null,
+            queueRoute: null,
+            auditRoute: null,
+          })),
+        })
+      }
+
+      if (enrollmentIds.length > 0) {
+        const queueRows = await prisma.outboundSendQueueItem.findMany({
+          where: { customerId, enrollmentId: { in: enrollmentIds } },
+          select: {
+            id: true,
+            enrollmentId: true,
+            recipientEmail: true,
+            status: true,
+            scheduledFor: true,
+            sentAt: true,
+            updatedAt: true,
+            stepIndex: true,
+            attemptCount: true,
+            lastError: true,
+          },
+        })
+        const byRecipient = new Map<string, QueueShapeRow[]>()
+        for (const row of queueRows) {
+          const emailNorm = row.recipientEmail.trim().toLowerCase()
+          const key = `${row.enrollmentId}::${emailNorm}`
+          const normalizedRow: QueueShapeRow = { ...row, recipientEmail: emailNorm }
+          const existing = byRecipient.get(key)
+          if (existing) existing.push(normalizedRow)
+          else byRecipient.set(key, [normalizedRow])
+        }
+
+        const firstBatch = Array.from(byRecipient.values())
+          .map((rows) => classifyRecipientGroup(rows, now))
+          .filter((row) => row.bucket === 'eligible')
+          .sort((a, b) => {
+            const aTime = a.row.scheduledFor ? a.row.scheduledFor.getTime() : 0
+            const bTime = b.row.scheduledFor ? b.row.scheduledFor.getTime() : 0
+            return aTime - bTime || a.row.stepIndex - b.row.stepIndex || a.row.id.localeCompare(b.row.id)
+          })
+          .slice(0, 15)
+          .map((row) => row.row)
+
+        const previewIds = new Set(firstBatch.map((row) => row.id))
+        const sequenceQueueById = new Map(queueRows.map((row) => [row.id, row]))
+        const recentAudits = await prisma.outboundSendAttemptAudit.findMany({
+          where: { customerId, decidedAt: { gte: sinceDate } },
+          orderBy: [{ decidedAt: 'desc' }, { id: 'desc' }],
+          take: 800,
+          select: { id: true, queueItemId: true, decision: true, reason: true, decidedAt: true, snapshot: true },
+        })
+        const sequenceAudits = recentAudits.filter((audit) => {
+          return sequenceQueueById.has(audit.queueItemId)
+        })
+        const matchedPreviewIds = new Set(
+          sequenceAudits.filter((audit) => previewIds.has(audit.queueItemId)).map((audit) => audit.queueItemId)
+        )
+        const previewOnly = firstBatch.filter((row) => !matchedPreviewIds.has(row.id))
+        const outcomeOnly = sequenceAudits.filter((audit) => !previewIds.has(audit.queueItemId))
+
+        if (previewOnly.length > 0 || outcomeOnly.length > 0) {
+          addGroup({
+            key: 'preview_outcome_mismatch',
+            title: `Preview-vs-outcome mismatch (${sequence.name ?? sequence.id})`,
+            severity: outcomeOnly.length > 0 ? 'HIGH' : 'MEDIUM',
+            priority: 3,
+            count: previewOnly.length + outcomeOnly.length,
+            status: 'open',
+            summary: 'Expected first-batch rows and recent outcomes are not fully aligned.',
+            nextStep: { label: 'Open Preview vs Outcome', target: 'preview-vs-outcome' },
+            samples: [
+              ...previewOnly.slice(0, 3).map((row) => ({
+                queueItemId: row.id,
+                enrollmentId: row.enrollmentId,
+                sequenceId: sequence.id,
+                recipientEmail: row.recipientEmail,
+                status: 'preview_only',
+                reason: row.lastError ?? 'preview_without_recent_outcome',
+                occurredAt: row.updatedAt.toISOString(),
+                detailRoute: `/api/send-queue/items/${row.id}`,
+                queueRoute: `/api/enrollments/${row.enrollmentId}/queue`,
+                auditRoute: `/api/send-worker/audits?queueItemId=${row.id}&limit=20`,
+              })),
+              ...outcomeOnly.slice(0, 2).map((audit) => {
+                const queue = sequenceQueueById.get(audit.queueItemId) ?? null
+                return {
+                  queueItemId: audit.queueItemId,
+                  enrollmentId: queue?.enrollmentId ?? null,
+                  sequenceId: sequence.id,
+                  recipientEmail:
+                    queue?.recipientEmail ??
+                    getSnapshotString(audit.snapshot, ['recipientEmailNorm', 'recipientEmail', 'email']) ??
+                    null,
+                  status: 'outcome_only',
+                  reason: audit.reason ?? audit.decision,
+                  occurredAt: audit.decidedAt.toISOString(),
+                  detailRoute: queue ? `/api/send-queue/items/${queue.id}` : null,
+                  queueRoute: queue ? `/api/enrollments/${queue.enrollmentId}/queue` : null,
+                  auditRoute: `/api/send-worker/audits?queueItemId=${encodeURIComponent(audit.queueItemId)}&limit=20`,
+                }
+              }),
+            ],
+          })
+        }
+      }
+    }
+
+    const severityWeight: Record<'HIGH' | 'MEDIUM' | 'LOW', number> = { HIGH: 0, MEDIUM: 1, LOW: 2 }
+    groups.sort((a, b) => {
+      if (severityWeight[a.severity] !== severityWeight[b.severity]) {
+        return severityWeight[a.severity] - severityWeight[b.severity]
+      }
+      if (a.priority !== b.priority) return a.priority - b.priority
+      return b.count - a.count
+    })
+
+    const statusSummary = {
+      totalGroups: groups.length,
+      openGroups: groups.filter((group) => group.count > 0).length,
+      high: groups.filter((group) => group.severity === 'HIGH').length,
+      medium: groups.filter((group) => group.severity === 'MEDIUM').length,
+      low: groups.filter((group) => group.severity === 'LOW').length,
+    }
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: sequenceIdParam || null,
+        sinceHours,
+        statusSummary,
+        groups,
+        routes: {
+          sequencePreflight: '/api/send-worker/sequence-preflight',
+          launchPreview: '/api/send-worker/launch-preview',
+          previewVsOutcome: '/api/send-worker/preview-vs-outcome',
+          runHistory: '/api/send-worker/run-history',
+          queueWorkbench: '/api/send-worker/queue-workbench',
+          identityCapacity: '/api/send-worker/identity-capacity',
+          marketingDataHealthLeadSources: '/api/lead-sources/health',
+          marketingDataHealthSuppression: '/api/suppression/health',
+        },
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/exception-center] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Exception center failed' })
+  }
+})
+
+/**
  * GET /api/send-worker/queue-workbench — tenant-scoped queue triage rows for operator workbench.
  * Query: state=ready|blocked|failed|scheduled|sent, limit<=100, search(recipient email contains), sinceHours
  */

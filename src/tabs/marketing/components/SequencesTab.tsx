@@ -621,6 +621,43 @@ const SequencesTab: React.FC = () => {
     outcomeOnlyRows: RunHistoryRow[]
     lastUpdatedAt?: string
   }
+  type ExceptionCenterSampleRow = {
+    queueItemId: string | null
+    enrollmentId: string | null
+    sequenceId: string | null
+    recipientEmail: string | null
+    status: string | null
+    reason: string | null
+    occurredAt: string | null
+    detailRoute: string | null
+    queueRoute: string | null
+    auditRoute: string | null
+  }
+  type ExceptionCenterGroup = {
+    key: string
+    title: string
+    severity: 'HIGH' | 'MEDIUM' | 'LOW'
+    priority: number
+    count: number
+    status: 'open' | 'clear'
+    summary: string
+    nextStep: { label: string; target: string }
+    samples: ExceptionCenterSampleRow[]
+  }
+  type ExceptionCenterData = {
+    sequenceId: string | null
+    sinceHours: number
+    statusSummary: {
+      totalGroups: number
+      openGroups: number
+      high: number
+      medium: number
+      low: number
+    }
+    groups: ExceptionCenterGroup[]
+    routes?: Record<string, string>
+    lastUpdatedAt?: string
+  }
   type OutreachReportRow = {
     sequenceId?: string
     sequenceName?: string
@@ -716,6 +753,9 @@ const SequencesTab: React.FC = () => {
   const [previewVsOutcomeData, setPreviewVsOutcomeData] = useState<PreviewVsOutcomeData | null>(null)
   const [previewVsOutcomeLoading, setPreviewVsOutcomeLoading] = useState(false)
   const [previewVsOutcomeError, setPreviewVsOutcomeError] = useState<string | null>(null)
+  const [exceptionCenterData, setExceptionCenterData] = useState<ExceptionCenterData | null>(null)
+  const [exceptionCenterLoading, setExceptionCenterLoading] = useState(false)
+  const [exceptionCenterError, setExceptionCenterError] = useState<string | null>(null)
   const [identityCapacityData, setIdentityCapacityData] = useState<IdentityCapacityData | null>(null)
   const [identityCapacityLoading, setIdentityCapacityLoading] = useState(false)
   const [identityCapacityError, setIdentityCapacityError] = useState<string | null>(null)
@@ -975,6 +1015,33 @@ const SequencesTab: React.FC = () => {
     setPreviewVsOutcomeError(null)
   }
 
+  const loadExceptionCenter = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!opts?.silent) setExceptionCenterLoading(true)
+    setExceptionCenterError(null)
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const params = new URLSearchParams()
+    params.set('sinceHours', String(hours))
+    if (chosenSequenceId) params.set('sequenceId', chosenSequenceId)
+    const endpoint = `/api/send-worker/exception-center?${params.toString()}`
+    const res = await api.get<ExceptionCenterData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setExceptionCenterLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setExceptionCenterError('Select a client.')
+      else if (status === 401 || status === 403) setExceptionCenterError(`Not authorized (${status}).`)
+      else if (status === 404) setExceptionCenterError('Sequence not found for this client.')
+      else setExceptionCenterError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setExceptionCenterData(null)
+      return
+    }
+    setExceptionCenterData(res.data ?? null)
+    setExceptionCenterError(null)
+  }
+
   const loadIdentityCapacity = async (opts?: { silent?: boolean }) => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     if (!opts?.silent) setIdentityCapacityLoading(true)
@@ -1168,11 +1235,13 @@ const SequencesTab: React.FC = () => {
       await loadLaunchPreview(sequenceReadinessSequenceId, { silent: true })
       await loadRunHistory(sequenceReadinessSequenceId, { silent: true })
       await loadPreviewVsOutcome(sequenceReadinessSequenceId, { silent: true })
+      await loadExceptionCenter(sequenceReadinessSequenceId, { silent: true })
     }
     if (!sequenceReadinessSequenceId.trim()) {
       await loadRunHistory('', { silent: true })
       setPreviewVsOutcomeData(null)
       setPreviewVsOutcomeError(null)
+      await loadExceptionCenter('', { silent: true })
     }
     await loadOpsReporting({ silent: true })
     await loadQueueWorkbench({ silent: true })
@@ -1182,6 +1251,48 @@ const SequencesTab: React.FC = () => {
     if (queueEnrollmentId) {
       loadQueue(queueEnrollmentId)
     }
+  }
+
+  const handleExceptionNextStep = (target: string) => {
+    if (target === 'queue-workbench-blocked') {
+      setQueueWorkbenchState('blocked')
+      void loadQueueWorkbench()
+      return
+    }
+    if (target === 'queue-workbench-failed') {
+      setQueueWorkbenchState('failed')
+      void loadQueueWorkbench()
+      return
+    }
+    if (target === 'sequence-preflight') {
+      void loadSequencePreflight()
+      return
+    }
+    if (target === 'identity-capacity') {
+      void loadIdentityCapacity()
+      return
+    }
+    if (target === 'preview-vs-outcome') {
+      void loadPreviewVsOutcome()
+      return
+    }
+    if (target === 'launch-preview') {
+      void loadLaunchPreview()
+      return
+    }
+    if (target === 'run-history') {
+      void loadRunHistory()
+      return
+    }
+    if (target === 'marketing-data-health') {
+      toast({
+        title: 'Open Data Health',
+        description: 'Use Marketing > Compliance/Lead Sources panel to review Google Sheets health.',
+        status: 'info',
+      })
+      return
+    }
+    void refreshControlLoopTruth({ silent: true })
   }
 
   function maskEmail(email: string): string {
@@ -1461,6 +1572,8 @@ const SequencesTab: React.FC = () => {
       setRunHistoryError(null)
       setPreviewVsOutcomeData(null)
       setPreviewVsOutcomeError(null)
+      setExceptionCenterData(null)
+      setExceptionCenterError(null)
       setIdentityCapacityData(null)
       setIdentityCapacityError(null)
       setOpsReportingData(null)
@@ -2300,6 +2413,8 @@ const SequencesTab: React.FC = () => {
       setRunHistoryError(null)
       setPreviewVsOutcomeData(null)
       setPreviewVsOutcomeError(null)
+      setExceptionCenterData(null)
+      setExceptionCenterError(null)
     }
   }, [readinessSequenceOptions, sequenceReadinessSequenceId])
 
@@ -3655,6 +3770,7 @@ const SequencesTab: React.FC = () => {
                                   loadLaunchPreview(nextId)
                                   loadRunHistory(nextId)
                                   loadPreviewVsOutcome(nextId)
+                                  loadExceptionCenter(nextId)
                                 }
                                 else {
                                   setSequenceReadinessData(null)
@@ -3666,6 +3782,7 @@ const SequencesTab: React.FC = () => {
                                   loadRunHistory('')
                                   setPreviewVsOutcomeData(null)
                                   setPreviewVsOutcomeError(null)
+                                  loadExceptionCenter('')
                                 }
                               }}
                             >
@@ -3683,8 +3800,9 @@ const SequencesTab: React.FC = () => {
                               loadLaunchPreview()
                               loadRunHistory()
                               loadPreviewVsOutcome()
+                              loadExceptionCenter()
                             }}
-                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading || previewVsOutcomeLoading}
+                            isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading || previewVsOutcomeLoading || exceptionCenterLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
                             Refresh Launch Data
@@ -4254,6 +4372,154 @@ const SequencesTab: React.FC = () => {
 
                             <Text id="preview-vs-outcome-last-updated" data-testid="preview-vs-outcome-last-updated" fontSize="xs" color="gray.500">
                               Last updated: {previewVsOutcomeData.lastUpdatedAt ? new Date(previewVsOutcomeData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/preview-vs-outcome
+                            </Text>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="exception-center-panel" data-testid="exception-center-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Exception Center (Prioritized Actions)</Text>
+                          <Button
+                            id="exception-center-refresh-btn"
+                            data-testid="exception-center-refresh-btn"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadExceptionCenter()}
+                            isLoading={exceptionCenterLoading}
+                          >
+                            Refresh Exceptions
+                          </Button>
+                        </Flex>
+
+                        {exceptionCenterError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{exceptionCenterError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!exceptionCenterError && exceptionCenterData && (
+                          <>
+                            <SimpleGrid id="exception-center-summary-cards" data-testid="exception-center-summary-cards" columns={{ base: 2, md: 5 }} spacing={2}>
+                              <Card><CardBody py={2}><Stat><StatLabel>Open groups</StatLabel><StatNumber>{exceptionCenterData.statusSummary.openGroups ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>High</StatLabel><StatNumber color="red.600">{exceptionCenterData.statusSummary.high ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Medium</StatLabel><StatNumber color="orange.600">{exceptionCenterData.statusSummary.medium ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Low</StatLabel><StatNumber color="blue.600">{exceptionCenterData.statusSummary.low ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={2}><Stat><StatLabel>Total groups</StatLabel><StatNumber>{exceptionCenterData.statusSummary.totalGroups ?? 0}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+
+                            <VStack id="exception-center-groups" data-testid="exception-center-groups" align="stretch" spacing={3}>
+                              {(exceptionCenterData.groups ?? []).length === 0 ? (
+                                <Alert status="success" size="sm">
+                                  <AlertIcon />
+                                  <AlertDescription>No active exception groups in this window.</AlertDescription>
+                                </Alert>
+                              ) : (exceptionCenterData.groups ?? []).map((group) => (
+                                <Card key={group.key} variant="outline">
+                                  <CardBody>
+                                    <VStack align="stretch" spacing={2}>
+                                      <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                                        <VStack align="start" spacing={0}>
+                                          <HStack>
+                                            <Text fontSize="sm" fontWeight="semibold">{group.title}</Text>
+                                            <Badge
+                                              id="exception-center-severity-badge"
+                                              data-testid="exception-center-severity-badge"
+                                              colorScheme={group.severity === 'HIGH' ? 'red' : group.severity === 'MEDIUM' ? 'orange' : 'blue'}
+                                            >
+                                              {group.severity}
+                                            </Badge>
+                                          </HStack>
+                                          <Text fontSize="xs" color="gray.600">{group.summary}</Text>
+                                        </VStack>
+                                        <HStack spacing={2}>
+                                          <Badge variant="outline">count={group.count}</Badge>
+                                          <Button
+                                            id="exception-center-next-step-btn"
+                                            data-testid="exception-center-next-step-btn"
+                                            size="xs"
+                                            variant="outline"
+                                            onClick={() => handleExceptionNextStep(group.nextStep?.target || '')}
+                                          >
+                                            {group.nextStep?.label || 'Open Next Step'}
+                                          </Button>
+                                        </HStack>
+                                      </Flex>
+
+                                      <Box overflowX="auto">
+                                        <Table size="sm">
+                                          <Thead>
+                                            <Tr>
+                                              <Th>Recipient</Th>
+                                              <Th>Status</Th>
+                                              <Th>Reason</Th>
+                                              <Th>Occurred</Th>
+                                              <Th>Actions</Th>
+                                            </Tr>
+                                          </Thead>
+                                          <Tbody>
+                                            {(group.samples || []).length === 0 ? (
+                                              <Tr>
+                                                <Td colSpan={5} color="gray.500">No sample rows.</Td>
+                                              </Tr>
+                                            ) : (group.samples || []).map((sample, idx) => (
+                                              <Tr key={`${group.key}-sample-${idx}`}>
+                                                <Td fontSize="xs">{sample.recipientEmail ? maskEmail(sample.recipientEmail) : '—'}</Td>
+                                                <Td fontSize="xs">
+                                                  <Badge variant="subtle">{sample.status || '—'}</Badge>
+                                                </Td>
+                                                <Td fontSize="xs">{sample.reason || '—'}</Td>
+                                                <Td fontSize="xs">{sample.occurredAt ? new Date(sample.occurredAt).toLocaleString() : '—'}</Td>
+                                                <Td>
+                                                  <HStack
+                                                    id="exception-center-next-step-routing"
+                                                    data-testid="exception-center-next-step-routing"
+                                                    spacing={1}
+                                                  >
+                                                    <Button
+                                                      size="xs"
+                                                      variant="ghost"
+                                                      isDisabled={!sample.enrollmentId}
+                                                      onClick={() => sample.enrollmentId && openQueueModal(sample.enrollmentId)}
+                                                    >
+                                                      Queue
+                                                    </Button>
+                                                    <Button
+                                                      size="xs"
+                                                      variant="ghost"
+                                                      isDisabled={!sample.queueItemId}
+                                                      onClick={() => sample.queueItemId && openAuditPanelForQueueItem(sample.queueItemId)}
+                                                    >
+                                                      Audit
+                                                    </Button>
+                                                    <Button
+                                                      size="xs"
+                                                      leftIcon={<EmailIcon />}
+                                                      isDisabled={!sample.queueItemId}
+                                                      onClick={() => sample.queueItemId && void previewQueueItemRender(sample.queueItemId)}
+                                                    >
+                                                      Render
+                                                    </Button>
+                                                  </HStack>
+                                                </Td>
+                                              </Tr>
+                                            ))}
+                                          </Tbody>
+                                        </Table>
+                                      </Box>
+                                    </VStack>
+                                  </CardBody>
+                                </Card>
+                              ))}
+                            </VStack>
+
+                            <Text id="exception-center-last-updated" data-testid="exception-center-last-updated" fontSize="xs" color="gray.500">
+                              Last updated: {exceptionCenterData.lastUpdatedAt ? new Date(exceptionCenterData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/exception-center
                             </Text>
                           </>
                         )}
