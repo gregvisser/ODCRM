@@ -377,6 +377,37 @@ const SequencesTab: React.FC = () => {
       blocked: OperatorConsoleSampleRow[]
     }
   }
+  type SequenceReadinessSampleRow = {
+    queueItemId: string
+    enrollmentId: string
+    recipientEmail: string
+    status: string
+    scheduledFor: string | null
+    lastError: string | null
+    reason: string
+  }
+  type SequenceReadinessData = {
+    sequenceId: string
+    sequenceName?: string | null
+    summary: {
+      enrollmentCount: number
+      totalRecipients: number
+      queueItemsTotal: number
+      eligibleCount: number
+      excludedCount: number
+      blockedCount: number
+      failedRecently?: number
+      sentRecently?: number
+    }
+    breakdown: Record<string, number>
+    samples: {
+      eligible: SequenceReadinessSampleRow[]
+      excluded: SequenceReadinessSampleRow[]
+      blocked: SequenceReadinessSampleRow[]
+    }
+    windowHours?: number
+    lastUpdatedAt?: string
+  }
   type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
@@ -392,6 +423,10 @@ const SequencesTab: React.FC = () => {
   const [operatorConsoleLastUpdatedAt, setOperatorConsoleLastUpdatedAt] = useState<string | null>(null)
   const [operatorActionStatus, setOperatorActionStatus] = useState<string | null>(null)
   const [liveCanaryTickLoading, setLiveCanaryTickLoading] = useState(false)
+  const [sequenceReadinessSequenceId, setSequenceReadinessSequenceId] = useState<string>('')
+  const [sequenceReadinessData, setSequenceReadinessData] = useState<SequenceReadinessData | null>(null)
+  const [sequenceReadinessLoading, setSequenceReadinessLoading] = useState(false)
+  const [sequenceReadinessError, setSequenceReadinessError] = useState<string | null>(null)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -487,8 +522,41 @@ const SequencesTab: React.FC = () => {
     setOperatorConsoleError(null)
   }
 
+  const loadSequenceReadiness = async (sequenceId?: string, opts?: { silent?: boolean }) => {
+    const chosenSequenceId = (sequenceId ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_') || !chosenSequenceId) {
+      if (!chosenSequenceId) {
+        setSequenceReadinessData(null)
+        setSequenceReadinessError(null)
+      }
+      return
+    }
+    if (!opts?.silent) setSequenceReadinessLoading(true)
+    setSequenceReadinessError(null)
+    const hours = Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))
+    const endpoint = `/api/send-worker/sequence-readiness?sequenceId=${encodeURIComponent(chosenSequenceId)}&sinceHours=${hours}`
+    const res = await api.get<SequenceReadinessData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setSequenceReadinessLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setSequenceReadinessError('Choose a sequence first.')
+      else if (status === 401 || status === 403) setSequenceReadinessError(`Not authorized (${status}).`)
+      else if (status === 404) setSequenceReadinessError('Sequence not found for this client.')
+      else setSequenceReadinessError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setSequenceReadinessData(null)
+      return
+    }
+    setSequenceReadinessData(res.data ?? null)
+    setSequenceReadinessError(null)
+  }
+
   const refreshControlLoopTruth = async (opts?: { silent?: boolean }) => {
     await loadOperatorConsole(opts)
+    if (sequenceReadinessSequenceId.trim()) {
+      await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
+    }
     loadAuditSummary()
     loadAudits()
     loadSendQueuePreview()
@@ -708,6 +776,9 @@ const SequencesTab: React.FC = () => {
       setOperatorConsoleError(null)
       setOperatorConsoleLastUpdatedAt(null)
       setOperatorActionStatus(null)
+      setSequenceReadinessSequenceId('')
+      setSequenceReadinessData(null)
+      setSequenceReadinessError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -1462,6 +1533,25 @@ const SequencesTab: React.FC = () => {
       return matchesSearch && matchesStatus
     })
   }, [sequences, searchQuery, statusFilter])
+
+  const readinessSequenceOptions = useMemo(() => {
+    return sequences
+      .filter((sequence) => !!sequence.sequenceId)
+      .map((sequence) => ({
+        id: sequence.sequenceId as string,
+        name: sequence.name,
+      }))
+  }, [sequences])
+
+  useEffect(() => {
+    if (!sequenceReadinessSequenceId) return
+    const exists = readinessSequenceOptions.some((opt) => opt.id === sequenceReadinessSequenceId)
+    if (!exists) {
+      setSequenceReadinessSequenceId('')
+      setSequenceReadinessData(null)
+      setSequenceReadinessError(null)
+    }
+  }, [readinessSequenceOptions, sequenceReadinessSequenceId])
 
   const stats = useMemo(() => {
     return {
@@ -2495,6 +2585,128 @@ const SequencesTab: React.FC = () => {
                     <Card><CardBody py={3}><Stat><StatLabel>Failed recent</StatLabel><StatNumber>{operatorConsoleData.queue.failedRecently}</StatNumber></Stat></CardBody></Card>
                     <Card><CardBody py={3}><Stat><StatLabel>Sent recent</StatLabel><StatNumber>{operatorConsoleData.queue.sentRecently}</StatNumber></Stat></CardBody></Card>
                   </SimpleGrid>
+
+                  <Card id="sequence-readiness-panel" data-testid="sequence-readiness-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex gap={3} align="end" flexWrap="wrap">
+                          <FormControl maxW="360px">
+                            <FormLabel fontSize="xs" mb={1}>Sequence Readiness</FormLabel>
+                            <Select
+                              id="sequence-readiness-select"
+                              data-testid="sequence-readiness-select"
+                              size="sm"
+                              placeholder="Select sequence"
+                              value={sequenceReadinessSequenceId}
+                              onChange={(e) => {
+                                const nextId = e.target.value
+                                setSequenceReadinessSequenceId(nextId)
+                                if (nextId) loadSequenceReadiness(nextId)
+                                else {
+                                  setSequenceReadinessData(null)
+                                  setSequenceReadinessError(null)
+                                }
+                              }}
+                            >
+                              {readinessSequenceOptions.map((opt) => (
+                                <option key={opt.id} value={opt.id}>{opt.name}</option>
+                              ))}
+                            </Select>
+                          </FormControl>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadSequenceReadiness()}
+                            isLoading={sequenceReadinessLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh Readiness
+                          </Button>
+                          <Text fontSize="xs" color="gray.500">
+                            Uses current queue and rule outcomes to show who is sendable now.
+                          </Text>
+                        </Flex>
+
+                        {sequenceReadinessError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{sequenceReadinessError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        {!sequenceReadinessError && sequenceReadinessData && (
+                          <>
+                            <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                              <Card><CardBody py={3}><Stat><StatLabel>Recipients</StatLabel><StatNumber>{sequenceReadinessData.summary.totalRecipients ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Eligible</StatLabel><StatNumber color="green.600">{sequenceReadinessData.summary.eligibleCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Excluded</StatLabel><StatNumber color="orange.600">{sequenceReadinessData.summary.excludedCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card><CardBody py={3}><Stat><StatLabel>Blocked</StatLabel><StatNumber color="red.500">{sequenceReadinessData.summary.blockedCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+                            <SimpleGrid id="sequence-readiness-breakdown" data-testid="sequence-readiness-breakdown" columns={{ base: 2, md: 4 }} spacing={2}>
+                              {Object.entries(sequenceReadinessData.breakdown ?? {}).map(([k, v]) => (
+                                <HStack key={k} justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                  <Text fontSize="xs" color="gray.600">{k}</Text>
+                                  <Badge>{v}</Badge>
+                                </HStack>
+                              ))}
+                            </SimpleGrid>
+
+                            <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={3}>
+                              {([
+                                ['eligible', 'Eligible samples'],
+                                ['excluded', 'Excluded samples'],
+                                ['blocked', 'Blocked samples'],
+                              ] as Array<[keyof SequenceReadinessData['samples'], string]>).map(([key, label]) => {
+                                const rows = sequenceReadinessData.samples?.[key] ?? []
+                                return (
+                                  <Card key={key}>
+                                    <CardBody>
+                                      <Text fontSize="sm" fontWeight="semibold" mb={2}>{label} ({rows.length})</Text>
+                                      <Box overflowX="auto">
+                                        <Table size="sm">
+                                          <Thead>
+                                            <Tr>
+                                              <Th>Recipient</Th>
+                                              <Th>Reason</Th>
+                                              <Th>Status</Th>
+                                              <Th>Actions</Th>
+                                            </Tr>
+                                          </Thead>
+                                          <Tbody>
+                                            {rows.length === 0 ? (
+                                              <Tr>
+                                                <Td colSpan={4} color="gray.500">No rows.</Td>
+                                              </Tr>
+                                            ) : rows.map((row) => (
+                                              <Tr key={row.queueItemId}>
+                                                <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                                <Td fontSize="xs">{row.reason}</Td>
+                                                <Td><Badge size="sm" variant="outline">{row.status}</Badge></Td>
+                                                <Td>
+                                                  <HStack spacing={1}>
+                                                    <Button size="xs" variant="ghost" isDisabled={!row.enrollmentId} onClick={() => openQueueModal(row.enrollmentId)}>
+                                                      Queue
+                                                    </Button>
+                                                    <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>
+                                                      Audit
+                                                    </Button>
+                                                  </HStack>
+                                                </Td>
+                                              </Tr>
+                                            ))}
+                                          </Tbody>
+                                        </Table>
+                                      </Box>
+                                    </CardBody>
+                                  </Card>
+                                )
+                              })}
+                            </SimpleGrid>
+                          </>
+                        )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
 
                   <Card>
                     <CardBody>
