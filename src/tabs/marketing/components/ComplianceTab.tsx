@@ -14,6 +14,7 @@ import {
   Input,
   Select,
   Spinner,
+  SimpleGrid,
   Table,
   Tbody,
   Td,
@@ -21,6 +22,7 @@ import {
   Th,
   Thead,
   Tr,
+  Link,
   useToast,
   VStack,
 } from '@chakra-ui/react'
@@ -55,6 +57,27 @@ type SheetImportResult = {
   headers: string[]
 }
 
+type LeadSourceHealthRow = {
+  sourceType: string
+  displayName: string
+  connected: boolean
+  usingGlobalConfig: boolean
+  lastFetchAt: string | null
+  lastError: string | null
+  isLocked: boolean
+}
+
+type SuppressionSheetHealth = {
+  configured: boolean
+  sheetUrl: string | null
+  gid: string | null
+  lastImportStatus: string | null
+  lastImportedAt: string | null
+  lastSourceLabel: string | null
+  lastError: string | null
+  totalEntries: number
+}
+
 const DEFAULT_EMAIL_DNC_URL =
   'https://docs.google.com/spreadsheets/d/1anU9DGiKVYj5LUPySpKAgDp0_bZeJv5KquJ0fExrsrw/edit?usp=drive_link'
 const DEFAULT_DOMAIN_DNC_URL =
@@ -71,6 +94,10 @@ export default function ComplianceTab() {
   const [sheetUrl, setSheetUrl] = useState(DEFAULT_EMAIL_DNC_URL)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<SheetImportResult | null>(null)
+  const [leadSourceHealth, setLeadSourceHealth] = useState<LeadSourceHealthRow[]>([])
+  const [suppressionSheetHealth, setSuppressionSheetHealth] = useState<{ email: SuppressionSheetHealth; domain: SuppressionSheetHealth } | null>(null)
+  const [dataHealthLoading, setDataHealthLoading] = useState(false)
+  const [dataHealthError, setDataHealthError] = useState<string | null>(null)
   const toast = useToast()
 
   const filteredEntries = useMemo(
@@ -90,9 +117,43 @@ export default function ComplianceTab() {
     setLoading(false)
   }, [customerId, toast])
 
+  const loadDataHealth = useCallback(async () => {
+    if (!customerId) return
+    setDataHealthLoading(true)
+    setDataHealthError(null)
+    const [leadRes, suppressionRes] = await Promise.all([
+      api.get<{ sources: LeadSourceHealthRow[] }>(`/api/lead-sources?customerId=${customerId}`),
+      api.get<{ success: boolean; data?: { suppressionSheets?: { email: SuppressionSheetHealth; domain: SuppressionSheetHealth } } }>(
+        `/api/suppression/health?customerId=${customerId}`
+      ),
+    ])
+
+    if (leadRes.error) {
+      setDataHealthError(leadRes.error)
+      setLeadSourceHealth([])
+    } else {
+      setLeadSourceHealth(Array.isArray(leadRes.data?.sources) ? leadRes.data!.sources : [])
+    }
+
+    if (suppressionRes.error) {
+      setDataHealthError((prev) => prev ? `${prev} | ${suppressionRes.error}` : suppressionRes.error)
+      setSuppressionSheetHealth(null)
+    } else {
+      const sheets = suppressionRes.data?.data?.suppressionSheets
+      if (sheets?.email && sheets?.domain) setSuppressionSheetHealth(sheets)
+      else setSuppressionSheetHealth(null)
+    }
+
+    setDataHealthLoading(false)
+  }, [customerId])
+
   useEffect(() => {
     if (customerId) void loadEntries()
   }, [customerId, loadEntries])
+
+  useEffect(() => {
+    if (customerId) void loadDataHealth()
+  }, [customerId, loadDataHealth])
 
   useEffect(() => {
     const unsubscribe = onSettingsUpdated((detail) => {
@@ -126,6 +187,7 @@ export default function ComplianceTab() {
     setReason('')
     toast({ title: 'Suppression entry added', status: 'success' })
     await loadEntries()
+    await loadDataHealth()
   }
 
   const handleDelete = async (id: string) => {
@@ -138,6 +200,7 @@ export default function ComplianceTab() {
       return
     }
     toast({ title: 'Entry removed', status: 'success' })
+    await loadDataHealth()
   }
 
   const handleImportFromSheet = async () => {
@@ -168,6 +231,7 @@ export default function ComplianceTab() {
       status: 'success',
     })
     await loadEntries()
+    await loadDataHealth()
     setImporting(false)
   }
 
@@ -188,6 +252,106 @@ export default function ComplianceTab() {
               Google Sheets import is now the primary source of truth for suppression lists. Manual edits remain available.
             </AlertDescription>
           </Alert>
+
+          <Box id="marketing-data-health-panel" data-testid="marketing-data-health-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
+            <VStack align="stretch" spacing={3}>
+              <HStack justify="space-between" flexWrap="wrap">
+                <Heading size="sm">Marketing Data Health</Heading>
+                <Button size="xs" variant="outline" onClick={() => void loadDataHealth()} isLoading={dataHealthLoading}>
+                  Refresh health
+                </Button>
+              </HStack>
+              <Text fontSize="sm" color="gray.600">
+                Live view of Google Sheets-linked Lead Sources and suppression list linkage/health for this client.
+              </Text>
+              {dataHealthError ? (
+                <Alert status="error">
+                  <AlertIcon />
+                  <AlertDescription fontSize="sm">{dataHealthError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <Box>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>Lead Sources</Text>
+                <Box borderWidth="1px" borderRadius="md" overflowX="auto">
+                  <Table size="sm">
+                    <Thead bg="gray.50">
+                      <Tr>
+                        <Th>Source</Th>
+                        <Th>Connected</Th>
+                        <Th>Scope</Th>
+                        <Th>Last Sync</Th>
+                        <Th>Error</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {leadSourceHealth.length === 0 ? (
+                        <Tr><Td colSpan={5}><Text fontSize="sm" color="gray.500">No lead source health data yet.</Text></Td></Tr>
+                      ) : (
+                        leadSourceHealth.map((source) => (
+                          <Tr key={source.sourceType}>
+                            <Td>{source.displayName}</Td>
+                            <Td>
+                              <Badge colorScheme={source.connected ? 'green' : 'gray'}>
+                                {source.connected ? 'Connected' : 'Missing'}
+                              </Badge>
+                            </Td>
+                            <Td>
+                              <Badge variant="subtle" colorScheme={source.usingGlobalConfig ? 'purple' : 'blue'}>
+                                {source.usingGlobalConfig ? 'Global' : 'Customer'}
+                              </Badge>
+                            </Td>
+                            <Td>{source.lastFetchAt ? new Date(source.lastFetchAt).toLocaleString() : 'Never'}</Td>
+                            <Td>
+                              <Text fontSize="xs" color={source.lastError ? 'red.600' : 'gray.500'}>
+                                {source.lastError || 'OK'}
+                              </Text>
+                            </Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+              </Box>
+
+              <Box>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>Suppression Sheets</Text>
+                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                  {(['email', 'domain'] as const).map((kind) => {
+                    const h = suppressionSheetHealth?.[kind]
+                    return (
+                      <Box key={kind} borderWidth="1px" borderRadius="md" p={3}>
+                        <HStack justify="space-between" mb={1}>
+                          <Text fontWeight="semibold">{kind === 'email' ? 'Email DNC' : 'Domain DNC'}</Text>
+                          <Badge colorScheme={h?.configured ? 'green' : 'orange'}>
+                            {h?.configured ? 'Sheet linked' : 'Sheet missing'}
+                          </Badge>
+                        </HStack>
+                        <Text fontSize="xs" color="gray.600">Entries: {h?.totalEntries ?? 0}</Text>
+                        <Text fontSize="xs" color="gray.600">Last import: {h?.lastImportedAt ? new Date(h.lastImportedAt).toLocaleString() : 'Never'}</Text>
+                        <Text fontSize="xs" color={h?.lastImportStatus === 'error' ? 'red.600' : 'gray.600'}>
+                          Status: {h?.lastImportStatus || 'unknown'}
+                        </Text>
+                        {h?.sheetUrl ? (
+                          <Link fontSize="xs" color="blue.600" href={h.sheetUrl} isExternal>
+                            Open linked sheet
+                          </Link>
+                        ) : (
+                          <Text fontSize="xs" color="orange.600">
+                            No persisted sheet URL yet. Import from Google Sheet to link.
+                          </Text>
+                        )}
+                        {h?.lastError ? (
+                          <Text fontSize="xs" color="red.600">Error: {h.lastError}</Text>
+                        ) : null}
+                      </Box>
+                    )
+                  })}
+                </SimpleGrid>
+              </Box>
+            </VStack>
+          </Box>
 
           <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
             <VStack align="stretch" spacing={4}>

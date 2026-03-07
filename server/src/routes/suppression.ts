@@ -58,6 +58,73 @@ type ParsedSuppressionRows = {
   sheetTitle: string
 }
 
+async function updateSuppressionSheetHealthMeta(
+  customerId: string,
+  type: 'email' | 'domain',
+  patch: {
+    sheetUrl?: string | null
+    gid?: string | null
+    sourceLabel?: string | null
+    lastImportStatus: 'success' | 'error'
+    lastImportedAt?: string | null
+    mode?: 'append' | 'replace' | null
+    totalRows?: number | null
+    inserted?: number | null
+    duplicates?: number | null
+    replacedCount?: number | null
+    invalidCount?: number | null
+    error?: string | null
+  }
+) {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, accountData: true },
+  })
+  if (!customer) return
+
+  const accountData =
+    customer.accountData && typeof customer.accountData === 'object'
+      ? (customer.accountData as Record<string, unknown>)
+      : {}
+  const existingSources =
+    accountData.dncSheetSources && typeof accountData.dncSheetSources === 'object'
+      ? (accountData.dncSheetSources as Record<string, unknown>)
+      : {}
+  const existingTypeMeta =
+    existingSources[type] && typeof existingSources[type] === 'object'
+      ? (existingSources[type] as Record<string, unknown>)
+      : {}
+
+  const nextTypeMeta = {
+    ...existingTypeMeta,
+    sheetUrl: patch.sheetUrl ?? existingTypeMeta.sheetUrl ?? null,
+    gid: patch.gid ?? existingTypeMeta.gid ?? null,
+    sourceLabel: patch.sourceLabel ?? existingTypeMeta.sourceLabel ?? null,
+    lastImportStatus: patch.lastImportStatus,
+    lastImportedAt: patch.lastImportedAt ?? new Date().toISOString(),
+    mode: patch.mode ?? existingTypeMeta.mode ?? null,
+    totalRows: patch.totalRows ?? existingTypeMeta.totalRows ?? null,
+    inserted: patch.inserted ?? existingTypeMeta.inserted ?? null,
+    duplicates: patch.duplicates ?? existingTypeMeta.duplicates ?? null,
+    replacedCount: patch.replacedCount ?? existingTypeMeta.replacedCount ?? null,
+    invalidCount: patch.invalidCount ?? existingTypeMeta.invalidCount ?? null,
+    lastError: patch.error ?? null,
+  }
+
+  await prisma.customer.update({
+    where: { id: customerId },
+    data: {
+      accountData: {
+        ...accountData,
+        dncSheetSources: {
+          ...existingSources,
+          [type]: nextTypeMeta,
+        },
+      } as any,
+    },
+  })
+}
+
 async function readPublicSheetCsv(sheetId: string, gid: string | null): Promise<{ headers: string[]; rows: Record<string, string>[]; sheetTitle: string }> {
   const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${encodeURIComponent(gid)}` : ''}`
   const response = await fetch(csvUrl)
@@ -517,6 +584,21 @@ async function importSuppressionFromSheet(
     else duplicates += 1
   }
 
+  await updateSuppressionSheetHealthMeta(customerId, expectedType, {
+    sheetUrl: input.sheetUrl,
+    gid,
+    sourceLabel: source,
+    lastImportStatus: 'success',
+    lastImportedAt: new Date().toISOString(),
+    mode,
+    totalRows: parsedRows.totalRows,
+    inserted,
+    duplicates,
+    replacedCount,
+    invalidCount: parsedRows.invalid.length,
+    error: null,
+  })
+
   return {
     success: true,
     type: expectedType,
@@ -541,6 +623,18 @@ router.post('/emails/import-sheet', requireMarketingMutationAuth, async (req, re
     const result = await importSuppressionFromSheet(customerId, 'email', input)
     res.json(result)
   } catch (error) {
+    try {
+      const customerId = getCustomerId(req)
+      const raw = req.body && typeof req.body.sheetUrl === 'string' ? req.body.sheetUrl : null
+      await updateSuppressionSheetHealthMeta(customerId, 'email', {
+        sheetUrl: raw,
+        lastImportStatus: 'error',
+        lastImportedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message.slice(0, 300) : 'import_failed',
+      })
+    } catch {
+      // ignore metadata write failures in error path
+    }
     next(error)
   }
 })
@@ -552,6 +646,90 @@ router.post('/domains/import-sheet', requireMarketingMutationAuth, async (req, r
     const input = sheetImportSchema.parse(req.body)
     const result = await importSuppressionFromSheet(customerId, 'domain', input)
     res.json(result)
+  } catch (error) {
+    try {
+      const customerId = getCustomerId(req)
+      const raw = req.body && typeof req.body.sheetUrl === 'string' ? req.body.sheetUrl : null
+      await updateSuppressionSheetHealthMeta(customerId, 'domain', {
+        sheetUrl: raw,
+        lastImportStatus: 'error',
+        lastImportedAt: new Date().toISOString(),
+        error: error instanceof Error ? error.message.slice(0, 300) : 'import_failed',
+      })
+    } catch {
+      // ignore metadata write failures in error path
+    }
+    next(error)
+  }
+})
+
+// GET /api/suppression/health - read-only suppression data health summary for Google Sheets-linked imports
+router.get('/health', async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req)
+    const [emailCounts, domainCounts, latestEmailImport, latestDomainImport, customer] = await Promise.all([
+      prisma.suppressionEntry.count({ where: { customerId, type: 'email' } }),
+      prisma.suppressionEntry.count({ where: { customerId, type: 'domain' } }),
+      prisma.suppressionEntry.findFirst({
+        where: { customerId, type: 'email', source: { startsWith: 'google-sheet:' } },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true, source: true },
+      }),
+      prisma.suppressionEntry.findFirst({
+        where: { customerId, type: 'domain', source: { startsWith: 'google-sheet:' } },
+        orderBy: { updatedAt: 'desc' },
+        select: { updatedAt: true, source: true },
+      }),
+      prisma.customer.findUnique({ where: { id: customerId }, select: { id: true, accountData: true } }),
+    ])
+
+    if (!customer) return res.status(404).json({ error: 'Customer not found' })
+
+    const accountData =
+      customer.accountData && typeof customer.accountData === 'object'
+        ? (customer.accountData as Record<string, unknown>)
+        : {}
+    const dncSheetSources =
+      accountData.dncSheetSources && typeof accountData.dncSheetSources === 'object'
+        ? (accountData.dncSheetSources as Record<string, unknown>)
+        : {}
+    const emailMeta = dncSheetSources.email && typeof dncSheetSources.email === 'object' ? (dncSheetSources.email as Record<string, unknown>) : {}
+    const domainMeta = dncSheetSources.domain && typeof dncSheetSources.domain === 'object' ? (dncSheetSources.domain as Record<string, unknown>) : {}
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        suppressionSheets: {
+          email: {
+            configured: typeof emailMeta.sheetUrl === 'string' && emailMeta.sheetUrl.trim().length > 0,
+            sheetUrl: typeof emailMeta.sheetUrl === 'string' ? emailMeta.sheetUrl : null,
+            gid: typeof emailMeta.gid === 'string' ? emailMeta.gid : null,
+            lastImportStatus: typeof emailMeta.lastImportStatus === 'string' ? emailMeta.lastImportStatus : null,
+            lastImportedAt:
+              typeof emailMeta.lastImportedAt === 'string'
+                ? emailMeta.lastImportedAt
+                : (latestEmailImport?.updatedAt?.toISOString() ?? null),
+            lastSourceLabel: typeof emailMeta.sourceLabel === 'string' ? emailMeta.sourceLabel : (latestEmailImport?.source ?? null),
+            lastError: typeof emailMeta.lastError === 'string' ? emailMeta.lastError : null,
+            totalEntries: emailCounts,
+          },
+          domain: {
+            configured: typeof domainMeta.sheetUrl === 'string' && domainMeta.sheetUrl.trim().length > 0,
+            sheetUrl: typeof domainMeta.sheetUrl === 'string' ? domainMeta.sheetUrl : null,
+            gid: typeof domainMeta.gid === 'string' ? domainMeta.gid : null,
+            lastImportStatus: typeof domainMeta.lastImportStatus === 'string' ? domainMeta.lastImportStatus : null,
+            lastImportedAt:
+              typeof domainMeta.lastImportedAt === 'string'
+                ? domainMeta.lastImportedAt
+                : (latestDomainImport?.updatedAt?.toISOString() ?? null),
+            lastSourceLabel: typeof domainMeta.sourceLabel === 'string' ? domainMeta.sourceLabel : (latestDomainImport?.source ?? null),
+            lastError: typeof domainMeta.lastError === 'string' ? domainMeta.lastError : null,
+            totalEntries: domainCounts,
+          },
+        },
+      },
+    })
   } catch (error) {
     next(error)
   }
