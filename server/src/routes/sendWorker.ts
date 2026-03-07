@@ -101,6 +101,12 @@ const BLOCKED_DUE_ERROR_MARKERS = [
   'suppressed',
 ]
 
+function buildBlockedErrorClauses() {
+  return BLOCKED_DUE_ERROR_MARKERS.map((marker) => ({
+    lastError: { contains: marker, mode: 'insensitive' as const },
+  }))
+}
+
 type QueueShapeRow = {
   id: string
   enrollmentId: string
@@ -173,6 +179,22 @@ function classifyRecipientGroup(
   if (failed) return { bucket: 'blocked', reason: 'failed_recently', row: failed }
 
   return { bucket: 'blocked', reason: 'blocked_other', row: sorted[0] }
+}
+
+function deriveQueueReason(status: OutboundSendQueueStatus, scheduledFor: Date | null, lastError: string | null, now: Date): string {
+  const normalized = String(lastError || '').toLowerCase()
+  if (normalized.includes('replied_stop')) return 'reply_stopped'
+  if (normalized.includes('suppress') || normalized.includes('unsubscribe')) return 'suppressed'
+  if (normalized.includes('hard_bounce_invalid_recipient') || normalized.includes('invalid_recipient')) return 'invalid_recipient'
+  if (normalized.includes('no_sender_identity')) return 'no_active_identity'
+  if (normalized.includes('outside_window')) return 'outside_window'
+  if (normalized.includes('canary')) return 'canary_blocked'
+  if (normalized.includes('daily_cap_reached') || normalized.includes('per_minute_cap_reached')) return 'rate_limited'
+  if (status === OutboundSendQueueStatus.SENT) return 'sent'
+  if (status === OutboundSendQueueStatus.FAILED) return 'send_failed'
+  if (status === OutboundSendQueueStatus.SKIPPED) return normalized || 'skipped'
+  if (status === OutboundSendQueueStatus.QUEUED && scheduledFor && scheduledFor > now) return 'scheduled_later'
+  return normalized || 'ready'
 }
 
 async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
@@ -641,17 +663,7 @@ router.get('/console', async (req: Request, res: Response) => {
       customerId,
       ...buildBlockedQueuedWhere(now),
     }
-    const blockedErrorClauses = [
-      { lastError: { contains: 'outside_window', mode: 'insensitive' as const } },
-      { lastError: { contains: 'canary', mode: 'insensitive' as const } },
-      { lastError: { contains: 'daily_cap_reached', mode: 'insensitive' as const } },
-      { lastError: { contains: 'per_minute_cap_reached', mode: 'insensitive' as const } },
-      { lastError: { contains: 'no_sender_identity', mode: 'insensitive' as const } },
-      { lastError: { contains: 'kill_switch', mode: 'insensitive' as const } },
-      { lastError: { contains: 'live_send_disabled', mode: 'insensitive' as const } },
-      { lastError: { contains: 'replied_stop', mode: 'insensitive' as const } },
-      { lastError: { contains: 'suppressed', mode: 'insensitive' as const } },
-    ]
+    const blockedErrorClauses = buildBlockedErrorClauses()
     const readyDueWhere = {
       customerId,
       status: OutboundSendQueueStatus.QUEUED,
@@ -964,6 +976,169 @@ router.get('/sequence-readiness', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/sequence-readiness] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence readiness failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/queue-workbench — tenant-scoped queue triage rows for operator workbench.
+ * Query: state=ready|blocked|failed|scheduled|sent, limit<=100, search(recipient email contains), sinceHours
+ */
+router.get('/queue-workbench', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const now = new Date()
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+    const rawState = typeof req.query.state === 'string' ? req.query.state.trim().toLowerCase() : 'ready'
+    const state: 'ready' | 'blocked' | 'failed' | 'scheduled' | 'sent' =
+      rawState === 'blocked' || rawState === 'failed' || rawState === 'scheduled' || rawState === 'sent'
+        ? rawState
+        : 'ready'
+    const rawLimit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 25
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 25
+    const search = typeof req.query.search === 'string' ? req.query.search.trim().toLowerCase() : ''
+
+    const blockedErrorClauses = buildBlockedErrorClauses()
+    const baseWhere: Record<string, unknown> = { customerId }
+    if (search) {
+      baseWhere.recipientEmail = { contains: search, mode: 'insensitive' }
+    }
+
+    let where: Record<string, unknown>
+    if (state === 'ready') {
+      where = {
+        ...baseWhere,
+        status: OutboundSendQueueStatus.QUEUED,
+        OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+        NOT: { OR: blockedErrorClauses },
+      }
+    } else if (state === 'blocked') {
+      where = {
+        ...baseWhere,
+        OR: [
+          {
+            status: OutboundSendQueueStatus.QUEUED,
+            AND: [{ OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }] }, { OR: blockedErrorClauses }],
+          },
+          {
+            status: OutboundSendQueueStatus.SKIPPED,
+            OR: [
+              { lastError: { contains: 'suppressed', mode: 'insensitive' as const } },
+              { lastError: { contains: 'unsubscribe', mode: 'insensitive' as const } },
+              { lastError: { contains: 'replied_stop', mode: 'insensitive' as const } },
+              { lastError: { contains: 'hard_bounce_invalid_recipient', mode: 'insensitive' as const } },
+              { lastError: { contains: 'invalid_recipient', mode: 'insensitive' as const } },
+            ],
+          },
+        ],
+      }
+    } else if (state === 'failed') {
+      where = {
+        ...baseWhere,
+        status: OutboundSendQueueStatus.FAILED,
+        updatedAt: { gte: sinceDate },
+      }
+    } else if (state === 'scheduled') {
+      where = {
+        ...baseWhere,
+        status: OutboundSendQueueStatus.QUEUED,
+        scheduledFor: { gt: now },
+      }
+    } else {
+      where = {
+        ...baseWhere,
+        status: OutboundSendQueueStatus.SENT,
+        sentAt: { gte: sinceDate },
+      }
+    }
+
+    const rows = await prisma.outboundSendQueueItem.findMany({
+      where,
+      orderBy: [
+        { scheduledFor: 'asc' },
+        { sentAt: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      take: limit,
+      select: {
+        id: true,
+        enrollmentId: true,
+        recipientEmail: true,
+        status: true,
+        scheduledFor: true,
+        sentAt: true,
+        updatedAt: true,
+        stepIndex: true,
+        attemptCount: true,
+        lastError: true,
+      },
+    })
+
+    const enrollmentIds = Array.from(new Set(rows.map((r) => r.enrollmentId).filter(Boolean)))
+    const enrollments = enrollmentIds.length
+      ? await prisma.enrollment.findMany({
+          where: { id: { in: enrollmentIds }, customerId },
+          select: { id: true, sequenceId: true, name: true },
+        })
+      : []
+    const sequenceIds = Array.from(new Set(enrollments.map((e) => e.sequenceId).filter(Boolean)))
+    const sequences = sequenceIds.length
+      ? await prisma.emailSequence.findMany({
+          where: { id: { in: sequenceIds }, customerId },
+          select: { id: true, name: true, senderIdentityId: true },
+        })
+      : []
+    const identityIds = Array.from(new Set(sequences.map((s) => s.senderIdentityId).filter((v): v is string => !!v)))
+    const identities = identityIds.length
+      ? await prisma.emailIdentity.findMany({
+          where: { id: { in: identityIds }, customerId },
+          select: { id: true, emailAddress: true },
+        })
+      : []
+
+    const enrollmentById = new Map(enrollments.map((e) => [e.id, e]))
+    const sequenceById = new Map(sequences.map((s) => [s.id, s]))
+    const identityById = new Map(identities.map((i) => [i.id, i]))
+
+    const triageRows = rows.map((row) => {
+      const enrollment = enrollmentById.get(row.enrollmentId)
+      const sequence = enrollment?.sequenceId ? sequenceById.get(enrollment.sequenceId) : null
+      const identity = sequence?.senderIdentityId ? identityById.get(sequence.senderIdentityId) : null
+      return {
+        queueItemId: row.id,
+        enrollmentId: row.enrollmentId,
+        enrollmentName: enrollment?.name ?? null,
+        sequenceId: sequence?.id ?? null,
+        sequenceName: sequence?.name ?? null,
+        recipientEmail: row.recipientEmail,
+        identityEmail: identity?.emailAddress ?? null,
+        status: row.status,
+        triageState: state,
+        reason: deriveQueueReason(row.status, row.scheduledFor, row.lastError, now),
+        scheduledFor: row.scheduledFor?.toISOString() ?? null,
+        sentAt: row.sentAt?.toISOString() ?? null,
+        updatedAt: row.updatedAt.toISOString(),
+        stepIndex: row.stepIndex,
+        attemptCount: row.attemptCount,
+        lastError: row.lastError ?? null,
+      }
+    })
+
+    res.json({
+      success: true,
+      data: {
+        state,
+        sinceHours,
+        totalReturned: triageRows.length,
+        lastUpdatedAt: new Date().toISOString(),
+        rows: triageRows,
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/queue-workbench] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Queue workbench failed' })
   }
 })
 

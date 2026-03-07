@@ -435,6 +435,32 @@ const SequencesTab: React.FC = () => {
     generatedAt?: string
     recentReasons?: Record<string, number>
   }
+  type QueueWorkbenchState = 'ready' | 'blocked' | 'failed' | 'scheduled' | 'sent'
+  type QueueWorkbenchRow = {
+    queueItemId: string
+    enrollmentId: string
+    enrollmentName?: string | null
+    sequenceId?: string | null
+    sequenceName?: string | null
+    recipientEmail: string
+    identityEmail?: string | null
+    status: string
+    triageState: QueueWorkbenchState
+    reason: string
+    scheduledFor: string | null
+    sentAt?: string | null
+    updatedAt: string
+    stepIndex: number
+    attemptCount: number
+    lastError: string | null
+  }
+  type QueueWorkbenchData = {
+    state: QueueWorkbenchState
+    sinceHours: number
+    totalReturned: number
+    lastUpdatedAt: string
+    rows: QueueWorkbenchRow[]
+  }
   type SendQueuePreviewResponse = { items: SendQueuePreviewItem[]; summary?: SendQueuePreviewSummary }
   const [queuePreviewLimit, setQueuePreviewLimit] = useState(20)
   const [queuePreviewEnrollmentId, setQueuePreviewEnrollmentId] = useState('')
@@ -466,6 +492,12 @@ const SequencesTab: React.FC = () => {
   const [opsReportingLoading, setOpsReportingLoading] = useState(false)
   const [opsReportingError, setOpsReportingError] = useState<string | null>(null)
   const [opsReportingSinceDays, setOpsReportingSinceDays] = useState<number>(30)
+  const [queueWorkbenchState, setQueueWorkbenchState] = useState<QueueWorkbenchState>('ready')
+  const [queueWorkbenchSearch, setQueueWorkbenchSearch] = useState('')
+  const [queueWorkbenchData, setQueueWorkbenchData] = useState<QueueWorkbenchData | null>(null)
+  const [queueWorkbenchLoading, setQueueWorkbenchLoading] = useState(false)
+  const [queueWorkbenchError, setQueueWorkbenchError] = useState<string | null>(null)
+  const [queueWorkbenchActionId, setQueueWorkbenchActionId] = useState<string | null>(null)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -613,12 +645,57 @@ const SequencesTab: React.FC = () => {
     setOpsReportingError(null)
   }
 
+  const loadQueueWorkbench = async (opts?: { silent?: boolean }) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    if (!opts?.silent) setQueueWorkbenchLoading(true)
+    setQueueWorkbenchError(null)
+    const params = new URLSearchParams()
+    params.set('state', queueWorkbenchState)
+    params.set('limit', '50')
+    params.set('sinceHours', String(Math.min(168, Math.max(1, operatorConsoleSinceHours || 24))))
+    if (queueWorkbenchSearch.trim()) params.set('search', queueWorkbenchSearch.trim())
+    const endpoint = `/api/send-worker/queue-workbench?${params.toString()}`
+    const res = await api.get<QueueWorkbenchData>(endpoint, {
+      headers: { 'X-Customer-Id': selectedCustomerId },
+    })
+    if (!opts?.silent) setQueueWorkbenchLoading(false)
+    if (res.error) {
+      const status = res.errorDetails?.status
+      if (status === 400) setQueueWorkbenchError('Select a client.')
+      else if (status === 401 || status === 403) setQueueWorkbenchError(`Not authorized (${status}).`)
+      else setQueueWorkbenchError(`${res.error}${res.errorDetails?.details ? ` — ${String(res.errorDetails.details).slice(0, 200)}` : ''}`)
+      setQueueWorkbenchData(null)
+      return
+    }
+    setQueueWorkbenchData(res.data ?? null)
+    setQueueWorkbenchError(null)
+  }
+
+  const applyQueueWorkbenchAction = async (itemId: string, payload: { status: 'QUEUED' | 'SKIPPED'; skipReason?: string }) => {
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    setQueueWorkbenchActionId(itemId)
+    try {
+      const res = await api.patch(`/api/send-queue/items/${itemId}`, payload, {
+        headers: { 'X-Customer-Id': selectedCustomerId },
+      })
+      if (res.error) {
+        toast({ title: 'Queue action failed', description: `${res.errorDetails?.status ?? ''} ${res.error}`.trim(), status: 'error' })
+        return
+      }
+      toast({ title: payload.status === 'QUEUED' ? 'Item re-queued' : 'Item skipped', status: 'success', duration: 2000 })
+      await refreshControlLoopTruth()
+    } finally {
+      setQueueWorkbenchActionId(null)
+    }
+  }
+
   const refreshControlLoopTruth = async (opts?: { silent?: boolean }) => {
     await loadOperatorConsole(opts)
     if (sequenceReadinessSequenceId.trim()) {
       await loadSequenceReadiness(sequenceReadinessSequenceId, { silent: true })
     }
     await loadOpsReporting({ silent: true })
+    await loadQueueWorkbench({ silent: true })
     loadAuditSummary()
     loadAudits()
     loadSendQueuePreview()
@@ -803,6 +880,23 @@ const SequencesTab: React.FC = () => {
   useEffect(() => {
     if (!isOperatorConsolePanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
+    loadQueueWorkbench()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbench refreshes on panel + tenant + chosen state
+  }, [isOperatorConsolePanelOpen, selectedCustomerId, queueWorkbenchState])
+
+  useEffect(() => {
+    if (!isOperatorConsolePanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
+    const timer = setTimeout(() => {
+      loadQueueWorkbench({ silent: true })
+    }, 300)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recipient search refreshes triage list with debounce
+  }, [queueWorkbenchSearch])
+
+  useEffect(() => {
+    if (!isOperatorConsolePanelOpen) return
+    if (!selectedCustomerId?.startsWith('cust_')) return
     const timer = setInterval(() => {
       refreshControlLoopTruth({ silent: true })
     }, 30000)
@@ -850,6 +944,8 @@ const SequencesTab: React.FC = () => {
       setSequenceReadinessError(null)
       setOpsReportingData(null)
       setOpsReportingError(null)
+      setQueueWorkbenchData(null)
+      setQueueWorkbenchError(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load when client changes
   }, [selectedCustomerId])
@@ -2973,6 +3069,142 @@ const SequencesTab: React.FC = () => {
                             </Text>
                           </>
                         )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="queue-workbench-panel" data-testid="queue-workbench-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex gap={3} align="center" flexWrap="wrap">
+                          <Text fontSize="sm" fontWeight="semibold">Queue Workbench</Text>
+                          <FormControl width="180px">
+                            <FormLabel fontSize="xs" mb={0}>View</FormLabel>
+                            <Select
+                              id="queue-workbench-view-select"
+                              data-testid="queue-workbench-view-select"
+                              size="sm"
+                              value={queueWorkbenchState}
+                              onChange={(e) => setQueueWorkbenchState(e.target.value as QueueWorkbenchState)}
+                            >
+                              <option value="ready">Ready now</option>
+                              <option value="blocked">Blocked</option>
+                              <option value="failed">Failed recently</option>
+                              <option value="scheduled">Scheduled later</option>
+                              <option value="sent">Recently sent</option>
+                            </Select>
+                          </FormControl>
+                          <FormControl width="240px">
+                            <FormLabel fontSize="xs" mb={0}>Recipient search</FormLabel>
+                            <Input
+                              id="queue-workbench-search"
+                              data-testid="queue-workbench-search"
+                              size="sm"
+                              placeholder="name@domain.com"
+                              value={queueWorkbenchSearch}
+                              onChange={(e) => setQueueWorkbenchSearch(e.target.value)}
+                            />
+                          </FormControl>
+                          <Button
+                            id="queue-workbench-refresh-btn"
+                            data-testid="queue-workbench-refresh-btn"
+                            size="sm"
+                            leftIcon={<RepeatIcon />}
+                            onClick={() => loadQueueWorkbench()}
+                            isLoading={queueWorkbenchLoading}
+                            isDisabled={!selectedCustomerId?.startsWith('cust_')}
+                          >
+                            Refresh Workbench
+                          </Button>
+                          <Text id="queue-workbench-last-updated" data-testid="queue-workbench-last-updated" fontSize="xs" color="gray.500">
+                            Last updated: {queueWorkbenchData?.lastUpdatedAt ? new Date(queueWorkbenchData.lastUpdatedAt).toLocaleString() : '—'}
+                          </Text>
+                        </Flex>
+
+                        {queueWorkbenchError && (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{queueWorkbenchError}</AlertDescription>
+                          </Alert>
+                        )}
+
+                        <Box overflowX="auto" id="queue-workbench-table" data-testid="queue-workbench-table">
+                          <Table size="sm">
+                            <Thead>
+                              <Tr>
+                                <Th>Recipient</Th>
+                                <Th>Sequence / Enrollment</Th>
+                                <Th>Status</Th>
+                                <Th>Reason</Th>
+                                <Th>Scheduled</Th>
+                                <Th>Identity</Th>
+                                <Th>Actions</Th>
+                              </Tr>
+                            </Thead>
+                            <Tbody>
+                              {(queueWorkbenchData?.rows || []).length === 0 ? (
+                                <Tr>
+                                  <Td colSpan={7} color="gray.500">
+                                    No rows in this view. Use refresh or switch view.
+                                  </Td>
+                                </Tr>
+                              ) : (queueWorkbenchData?.rows || []).map((row) => (
+                                <Tr key={row.queueItemId}>
+                                  <Td fontSize="xs">{maskEmail(row.recipientEmail)}</Td>
+                                  <Td fontSize="xs">
+                                    <Text>{row.sequenceName || row.sequenceId || 'Unknown sequence'}</Text>
+                                    <Text color="gray.500">{row.enrollmentName || row.enrollmentId}</Text>
+                                  </Td>
+                                  <Td>
+                                    <Badge size="sm" variant="outline">{row.status}</Badge>
+                                  </Td>
+                                  <Td fontSize="xs">
+                                    <Text>{row.reason || '—'}</Text>
+                                    {row.lastError ? <Text color="gray.500" noOfLines={2}>{row.lastError}</Text> : null}
+                                  </Td>
+                                  <Td fontSize="xs">{row.scheduledFor ? new Date(row.scheduledFor).toLocaleString() : row.sentAt ? new Date(row.sentAt).toLocaleString() : '—'}</Td>
+                                  <Td fontSize="xs">{row.identityEmail || '—'}</Td>
+                                  <Td>
+                                    <VStack align="start" spacing={1}>
+                                      <HStack spacing={1}>
+                                        <Button size="xs" variant="ghost" onClick={() => openQueueModal(row.enrollmentId)}>
+                                          Queue
+                                        </Button>
+                                        <Button size="xs" variant="ghost" onClick={() => openAuditPanelForQueueItem(row.queueItemId)}>
+                                          Audit
+                                        </Button>
+                                      </HStack>
+                                      <HStack spacing={1}>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          isLoading={queueWorkbenchActionId === row.queueItemId}
+                                          onClick={() => applyQueueWorkbenchAction(row.queueItemId, { status: 'QUEUED' })}
+                                        >
+                                          Requeue
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          isLoading={queueWorkbenchActionId === row.queueItemId}
+                                          onClick={() => {
+                                            const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'triage_skip'
+                                            void applyQueueWorkbenchAction(row.queueItemId, { status: 'SKIPPED', skipReason: reason })
+                                          }}
+                                        >
+                                          Skip
+                                        </Button>
+                                      </HStack>
+                                    </VStack>
+                                  </Td>
+                                </Tr>
+                              ))}
+                            </Tbody>
+                          </Table>
+                        </Box>
+                        <Text fontSize="xs" color="gray.500">
+                          Row-level safe actions use existing tenant-scoped queue endpoints. For deep inspection, use Queue and Audit drill-downs.
+                        </Text>
                       </VStack>
                     </CardBody>
                   </Card>
