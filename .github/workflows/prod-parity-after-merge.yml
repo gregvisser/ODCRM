@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  actions: write
+
 concurrency:
   group: prod-parity-after-merge
   cancel-in-progress: true
@@ -29,23 +33,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Poll until prod frontend and backend match push SHA
+      - name: Poll with classification and bounded backend auto-recovery
         run: |
           EXPECT_SHA="${{ github.sha }}"
           echo "Expecting prod to serve SHA: $EXPECT_SHA"
-          for i in $(seq 1 60); do
-            echo "--- Attempt $i/60 ---"
-            if EXPECT_SHA="$EXPECT_SHA" node scripts/prod-check.cjs; then
-              echo "Prod parity reached."
-              exit 0
-            fi
-            if [ "$i" -lt 60 ]; then
-              echo "Sleeping 10s..."
-              sleep 10
-            fi
-          done
-          echo "Prod did not reach parity within 60 attempts."
-          exit 1
+          EXPECT_SHA="$EXPECT_SHA" node scripts/prod-check.cjs
         env:
           PROD_FRONTEND: https://odcrm.bidlow.co.uk
           PROD_BACKEND: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
+          PARITY_MAX_ATTEMPTS: '90'
+          PARITY_RETRY_DELAY_MS: '10000'
+          AUTO_RECOVER_BACKEND: 'true'
+          AUTO_RECOVER_THRESHOLD_ATTEMPT: '18'
+          RECOVERY_WORKFLOW: deploy-backend-azure.yml
+          RECOVERY_REF: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
