@@ -97,6 +97,7 @@
     "test:reply-stop-propagation-runtime": "node scripts/self-test-reply-stop-propagation-runtime.mjs",
     "test:schedules-emails-runtime": "node scripts/self-test-schedules-emails-runtime.mjs",
     "test:deploy-reliability-runtime": "node scripts/self-test-deploy-reliability-runtime.mjs",
+    "test:marketing-data-health-runtime": "node scripts/self-test-marketing-data-health-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
