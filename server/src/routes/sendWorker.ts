@@ -89,6 +89,92 @@ function buildBlockedQueuedWhere(now: Date) {
   }
 }
 
+const BLOCKED_DUE_ERROR_MARKERS = [
+  'outside_window',
+  'canary',
+  'daily_cap_reached',
+  'per_minute_cap_reached',
+  'no_sender_identity',
+  'kill_switch',
+  'live_send_disabled',
+  'replied_stop',
+  'suppressed',
+]
+
+type QueueShapeRow = {
+  id: string
+  enrollmentId: string
+  recipientEmail: string
+  status: OutboundSendQueueStatus
+  scheduledFor: Date | null
+  lastError: string | null
+  stepIndex: number
+  updatedAt: Date
+}
+
+function isDueNow(row: QueueShapeRow, now: Date): boolean {
+  return !row.scheduledFor || row.scheduledFor <= now
+}
+
+function errorHasAny(lastError: string | null | undefined, markers: string[]): boolean {
+  const normalized = String(lastError || '').toLowerCase()
+  if (!normalized) return false
+  return markers.some((marker) => normalized.includes(marker))
+}
+
+function classifyRecipientGroup(
+  rows: QueueShapeRow[],
+  now: Date
+): { bucket: 'eligible' | 'excluded' | 'blocked'; reason: string; row: QueueShapeRow } {
+  const sorted = [...rows].sort((a, b) => {
+    const aTime = a.scheduledFor ? a.scheduledFor.getTime() : 0
+    const bTime = b.scheduledFor ? b.scheduledFor.getTime() : 0
+    return aTime - bTime || a.stepIndex - b.stepIndex
+  })
+
+  const eligible = sorted.find((row) =>
+    row.status === OutboundSendQueueStatus.QUEUED &&
+    isDueNow(row, now) &&
+    !errorHasAny(row.lastError, BLOCKED_DUE_ERROR_MARKERS)
+  )
+  if (eligible) return { bucket: 'eligible', reason: 'eligible_now', row: eligible }
+
+  const suppressed = sorted.find((row) =>
+    errorHasAny(row.lastError, ['suppressed', 'unsubscribe'])
+  )
+  if (suppressed) return { bucket: 'excluded', reason: 'suppressed', row: suppressed }
+
+  const replyStopped = sorted.find((row) =>
+    errorHasAny(row.lastError, ['replied_stop'])
+  )
+  if (replyStopped) return { bucket: 'excluded', reason: 'reply_stopped', row: replyStopped }
+
+  const invalidRecipient = sorted.find((row) =>
+    errorHasAny(row.lastError, ['hard_bounce_invalid_recipient', 'invalid_recipient', 'mailbox_not_found', 'recipient_not_found'])
+  )
+  if (invalidRecipient) return { bucket: 'excluded', reason: 'invalid_recipient', row: invalidRecipient }
+
+  const noIdentity = sorted.find((row) =>
+    errorHasAny(row.lastError, ['no_sender_identity'])
+  )
+  if (noIdentity) return { bucket: 'blocked', reason: 'no_active_identity', row: noIdentity }
+
+  const scheduledLater = sorted.find((row) =>
+    row.status === OutboundSendQueueStatus.QUEUED && !!row.scheduledFor && row.scheduledFor > now
+  )
+  if (scheduledLater) return { bucket: 'blocked', reason: 'scheduled_later', row: scheduledLater }
+
+  const blockedOther = sorted.find((row) =>
+    row.status === OutboundSendQueueStatus.QUEUED && isDueNow(row, now) && errorHasAny(row.lastError, BLOCKED_DUE_ERROR_MARKERS)
+  )
+  if (blockedOther) return { bucket: 'blocked', reason: 'blocked_other', row: blockedOther }
+
+  const failed = sorted.find((row) => row.status === OutboundSendQueueStatus.FAILED)
+  if (failed) return { bucket: 'blocked', reason: 'failed_recently', row: failed }
+
+  return { bucket: 'blocked', reason: 'blocked_other', row: sorted[0] }
+}
+
 async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
   const cap = getLiveSendCap()
   const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
@@ -677,6 +763,201 @@ router.get('/console', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[send-worker/console] error:', err)
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Operator console failed' })
+  }
+})
+
+/**
+ * GET /api/send-worker/sequence-readiness — sequence-level eligibility/exclusion breakdown.
+ * Tenant-scoped, read-only.
+ */
+router.get('/sequence-readiness', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const sequenceId = typeof req.query.sequenceId === 'string' ? req.query.sequenceId.trim() : ''
+  if (!sequenceId) {
+    res.status(400).json({ success: false, error: 'sequenceId is required' })
+    return
+  }
+
+  try {
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true, name: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+
+    const enrollmentRows = await prisma.enrollment.findMany({
+      where: { customerId, sequenceId: sequence.id },
+      select: { id: true, status: true },
+    })
+    const enrollmentIds = enrollmentRows.map((row) => row.id)
+    const now = new Date()
+    const sinceHours = parseSinceHours(req.query.sinceHours)
+    const sinceDate = new Date(Date.now() - sinceHours * 60 * 60 * 1000)
+
+    if (enrollmentIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          sequenceId: sequence.id,
+          sequenceName: sequence.name ?? null,
+          summary: {
+            enrollmentCount: 0,
+            totalRecipients: 0,
+            queueItemsTotal: 0,
+            eligibleCount: 0,
+            excludedCount: 0,
+            blockedCount: 0,
+          },
+          breakdown: {
+            eligible_now: 0,
+            suppressed: 0,
+            reply_stopped: 0,
+            invalid_recipient: 0,
+            no_active_identity: 0,
+            scheduled_later: 0,
+            blocked_other: 0,
+            failed_recently: 0,
+          },
+          samples: {
+            eligible: [],
+            excluded: [],
+            blocked: [],
+          },
+          windowHours: sinceHours,
+          lastUpdatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+
+    const [totalRecipients, queueRows, failedRecently, sentRecently] = await Promise.all([
+      prisma.enrollmentRecipient.count({
+        where: { enrollmentId: { in: enrollmentIds } },
+      }),
+      prisma.outboundSendQueueItem.findMany({
+        where: { customerId, enrollmentId: { in: enrollmentIds } },
+        select: {
+          id: true,
+          enrollmentId: true,
+          recipientEmail: true,
+          status: true,
+          scheduledFor: true,
+          lastError: true,
+          stepIndex: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          customerId,
+          enrollmentId: { in: enrollmentIds },
+          status: OutboundSendQueueStatus.FAILED,
+          updatedAt: { gte: sinceDate },
+        },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: {
+          customerId,
+          enrollmentId: { in: enrollmentIds },
+          status: OutboundSendQueueStatus.SENT,
+          sentAt: { gte: sinceDate },
+        },
+      }),
+    ])
+
+    const byRecipient = new Map<string, QueueShapeRow[]>()
+    for (const row of queueRows) {
+      const recipientEmailNorm = row.recipientEmail.trim().toLowerCase()
+      const key = `${row.enrollmentId}::${recipientEmailNorm}`
+      const existing = byRecipient.get(key)
+      const normalizedRow: QueueShapeRow = { ...row, recipientEmail: recipientEmailNorm }
+      if (existing) existing.push(normalizedRow)
+      else byRecipient.set(key, [normalizedRow])
+    }
+
+    const breakdown = {
+      eligible_now: 0,
+      suppressed: 0,
+      reply_stopped: 0,
+      invalid_recipient: 0,
+      no_active_identity: 0,
+      scheduled_later: 0,
+      blocked_other: 0,
+      failed_recently: 0,
+    }
+
+    const samples = {
+      eligible: [] as Array<{ queueItemId: string; enrollmentId: string; recipientEmail: string; status: string; scheduledFor: string | null; lastError: string | null; reason: string }>,
+      excluded: [] as Array<{ queueItemId: string; enrollmentId: string; recipientEmail: string; status: string; scheduledFor: string | null; lastError: string | null; reason: string }>,
+      blocked: [] as Array<{ queueItemId: string; enrollmentId: string; recipientEmail: string; status: string; scheduledFor: string | null; lastError: string | null; reason: string }>,
+    }
+
+    let eligibleCount = 0
+    let excludedCount = 0
+    let blockedCount = 0
+
+    for (const rows of byRecipient.values()) {
+      const classified = classifyRecipientGroup(rows, now)
+      if (classified.bucket === 'eligible') eligibleCount += 1
+      else if (classified.bucket === 'excluded') excludedCount += 1
+      else blockedCount += 1
+
+      if (Object.prototype.hasOwnProperty.call(breakdown, classified.reason)) {
+        ;(breakdown as Record<string, number>)[classified.reason] += 1
+      } else {
+        breakdown.blocked_other += 1
+      }
+
+      const target =
+        classified.bucket === 'eligible'
+          ? samples.eligible
+          : classified.bucket === 'excluded'
+            ? samples.excluded
+            : samples.blocked
+      if (target.length < 5) {
+        target.push({
+          queueItemId: classified.row.id,
+          enrollmentId: classified.row.enrollmentId,
+          recipientEmail: classified.row.recipientEmail,
+          status: classified.row.status,
+          scheduledFor: classified.row.scheduledFor?.toISOString() ?? null,
+          lastError: classified.row.lastError ?? null,
+          reason: classified.reason,
+        })
+      }
+    }
+
+    breakdown.failed_recently = failedRecently
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: sequence.id,
+        sequenceName: sequence.name ?? null,
+        summary: {
+          enrollmentCount: enrollmentIds.length,
+          totalRecipients,
+          queueItemsTotal: queueRows.length,
+          eligibleCount,
+          excludedCount,
+          blockedCount,
+          failedRecently,
+          sentRecently,
+        },
+        breakdown,
+        samples,
+        windowHours: sinceHours,
+        lastUpdatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/sequence-readiness] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence readiness failed' })
   }
 })
 
