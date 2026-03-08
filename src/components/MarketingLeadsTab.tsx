@@ -1168,11 +1168,18 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
           </Text>
         </Box>
       ) : error && leads.length === 0 ? (
-        <Alert status="error" borderRadius="lg">
+        <Alert status="error" borderRadius="lg" data-testid="marketing-leads-actionable-error">
           <AlertIcon />
           <Box>
             <AlertTitle>Error loading leads</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <Text>{error}</Text>
+              <Text mt={2} fontSize="sm">
+                {sourceOfTruth === 'db'
+                  ? 'This client is DB-backed for leads in Marketing. Confirm lead records are available in ODCRM.'
+                  : 'This client is Google Sheets-backed for leads in Marketing. Confirm the linked sheet URL and access, then refresh.'}
+              </Text>
+            </AlertDescription>
           </Box>
         </Alert>
       ) : (
@@ -1229,6 +1236,11 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
             </Text>
             <Text fontSize="xs" color="gray.500" mt={1}>
               Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1} data-testid="marketing-leads-next-step-guidance">
+              {sourceOfTruth === 'db'
+                ? 'Next step: use Marketing workflows to operate on DB-backed lead records.'
+                : 'Next step: maintain sheet setup in Clients/Lead Sources, then run outreach from Marketing.'}
             </Text>
             <Text fontSize="xs" color="gray.500" mt={2}>
               Last refreshed: {formatLastRefresh(lastRefresh)} • Polls every 30s

@@ -36,6 +36,7 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import {
   convertLeadToContact,
   bulkConvertLeads,
@@ -74,7 +75,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 
 function LeadsTab() {
-  const customerId = localStorage.getItem('currentCustomerId') || ''
+  const customerId = getCurrentCustomerId() || ''
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
@@ -328,11 +329,18 @@ function LeadsTab() {
 
   if (error) {
     return (
-      <Alert status="error" borderRadius="lg">
+      <Alert status="error" borderRadius="lg" data-testid="leads-acceptance-actionable-error">
         <AlertIcon />
         <Box>
           <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            <Text>{error}</Text>
+            <Text mt={2} fontSize="sm">
+              {sourceOfTruth === 'db'
+                ? 'This client uses ODCRM database lead records. Confirm leads exist in ODCRM for this client.'
+                : 'This client uses Google Sheets-backed lead truth. Confirm the linked sheet URL is valid and readable by ODCRM.'}
+            </Text>
+          </AlertDescription>
         </Box>
       </Alert>
     )
@@ -365,11 +373,21 @@ function LeadsTab() {
           <Text fontSize="lg" color="gray.600">
             No leads data available
           </Text>
+          <Text fontSize="sm" color="gray.600" mt={2} data-testid="leads-acceptance-source-mode">
+            {sourceOfTruth === 'db'
+              ? 'This client is DB-backed for leads in this view.'
+              : 'This client is Google Sheets-backed for leads in this view.'}
+          </Text>
           <Text fontSize="sm" color="gray.500" mt={2}>
             {whyZeroMessage
               ?? (sourceOfTruth === 'db'
                 ? 'No lead records are stored for this client yet.'
                 : 'Configure Client Leads sheets in account settings to view leads data')}
+          </Text>
+          <Text fontSize="sm" color="gray.500" mt={2} data-testid="leads-acceptance-next-step">
+            {sourceOfTruth === 'db'
+              ? 'Next step: add or import lead records for this client in ODCRM, then refresh.'
+              : 'Next step: update the client lead sheet link in Accounts and confirm sheet access, then refresh.'}
           </Text>
           {sheetValidateForEmpty?.hint && !sheetValidateForEmpty.ok && (
             <Text fontSize="sm" color="gray.500" mt={1} fontStyle="italic">{sheetValidateForEmpty.hint}</Text>
@@ -571,6 +589,11 @@ function LeadsTab() {
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
+          </Text>
+          <Text fontSize="xs" color="gray.500" mt={1} data-testid="leads-acceptance-next-step">
+            {sourceOfTruth === 'db'
+              ? 'Use this view to monitor DB-backed lead records for this client.'
+              : 'Use this view to monitor Google Sheets-backed lead records for this client.'}
           </Text>
           <HStack spacing={2} mt={1} fontSize="xs" color="gray.500">
             <Text>Last synced: {formatLastRefresh(lastRefresh)}</Text>
