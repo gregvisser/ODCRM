@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Badge,
   Box,
   Button,
@@ -26,21 +30,14 @@ import {
 } from '@chakra-ui/react'
 import { CheckCircleIcon, RepeatIcon, WarningIcon, DownloadIcon } from '@chakra-ui/icons'
 import { type Account } from '../../components/AccountsTab'
-import { syncAccountLeadCountsFromLeads } from '../../utils/accountsLeadsSync'
 import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
 import RequireActiveClient from '../../components/RequireActiveClient'
-import { useLiveLeadsPolling } from '../../hooks/useLiveLeadsPolling'
-import type { LiveLeadRow } from '../../utils/liveLeadsApi'
+import { useLiveLeadMetricsPolling } from '../../hooks/useLiveLeadsPolling'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
-
-type Lead = {
-  [key: string]: string
-  accountName: string
-}
 
 type CustomerApi = {
   id: string
@@ -60,28 +57,6 @@ type CustomerApi = {
   monthlyLeadActual?: number | null
 }
 
-const LEAD_SOURCE_CATEGORIES = [
-  'Individual Email',
-  'Telesales',
-  'SJ Contact List',
-  'Salesforce Individual Email',
-  'Personal Contacts',
-  'Old CRM',
-  'LinkedIn',
-  'CRM Email',
-] as const
-
-const LEAD_SOURCE_KEYWORDS: Record<string, string[]> = {
-  'Individual Email': ['individual email'],
-  Telesales: ['telesales', 'tele-sales'],
-  'SJ Contact List': ['sj contact'],
-  'Salesforce Individual Email': ['salesforce individual email', 'salesforce email'],
-  'Personal Contacts': ['personal contact'],
-  'Old CRM': ['old crm'],
-  LinkedIn: ['linkedin'],
-  'CRM Email': ['crm email'],
-}
-
 const DEFAULT_ABOUT_SECTIONS: Account['aboutSections'] = {
   whatTheyDo: '',
   accreditations: '',
@@ -91,24 +66,6 @@ const DEFAULT_ABOUT_SECTIONS: Account['aboutSections'] = {
   companySize: '',
   headquarters: '',
   foundingYear: '',
-}
-
-const normalizeLeadSource = (value: string | undefined): string | null => {
-  if (!value) return null
-  const cleaned = value.trim().toLowerCase()
-  if (!cleaned) return null
-
-  const exactMatch = LEAD_SOURCE_CATEGORIES.find((source) => source.toLowerCase() === cleaned)
-  if (exactMatch) return exactMatch
-
-  for (const category of LEAD_SOURCE_CATEGORIES) {
-    const keywords = LEAD_SOURCE_KEYWORDS[category] || []
-    if (keywords.some((keyword) => cleaned.includes(keyword))) {
-      return category
-    }
-  }
-
-  return null
 }
 
 function mapClientStatusToAccountStatus(status?: string | null): Account['status'] {
@@ -205,24 +162,19 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
   return applyCustomerFieldsToAccount(base, customer)
 }
 
-/** Map live API rows to Lead shape for dashboard. */
-function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
-  return rows.map((row, i) => ({
-    ...row.raw,
-    accountName,
-    Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
-    'Channel of Lead': row.source ?? row.raw['Channel of Lead'] ?? '',
-    'OD Team Member': row.owner ?? row.raw['OD Team Member'] ?? '',
-  }))
-}
-
 export default function DashboardsHomePage() {
   const toast = useToast()
   const customerId = getCurrentCustomerId()
-  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const {
+    data: liveMetricsData,
+    loading: metricsLoading,
+    error: metricsError,
+    lastUpdatedAt: metricsUpdatedAt,
+    refetch: refetchMetrics,
+  } = useLiveLeadMetricsPolling(customerId || null)
   const { interpretation: readiness, signal: readinessSignal } = useClientReadinessState(customerId)
-  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
-  const lastRefresh = lastUpdatedAt ?? new Date()
+  const sourceOfTruth = liveMetricsData?.sourceOfTruth ?? null
+  const lastRefresh = metricsUpdatedAt ?? new Date()
 
   const [accountsData, setAccountsData] = useState<Account[]>([])
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
@@ -272,15 +224,6 @@ export default function DashboardsHomePage() {
     }
   }
   
-  const leadsRef = useRef(leads)
-  useEffect(() => {
-    leadsRef.current = leads
-  }, [leads])
-
-  useEffect(() => {
-    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
-  }, [leads])
-
   useEffect(() => {
     const syncFromCustomers = async () => {
       if (hasSyncedCustomers) return
@@ -325,16 +268,16 @@ export default function DashboardsHomePage() {
 
     const init = async () => {
       await syncFromCustomers()
-      refetch()
+      await refetchMetrics()
     }
 
     void init()
 
     const offAccountsUpdated = on<Account[]>('accountsUpdated', (accounts) => {
       if (accounts && accounts.length > 0) setAccountsData(accounts)
-      refetch()
+      void refetchMetrics()
     })
-    const offLeadsUpdated = on<Lead[]>('leadsUpdated', () => refetch())
+    const offLeadsUpdated = on('leadsUpdated', () => void refetchMetrics())
 
     const refreshInterval = setInterval(async () => {
       const syncCustomers = async () => {
@@ -345,7 +288,7 @@ export default function DashboardsHomePage() {
         setAccountsData(hydrated)
         emit('accountsUpdated', hydrated)
       }
-      await Promise.allSettled([syncCustomers(), refetch()])
+      await Promise.allSettled([syncCustomers(), refetchMetrics()])
     }, 30 * 1000)
 
     return () => {
@@ -353,258 +296,21 @@ export default function DashboardsHomePage() {
       offLeadsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [refetch, hasSyncedCustomers])
-
-  const unifiedAnalytics = useMemo(() => {
-    const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
-    const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
-
-    const now = new Date()
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const endOfToday = new Date(startOfToday)
-    endOfToday.setDate(endOfToday.getDate() + 1)
-
-    const weekStart = new Date(startOfToday)
-    const day = weekStart.getDay()
-    const diff = day === 0 ? -6 : 1 - day
-    weekStart.setDate(weekStart.getDate() + diff)
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekEnd.getDate() + 7)
-
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
-
-    const dailyTargetFromWeekly = totalWeeklyTarget / 7
-    const dailyTargetFromMonthly = totalMonthlyTarget / daysInMonth
-    const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
-
-    const parseLeadDate = (dateStr: string): Date | null => {
-      if (!dateStr || dateStr.trim() === '') return null
-      
-      const trimmed = dateStr.trim()
-      
-      // Try dd.mm.yy format (e.g., 03.02.26)
-      const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-      if (ddmmyy) {
-        const day = parseInt(ddmmyy[1], 10)
-        const month = parseInt(ddmmyy[2], 10) - 1
-        const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-        return new Date(year, month, day)
-      }
-      
-      // Try dd/mm/yyyy format (e.g., 03/02/2026)
-      const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-      if (ddmmyyyy) {
-        const day = parseInt(ddmmyyyy[1], 10)
-        const month = parseInt(ddmmyyyy[2], 10) - 1
-        const year = parseInt(ddmmyyyy[3], 10)
-        return new Date(year, month, day)
-      }
-      
-      // Try Week format (e.g., "Week 5 - 03 Feb")
-      const weekMatch = trimmed.match(/Week\s+(\d+)/i)
-      if (weekMatch) {
-        const dateAfterDash = trimmed.split('-')[1]
-        if (dateAfterDash) {
-          const parsed = new Date(dateAfterDash.trim())
-          if (!isNaN(parsed.getTime())) return parsed
-        }
-      }
-      
-      // Try standard Date parsing as fallback
-      const parsed = new Date(trimmed)
-      return isNaN(parsed.getTime()) ? null : parsed
-    }
-
-    const leadsWithDates = leads
-      .map((lead) => {
-        const dateValue =
-          lead['Date'] ||
-          lead['date'] ||
-          lead['Week'] ||
-          lead['week'] ||
-          lead['First Meeting Date'] ||
-          ''
-        const parsedDate = parseLeadDate(dateValue)
-        if (!parsedDate) return null
-        return { data: lead, parsedDate }
-      })
-      .filter((x): x is { data: Lead; parsedDate: Date } => Boolean(x))
-
-    const computeMetrics = (start: Date, end: Date) => {
-      const breakdown: Record<string, number> = {}
-      const teamBreakdown: Record<string, number> = {}
-      let actual = 0
-
-      leadsWithDates.forEach((entry) => {
-        if (entry.parsedDate >= start && entry.parsedDate < end) {
-          actual += 1
-
-          const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
-          const normalized = normalizeLeadSource(channel)
-          const key = normalized || (channel ? channel : '')
-          if (key) breakdown[key] = (breakdown[key] || 0) + 1
-
-          const rawTeamMember =
-            entry.data['OD Team Member'] ||
-            entry.data['OD team member'] ||
-            entry.data['od team member'] ||
-            entry.data['OD Team'] ||
-            entry.data['od team'] ||
-            ''
-
-          if (rawTeamMember && rawTeamMember.trim()) {
-            const members = rawTeamMember
-              .split(/,|&|\/|\+|\band\b/gi)
-              .map((m) => m.trim())
-              .filter(Boolean)
-
-            members.forEach((member) => {
-              teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
-            })
-          }
-        }
-      })
-
-      return { actual, breakdown, teamBreakdown }
-    }
-
-    return {
-      periodMetrics: {
-        today: { label: 'Today', ...computeMetrics(startOfToday, endOfToday), target: Math.max(Math.round(dailyTarget), 0) },
-        week: { label: 'This Week', ...computeMetrics(weekStart, weekEnd), target: Math.max(Math.round(totalWeeklyTarget), 0) },
-        month: { label: 'This Month', ...computeMetrics(monthStart, monthEnd), target: Math.max(Math.round(totalMonthlyTarget), 0) },
-      },
-    }
-  }, [accountsData, leads])
+  }, [refetchMetrics, hasSyncedCustomers])
 
   const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const endOfToday = new Date(startOfToday)
-  endOfToday.setDate(endOfToday.getDate() + 1)
-
-  const weekStart = new Date(startOfToday)
-  const day = weekStart.getDay()
-  const diff = day === 0 ? -6 : 1 - day
-  weekStart.setDate(weekStart.getDate() + diff)
-  const weekEnd = new Date(weekStart)
-  weekEnd.setDate(weekEnd.getDate() + 7)
-
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-
-  // Use the SAME parseLeadDate function from unifiedAnalytics (supports multiple date formats)
-  const parseLeadDateFlexible = (dateStr: string): Date | null => {
-    if (!dateStr || dateStr.trim() === '') return null
-    
-    const trimmed = dateStr.trim()
-    
-    // Try dd.mm.yy format (e.g., 03.02.26)
-    const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-    if (ddmmyy) {
-      const day = parseInt(ddmmyy[1], 10)
-      const month = parseInt(ddmmyy[2], 10) - 1
-      const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-      return new Date(year, month, day)
-    }
-    
-    // Try dd/mm/yyyy format (e.g., 03/02/2026)
-    const ddmmyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-    if (ddmmyyyy) {
-      const day = parseInt(ddmmyyyy[1], 10)
-      const month = parseInt(ddmmyyyy[2], 10) - 1
-      const year = parseInt(ddmmyyyy[3], 10)
-      return new Date(year, month, day)
-    }
-    
-    // Try mm/dd/yyyy format (US format, e.g., 02/03/2026)
-    const mmddyyyy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-    if (mmddyyyy) {
-      const month = parseInt(mmddyyyy[1], 10) - 1
-      const day = parseInt(mmddyyyy[2], 10)
-      const year = parseInt(mmddyyyy[3], 10)
-      const usDate = new Date(year, month, day)
-      if (!isNaN(usDate.getTime())) return usDate
-    }
-    
-    // Try Week format (e.g., "Week 5 - 03 Feb" or "Week 5")
-    const weekMatch = trimmed.match(/Week\s+(\d+)/i)
-    if (weekMatch) {
-      // Try to extract date after the dash
-      const dateAfterDash = trimmed.split('-')[1]
-      if (dateAfterDash) {
-        const parsed = new Date(dateAfterDash.trim())
-        if (!isNaN(parsed.getTime())) return parsed
-      }
-    }
-    
-    // Try standard Date parsing as fallback (handles ISO, other formats)
-    const parsed = new Date(trimmed)
-    return isNaN(parsed.getTime()) ? null : parsed
-  }
-
-  const leadsWithDates = leads
-    .map((lead) => {
-      const dateValue = lead['Date'] || lead['date'] || lead['Week'] || lead['week'] || lead['First Meeting Date'] || ''
-      const parsedDate = parseLeadDateFlexible(dateValue)
-      
-      // DEBUG: Log GreenTheUK leads to see date format issues
-      if (lead.accountName === 'GreenTheUK Limited') {
-        console.log('🔍 GreenTheUK Lead Debug:', {
-          dateValue,
-          parsedDate: parsedDate ? parsedDate.toISOString() : 'NULL',
-          allDateFields: {
-            'Date': lead['Date'],
-            'date': lead['date'],
-            'Week': lead['Week'],
-            'week': lead['week'],
-            'First Meeting Date': lead['First Meeting Date']
-          },
-          leadName: lead['Name'] || lead['name'] || 'unknown',
-          isToday: parsedDate ? (parsedDate >= startOfToday && parsedDate < endOfToday) : false,
-          isThisWeek: parsedDate ? (parsedDate >= weekStart && parsedDate < weekEnd) : false,
-          isThisMonth: parsedDate ? (parsedDate >= monthStart && parsedDate < monthEnd) : false,
-        })
-      }
-      
-      if (!parsedDate) return null
-      return { data: lead, parsedDate }
-    })
-    .filter((x): x is { data: Lead; parsedDate: Date } => Boolean(x))
-
-  const weekTotal = leadsWithDates.filter(
-    (entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd
-  ).length
-
-  const monthTotal = leadsWithDates.filter(
-    (entry) => entry.parsedDate >= monthStart && entry.parsedDate < monthEnd
-  ).length
-
-  const todayTotal = leadsWithDates.filter(
-    (entry) => entry.parsedDate >= startOfToday && entry.parsedDate < endOfToday
-  ).length
-
   const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
   const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
-
-  const channelBreakdown: Record<string, number> = {}
-  leadsWithDates
-    .filter((entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd)
-    .forEach((entry) => {
-      const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || 'Unknown'
-      channelBreakdown[channel] = (channelBreakdown[channel] || 0) + 1
-    })
-
-  const teamBreakdown: Record<string, number> = {}
-  leadsWithDates
-    .filter((entry) => entry.parsedDate >= weekStart && entry.parsedDate < weekEnd)
-    .forEach((entry) => {
-      const member = entry.data['OD Team Member'] || entry.data['OD team member'] || 'Unknown'
-      if (member && member.trim() && member !== 'Unknown') {
-        teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
-      }
-    })
+  const kpiMetricsAvailable = Boolean(liveMetricsData) && !metricsError
+  const metricsAuthoritative = liveMetricsData?.authoritative !== false && liveMetricsData?.dataFreshness !== 'diagnostic_stale'
+  const showKpiContractError = !metricsLoading && (!kpiMetricsAvailable || !metricsAuthoritative)
+  const weekTotal = kpiMetricsAvailable && metricsAuthoritative ? (liveMetricsData?.weekLeads ?? 0) : 0
+  const monthTotal = kpiMetricsAvailable && metricsAuthoritative ? (liveMetricsData?.monthLeads ?? 0) : 0
+  const todayTotal = kpiMetricsAvailable && metricsAuthoritative ? (liveMetricsData?.todayLeads ?? 0) : 0
+  const channelBreakdown: Record<string, number> =
+    kpiMetricsAvailable && metricsAuthoritative ? (liveMetricsData?.breakdownBySource ?? {}) : {}
+  const teamBreakdown: Record<string, number> =
+    kpiMetricsAvailable && metricsAuthoritative ? (liveMetricsData?.breakdownByOwner ?? {}) : {}
 
   const salesLeaderboard = Object.entries(teamBreakdown)
     .map(([name, leads]) => ({ name, leads }))
@@ -716,9 +422,9 @@ export default function DashboardsHomePage() {
   const isWeekOnTrack = weekTotal >= totalWeeklyTarget * 0.8
   const dailyTarget = Math.ceil(totalWeeklyTarget / 7)
   const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-  const weekNumber = Math.ceil((now.getDate() + startOfToday.getDay()) / 7)
+  const weekNumber = Math.ceil((now.getDate() + new Date(now.getFullYear(), now.getMonth(), now.getDate()).getDay()) / 7)
 
-  if (loading && leads.length === 0) {
+  if (metricsLoading && !liveMetricsData) {
     return (
       <RequireActiveClient>
         <Box textAlign="center" py={12}>
@@ -854,7 +560,15 @@ export default function DashboardsHomePage() {
       </Box>
 
       {/* Header Stats */}
-      <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
+      <Box
+        bg="white"
+        p={3}
+        borderRadius="md"
+        shadow="sm"
+        border="1px"
+        borderColor="gray.200"
+        data-testid="dashboard-kpi-truth-contract"
+      >
         <HStack justify="space-between" mb={2} flexWrap="wrap">
           <Box>
             <Heading size="md" color="gray.700">
@@ -862,6 +576,9 @@ export default function DashboardsHomePage() {
             </Heading>
             <Text fontSize="xs" color="gray.500" mt={1}>
               Secondary metrics and trend context after triage decisions. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1} data-testid="dashboard-kpi-source-of-truth-mode">
+              KPI source of truth: {sourceOfTruth === 'google_sheets' ? 'Google Sheets (backend-validated)' : sourceOfTruth === 'db' ? 'Database' : 'Unavailable'}
             </Text>
           </Box>
           <HStack spacing={2}>
@@ -894,7 +611,9 @@ export default function DashboardsHomePage() {
                       status: 'success',
                       duration: 5000,
                     })
-                    setTimeout(() => refetch(), 10000)
+                    setTimeout(() => {
+                      void refetchMetrics()
+                    }, 10000)
                   }
                 } catch (err: any) {
                   toast({
@@ -928,7 +647,7 @@ export default function DashboardsHomePage() {
 
               const results = await Promise.allSettled([
                 syncFromCustomers(),
-                refetch()
+                refetchMetrics(),
               ])
 
               // Check actual operation success before showing feedback
@@ -961,7 +680,7 @@ export default function DashboardsHomePage() {
                 })
               }
             }}
-              isLoading={loading}
+              isLoading={metricsLoading}
               colorScheme="blue"
               size="sm"
               title="Refresh dashboard data"
@@ -969,11 +688,29 @@ export default function DashboardsHomePage() {
           </HStack>
         </HStack>
 
+        {showKpiContractError && (
+          <Alert
+            status="warning"
+            borderRadius="md"
+            mb={3}
+            data-testid="dashboard-kpi-truth-error"
+            id="dashboard-kpi-truth-error"
+          >
+            <AlertIcon />
+            <Box>
+              <AlertTitle fontSize="sm">Live KPI truth is currently unavailable</AlertTitle>
+              <AlertDescription fontSize="sm">
+                {metricsError || liveMetricsData?.warning || liveMetricsData?.hint || 'The dashboard could not load authoritative KPI metrics from backend truth. Refresh after checking lead source access.'}
+              </AlertDescription>
+            </Box>
+          </Alert>
+        )}
+
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
           <Stat>
             <StatLabel fontSize="xs">Total Leads This Week</StatLabel>
             <StatNumber fontSize="2xl" color="orange.500">
-              {weekTotal}
+              {showKpiContractError ? '—' : weekTotal}
             </StatNumber>
             <StatHelpText fontSize="xs">Week {weekNumber} Target: {totalWeeklyTarget}</StatHelpText>
           </Stat>
@@ -987,10 +724,12 @@ export default function DashboardsHomePage() {
           <Stat>
             <StatLabel fontSize="xs">Month-to-Date</StatLabel>
             <StatNumber fontSize="2xl" color="orange.500">
-              {monthTotal}
+              {showKpiContractError ? '—' : monthTotal}
             </StatNumber>
             <StatHelpText fontSize="xs">
-              {totalMonthlyTarget > 0 
+              {showKpiContractError
+                ? 'Awaiting authoritative KPI refresh'
+                : totalMonthlyTarget > 0
                 ? `${((monthTotal / totalMonthlyTarget) * 100).toFixed(1)}% of target`
                 : 'No target set'}
             </StatHelpText>
@@ -1011,7 +750,7 @@ export default function DashboardsHomePage() {
         enablePagination={false}
         enableExport
         compact
-        loading={loading}
+        loading={metricsLoading}
         emptyMessage="No client data available"
       />
 
@@ -1150,7 +889,7 @@ export default function DashboardsHomePage() {
       </Box>
 
       <Text fontSize="xs" color="gray.400" textAlign="center">
-        Last synced: {lastRefresh.toLocaleString('en-GB')} | Data from Google Sheets via automated sync
+        Last synced: {lastRefresh.toLocaleString('en-GB')} | KPI truth: {sourceOfTruth === 'google_sheets' ? 'Google Sheets (via backend sync)' : sourceOfTruth === 'db' ? 'Database' : 'Unavailable'}
       </Text>
     </VStack>
     </RequireActiveClient>
