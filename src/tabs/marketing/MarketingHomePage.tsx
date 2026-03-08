@@ -81,7 +81,7 @@ export default function MarketingHomePage({
 
   // Default navigation items — Overview and People tabs removed (2026-02-22).
   // Old ?view=overview and ?view=people URLs are handled by coerceViewId above.
-  const defaultNavItems: SubNavItem[] = [
+  const defaultNavItems: SubNavItem[] = useMemo(() => [
     {
       id: 'readiness',
       label: 'Readiness',
@@ -145,7 +145,7 @@ export default function MarketingHomePage({
       content: <InboxTab />,
       sortOrder: 8,
     },
-  ]
+  ], [onNavigate])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
