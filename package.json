@@ -128,6 +128,7 @@
     "test:client-readiness-unification-runtime": "node scripts/self-test-client-readiness-unification-runtime.mjs",
     "test:dashboard-action-priority-runtime": "node scripts/self-test-dashboard-action-priority-runtime.mjs",
     "test:customers-crm-data-health-runtime": "node scripts/self-test-customers-crm-data-health-runtime.mjs",
+    "test:onboarding-activation-tightening-runtime": "node scripts/self-test-onboarding-activation-tightening-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
