@@ -28,6 +28,8 @@ export type LiveLeadsResponse = {
   leads: LiveLeadRow[]
   queriedAt: string
   sourceUrl: string
+  staleFallbackUsed?: boolean
+  warning?: string
 }
 
 export type LiveLeadMetricsResponse = {
@@ -42,6 +44,13 @@ export type LiveLeadMetricsResponse = {
   rowCount: number
   queriedAt: string
   sourceUrl: string
+  staleFallbackUsed?: boolean
+  warning?: string
+}
+
+type ApiErrorResponse = {
+  error?: string
+  hint?: string
 }
 
 export async function getLiveLeads(customerId: string): Promise<LiveLeadsResponse> {
@@ -49,8 +58,9 @@ export async function getLiveLeads(customerId: string): Promise<LiveLeadsRespons
     headers: getCustomerHeaders(customerId),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error((err as { error?: string }).error || `HTTP ${res.status}`)
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
   }
   return res.json()
 }
@@ -60,8 +70,9 @@ export async function getLiveLeadMetrics(customerId: string): Promise<LiveLeadMe
     headers: getCustomerHeaders(customerId),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error((err as { error?: string }).error || `HTTP ${res.status}`)
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
   }
   return res.json()
 }

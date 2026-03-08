@@ -5,7 +5,7 @@
  */
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { fetchAndParseLiveLeads, resolveCsvUrl } from '../utils/liveSheets.js'
+import { fetchAndParseLiveLeads, getStaleCachedLeads, resolveCsvUrl } from '../utils/liveSheets.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
@@ -98,8 +98,8 @@ router.get('/leads', async (req, res) => {
       return res.status(400).json({ error: 'Customer has no leads reporting URL configured' })
     }
 
-    const leads = await fetchAndParseLiveLeads(customerId, url)
     const sourceUrl = resolveCsvUrl(url)
+    const leads = await fetchAndParseLiveLeads(customerId, url)
     const queriedAt = new Date().toISOString()
 
     res.json({
@@ -109,10 +109,34 @@ router.get('/leads', async (req, res) => {
       leads,
       queriedAt,
       sourceUrl,
+      staleFallbackUsed: false,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to fetch live leads'
-    return res.status(500).json({ error: message })
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true, leadsReportingUrl: true },
+    })
+    const sourceUrl = resolveCsvUrl((customer?.leadsReportingUrl || '').trim())
+    const stale = customer?.leadsReportingUrl
+      ? getStaleCachedLeads(customerId, customer.leadsReportingUrl)
+      : null
+    if (stale) {
+      return res.json({
+        customerId,
+        customerName: customer?.name || '',
+        rowCount: stale.data.length,
+        leads: stale.data,
+        queriedAt: new Date().toISOString(),
+        sourceUrl,
+        staleFallbackUsed: true,
+        warning: `Using cached leads due to sheet fetch issue: ${message}`,
+      })
+    }
+    return res.status(500).json({
+      error: message,
+      hint: 'Verify leads Google Sheet URL accessibility and published CSV permissions for this client.',
+    })
   }
 })
 
@@ -137,8 +161,8 @@ router.get('/leads/metrics', async (req, res) => {
       return res.status(400).json({ error: 'Customer has no leads reporting URL configured' })
     }
 
-    const leads = await fetchAndParseLiveLeads(customerId, url)
     const sourceUrl = resolveCsvUrl(url)
+    const leads = await fetchAndParseLiveLeads(customerId, url)
     const queriedAt = new Date().toISOString()
 
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtc()
@@ -177,10 +201,59 @@ router.get('/leads/metrics', async (req, res) => {
       rowCount: leads.length,
       queriedAt,
       sourceUrl,
+      staleFallbackUsed: false,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to fetch live lead metrics'
-    return res.status(500).json({ error: message })
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { leadsReportingUrl: true },
+    })
+    const stale = customer?.leadsReportingUrl
+      ? getStaleCachedLeads(customerId, customer.leadsReportingUrl)
+      : null
+    if (!stale) {
+      return res.status(500).json({
+        error: message,
+        hint: 'Verify leads Google Sheet URL accessibility and published CSV permissions for this client.',
+      })
+    }
+
+    const leads = stale.data
+    const sourceUrl = resolveCsvUrl(customer?.leadsReportingUrl || '')
+    const queriedAt = new Date().toISOString()
+    const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtc()
+    let todayLeads = 0
+    let weekLeads = 0
+    let monthLeads = 0
+    const breakdownBySource: Record<string, number> = {}
+    const breakdownByOwner: Record<string, number> = {}
+    for (const row of leads) {
+      const at = row.occurredAt ? new Date(row.occurredAt) : null
+      if (at && at >= todayStart && at < todayEnd) todayLeads++
+      if (at && at >= weekStart && at < weekEnd) weekLeads++
+      if (at && at >= monthStart && at < monthEnd) monthLeads++
+      const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
+      const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
+      breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
+      breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
+    }
+
+    return res.json({
+      customerId,
+      totalLeads: leads.length,
+      todayLeads,
+      weekLeads,
+      monthLeads,
+      counts: { today: todayLeads, week: weekLeads, month: monthLeads, total: leads.length },
+      breakdownBySource,
+      breakdownByOwner,
+      rowCount: leads.length,
+      queriedAt,
+      sourceUrl,
+      staleFallbackUsed: true,
+      warning: `Using cached metrics due to sheet fetch issue: ${message}`,
+    })
   }
 })
 

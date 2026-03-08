@@ -131,6 +131,8 @@
     "test:onboarding-activation-tightening-runtime": "node scripts/self-test-onboarding-activation-tightening-runtime.mjs",
     "test:onboarding-suppression-truth-runtime": "node scripts/self-test-onboarding-suppression-truth-runtime.mjs",
     "test:reporting-input-truth-runtime": "node scripts/self-test-reporting-input-truth-runtime.mjs",
+    "test:google-sheets-data-plane-runtime": "node scripts/self-test-google-sheets-data-plane-runtime.mjs",
+    "test:customers-leads-reporting-truth-runtime": "node scripts/self-test-customers-leads-reporting-truth-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
