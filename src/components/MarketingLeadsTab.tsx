@@ -174,7 +174,10 @@ const DEFAULT_FILTERS: FilterState = {
 function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountName?: string; enabled?: boolean }) {
   const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, { enabled })
-  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const leads = useMemo(
+    () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
+    [liveData]
+  )
   const lastRefresh = lastUpdatedAt ?? new Date()
   const liveWarning = liveData?.warning ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null

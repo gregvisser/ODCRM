@@ -91,7 +91,7 @@ export function useDatabaseFirst<T extends { id?: string; _databaseId?: string }
     showToasts = false,
   } = options
   
-  const toast = showToasts ? useToast() : null
+  const toast = useToast()
   
   // State
   const [data, setData] = useState<T[]>([])

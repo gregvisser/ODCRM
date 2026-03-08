@@ -3456,7 +3456,7 @@ function NotesSection({ account, customerId, updateAccount, toast, users, curren
     const existing = (account.notes || []).find((n) => n.userId)?.userId || ''
     const fallback = activeUsers[0]?.id || ''
     setNoteUserId(matchByEmail || existing || fallback)
-  }, [account.name, account.notes, activeUsers])
+  }, [account.name, account.notes, activeUsers, currentUserEmail])
 
   const handleAddNote = async () => {
     const content = noteContent.trim()
@@ -3690,6 +3690,7 @@ function deriveCustomerId(
 }
 
 function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = 'CACHE', refetchCustomers }: AccountsTabProps) {
+  const SHOW_LEGACY_ACCOUNT_DRAWER = false
   const toast = useToast()
   // Notes and manager wiring must use the same user source as Settings → User Authorization
   const { users: dbUsers } = useUsersFromDatabase()
@@ -5522,7 +5523,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
 
     void loadLeadsData(false)
-  }, []) // Empty deps - run once on mount only
+  }, [loadLeadsData]) // loadLeadsData is guarded by hasLoadedLeadsRef to remain mount-safe
 
   // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
@@ -7153,7 +7154,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 </Modal>
 
                 {/* Legacy account drawer UI (dashboard/metrics/events) is disabled for production launch. */}
-                {false && (
+                {SHOW_LEGACY_ACCOUNT_DRAWER && (
                   <>
                 {/* Quick Info Section */}
                 <Box

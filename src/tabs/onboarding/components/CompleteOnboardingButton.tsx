@@ -86,43 +86,39 @@ export function CompleteOnboardingButton({
   }, [loadCompletionInfo])
 
   const handleComplete = async () => {
-    try {
-      // SECURITY: Actor identity is derived server-side from auth context
-      // Do NOT send client-supplied identity - it would be spoofable
-      const { data, error } = await api.post<any>(
-        `/api/customers/${customerId}/complete-onboarding`,
-        {} // Empty body - server derives actor from auth headers
-      )
+    // SECURITY: Actor identity is derived server-side from auth context
+    // Do NOT send client-supplied identity - it would be spoofable
+    const { data, error } = await api.post<any>(
+      `/api/customers/${customerId}/complete-onboarding`,
+      {} // Empty body - server derives actor from auth headers
+    )
 
-      if (error) {
-        throw new Error(error)
-      }
+    if (error) {
+      throw new Error(error)
+    }
 
-      toast({
-        title: 'Onboarding Completed',
-        description: `${customerName} is now active`,
-        status: 'success',
-        duration: 4000,
-        isClosable: true,
-      })
+    toast({
+      title: 'Onboarding Completed',
+      description: `${customerName} is now active`,
+      status: 'success',
+      duration: 4000,
+      isClosable: true,
+    })
 
-      // Update completion info
-      setCompletionInfo({
-        isCompleted: true,
-        completedAt: data.auditEvent.createdAt,
-        completedBy: data.auditEvent.actorEmail || data.auditEvent.actorUserId,
-        auditEventId: data.auditEvent.id,
-      })
+    // Update completion info
+    setCompletionInfo({
+      isCompleted: true,
+      completedAt: data.auditEvent.createdAt,
+      completedBy: data.auditEvent.actorEmail || data.auditEvent.actorUserId,
+      auditEventId: data.auditEvent.id,
+    })
 
-      // Close modal
-      onClose()
+    // Close modal
+    onClose()
 
-      // Notify parent to refresh customer data
-      if (onStatusUpdated) {
-        onStatusUpdated()
-      }
-    } catch (err) {
-      throw err // Re-throw for modal to handle
+    // Notify parent to refresh customer data
+    if (onStatusUpdated) {
+      onStatusUpdated()
     }
   }
 

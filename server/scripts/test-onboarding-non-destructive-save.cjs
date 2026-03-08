@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * Lightweight regression test for onboarding non-destructive saves.
  *

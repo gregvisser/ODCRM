@@ -203,7 +203,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     } catch {
       // ignore
     }
-  }, [fetchIdentities, toast])
+  }, [customerId, fetchIdentities, toast])
 
   const handleCreateSMTP = () => {
     setSmtpForm({

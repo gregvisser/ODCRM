@@ -62,7 +62,7 @@ export default function CustomersHomePage({
     }
   }
 
-  const defaultNavItems: SubNavItem[] = [
+  const defaultNavItems: SubNavItem[] = useMemo(() => [
     {
       id: 'accounts',
       label: 'Accounts',
@@ -84,7 +84,7 @@ export default function CustomersHomePage({
           <MarketingLeadsTab focusAccountName={focusAccountName} enabled />
         ) : null,
     },
-  ]
+  ], [activeView, focusAccountName])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {

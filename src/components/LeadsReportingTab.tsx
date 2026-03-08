@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -53,7 +53,10 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 function LeadsReportingTab() {
   const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
-  const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
+  const leads = useMemo(
+    () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
+    [liveData]
+  )
   const lastRefresh = lastUpdatedAt
   const liveWarning = liveData?.warning ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null
