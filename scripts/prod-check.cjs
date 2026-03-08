@@ -5,6 +5,7 @@
  *   - With EXPECT_SHA set: strict gate (frontend and backend must equal EXPECT_SHA).
  *   - Supports bounded retries + mismatch classification.
  *   - Optional bounded auto-recovery: dispatch backend deploy workflow once when FE is updated but BE stays stale.
+ *   - Recovery dispatch is suppressed when a backend deploy is already queued/in-progress.
  *
  * Existing contract preserved:
  *   npx --yes cross-env EXPECT_SHA=<sha> node scripts/prod-check.cjs
@@ -30,6 +31,7 @@ const AUTO_RECOVER_THRESHOLD_ATTEMPT = toInt(
   process.env.AUTO_RECOVER_THRESHOLD_ATTEMPT,
   Math.max(1, Math.min(18, PARITY_MAX_ATTEMPTS))
 )
+const AUTO_RECOVER_MIN_STALE_MS = toInt(process.env.AUTO_RECOVER_MIN_STALE_MS, 240000)
 const RECOVERY_WORKFLOW = (process.env.RECOVERY_WORKFLOW || 'deploy-backend-azure.yml').trim()
 const RECOVERY_REF = (process.env.RECOVERY_REF || process.env.GITHUB_REF_NAME || 'main').trim()
 
@@ -140,6 +142,62 @@ async function triggerBackendRecovery({ workflowFile, ref }) {
   }
 }
 
+async function findActiveBackendDeploy({ workflowFile, ref, expectedSha }) {
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN
+  const repo = process.env.GITHUB_REPOSITORY
+
+  if (!token || !repo || !repo.includes('/')) {
+    return { known: false, active: false, reason: 'missing_github_context' }
+  }
+
+  const [owner, repoName] = repo.split('/')
+  const url = `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?status=in_progress&per_page=20&branch=${encodeURIComponent(ref)}`
+  const queuedUrl = `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?status=queued&per_page=20&branch=${encodeURIComponent(ref)}`
+
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'User-Agent': 'odcrm-prod-check',
+    'X-GitHub-Api-Version': '2022-11-28',
+  }
+
+  const [inProgressRes, queuedRes] = await Promise.all([
+    fetchUrl(url, { method: 'GET', headers }),
+    fetchUrl(queuedUrl, { method: 'GET', headers }),
+  ])
+
+  if (inProgressRes.status < 200 || inProgressRes.status >= 300 || queuedRes.status < 200 || queuedRes.status >= 300) {
+    return { known: false, active: false, reason: `workflow_run_query_failed_${inProgressRes.status}_${queuedRes.status}` }
+  }
+
+  let inProgressRuns = []
+  let queuedRuns = []
+  try {
+    const parsedInProgress = JSON.parse(inProgressRes.data || '{}')
+    const parsedQueued = JSON.parse(queuedRes.data || '{}')
+    inProgressRuns = Array.isArray(parsedInProgress.workflow_runs) ? parsedInProgress.workflow_runs : []
+    queuedRuns = Array.isArray(parsedQueued.workflow_runs) ? parsedQueued.workflow_runs : []
+  } catch {
+    return { known: false, active: false, reason: 'workflow_run_query_parse_failed' }
+  }
+
+  const runs = [...inProgressRuns, ...queuedRuns]
+  if (runs.length === 0) {
+    return { known: true, active: false, reason: 'no_active_runs' }
+  }
+
+  const hasExpectedShaRun = expectedSha
+    ? runs.some((run) => String(run.head_sha || '').trim() === expectedSha)
+    : false
+
+  return {
+    known: true,
+    active: true,
+    reason: hasExpectedShaRun ? 'active_run_for_expected_sha' : 'active_run_for_branch',
+    runCount: runs.length,
+  }
+}
+
 async function readBuildShas(frontendBase, backendBase) {
   const frontendUrl = `${frontendBase}/__build.json`
   const backendUrl = `${backendBase}/api/_build`
@@ -211,10 +269,14 @@ async function modeB() {
     console.log('EXPECT_SHA:', expectSha)
     console.log(`Parity attempts: ${PARITY_MAX_ATTEMPTS}, delay=${PARITY_RETRY_DELAY_MS}ms`)
     console.log(`Auto-recover backend: ${AUTO_RECOVER_BACKEND ? 'enabled' : 'disabled'} (threshold attempt=${AUTO_RECOVER_THRESHOLD_ATTEMPT})`)
+    if (AUTO_RECOVER_BACKEND) {
+      console.log(`Auto-recover stale window: ${AUTO_RECOVER_MIN_STALE_MS}ms before fallback dispatch`)
+    }
     console.log('')
   }
 
   let recoveryTriggered = false
+  let firstFeUpdatedBeStaleAt = null
   let lastState = 'ENDPOINT_ERROR'
   let lastFrontSha = null
   let lastBackSha = null
@@ -236,6 +298,17 @@ async function modeB() {
     const state = classifyMismatch(snapshot.frontendSha, snapshot.backendSha, expectSha)
     lastState = state
     console.log('PARITY_STATE:', state, `(${prettyStateLabel(state)})`)
+    if (state === 'BOTH_STALE_SAME_SHA') {
+      console.log('PARITY_NOTE: both endpoints are on the same old SHA; rollout likely still in progress.')
+    }
+
+    if (state === 'FE_UPDATED_BE_STALE') {
+      if (!firstFeUpdatedBeStaleAt) firstFeUpdatedBeStaleAt = Date.now()
+      const staleMs = Date.now() - firstFeUpdatedBeStaleAt
+      console.log(`PARITY_NOTE: backend stale duration ${staleMs}ms while frontend is on expected SHA.`)
+    } else {
+      firstFeUpdatedBeStaleAt = null
+    }
 
     if (state === 'PARITY_OK') {
       if (expectSha) {
@@ -251,18 +324,29 @@ async function modeB() {
       AUTO_RECOVER_BACKEND &&
       !recoveryTriggered &&
       attempt >= AUTO_RECOVER_THRESHOLD_ATTEMPT &&
+      firstFeUpdatedBeStaleAt &&
+      Date.now() - firstFeUpdatedBeStaleAt >= AUTO_RECOVER_MIN_STALE_MS &&
       state === 'FE_UPDATED_BE_STALE'
 
     if (shouldTriggerRecovery) {
-      console.log('AUTO_RECOVERY: triggering backend deploy workflow dispatch...')
-      const recovery = await triggerBackendRecovery({ workflowFile: RECOVERY_WORKFLOW, ref: RECOVERY_REF })
-      if (recovery.ok) {
-        recoveryTriggered = true
-        console.log(`AUTO_RECOVERY: triggered workflow=${RECOVERY_WORKFLOW} ref=${RECOVERY_REF}`)
+      const activeRunState = await findActiveBackendDeploy({ workflowFile: RECOVERY_WORKFLOW, ref: RECOVERY_REF, expectedSha: expectSha })
+      if (activeRunState.known && activeRunState.active) {
+        const count = typeof activeRunState.runCount === 'number' ? activeRunState.runCount : 1
+        console.log(`AUTO_RECOVERY: skipped dispatch because backend deploy is already active (${activeRunState.reason}, runs=${count}).`)
       } else {
-        recoveryTriggered = true
-        console.log(`AUTO_RECOVERY: skipped/failed reason=${recovery.reason}`)
-        if (recovery.details) console.log(`AUTO_RECOVERY: details=${recovery.details}`)
+        if (!activeRunState.known) {
+          console.log(`AUTO_RECOVERY: active-run precheck unavailable (${activeRunState.reason}); proceeding with bounded dispatch.`)
+        }
+        console.log('AUTO_RECOVERY: triggering backend deploy workflow dispatch...')
+        const recovery = await triggerBackendRecovery({ workflowFile: RECOVERY_WORKFLOW, ref: RECOVERY_REF })
+        if (recovery.ok) {
+          recoveryTriggered = true
+          console.log(`AUTO_RECOVERY: triggered workflow=${RECOVERY_WORKFLOW} ref=${RECOVERY_REF}`)
+        } else {
+          recoveryTriggered = true
+          console.log(`AUTO_RECOVERY: skipped/failed reason=${recovery.reason}`)
+          if (recovery.details) console.log(`AUTO_RECOVERY: details=${recovery.details}`)
+        }
       }
     }
 
