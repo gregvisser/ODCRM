@@ -6,6 +6,7 @@
 const CACHE_TTL_SUCCESS_MS = 30 * 1000
 const CACHE_TTL_FAILURE_MS = 10 * 1000
 const FETCH_TIMEOUT_MS = 10 * 1000
+const STALE_FALLBACK_MAX_AGE_MS = 6 * 60 * 60 * 1000
 
 export type LiveLeadRow = {
   occurredAt: string | null
@@ -190,7 +191,7 @@ export function rowsToLiveLeads(rows: string[][]): LiveLeadRow[] {
 }
 
 /** In-memory cache: key = customerId + '|' + url; value = { data, at, isFailure }. */
-const cache = new Map<string, { data: LiveLeadRow[]; at: number; isFailure: boolean }>()
+const cache = new Map<string, { data: LiveLeadRow[]; at: number; isFailure: boolean; error?: string }>()
 
 function cacheKey(customerId: string, url: string): string {
   return `${customerId}|${url}`
@@ -208,8 +209,17 @@ export function getCachedLeads(customerId: string, url: string): { data: LiveLea
   return { data: entry.data, isFailure: entry.isFailure }
 }
 
-export function setCachedLeads(customerId: string, url: string, data: LiveLeadRow[], isFailure: boolean): void {
-  cache.set(cacheKey(customerId, url), { data, at: Date.now(), isFailure })
+export function setCachedLeads(customerId: string, url: string, data: LiveLeadRow[], isFailure: boolean, error?: string): void {
+  cache.set(cacheKey(customerId, url), { data, at: Date.now(), isFailure, error })
+}
+
+export function getStaleCachedLeads(customerId: string, url: string): { data: LiveLeadRow[]; ageMs: number } | null {
+  const key = cacheKey(customerId, url)
+  const entry = cache.get(key)
+  if (!entry || entry.isFailure) return null
+  const ageMs = Date.now() - entry.at
+  if (ageMs > STALE_FALLBACK_MAX_AGE_MS) return null
+  return { data: entry.data, ageMs }
 }
 
 /**
@@ -217,9 +227,13 @@ export function setCachedLeads(customerId: string, url: string, data: LiveLeadRo
  */
 export async function fetchAndParseLiveLeads(customerId: string, sheetUrl: string): Promise<LiveLeadRow[]> {
   const url = resolveCsvUrl(sheetUrl)
+  const key = cacheKey(customerId, url)
   const cached = getCachedLeads(customerId, url)
   if (cached !== null) {
-    if (cached.isFailure) throw new Error('Failed to fetch or parse CSV')
+    if (cached.isFailure) {
+      const failure = cache.get(key)
+      throw new Error(failure?.error || 'Failed to fetch or parse CSV')
+    }
     return cached.data
   }
   try {
@@ -228,8 +242,14 @@ export async function fetchAndParseLiveLeads(customerId: string, sheetUrl: strin
     const leads = rowsToLiveLeads(rows)
     setCachedLeads(customerId, url, leads, false)
     return leads
-  } catch {
-    setCachedLeads(customerId, url, [], true)
-    throw new Error('Failed to fetch or parse CSV')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch or parse CSV'
+    const stale = getStaleCachedLeads(customerId, url)
+    if (stale && stale.data.length > 0) {
+      // Preserve previous successful data during transient sheet/network failures.
+      return stale.data
+    }
+    setCachedLeads(customerId, url, [], true, message)
+    throw new Error(message)
   }
 }

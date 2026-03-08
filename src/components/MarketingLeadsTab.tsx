@@ -176,6 +176,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, { enabled })
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
+  const liveWarning = liveData?.warning ?? null
 
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
@@ -1175,6 +1176,15 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         </Alert>
       ) : (
     <Stack spacing={{ base: 4, md: 6, lg: 8 }} px={{ base: 0, md: 0 }} pb={8}>
+      {liveWarning && (
+        <Alert status="warning" borderRadius="lg" data-testid="marketing-leads-stale-sheet-warning">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Using cached Google Sheets data</AlertTitle>
+            <AlertDescription>{liveWarning}</AlertDescription>
+          </Box>
+        </Alert>
+      )}
       {leads.length === 0 && syncStatusForEmpty && (
         <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
           <AlertIcon />
@@ -1213,11 +1223,11 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
               Marketing Leads
             </Heading>
             <Text color="gray.600" fontSize={{ base: "sm", md: "md" }}>
-              All leads from customer data ({leads.length} total
+              Live sheet-backed leads via ODCRM ({leads.length} total
               {filteredAndSortedLeads.length !== leads.length && `, ${filteredAndSortedLeads.length} filtered`})
             </Text>
             <Text fontSize="xs" color="gray.500" mt={2}>
-              Last refreshed: {formatLastRefresh(lastRefresh)} • Auto-refreshes every 30 minutes
+              Last refreshed: {formatLastRefresh(lastRefresh)} • Polls every 30s
             </Text>
           </Box>
           <IconButton

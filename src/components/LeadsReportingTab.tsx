@@ -55,7 +55,7 @@ function LeadsReportingTab() {
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt
-  const hasServerData = !!liveData
+  const liveWarning = liveData?.warning ?? null
 
   const [filters, setFilters] = useState({
     account: '',
@@ -267,17 +267,25 @@ function LeadsReportingTab() {
 
   content = (
     <Stack spacing={6}>
+      {liveWarning && (
+        <Alert status="warning" borderRadius="lg" data-testid="leads-reporting-stale-sheet-warning">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Using cached Google Sheets data</AlertTitle>
+            <AlertDescription>{liveWarning}</AlertDescription>
+          </Box>
+        </Alert>
+      )}
       <HStack justify="space-between" align="flex-start">
         <Box>
           <Heading size="lg" mb={2}>
             Leads Reporting
           </Heading>
           <Text color="gray.600">
-            {hasServerData ? 'Live data from server' : 'Cached data (server unavailable)'} ({filteredLeads.length} of {leads.length} leads)
+            Live sheet-backed data via ODCRM ({filteredLeads.length} of {leads.length} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
-            Last refreshed: {lastRefresh ? formatLastRefresh(lastRefresh) : 'Never'} • Auto-refreshes every 30 minutes
-            {!hasServerData && ' • Using local cache'}
+            Last refreshed: {lastRefresh ? formatLastRefresh(lastRefresh) : 'Never'} • Polls every 30s
           </Text>
         </Box>
         <IconButton

@@ -78,6 +78,7 @@ function LeadsTab() {
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
+  const liveWarning = liveData?.warning ?? null
 
   const [filters, setFilters] = useState({
     account: '',
@@ -345,6 +346,15 @@ function LeadsTab() {
             : null)
     return (
       <Stack spacing={4} py={12}>
+        {liveWarning && (
+          <Alert status="warning" borderRadius="lg" maxW="2xl" mx="auto" data-testid="leads-tab-stale-sheet-warning">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Using cached Google Sheets data</AlertTitle>
+              <AlertDescription>{liveWarning}</AlertDescription>
+            </Box>
+          </Alert>
+        )}
         <Box textAlign="center">
           <Text fontSize="lg" color="gray.600">
             No leads data available
@@ -533,20 +543,29 @@ function LeadsTab() {
 
   return (
     <Stack spacing={6}>
+      {liveWarning && (
+        <Alert status="warning" borderRadius="lg" data-testid="leads-tab-stale-sheet-warning">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Using cached Google Sheets data</AlertTitle>
+            <AlertDescription>{liveWarning}</AlertDescription>
+          </Box>
+        </Alert>
+      )}
       <HStack justify="space-between" align="flex-start">
         <Box>
           <Heading size="lg" mb={2}>
             Leads Generated
           </Heading>
           <Text color="gray.600">
-            Live data from the database ({filteredLeads.length} of {leads.length} leads)
+            Live sheet-backed data via ODCRM ({filteredLeads.length} of {leads.length} leads)
           </Text>
           <HStack spacing={2} mt={1} fontSize="xs" color="gray.500">
             <Text>Last synced: {formatLastRefresh(lastRefresh)}</Text>
             {Date.now() - lastRefresh.getTime() > 2 * 60 * 1000 && (
               <Badge size="sm" colorScheme="yellow">Stale</Badge>
             )}
-            <Text>• Polls every 60s</Text>
+            <Text>• Polls every 30s</Text>
           </HStack>
         </Box>
         <HStack spacing={2}>
@@ -835,4 +854,3 @@ function LeadsTab() {
 }
 
 export default LeadsTab
-
