@@ -165,6 +165,18 @@ const ReadinessTab: React.FC = () => {
     window.location.search = params.toString()
   }, [selectedSequenceId])
 
+  const openMarketingTab = useCallback((view: 'sequences' | 'inbox' | 'reports', target?: string) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('view', view)
+    if (selectedSequenceId) {
+      params.set('sequenceId', selectedSequenceId)
+    }
+    if (target) {
+      params.set('focusPanel', target)
+    }
+    window.location.search = params.toString()
+  }, [selectedSequenceId])
+
   const loadData = useCallback(async (isRefresh = false) => {
     if (!customerId?.startsWith('cust_')) {
       setError('Select an active client to view readiness.')
@@ -263,7 +275,12 @@ const ReadinessTab: React.FC = () => {
           <Card id="readiness-tab-cockpit" data-testid="readiness-tab-cockpit">
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
-                <Heading size="md">Readiness Operations Cockpit</Heading>
+                <VStack align="start" spacing={0}>
+                  <Heading size="md">Readiness Operations Cockpit</Heading>
+                  <Text fontSize="sm" color="gray.600" data-testid="readiness-tab-operator-cue">
+                    Use this view to decide what to fix first, then jump into Sequences, Inbox, or Reports.
+                  </Text>
+                </VStack>
                 <HStack>
                   <Select
                     id="readiness-tab-sequence-select"
@@ -344,7 +361,7 @@ const ReadinessTab: React.FC = () => {
               )}
 
               <Text id="readiness-tab-last-updated" data-testid="readiness-tab-last-updated" fontSize="xs" color="gray.500" mt={3}>
-                Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Routes: /api/send-worker/exception-center, /api/send-worker/sequence-preflight, /api/send-worker/launch-preview, /api/send-worker/preview-vs-outcome, /api/send-worker/identity-capacity, /api/send-worker/run-history
+                Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'}
               </Text>
             </CardBody>
           </Card>
@@ -355,7 +372,17 @@ const ReadinessTab: React.FC = () => {
             </CardHeader>
             <CardBody>
               {topExceptionGroups.length === 0 ? (
-                <Text color="gray.500">No prioritized exceptions in this window.</Text>
+                <VStack align="stretch" spacing={2}>
+                  <Text color="gray.500">No prioritized exceptions in this window.</Text>
+                  <HStack>
+                    <Button size="xs" variant="outline" data-testid="readiness-tab-go-reports" onClick={() => openMarketingTab('reports')}>
+                      Open Reports
+                    </Button>
+                    <Button size="xs" variant="outline" data-testid="readiness-tab-go-inbox" onClick={() => openMarketingTab('inbox')}>
+                      Open Inbox
+                    </Button>
+                  </HStack>
+                </VStack>
               ) : (
                 <VStack align="stretch" spacing={2}>
                   {topExceptionGroups.map((group, index) => (
@@ -388,6 +415,9 @@ const ReadinessTab: React.FC = () => {
               <CardHeader><Heading size="sm">Preflight Blockers / Warnings</Heading></CardHeader>
               <CardBody>
                 <VStack align="stretch" spacing={2}>
+                  <Text fontSize="sm" color="gray.600">
+                    Check blockers before launch. If this section is clear, continue to Launch Preview.
+                  </Text>
                   <Box>
                     <Text fontWeight="semibold">Blockers</Text>
                     {(preflightData?.blockers ?? []).length === 0 ? <Text color="gray.500">None</Text> : (preflightData?.blockers ?? []).slice(0, 5).map((row, idx) => <Text key={`b-${idx}`}>• {row}</Text>)}
@@ -415,6 +445,9 @@ const ReadinessTab: React.FC = () => {
               <CardHeader><Heading size="sm">Launch Preview Snapshot</Heading></CardHeader>
               <CardBody>
                 <VStack align="stretch" spacing={2}>
+                  <Text fontSize="sm" color="gray.600">
+                    Confirm who would send first and which rows are excluded before running any tick.
+                  </Text>
                   <HStack>
                     <Badge>Candidates {launchPreviewData?.summary?.firstBatchCount ?? previewCandidates.length}</Badge>
                     <Badge colorScheme="orange">Excluded {launchPreviewData?.summary?.excludedCount ?? previewExcluded.length}</Badge>
@@ -447,6 +480,9 @@ const ReadinessTab: React.FC = () => {
             <Card id="readiness-tab-preview-vs-outcome" data-testid="readiness-tab-preview-vs-outcome">
               <CardHeader><Heading size="sm">Preview vs Outcome Snapshot</Heading></CardHeader>
               <CardBody>
+                <Text fontSize="sm" color="gray.600" mb={2}>
+                  Compare expected recipients versus actual outcomes to spot surprises quickly.
+                </Text>
                 <SimpleGrid columns={3} spacing={2}>
                   <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Matched</StatLabel><StatNumber>{comparisonData?.summary?.matched ?? 0}</StatNumber></Stat>
                   <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Preview Only</StatLabel><StatNumber>{comparisonData?.summary?.previewOnly ?? 0}</StatNumber></Stat>
@@ -470,6 +506,9 @@ const ReadinessTab: React.FC = () => {
             <Card id="readiness-tab-run-history" data-testid="readiness-tab-run-history">
               <CardHeader><Heading size="sm">Recent Run Outcomes</Heading></CardHeader>
               <CardBody>
+                <Text fontSize="sm" color="gray.600" mb={2}>
+                  Use recent outcomes to verify send quality and decide whether to continue or pause.
+                </Text>
                 <Box overflowX="auto">
                   <Table size="sm">
                     <Thead>
@@ -506,6 +545,14 @@ const ReadinessTab: React.FC = () => {
                 >
                   Open Run History
                 </Button>
+                <HStack mt={2}>
+                  <Button size="xs" variant="ghost" onClick={() => openMarketingTab('reports')} data-testid="readiness-tab-open-reports-followup">
+                    Review Reports
+                  </Button>
+                  <Button size="xs" variant="ghost" onClick={() => openMarketingTab('inbox')} data-testid="readiness-tab-open-inbox-followup">
+                    Review Inbox
+                  </Button>
+                </HStack>
               </CardBody>
             </Card>
           </SimpleGrid>

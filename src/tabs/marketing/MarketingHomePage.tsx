@@ -4,6 +4,7 @@
  */
 
 import React, { useMemo } from 'react'
+import { Box, Text } from '@chakra-ui/react'
 import {
   CheckCircleIcon,
   RepeatIcon,
@@ -181,6 +182,11 @@ export default function MarketingHomePage({
 
   return (
     <div data-testid="marketing-home-panel">
+      <Box mb={3} data-testid="marketing-home-operator-guidance">
+        <Text fontSize="sm" color="gray.600">
+          Start in Readiness to see current issues, then move to Sequences to inspect or act, Inbox to handle replies, and Reports to verify results.
+        </Text>
+      </Box>
       <SubNavigation
         items={navItems}
         activeId={activeView}
