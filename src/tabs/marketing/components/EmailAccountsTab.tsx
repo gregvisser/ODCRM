@@ -91,12 +91,46 @@ type Customer = {
   name: string
 }
 
+type IdentityCapacityRow = {
+  identityId: string
+  emailAddress: string
+  displayName: string | null
+  provider: string
+  isActive: boolean
+  state: 'usable' | 'unavailable' | 'risky'
+  reasons: string[]
+  sent: number
+  failed: number
+  wouldSend: number
+}
+
+type IdentityCapacityData = {
+  summary: {
+    total: number
+    usable: number
+    unavailable: number
+    risky: number
+    preferredIdentityId: string | null
+    preferredIdentityState: 'usable' | 'unavailable' | 'risky' | null
+    recommendedIdentityId: string | null
+  }
+  guardrails: {
+    warnings: string[]
+    blocker: boolean
+  }
+  rows: IdentityCapacityRow[]
+  lastUpdatedAt: string
+}
+
 const EmailAccountsTab: React.FC = () => {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
+  const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [capacityLoading, setCapacityLoading] = useState(false)
+  const [capacityError, setCapacityError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -131,6 +165,36 @@ const EmailAccountsTab: React.FC = () => {
     setLoading(false)
   }, [selectedCustomerId])
 
+  const loadIdentityCapacity = useCallback(async () => {
+    if (!selectedCustomerId) {
+      setIdentityCapacity(null)
+      setCapacityError(null)
+      return
+    }
+    setCapacityLoading(true)
+    setCapacityError(null)
+    const { data, error: apiError } = await api.get<{ success?: boolean; data?: IdentityCapacityData }>(
+      '/api/send-worker/identity-capacity?sinceHours=72',
+      { headers: { 'X-Customer-Id': selectedCustomerId } },
+    )
+    if (apiError) {
+      setCapacityError(apiError)
+      setCapacityLoading(false)
+      return
+    }
+    if (!data?.success || !data?.data) {
+      setCapacityError('Identity capacity response missing data')
+      setCapacityLoading(false)
+      return
+    }
+    setIdentityCapacity(data.data)
+    setCapacityLoading(false)
+  }, [selectedCustomerId])
+
+  const handleRefreshAll = useCallback(async () => {
+    await Promise.all([loadIdentities(), loadIdentityCapacity()])
+  }, [loadIdentities, loadIdentityCapacity])
+
   useEffect(() => {
     selectedCustomerIdRef.current = selectedCustomerId
   }, [selectedCustomerId])
@@ -141,13 +205,15 @@ const EmailAccountsTab: React.FC = () => {
 
   useEffect(() => {
     if (selectedCustomerId) {
-      loadIdentities()
+      void Promise.all([loadIdentities(), loadIdentityCapacity()])
     } else {
       setIdentities([])
+      setIdentityCapacity(null)
+      setCapacityError(null)
       setError(null)
       setLoading(false)
     }
-  }, [selectedCustomerId, loadIdentities])
+  }, [selectedCustomerId, loadIdentities, loadIdentityCapacity])
 
   const loadCustomers = async () => {
     const { data, error: apiError } = await api.get('/api/customers')
@@ -332,7 +398,7 @@ const EmailAccountsTab: React.FC = () => {
   if (!selectedCustomerId) {
     return (
       <RequireActiveClient>
-      <Box>
+      <Box id="email-accounts-tab-panel" data-testid="email-accounts-tab-panel">
         <VStack align="start" spacing={1} mb={4}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">Connect Outlook accounts to send campaigns (max 5 per client)</Text>
@@ -357,7 +423,7 @@ const EmailAccountsTab: React.FC = () => {
             </Select>
           </FormControl>
         </VStack>
-        <Card>
+        <Card id="email-accounts-tab-no-customer" data-testid="email-accounts-tab-no-customer">
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
             <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to view email accounts</Text>
@@ -384,7 +450,7 @@ const EmailAccountsTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
+    <Box id="email-accounts-tab-panel" data-testid="email-accounts-tab-panel">
       {/* Error Banner */}
       {error && (
         <Alert status="error" mb={4}>
@@ -427,14 +493,27 @@ const EmailAccountsTab: React.FC = () => {
             </FormControl>
           </HStack>
         </VStack>
-        <Button
-          leftIcon={<ExternalLinkIcon />}
-          colorScheme="blue"
-          onClick={handleConnectOutlook}
-          isDisabled={identities.filter(i => i.isActive).length >= 5}
-        >
-          Connect Outlook
-        </Button>
+        <HStack>
+          <Button
+            id="email-accounts-tab-refresh-btn"
+            data-testid="email-accounts-tab-refresh-btn"
+            variant="outline"
+            onClick={() => void handleRefreshAll()}
+            isLoading={loading || capacityLoading}
+          >
+            Refresh
+          </Button>
+          <Button
+            id="email-accounts-tab-connect-outlook-btn"
+            data-testid="email-accounts-tab-connect-outlook-btn"
+            leftIcon={<ExternalLinkIcon />}
+            colorScheme="blue"
+            onClick={handleConnectOutlook}
+            isDisabled={identities.filter(i => i.isActive).length >= 5}
+          >
+            Connect Outlook
+          </Button>
+        </HStack>
       </Flex>
 
       {/* Stats */}
@@ -472,6 +551,74 @@ const EmailAccountsTab: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Card id="email-accounts-identity-capacity-panel" data-testid="email-accounts-identity-capacity-panel" mb={6}>
+        <CardBody>
+          <Flex justify="space-between" align="center" mb={4}>
+            <Text fontSize="lg" fontWeight="semibold">Identity Capacity Guardrails</Text>
+            {capacityLoading && <Spinner size="sm" />}
+          </Flex>
+
+          {capacityError ? (
+            <Alert status="warning" mb={3}>
+              <AlertIcon />
+              <AlertDescription>{capacityError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <SimpleGrid id="email-accounts-identity-summary" data-testid="email-accounts-identity-summary" columns={{ base: 2, md: 5 }} spacing={3} mb={4}>
+            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Total</StatLabel><StatNumber>{identityCapacity?.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
+            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Usable</StatLabel><StatNumber>{identityCapacity?.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
+            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Unavailable</StatLabel><StatNumber>{identityCapacity?.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
+            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Risky</StatLabel><StatNumber>{identityCapacity?.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
+            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="md">{identityCapacity?.summary.recommendedIdentityId ?? '—'}</StatNumber></Stat></CardBody></Card>
+          </SimpleGrid>
+
+          {!!identityCapacity?.guardrails?.warnings?.length && (
+            <Alert id="email-accounts-identity-guardrails" data-testid="email-accounts-identity-guardrails" status={identityCapacity.guardrails.blocker ? 'error' : 'warning'} mb={4}>
+              <AlertIcon />
+              <Box>
+                <AlertTitle>{identityCapacity.guardrails.blocker ? 'Identity launch blocker' : 'Identity launch warning'}</AlertTitle>
+                <AlertDescription>{identityCapacity.guardrails.warnings.join(' ')}</AlertDescription>
+              </Box>
+            </Alert>
+          )}
+
+          <Box id="email-accounts-identity-rows" data-testid="email-accounts-identity-rows" overflowX="auto">
+            <Table size="sm">
+              <Thead>
+                <Tr>
+                  <Th>Email</Th>
+                  <Th>Provider</Th>
+                  <Th>State</Th>
+                  <Th isNumeric>Sent</Th>
+                  <Th isNumeric>Failed</Th>
+                  <Th>Reason</Th>
+                </Tr>
+              </Thead>
+              <Tbody>
+                {(identityCapacity?.rows ?? []).map((row) => (
+                  <Tr key={row.identityId}>
+                    <Td>{row.displayName ? `${row.displayName} (${row.emailAddress})` : row.emailAddress}</Td>
+                    <Td>{row.provider}</Td>
+                    <Td>
+                      <Badge id="email-accounts-identity-state" data-testid="email-accounts-identity-state" colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'red'}>
+                        {row.state}
+                      </Badge>
+                    </Td>
+                    <Td isNumeric>{row.sent}</Td>
+                    <Td isNumeric>{row.failed}</Td>
+                    <Td fontSize="xs">{row.reasons?.join('; ') || '—'}</Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          </Box>
+          <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
+            Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/identity-capacity
+          </Text>
+        </CardBody>
+      </Card>
 
       {/* Limit warning */}
       {identities.filter(i => i.isActive).length >= 5 && (
