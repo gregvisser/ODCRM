@@ -744,6 +744,19 @@ export default function DashboardsHomePage() {
         borderColor="blue.100"
         data-testid="dashboard-action-priority-triage"
       >
+        <Box
+          mb={2}
+          p={2}
+          borderRadius="md"
+          borderWidth="1px"
+          borderColor="blue.200"
+          bg="blue.100"
+          data-testid="dashboard-live-triage-role-separation"
+        >
+          <Text fontSize="sm" color="blue.900">
+            Dashboard is for live triage: what needs attention now. Use Marketing Reports for retrospective outcome analysis.
+          </Text>
+        </Box>
         <HStack justify="space-between" align="start" flexWrap="wrap" gap={2}>
           <Box>
             <Text fontWeight="semibold" color="blue.800" data-testid="dashboard-role-framing">
@@ -779,6 +792,9 @@ export default function DashboardsHomePage() {
           </Button>
           <Button size="sm" variant="outline" colorScheme="gray" onClick={goToClientsMaintenance} data-testid="dashboard-go-clients-maintenance">
             Fix data in OpenDoors Clients
+          </Button>
+          <Button size="sm" variant="ghost" colorScheme="blue" onClick={goToMarketingReports} data-testid="dashboard-go-reports-retrospective">
+            Review retrospective results in Reports
           </Button>
         </HStack>
 
