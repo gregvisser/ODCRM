@@ -98,6 +98,12 @@ const ReportsTab: React.FC = () => {
   const [identityData, setIdentityData] = useState<IdentityCapacityResponse | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
+  const goToDashboardTriage = useCallback(() => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('view', 'dashboards-home')
+    window.location.search = params.toString()
+  }, [])
+
   const openMarketingTab = useCallback((view: 'readiness' | 'sequences' | 'inbox', focusPanel?: string) => {
     const params = new URLSearchParams(window.location.search)
     params.set('view', view)
@@ -182,6 +188,12 @@ const ReportsTab: React.FC = () => {
     <RequireActiveClient>
       <Box id="reports-tab-panel" data-testid="reports-tab-panel">
         <VStack align="stretch" spacing={4}>
+          <Alert status="info" data-testid="reports-retrospective-role-separation">
+            <AlertIcon />
+            <AlertDescription>
+              Reports is retrospective: use it to review what happened. For live priorities and next action, return to Dashboard triage.
+            </AlertDescription>
+          </Alert>
           <Card id="reports-tab-controls" data-testid="reports-tab-controls">
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
@@ -192,6 +204,14 @@ const ReportsTab: React.FC = () => {
                   </Text>
                 </VStack>
                 <HStack>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={goToDashboardTriage}
+                    data-testid="reports-go-dashboard-triage"
+                  >
+                    Open Dashboard triage
+                  </Button>
                   <Select
                     id="reports-tab-window-select"
                     data-testid="reports-tab-window-select"
