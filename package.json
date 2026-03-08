@@ -113,6 +113,7 @@
     "test:reports-tab-runtime": "node scripts/self-test-reports-tab-runtime.mjs",
     "test:lead-sources-tab-runtime": "node scripts/self-test-lead-sources-tab-runtime.mjs",
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",
+    "test:email-accounts-tab-runtime": "node scripts/self-test-email-accounts-tab-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
