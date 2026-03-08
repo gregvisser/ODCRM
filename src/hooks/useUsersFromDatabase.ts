@@ -4,7 +4,7 @@
  * This is the single source of truth for user data
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '../utils/api'
 
 export type DatabaseUser = {
@@ -44,6 +44,77 @@ export function useUsersFromDatabase(): UseUsersResult {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [hasMigrated, setHasMigrated] = useState(false)
+  const fetchUsersRef = useRef<() => Promise<void>>(async () => {})
+
+  const migrateFromLocalStorage = useCallback(async () => {
+    try {
+      const stored = localStorage.getItem('users')
+      if (!stored) {
+        console.log('ℹ️ No users in localStorage to migrate')
+        setHasMigrated(true)
+        return
+      }
+
+      const localUsers = JSON.parse(stored) as any[]
+      if (!Array.isArray(localUsers) || localUsers.length === 0) {
+        console.log('ℹ️ No users in localStorage to migrate')
+        setHasMigrated(true)
+        return
+      }
+
+      console.log(`🔄 Migrating ${localUsers.length} users from localStorage to database...`)
+
+      let successCount = 0
+      let errorCount = 0
+
+      for (const user of localUsers) {
+        try {
+          const payload = {
+            id: user.id,
+            userId: user.userId || user.id,
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
+            email: user.email || '',
+            username: user.username || user.email || '',
+            phoneNumber: user.phoneNumber || null,
+            role: user.role || 'Operations',
+            department: user.department || 'Operations',
+            accountStatus: user.accountStatus || 'Active',
+            lastLoginDate: user.lastLoginDate && user.lastLoginDate !== 'Never' ? user.lastLoginDate : null,
+            profilePhoto: user.profilePhoto || null,
+            createdDate: user.createdDate || new Date().toISOString().split('T')[0],
+          }
+
+          const { error: createError } = await api.post('/api/users', payload)
+
+          if (createError) {
+            console.error(`❌ Failed to migrate user ${user.email}:`, createError)
+            errorCount++
+          } else {
+            console.log(`✅ Migrated user: ${user.email}`)
+            successCount++
+          }
+        } catch (err) {
+          console.error(`❌ Error migrating user ${user.email}:`, err)
+          errorCount++
+        }
+      }
+
+      console.log(`✅ Migration complete: ${successCount} succeeded, ${errorCount} failed`)
+      setHasMigrated(true)
+
+      // Refetch to show migrated users
+      if (successCount > 0) {
+        await fetchUsersRef.current()
+      }
+
+      // Keep localStorage as backup for now (can be removed in future)
+      // localStorage.removeItem('users')
+    } catch (err: any) {
+      console.error('❌ Migration error:', err)
+      setHasMigrated(true)
+    }
+  }, [])
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
@@ -66,77 +137,10 @@ export function useUsersFromDatabase(): UseUsersResult {
     }
     
     setLoading(false)
-  }, [hasMigrated])
+  }, [hasMigrated, migrateFromLocalStorage])
 
-  const migrateFromLocalStorage = useCallback(async () => {
-    try {
-      const stored = localStorage.getItem('users')
-      if (!stored) {
-        console.log('ℹ️ No users in localStorage to migrate')
-        setHasMigrated(true)
-        return
-      }
-
-      const localUsers = JSON.parse(stored) as any[]
-      if (!Array.isArray(localUsers) || localUsers.length === 0) {
-        console.log('ℹ️ No users in localStorage to migrate')
-        setHasMigrated(true)
-        return
-      }
-
-      console.log(`🔄 Migrating ${localUsers.length} users from localStorage to database...`)
-      
-      let successCount = 0
-      let errorCount = 0
-      
-      for (const user of localUsers) {
-        try {
-          const payload = {
-            id: user.id,
-            userId: user.userId || user.id,
-            firstName: user.firstName || '',
-            lastName: user.lastName || '',
-            email: user.email || '',
-            username: user.username || user.email || '',
-            phoneNumber: user.phoneNumber || null,
-            role: user.role || 'Operations',
-            department: user.department || 'Operations',
-            accountStatus: user.accountStatus || 'Active',
-            lastLoginDate: user.lastLoginDate && user.lastLoginDate !== 'Never' ? user.lastLoginDate : null,
-            profilePhoto: user.profilePhoto || null,
-            createdDate: user.createdDate || new Date().toISOString().split('T')[0],
-          }
-
-          const { error: createError } = await api.post('/api/users', payload)
-          
-          if (createError) {
-            console.error(`❌ Failed to migrate user ${user.email}:`, createError)
-            errorCount++
-          } else {
-            console.log(`✅ Migrated user: ${user.email}`)
-            successCount++
-          }
-        } catch (err) {
-          console.error(`❌ Error migrating user ${user.email}:`, err)
-          errorCount++
-        }
-      }
-
-      console.log(`✅ Migration complete: ${successCount} succeeded, ${errorCount} failed`)
-      setHasMigrated(true)
-      
-      // Refetch to show migrated users
-      if (successCount > 0) {
-        await fetchUsers()
-      }
-
-      // Keep localStorage as backup for now (can be removed in future)
-      // localStorage.removeItem('users')
-      
-    } catch (err: any) {
-      console.error('❌ Migration error:', err)
-      setHasMigrated(true)
-    }
+  useEffect(() => {
+    fetchUsersRef.current = fetchUsers
   }, [fetchUsers])
 
   // Load on mount

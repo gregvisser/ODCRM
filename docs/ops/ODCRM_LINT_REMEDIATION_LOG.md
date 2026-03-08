@@ -1,5 +1,22 @@
 # ODCRM Lint Remediation Log
 
+## Session: Post-PR #170 Parity Noise + Remaining Warning Cleanup
+- Date: 2026-03-08
+- Baseline SHA: `cf4d24fe6b50808f43a22abea3f394a359f357f5`
+- Baseline lint: `11 problems / 0 errors / 11 warnings`
+- Current lint after fixes: `1 problem / 0 errors / 1 warning`
+
+| Cluster | File(s) | Rule(s) | Status | Behavior change | Verification | Notes / Next action |
+|---|---|---|---|---|---|---|
+| Prod parity drift false-red noise | `.github/workflows/prod-sha-drift-check.yml` | Workflow parity classification timing/noise | Fixed | No product behavior change | `test:deploy-reliability-runtime`, parity command | Drift check now uses strict `EXPECT_SHA` + bounded retries to tolerate normal rollout lag while preserving hard SHA equality. |
+| Hook dependency cycle | `src/hooks/useUsersFromDatabase.ts` | `react-hooks/exhaustive-deps` | Fixed | No | `npm run lint` | Broke callback cycle with `fetchUsersRef` dispatcher; preserved migration + refetch behavior. |
+| Marketing hooks dependency warnings | `src/tabs/marketing/components/CampaignsTab.tsx`, `LeadSourcesTab.tsx`, `SchedulesTab.tsx`, `SequencesTab.tsx`, `TemplatesTab.tsx` | `react-hooks/exhaustive-deps` | Fixed | No intentional behavior change | `npm run lint` + runtime proofs | Converted loaders/init handlers to stable callbacks and aligned effect dependencies without adding fallback shortcuts. |
+
+### Remaining warnings (current session)
+| File | Rule | Fixed? | Why not fixed in this pass | Risk | Recommended next action |
+|---|---|---|---|---|---|
+| `src/components/DataTable.tsx` | `react-hooks/incompatible-library` | No | TanStack `useReactTable()` is flagged by React Compiler compatibility rule; this is a known library-compat warning, not a logic regression. | Low | Keep as a documented accepted warning unless table abstraction or compiler policy changes. |
+
 ## Session: Post-PR #169 Dashboard Regression + Full Lint Pass
 - Date: 2026-03-08
 - Baseline SHA: `39546c59bec16fbb4c4e2f965c48ad837b08fc18`
