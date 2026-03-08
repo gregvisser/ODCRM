@@ -220,7 +220,7 @@ export default function DashboardsHomePage() {
   const toast = useToast()
   const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
-  const { interpretation: readiness } = useClientReadinessState(customerId)
+  const { interpretation: readiness, signal: readinessSignal } = useClientReadinessState(customerId)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
 
@@ -238,6 +238,14 @@ export default function DashboardsHomePage() {
 
   const goToClientsMaintenance = () => {
     window.dispatchEvent(new CustomEvent('navigateToAccount'))
+  }
+
+  const goToMarketingReports = () => {
+    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'reports' } }))
+  }
+
+  const goToMarketingInbox = () => {
+    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'inbox' } }))
   }
 
   const runReadinessNextStep = () => {
@@ -726,15 +734,115 @@ export default function DashboardsHomePage() {
   return (
     <RequireActiveClient>
     <VStack spacing={3} align="stretch">
+      {/* Action-Priority Triage (primary entry) */}
+      <Box
+        id="dashboard-next-step-routing"
+        bg="blue.50"
+        p={3}
+        borderRadius="md"
+        border="1px"
+        borderColor="blue.100"
+        data-testid="dashboard-action-priority-triage"
+      >
+        <HStack justify="space-between" align="start" flexWrap="wrap" gap={2}>
+          <Box>
+            <Text fontWeight="semibold" color="blue.800" data-testid="dashboard-role-framing">
+              Action priority triage
+            </Text>
+            <Text fontSize="sm" color="blue.900" mt={1}>
+              Start here each day: resolve urgent blockers first, then move into outreach operations.
+            </Text>
+          </Box>
+          <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="dashboard-client-readiness-state">
+            {readiness.label}
+          </Badge>
+        </HStack>
+
+        <Text fontSize="sm" color="blue.900" mt={2}>
+          {readiness.reason}
+        </Text>
+
+        <HStack spacing={2} mt={3} flexWrap="wrap" data-testid="dashboard-triage-next-actions">
+          <Button
+            size="sm"
+            colorScheme="teal"
+            onClick={runReadinessNextStep}
+            data-testid="dashboard-readiness-next-step"
+          >
+            {readiness.nextStep.label}
+          </Button>
+          <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="dashboard-go-marketing-readiness">
+            Open Marketing Readiness
+          </Button>
+          <Button size="sm" variant="outline" colorScheme="purple" onClick={goToOnboardingSetup} data-testid="dashboard-go-onboarding-setup">
+            Continue setup in Onboarding
+          </Button>
+          <Button size="sm" variant="outline" colorScheme="gray" onClick={goToClientsMaintenance} data-testid="dashboard-go-clients-maintenance">
+            Fix data in OpenDoors Clients
+          </Button>
+        </HStack>
+
+        <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} spacing={2} mt={3} data-testid="dashboard-priority-groups">
+          <Box borderWidth="1px" borderRadius="md" p={2} bg={readiness.state === 'needs-attention' ? 'red.50' : 'white'} data-testid="dashboard-priority-needs-attention">
+            <HStack justify="space-between">
+              <Text fontWeight="semibold" fontSize="sm">Needs attention</Text>
+              <Badge colorScheme="red">{readiness.state === 'needs-attention' ? 1 : 0}</Badge>
+            </HStack>
+            <Text fontSize="xs" color="gray.600" mt={1}>Blocked or failed outreach that should be reviewed now.</Text>
+            <Button mt={2} size="xs" variant="ghost" onClick={goToMarketingReadiness}>Open Readiness</Button>
+          </Box>
+
+          <Box borderWidth="1px" borderRadius="md" p={2} bg={(readiness.state === 'setup-needed' || readiness.state === 'data-incomplete') ? 'orange.50' : 'white'} data-testid="dashboard-priority-setup-data">
+            <HStack justify="space-between">
+              <Text fontWeight="semibold" fontSize="sm">Setup / data blockers</Text>
+              <Badge colorScheme="orange">{(readiness.state === 'setup-needed' || readiness.state === 'data-incomplete') ? 1 : 0}</Badge>
+            </HStack>
+            <Text fontSize="xs" color="gray.600" mt={1}>Onboarding and client data prerequisites that block reliable outreach.</Text>
+            <HStack mt={2}>
+              <Button size="xs" variant="ghost" onClick={goToOnboardingSetup}>Onboarding</Button>
+              <Button size="xs" variant="ghost" onClick={goToClientsMaintenance}>Clients</Button>
+            </HStack>
+          </Box>
+
+          <Box borderWidth="1px" borderRadius="md" p={2} bg={readiness.state === 'ready-for-outreach' ? 'green.50' : 'white'} data-testid="dashboard-priority-ready-outreach">
+            <HStack justify="space-between">
+              <Text fontWeight="semibold" fontSize="sm">Ready for outreach</Text>
+              <Badge colorScheme="green">{readiness.state === 'ready-for-outreach' ? 1 : 0}</Badge>
+            </HStack>
+            <Text fontSize="xs" color="gray.600" mt={1}>Core checks are healthy and the client can move into outreach execution.</Text>
+            <Button mt={2} size="xs" variant="ghost" onClick={goToMarketingReadiness}>Start in Marketing</Button>
+          </Box>
+
+          <Box borderWidth="1px" borderRadius="md" p={2} bg={readiness.state === 'outreach-active' ? 'blue.100' : 'white'} data-testid="dashboard-priority-active-outreach">
+            <HStack justify="space-between">
+              <Text fontWeight="semibold" fontSize="sm">Outreach active</Text>
+              <Badge colorScheme="blue">{readiness.state === 'outreach-active' ? 1 : 0}</Badge>
+            </HStack>
+            <Text fontSize="xs" color="gray.600" mt={1}>Watch outcomes and replies while outreach is running.</Text>
+            <HStack mt={2}>
+              <Button size="xs" variant="ghost" onClick={goToMarketingReports}>Reports</Button>
+              <Button size="xs" variant="ghost" onClick={goToMarketingInbox}>Inbox</Button>
+            </HStack>
+          </Box>
+        </SimpleGrid>
+
+        <HStack mt={2} spacing={3} flexWrap="wrap" data-testid="dashboard-triage-queue-facts">
+          <Text fontSize="xs" color="gray.700">Ready now: <b>{readinessSignal.queue.readyNow}</b></Text>
+          <Text fontSize="xs" color="gray.700">Blocked: <b>{readinessSignal.queue.blocked}</b></Text>
+          <Text fontSize="xs" color="gray.700">Failed recently: <b>{readinessSignal.queue.failedRecently}</b></Text>
+          <Text fontSize="xs" color="gray.700">Sent recently: <b>{readinessSignal.queue.sentRecently}</b></Text>
+        </HStack>
+      </Box>
+
       {/* Header Stats */}
       <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
         <HStack justify="space-between" mb={2} flexWrap="wrap">
           <Box>
             <Heading size="md" color="gray.700">
-              Client Lead Generation Dashboard
+              Supporting KPI Context
             </Heading>
             <Text fontSize="xs" color="gray.500" mt={1}>
-              Daily overview: check status here, then move to setup fixes or marketing operations. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
+              Secondary metrics and trend context after triage decisions. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
             </Text>
           </Box>
           <HStack spacing={2}>
@@ -869,49 +977,6 @@ export default function DashboardsHomePage() {
             </StatHelpText>
           </Stat>
         </SimpleGrid>
-      </Box>
-
-      <Box
-        bg="blue.50"
-        p={3}
-        borderRadius="md"
-        border="1px"
-        borderColor="blue.100"
-        data-testid="dashboard-next-step-routing"
-      >
-        <Text fontWeight="semibold" color="blue.800" data-testid="dashboard-role-framing">
-          Next step routing
-        </Text>
-        <HStack mt={2} spacing={2} align="center">
-          <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="dashboard-client-readiness-state">
-            {readiness.label}
-          </Badge>
-          <Text fontSize="sm" color="blue.900">
-            {readiness.reason}
-          </Text>
-        </HStack>
-        <Text fontSize="sm" color="blue.900" mt={1}>
-          Use Dashboard for quick status. Continue setup in Onboarding or Clients when needed, then run daily outreach from Marketing Readiness. Settings remains admin-only.
-        </Text>
-        <HStack spacing={2} mt={3} flexWrap="wrap">
-          <Button
-            size="sm"
-            colorScheme="teal"
-            onClick={runReadinessNextStep}
-            data-testid="dashboard-readiness-next-step"
-          >
-            {readiness.nextStep.label}
-          </Button>
-          <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="dashboard-go-marketing-readiness">
-            Continue in Marketing Readiness
-          </Button>
-          <Button size="sm" variant="outline" colorScheme="purple" onClick={goToOnboardingSetup} data-testid="dashboard-go-onboarding-setup">
-            Complete setup in Onboarding
-          </Button>
-          <Button size="sm" variant="outline" colorScheme="gray" onClick={goToClientsMaintenance} data-testid="dashboard-go-clients-maintenance">
-            Fix client data in OpenDoors Clients
-          </Button>
-        </HStack>
       </Box>
 
       {/* Main Client Table */}
