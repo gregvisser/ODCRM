@@ -103,11 +103,18 @@ function LeadsReportingTab() {
     )
   } else if (error) {
     content = (
-      <Alert status="error" borderRadius="lg">
+      <Alert status="error" borderRadius="lg" data-testid="leads-reporting-actionable-error">
         <AlertIcon />
         <Box>
           <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            <Text>{error}</Text>
+            <Text mt={2} fontSize="sm">
+              {sourceOfTruth === 'db'
+                ? 'This client is DB-backed for leads here. Confirm lead records exist in ODCRM for reporting.'
+                : 'This client is Google Sheets-backed for leads here. Confirm the linked sheet URL and sharing access, then refresh.'}
+            </Text>
+          </AlertDescription>
         </Box>
       </Alert>
     )
@@ -117,10 +124,20 @@ function LeadsReportingTab() {
         <Text fontSize="lg" color="gray.600">
           No leads data available
         </Text>
+        <Text fontSize="sm" color="gray.600" mt={2} data-testid="leads-reporting-source-mode">
+          {sourceOfTruth === 'db'
+            ? 'This reporting view is DB-backed for this client.'
+            : 'This reporting view is Google Sheets-backed for this client.'}
+        </Text>
         <Text fontSize="sm" color="gray.500" mt={2}>
           {sourceOfTruth === 'db'
             ? 'No lead records are stored for this client yet.'
             : 'Configure and validate the client Google Sheet URL in Accounts to load sheet-backed leads.'}
+        </Text>
+        <Text fontSize="sm" color="gray.500" mt={2} data-testid="leads-reporting-next-step">
+          {sourceOfTruth === 'db'
+            ? 'Next step: add lead records in ODCRM so retrospective reporting can populate.'
+            : 'Next step: fix the Google Sheet link/access in Clients and refresh this report.'}
         </Text>
       </Box>
     )
@@ -289,6 +306,11 @@ function LeadsReportingTab() {
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
+          </Text>
+          <Text fontSize="xs" color="gray.500" mt={1} data-testid="leads-reporting-next-step">
+            {sourceOfTruth === 'db'
+              ? 'Use this page for retrospective performance from ODCRM lead records.'
+              : 'Use this page for retrospective performance from Google Sheets-backed lead records.'}
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Last refreshed: {lastRefresh ? formatLastRefresh(lastRefresh) : 'Never'} • Polls every 30s
