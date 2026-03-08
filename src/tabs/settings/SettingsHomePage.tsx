@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Box, Text } from '@chakra-ui/react'
 import { UnlockIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
@@ -23,17 +24,17 @@ export default function SettingsHomePage({
   const activeView = coerceSettingsViewId(view)
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
 
-  const defaultNavItems: SubNavItem[] = [
-    {
-      id: 'user-authorization',
-      label: 'User Authorization',
-      icon: UnlockIcon,
-      content: <UserAuthorizationTab />,
-    },
-  ]
-
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
+    const defaultNavItems: SubNavItem[] = [
+      {
+        id: 'user-authorization',
+        label: 'User Authorization',
+        icon: UnlockIcon,
+        content: <UserAuthorizationTab />,
+      },
+    ]
+
     const savedOrder = getTabOrder(SETTINGS_SECTION_KEY)
     if (!savedOrder || savedOrder.length === 0) {
       return defaultNavItems
@@ -55,7 +56,7 @@ export default function SettingsHomePage({
     orderedItems.push(...Array.from(itemsById.values()))
 
     return orderedItems
-  }, [getTabOrder, defaultNavItems])
+  }, [getTabOrder])
 
   // Save navigation order when it changes (to database, per-user)
   const handleNavReorder = async (reorderedItems: SubNavItem[]) => {
@@ -64,13 +65,31 @@ export default function SettingsHomePage({
   }
 
   return (
-    <SubNavigation
-      items={navItems}
-      activeId={activeView}
-      onChange={(id) => onNavigate?.(id as SettingsViewId)}
-      onReorder={handleNavReorder}
-      title="Settings"
-      enableDragDrop={true}
-    />
+    <Box data-testid="settings-home-panel">
+      <Box
+        mb={3}
+        p={3}
+        borderRadius="md"
+        border="1px solid"
+        borderColor="gray.200"
+        bg="gray.50"
+        data-testid="settings-admin-framing"
+      >
+        <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="settings-role-framing">
+          Settings is an admin/setup area for permissions and system controls.
+        </Text>
+        <Text mt={1} fontSize="sm" color="gray.700" data-testid="settings-daily-operations-guidance">
+          For daily client work, start in Dashboard triage or Marketing Readiness instead of staying in Settings.
+        </Text>
+      </Box>
+      <SubNavigation
+        items={navItems}
+        activeId={activeView}
+        onChange={(id) => onNavigate?.(id as SettingsViewId)}
+        onReorder={handleNavReorder}
+        title="Settings"
+        enableDragDrop={true}
+      />
+    </Box>
   )
 }

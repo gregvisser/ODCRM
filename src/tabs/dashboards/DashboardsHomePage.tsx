@@ -774,6 +774,9 @@ export default function DashboardsHomePage() {
         <Text fontSize="sm" color="blue.900" mt={2}>
           {readiness.reason}
         </Text>
+        <Text fontSize="xs" color="blue.800" mt={1} data-testid="dashboard-daily-vs-admin-framing">
+          Daily workflow: Dashboard, Clients, Onboarding, and Marketing. Use Settings for admin controls only.
+        </Text>
 
         <HStack spacing={2} mt={3} flexWrap="wrap" data-testid="dashboard-triage-next-actions">
           <Button

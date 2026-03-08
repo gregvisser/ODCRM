@@ -109,6 +109,14 @@ export default function MarketingHomePage({
     }
   }
 
+  const goToOnboarding = () => {
+    window.dispatchEvent(new CustomEvent('navigateToOnboarding'))
+  }
+
+  const goToClients = () => {
+    window.dispatchEvent(new CustomEvent('navigateToAccount'))
+  }
+
   // Default navigation items — Overview and People tabs removed (2026-02-22).
   // Old ?view=overview and ?view=people URLs are handled by coerceViewId above.
   const defaultNavItems: SubNavItem[] = useMemo(() => [
@@ -221,9 +229,18 @@ export default function MarketingHomePage({
         <Text fontSize="sm" color="gray.600">
           Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
         </Text>
-        <HStack mt={2}>
+        <Text fontSize="xs" color="gray.500" mt={1} data-testid="marketing-module-continuity-guidance">
+          If setup or data blockers appear, switch to Onboarding or OpenDoors Clients, then return here to continue operations.
+        </Text>
+        <HStack mt={2} flexWrap="wrap">
           <Button size="xs" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="marketing-readiness-next-step">
             {readiness.nextStep.label}
+          </Button>
+          <Button size="xs" variant="ghost" colorScheme="purple" onClick={goToOnboarding} data-testid="marketing-go-onboarding-setup">
+            Open Onboarding setup
+          </Button>
+          <Button size="xs" variant="ghost" colorScheme="gray" onClick={goToClients} data-testid="marketing-go-clients-data-health">
+            Open Clients data health
           </Button>
         </HStack>
       </Box>
