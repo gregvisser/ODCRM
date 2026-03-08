@@ -3219,11 +3219,49 @@ const SequencesTab: React.FC = () => {
           <Text color="gray.600">
             Create and manage multi-step outreach sequences from lead snapshots
           </Text>
+          <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
+            Use this workspace for inspect, act, and verify. Start from Readiness, then return there or to Reports after changes.
+          </Text>
           {activeFocusPanel ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
               Focused panel: {activeFocusPanel}
             </Text>
           ) : null}
+          <HStack spacing={2} mt={1} data-testid="sequences-tab-cross-nav">
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                const params = new URLSearchParams(window.location.search)
+                params.set('view', 'readiness')
+                window.location.search = params.toString()
+              }}
+            >
+              Open Readiness
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => {
+                const params = new URLSearchParams(window.location.search)
+                params.set('view', 'reports')
+                window.location.search = params.toString()
+              }}
+            >
+              Open Reports
+            </Button>
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => {
+                const params = new URLSearchParams(window.location.search)
+                params.set('view', 'inbox')
+                window.location.search = params.toString()
+              }}
+            >
+              Open Inbox
+            </Button>
+          </HStack>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
               <FormLabel fontSize="sm">Client</FormLabel>

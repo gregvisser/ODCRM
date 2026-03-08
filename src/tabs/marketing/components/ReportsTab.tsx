@@ -98,6 +98,13 @@ const ReportsTab: React.FC = () => {
   const [identityData, setIdentityData] = useState<IdentityCapacityResponse | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
+  const openMarketingTab = useCallback((view: 'readiness' | 'sequences' | 'inbox', focusPanel?: string) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('view', view)
+    if (focusPanel) params.set('focusPanel', focusPanel)
+    window.location.search = params.toString()
+  }, [])
+
   useEffect(() => {
     const unsubscribe = onSettingsUpdated((detail) => {
       const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId || ''
@@ -178,7 +185,12 @@ const ReportsTab: React.FC = () => {
           <Card id="reports-tab-controls" data-testid="reports-tab-controls">
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
-                <Heading size="md">Outreach Operations Reports</Heading>
+                <VStack align="start" spacing={0}>
+                  <Heading size="md">Outreach Operations Reports</Heading>
+                  <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
+                    Use this tab to review recent outcomes, then jump to Sequences or Inbox for follow-up.
+                  </Text>
+                </VStack>
                 <HStack>
                   <Select
                     id="reports-tab-window-select"
@@ -242,8 +254,28 @@ const ReportsTab: React.FC = () => {
                 </Stat>
               </SimpleGrid>
               <Text id="reports-tab-last-updated" data-testid="reports-tab-last-updated" mt={3} fontSize="xs" color="gray.500">
-                Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Routes: /api/reports/outreach, /api/send-worker/run-history, /api/send-worker/identity-capacity
+                Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'}
               </Text>
+            </CardBody>
+          </Card>
+
+          <Card id="reports-tab-next-steps" data-testid="reports-tab-next-steps">
+            <CardHeader><Heading size="sm">Operator Follow-Up</Heading></CardHeader>
+            <CardBody>
+              <Text fontSize="sm" color="gray.600" mb={3}>
+                If failures, skips, or mismatches are rising, open Sequences for inspection/remediation or Inbox for reply handling.
+              </Text>
+              <HStack flexWrap="wrap">
+                <Button size="sm" variant="outline" data-testid="reports-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'run-history-panel')}>
+                  Open Sequences
+                </Button>
+                <Button size="sm" variant="outline" data-testid="reports-tab-open-inbox" onClick={() => openMarketingTab('inbox')}>
+                  Open Inbox
+                </Button>
+                <Button size="sm" variant="ghost" data-testid="reports-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
+                  Back to Readiness
+                </Button>
+              </HStack>
             </CardBody>
           </Card>
 
@@ -264,7 +296,7 @@ const ReportsTab: React.FC = () => {
                     </Thead>
                     <Tbody>
                       {bySequence.length === 0 ? (
-                        <Tr><Td colSpan={5} color="gray.500">No sequence metrics in this window.</Td></Tr>
+                        <Tr><Td colSpan={5} color="gray.500">No sequence metrics in this window. Check Readiness to confirm sequence activity.</Td></Tr>
                       ) : (
                         bySequence.slice(0, 12).map((row, idx) => (
                           <Tr key={row.sequenceId || row.sequenceName || `seq-${idx}`}>
@@ -298,7 +330,7 @@ const ReportsTab: React.FC = () => {
                     </Thead>
                     <Tbody>
                       {byIdentity.length === 0 ? (
-                        <Tr><Td colSpan={5} color="gray.500">No identity metrics in this window.</Td></Tr>
+                        <Tr><Td colSpan={5} color="gray.500">No identity metrics in this window. Verify Email Accounts and recent run activity.</Td></Tr>
                       ) : (
                         byIdentity.slice(0, 12).map((row, idx) => (
                           <Tr key={row.identityId || row.email || `identity-${idx}`}>
@@ -320,7 +352,7 @@ const ReportsTab: React.FC = () => {
               <CardHeader><Heading size="sm">Recent Reasons</Heading></CardHeader>
               <CardBody>
                 {topReasons.length === 0 ? (
-                  <Text color="gray.500">No recent reason rows in this window.</Text>
+                  <Text color="gray.500">No recent reasons in this window. If this is unexpected, refresh or review Sequences run history.</Text>
                 ) : (
                   <VStack align="stretch" spacing={2}>
                     {topReasons.map((row) => (
@@ -349,7 +381,7 @@ const ReportsTab: React.FC = () => {
                     </Thead>
                     <Tbody>
                       {runRows.length === 0 ? (
-                        <Tr><Td colSpan={4} color="gray.500">No recent attempts in this window.</Td></Tr>
+                        <Tr><Td colSpan={4} color="gray.500">No recent attempts in this window. Open Sequences to run preflight or check queue state.</Td></Tr>
                       ) : (
                         runRows.slice(0, 14).map((row, idx) => (
                           <Tr key={`${row.recipientEmail || 'unknown'}-${row.createdAt || idx}`}>

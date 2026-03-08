@@ -142,6 +142,13 @@ const InboxTab: React.FC = () => {
   const [isSendingReply, setIsSendingReply] = useState(false)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
+  const openMarketingTab = (view: 'readiness' | 'reports' | 'sequences', focusPanel?: string) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('view', view)
+    if (focusPanel) params.set('focusPanel', focusPanel)
+    window.location.search = params.toString()
+  }
+
   useEffect(() => {
     loadCustomers()
   }, [])
@@ -409,7 +416,7 @@ const InboxTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Inbox</Heading>
           <Text color="gray.600">
-            View email threads from your connected mailboxes
+            Handle inbound replies and thread conversations from connected mailboxes.
           </Text>
         </VStack>
         <HStack>
@@ -473,6 +480,27 @@ const InboxTab: React.FC = () => {
         Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : 'Not loaded yet'}
       </Text>
 
+      <Alert status="info" mb={4} data-testid="inbox-tab-operator-guidance">
+        <AlertIcon />
+        <Box>
+          <AlertTitle fontSize="sm">Operator flow</AlertTitle>
+          <AlertDescription fontSize="sm">
+            Review replies and unread threads here, then go to Sequences for remediation or Reports for trend verification.
+          </AlertDescription>
+          <HStack mt={2}>
+            <Button size="xs" variant="outline" data-testid="inbox-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'queue-workbench-panel')}>
+              Open Sequences
+            </Button>
+            <Button size="xs" variant="outline" data-testid="inbox-tab-open-reports" onClick={() => openMarketingTab('reports')}>
+              Open Reports
+            </Button>
+            <Button size="xs" variant="ghost" data-testid="inbox-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
+              Back to Readiness
+            </Button>
+          </HStack>
+        </Box>
+      </Alert>
+
       {/* Error Display */}
       {error && (
         <Alert status="error" mb={4}>
@@ -512,7 +540,16 @@ const InboxTab: React.FC = () => {
                 </VStack>
               ) : threads.length === 0 ? (
                 <VStack py={8}>
-                  <Text color="gray.500">No email threads found</Text>
+                  <Text color="gray.500">No email threads found for this client yet.</Text>
+                  <Text fontSize="sm" color="gray.500">Try Refresh, switch to Replies, or verify connected email accounts.</Text>
+                  <HStack>
+                    <Button size="xs" variant="outline" onClick={handleRefresh} isDisabled={!selectedCustomerId}>
+                      Refresh Inbox
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setView('replies')}>
+                      View Replies
+                    </Button>
+                  </HStack>
                 </VStack>
               ) : (
                 <VStack spacing={0} align="stretch">
@@ -661,7 +698,10 @@ const InboxTab: React.FC = () => {
                   </Box>
                 </VStack>
               ) : (
-                <Text color="gray.500">Select a thread from the list to view messages</Text>
+                <VStack align="start" spacing={2}>
+                  <Text color="gray.500">Select a thread from the list to review conversation history and send a reply.</Text>
+                  <Text fontSize="sm" color="gray.500">Use Unread only to prioritize inbound items that still need action.</Text>
+                </VStack>
               )}
             </CardBody>
           </Card>
@@ -721,8 +761,16 @@ const InboxTab: React.FC = () => {
               {searchQuery ? 'No replies match your search' : 'No replies yet'}
             </Text>
             <Text color="gray.400" mt={2}>
-              Replies will appear here when prospects respond to your campaigns
+              Replies will appear here when prospects respond to your campaigns.
             </Text>
+            <HStack mt={3} justify="center">
+              <Button size="sm" variant="outline" onClick={handleRefresh} isDisabled={!selectedCustomerId}>
+                Refresh Inbox
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => openMarketingTab('reports')}>
+                Open Reports
+              </Button>
+            </HStack>
           </CardBody>
         </Card>
       ) : (
