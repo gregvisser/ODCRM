@@ -292,7 +292,9 @@ const SequencesTab: React.FC = () => {
     isOpen: isOperatorConsolePanelOpen,
     onOpen: onOperatorConsolePanelOpen,
     onClose: onOperatorConsolePanelClose,
-  } = useDisclosure({ defaultIsOpen: true })
+  } = useDisclosure({ defaultIsOpen: false })
+  const { isOpen: isDiagnosticsOpen, onOpen: onDiagnosticsOpen, onClose: onDiagnosticsClose } = useDisclosure({ defaultIsOpen: false })
+  const [deletingSequenceId, setDeletingSequenceId] = useState<string | null>(null)
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -2214,11 +2216,11 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  const loadData = async () => {
+  const loadData = async (): Promise<SequenceCampaign[] | null> => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       setSequences([])
       setError(null)
-      return
+      return []
     }
     if (import.meta.env.DEV) {
       console.debug('[SequencesTab] loadData', { hasCustomerId: true })
@@ -2255,7 +2257,7 @@ const SequencesTab: React.FC = () => {
       setError(sequencesRes.error)
       setSequences([])
       setLoading(false)
-      return
+      return null
     }
     const seqList = Array.isArray(sequencesRes.data) ? sequencesRes.data : []
     const campaigns = Array.isArray(campaignsRes.data) ? campaignsRes.data : []
@@ -2299,6 +2301,7 @@ const SequencesTab: React.FC = () => {
     })
     setSequences(rows)
     setLoading(false)
+    return rows
   }
 
   const loadFormOptions = async () => {
@@ -2436,6 +2439,7 @@ const SequencesTab: React.FC = () => {
 
   useEffect(() => {
     if (!requestedFocusPanel) return
+    if (!isOperatorConsolePanelOpen) onOperatorConsolePanelOpen()
     const panelId = requestedFocusPanel
     const timer = window.setTimeout(() => {
       const panel = document.getElementById(panelId)
@@ -2444,7 +2448,7 @@ const SequencesTab: React.FC = () => {
       setActiveFocusPanel(panelId)
     }, 75)
     return () => window.clearTimeout(timer)
-  }, [requestedFocusPanel, sequenceReadinessSequenceId, loading])
+  }, [requestedFocusPanel, sequenceReadinessSequenceId, loading, isOperatorConsolePanelOpen, onOperatorConsolePanelOpen])
 
   const stats = useMemo(() => {
     return {
@@ -3072,21 +3076,50 @@ const SequencesTab: React.FC = () => {
 
   const handleDeleteSequence = async (sequenceId: string) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    if (deletingSequenceId) return
+    setDeletingSequenceId(sequenceId)
     const deleteHeaders = { 'X-Customer-Id': selectedCustomerId }
     try {
-      await api.delete(`/api/sequences/${sequenceId}`, { headers: deleteHeaders })
-      await loadData()
+      const deleteRes = await api.delete(`/api/sequences/${sequenceId}`, { headers: deleteHeaders })
+      if (deleteRes.error) {
+        toast({
+          title: 'Failed to delete sequence',
+          description: deleteRes.error,
+          status: 'error',
+          duration: 5000,
+        })
+        return
+      }
+      const refreshedRows = await loadData()
+      const stillVisible = Array.isArray(refreshedRows) && refreshedRows.some((row) => row.id === sequenceId)
+      if (stillVisible) {
+        toast({
+          title: 'Delete not confirmed yet',
+          description: 'The sequence is still in the list after refresh. Please retry in a few seconds.',
+          status: 'warning',
+          duration: 5000,
+        })
+        return
+      }
+      if (editingSequence?.id === sequenceId) {
+        onClose()
+        setEditingSequence(null)
+      }
       toast({
         title: 'Sequence deleted',
+        description: 'Removed and confirmed from the latest list refresh.',
         status: 'success',
         duration: 3000,
       })
-    } catch (deleteError) {
+    } catch (deleteError: any) {
       toast({
         title: 'Failed to delete sequence',
+        description: deleteError?.message || 'Unexpected error',
         status: 'error',
-        duration: 3000,
+        duration: 5000,
       })
+    } finally {
+      setDeletingSequenceId((current) => (current === sequenceId ? null : current))
     }
   }
 
@@ -3217,10 +3250,10 @@ const SequencesTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Sequences</Heading>
           <Text color="gray.600">
-            Create and manage multi-step outreach sequences from lead snapshots
+            Choose a sequence, verify readiness, then run only the next safe action.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Use this workspace to inspect, act, and verify. Start from Readiness, then return there or to Reports after changes.
+            Start with readiness and launch preview. Use diagnostics only when investigating issues.
           </Text>
           {activeFocusPanel ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
@@ -3364,6 +3397,13 @@ const SequencesTab: React.FC = () => {
 
       <Card mb={6}>
         <CardBody>
+          <HStack mb={3} align="start" spacing={3} id="sequences-tab-core-workflow" data-testid="sequences-tab-core-workflow">
+            <InfoIcon color="blue.500" mt={1} />
+            <VStack align="start" spacing={0}>
+              <Text fontSize="sm" fontWeight="semibold">Daily workflow</Text>
+              <Text fontSize="xs" color="gray.600">1) Choose a sequence 2) Confirm readiness/preflight 3) Run dry-run or live canary only when ready</Text>
+            </VStack>
+          </HStack>
           <Heading
             id="sending-console-panel"
             data-testid="sending-console-panel"
@@ -4119,6 +4159,28 @@ const SequencesTab: React.FC = () => {
                       </VStack>
                     </CardBody>
                   </Card>
+
+                  <Card id="sequences-tab-advanced-review" data-testid="sequences-tab-advanced-review" variant="outline">
+                    <CardBody py={3}>
+                      <HStack justify="space-between" align="center">
+                        <VStack align="start" spacing={0}>
+                          <Text fontSize="sm" fontWeight="semibold">Advanced Review & Diagnostics</Text>
+                          <Text fontSize="xs" color="gray.500">Open this when you need deeper troubleshooting after preflight and launch preview.</Text>
+                        </VStack>
+                        <Button
+                          id="sequences-tab-toggle-diagnostics"
+                          data-testid="sequences-tab-toggle-diagnostics"
+                          size="xs"
+                          variant="ghost"
+                          onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
+                        >
+                          {isDiagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
+                        </Button>
+                      </HStack>
+                    </CardBody>
+                  </Card>
+
+                  <Collapse in={isDiagnosticsOpen}>
 
                   <Card id="run-history-panel" data-testid="run-history-panel">
                     <CardBody>
@@ -4983,6 +5045,7 @@ const SequencesTab: React.FC = () => {
                       )
                     })}
                   </SimpleGrid>
+                  </Collapse>
                 </>
               )}
             </VStack>
@@ -5564,8 +5627,13 @@ const SequencesTab: React.FC = () => {
                             </MenuItem>
                           )}
                           <MenuDivider />
-                          <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteSequence(sequence.id)}>
-                            Delete
+                          <MenuItem
+                            icon={<DeleteIcon />}
+                            color="red.500"
+                            isDisabled={Boolean(deletingSequenceId)}
+                            onClick={() => handleDeleteSequence(sequence.id)}
+                          >
+                            {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
                           </MenuItem>
                         </MenuList>
                       </Menu>
