@@ -23,52 +23,45 @@
 - Branch: `codex/fix-dashboard-reports-role-separation`
 - PR: #164
 - Merge SHA: `81e5d211abea398d977aa57e40950e3b324a444e`
-- What changed:
-  - Dashboard explicitly framed as live triage with handoff to Reports.
-  - Reports explicitly framed as retrospective analysis with handoff to Dashboard.
-  - Added runtime proof: `test:dashboard-reports-role-separation-runtime`.
-- What is now working:
-  - Role separation cues are visible and deterministic.
-  - Targeted proofs/gates passed; lint unchanged.
-  - Post-merge strict parity confirmed.
-- Verification steps (UI):
-  - Dashboard shows live-triage framing and Reports handoff CTA.
-  - Marketing > Reports shows retrospective framing and Dashboard return CTA.
+- Status: Completed
 
 ### Slice 2 — Live leads/reporting user-visible acceptance hardening
 - Branch: `codex/fix-leads-user-acceptance`
 - PR: #165
 - Merge SHA: `6f82198d88e5b13e3c29bae103120b305565f3b5`
-- What changed:
-  - Hardened source-of-truth mode guidance and next-step copy in `LeadsTab`, `LeadsReportingTab`, and `MarketingLeadsTab`.
-  - Added actionable, non-technical error guidance for DB-backed vs Google-Sheets-backed lead paths.
-  - Aligned `LeadsTab` selected-customer lookup with shared settings store helper (`getCurrentCustomerId`).
-  - Added runtime proof: `test:leads-user-acceptance-runtime`.
-- What is now working:
-  - Lead surfaces clearly explain truth mode and recovery actions.
-  - Targeted proofs/gates passed.
-  - Post-merge strict parity confirmed.
-- Verification steps (UI):
-  - In each leads surface, verify source-of-truth label and next-step guidance are visible.
-  - Trigger an invalid sheet path and verify actionable setup/access error text.
+- Status: Completed
 
 ### Slice 3 — Whole-system operator acceptance sweep
 - Branch: `codex/fix-whole-system-operator-acceptance`
+- PR: #166
+- Merge SHA: `1c9559c0ad1d5ffb4f29ec414bd3dc83e3e6c498`
+- What changed:
+  - Added whole-system continuity cues across Dashboard/Clients/Onboarding/Marketing.
+  - Added Settings admin-only framing plus daily-work redirect guidance.
+  - Added runtime proof: `test:whole-system-operator-acceptance-runtime`.
+  - Added checklist: `docs/ops/ODCRM_OPERATOR_ACCEPTANCE_CHECKLIST.md`.
+- What is now working:
+  - Cross-module handoff cues are clearer and deterministic across top-level surfaces.
+  - Whole-system acceptance runtime proof passes.
+  - Lint improved from `54/22/32` to `53/22/31`.
+  - Post-merge strict parity confirmed.
+- Verification steps (UI):
+  - Dashboard: verify daily-vs-admin framing and triage CTA flow.
+  - Clients/Onboarding/Marketing: verify continuity guidance and next-step CTAs.
+  - Settings: verify admin/setup framing and daily-operations redirect hint.
+
+### Slice 4 — Lead source-of-truth transition plan (docs-first)
+- Branch: `codex/docs-lead-source-of-truth-transition-plan`
 - Status: In progress (pre-PR)
 - What changed so far:
-  - Added cross-module continuity guidance in Dashboard, Clients, Onboarding, and Marketing.
-  - Added Settings role framing to clearly position Settings as admin/setup only.
-  - Added runtime proof: `test:whole-system-operator-acceptance-runtime`.
-  - Added operator checklist artifact: `docs/ops/ODCRM_OPERATOR_ACCEPTANCE_CHECKLIST.md`.
-- Validation completed so far:
-  - `test:deploy-reliability-runtime` PASS
-  - `test:whole-system-operator-acceptance-runtime` PASS
-  - `test:marketing-full-stack-runtime` PASS
-  - `test:client-readiness-unification-runtime` PASS
-  - `test:dashboard-action-priority-runtime` PASS
-  - Mandatory gates: `tsc`, frontend build, server build PASS
-  - Lint improved to `53 problems / 22 errors / 31 warnings`
+  - Added docs:
+    - `docs/product/ODCRM_LEAD_TRUTH_CURRENT_STATE.md`
+    - `docs/product/ODCRM_LEAD_SOURCE_OF_TRUTH_TARGET.md`
+    - `docs/product/ODCRM_LEAD_SYNC_TRANSITION_PLAN.md`
+    - `docs/product/ODCRM_LEAD_IMPLEMENTATION_STAGES.md`
+    - `docs/product/ODCRM_LEAD_CONFLICT_RULES.md`
 - Pending:
+  - Run required proofs and gates
   - Commit/PR/merge
   - Post-merge strict parity
 
