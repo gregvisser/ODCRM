@@ -127,6 +127,7 @@
     "test:top-level-flow-spine-runtime": "node scripts/self-test-top-level-flow-spine-runtime.mjs",
     "test:client-readiness-unification-runtime": "node scripts/self-test-client-readiness-unification-runtime.mjs",
     "test:dashboard-action-priority-runtime": "node scripts/self-test-dashboard-action-priority-runtime.mjs",
+    "test:customers-crm-data-health-runtime": "node scripts/self-test-customers-crm-data-health-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

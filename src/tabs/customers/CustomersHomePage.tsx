@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { MdAssessment } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
@@ -129,7 +129,10 @@ export default function CustomersHomePage({
         data-testid="customers-marketing-bridge"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
-          OpenDoors Clients is for setup and data maintenance.
+          OpenDoors Clients is your CRM and data-health workspace for outreach readiness.
+        </Text>
+        <Text mt={1} fontSize="sm" color="gray.700" data-testid="customers-crm-data-health-framing">
+          Maintain account records, contact quality, and lead prerequisites here so Marketing can run reliably.
         </Text>
         <HStack mt={2} spacing={2}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">
@@ -137,8 +140,55 @@ export default function CustomersHomePage({
           </Badge>
           <Text fontSize="sm" color="gray.700">{readiness.reason}</Text>
         </HStack>
-        <Text fontSize="sm" color="gray.700" mt={1}>
+        <Text fontSize="sm" color="gray.700" mt={1} data-testid="customers-readiness-guidance">
           After updating accounts, contacts, or lead prerequisites, continue in Marketing Readiness to run outreach operations.
+        </Text>
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2} mt={3}>
+          <VStack
+            align="start"
+            spacing={0}
+            p={2}
+            borderRadius="md"
+            border="1px solid"
+            borderColor="gray.200"
+            bg="white"
+            data-testid="customers-subarea-guidance-accounts"
+          >
+            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Accounts</Text>
+            <Text fontSize="sm" color="gray.700">Company-level records and ownership context.</Text>
+          </VStack>
+          <VStack
+            align="start"
+            spacing={0}
+            p={2}
+            borderRadius="md"
+            border="1px solid"
+            borderColor="gray.200"
+            bg="white"
+            data-testid="customers-subarea-guidance-contacts"
+          >
+            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Contacts</Text>
+            <Text fontSize="sm" color="gray.700">Recipient-level email and outreach readiness details.</Text>
+          </VStack>
+          <VStack
+            align="start"
+            spacing={0}
+            p={2}
+            borderRadius="md"
+            border="1px solid"
+            borderColor="gray.200"
+            bg="white"
+            data-testid="customers-subarea-guidance-leads"
+          >
+            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Leads</Text>
+            <Text fontSize="sm" color="gray.700">Lead performance and reporting signals for follow-up planning.</Text>
+          </VStack>
+        </SimpleGrid>
+        <Text fontSize="xs" color="gray.600" mt={2} data-testid="customers-transitional-leads-note">
+          During transition, lead-source updates may still come from linked Google Sheets and are reflected here when synced.
+        </Text>
+        <Text fontSize="xs" color="gray.600" mt={2} data-testid="customers-post-fix-handoff">
+          When data checks are complete, move back to Marketing Readiness for send planning and operations.
         </Text>
         <HStack mt={3}>
           <Button size="sm" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="customers-readiness-next-step">
