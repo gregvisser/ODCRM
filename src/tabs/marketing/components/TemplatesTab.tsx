@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   AlertDescription,
@@ -118,17 +118,7 @@ const TemplatesTab: React.FC = () => {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const toast = useToast()
 
-  useEffect(() => {
-    loadCustomers()
-  }, [])
-
-  useEffect(() => {
-    if (selectedCustomerId) {
-      loadData()
-    }
-  }, [selectedCustomerId])
-
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     const { data, error: apiError } = await api.get('/api/customers')
 
     if (apiError) {
@@ -154,9 +144,13 @@ const TemplatesTab: React.FC = () => {
       setCustomers([])
       setSelectedCustomerId('')
     }
-  }
+  }, [])
 
-  const loadData = async () => {
+  useEffect(() => {
+    void loadCustomers()
+  }, [loadCustomers])
+
+  const loadData = useCallback(async () => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       return
     }
@@ -198,7 +192,13 @@ const TemplatesTab: React.FC = () => {
     }
     
     setLoading(false)
-  }
+  }, [selectedCustomerId])
+
+  useEffect(() => {
+    if (selectedCustomerId) {
+      void loadData()
+    }
+  }, [selectedCustomerId, loadData])
 
   const categories = useMemo(() => {
     const cats = new Set(templates.map(t => t.category))

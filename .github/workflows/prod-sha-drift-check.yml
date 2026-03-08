@@ -59,10 +59,16 @@ jobs:
 
       - name: Run prod drift check (Mode B)
         if: steps.both.outputs.both_success == 'true'
-        run: node scripts/prod-check.cjs
+        run: |
+          EXPECT_SHA="${{ github.event.workflow_run.head_sha }}"
+          echo "Running strict drift check for SHA: $EXPECT_SHA"
+          EXPECT_SHA="$EXPECT_SHA" node scripts/prod-check.cjs
         env:
           PROD_FRONTEND: https://odcrm.bidlow.co.uk
           PROD_BACKEND: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
+          PARITY_MAX_ATTEMPTS: '36'
+          PARITY_RETRY_DELAY_MS: '10000'
+          AUTO_RECOVER_BACKEND: 'false'
 
       - name: Skip drift check (other workflow not complete)
         if: steps.both.outputs.both_success != 'true'

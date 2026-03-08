@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -181,11 +181,7 @@ const SchedulesTab: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  const loadData = async (isManualRefresh = false) => {
+  const loadData = useCallback(async (isManualRefresh = false) => {
     try {
       if (isManualRefresh) setRefreshing(true)
       else setLoading(true)
@@ -218,7 +214,11 @@ const SchedulesTab: React.FC = () => {
       setRefreshing(false)
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    void loadData()
+  }, [loadData])
 
   const loadScheduleStats = async (scheduleId: string) => {
     try {

@@ -242,6 +242,8 @@ export function DataTable<T extends Record<string, any>>({
   pageSize = 50,
   emptyMessage = 'No data available',
 }: DataTableProps<T>) {
+  "use no memo"
+
   // Load saved preferences
   const savedPrefs = loadTablePreferences(tableId)
   

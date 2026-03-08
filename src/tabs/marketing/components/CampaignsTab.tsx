@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
   Button,
@@ -158,13 +158,7 @@ const CampaignsTab: React.FC = () => {
   const cancelStartRef = useRef<HTMLButtonElement | null>(null)
   const toast = useToast()
 
-  useEffect(() => {
-    loadData()
-    loadFormOptions()
-    maybeOpenFromSnapshot()
-  }, [])
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -177,9 +171,37 @@ const CampaignsTab: React.FC = () => {
     }
 
     setLoading(false)
-  }
+  }, [])
 
-  const loadFormOptions = async () => {
+  const loadSnapshots = useCallback(async () => {
+    const results = await Promise.all(
+      LEAD_SOURCES.map((source) =>
+        api.get<{ lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
+      )
+    )
+
+    const errors = results
+      .map((res, idx) => (res.error ? `${LEAD_SOURCES[idx]}: ${res.error}` : null))
+      .filter(Boolean) as string[]
+
+    if (errors.length > 0) {
+      setSnapshotsError(`Failed to load snapshots: ${errors.join(', ')}`)
+    }
+
+    const combined: SnapshotOption[] = results.flatMap((res, idx) => {
+      const lists = res.data?.lists || []
+      return lists.map((list) => ({
+        ...list,
+        source: LEAD_SOURCES[idx],
+      }))
+    })
+
+    combined.sort((a, b) => new Date(b.lastSyncAt).getTime() - new Date(a.lastSyncAt).getTime())
+    setSnapshots(combined)
+    return combined
+  }, [])
+
+  const loadFormOptions = useCallback(async () => {
     setSnapshotsLoading(true)
     setTemplatesLoading(true)
     setSendersLoading(true)
@@ -208,35 +230,7 @@ const CampaignsTab: React.FC = () => {
     setSnapshotsLoading(false)
     setTemplatesLoading(false)
     setSendersLoading(false)
-  }
-
-  const loadSnapshots = async () => {
-    const results = await Promise.all(
-      LEAD_SOURCES.map((source) =>
-        api.get<{ lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
-      )
-    )
-
-    const errors = results
-      .map((res, idx) => (res.error ? `${LEAD_SOURCES[idx]}: ${res.error}` : null))
-      .filter(Boolean) as string[]
-
-    if (errors.length > 0) {
-      setSnapshotsError(`Failed to load snapshots: ${errors.join(', ')}`)
-    }
-
-    const combined: SnapshotOption[] = results.flatMap((res, idx) => {
-      const lists = res.data?.lists || []
-      return lists.map((list) => ({
-        ...list,
-        source: LEAD_SOURCES[idx],
-      }))
-    })
-
-    combined.sort((a, b) => new Date(b.lastSyncAt).getTime() - new Date(a.lastSyncAt).getTime())
-    setSnapshots(combined)
-    return combined
-  }
+  }, [loadSnapshots])
 
   const getRecipientCount = (campaign: Campaign) => {
     return campaign.metrics?.totalProspects ?? 0
@@ -283,7 +277,7 @@ const CampaignsTab: React.FC = () => {
     }
   }, [campaigns])
 
-  const handleCreateCampaign = () => {
+  const handleCreateCampaign = useCallback(() => {
     setEditingCampaign({
       id: '',
       name: '',
@@ -295,7 +289,7 @@ const CampaignsTab: React.FC = () => {
       templateId: '',
     })
     onOpen()
-  }
+  }, [onOpen])
 
   const handleEditCampaign = (campaign: Campaign) => {
     setEditingCampaign({
@@ -535,14 +529,20 @@ const CampaignsTab: React.FC = () => {
     }
   }
 
-  const maybeOpenFromSnapshot = () => {
+  const maybeOpenFromSnapshot = useCallback(() => {
     const params = new URLSearchParams(window.location.search)
     const snapshotId = params.get('snapshotId')
     const view = params.get('view')
     if (view !== 'campaigns' || !snapshotId) return
     handleCreateCampaign()
     setEditingCampaign((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
-  }
+  }, [handleCreateCampaign])
+
+  useEffect(() => {
+    void loadData()
+    void loadFormOptions()
+    maybeOpenFromSnapshot()
+  }, [loadData, loadFormOptions, maybeOpenFromSnapshot])
 
   const handlePauseCampaign = async (campaignId: string) => {
     const { error: apiError } = await api.post(`/api/campaigns/${campaignId}/pause`, {})

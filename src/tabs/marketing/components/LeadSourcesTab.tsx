@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   Alert,
   AlertDescription,
@@ -165,7 +165,7 @@ const LeadSourcesTab: React.FC = () => {
   const [expandedRawLists, setExpandedRawLists] = useState<Set<string>>(new Set())
   const toast = useToast()
 
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     const res = await api.get('/api/customers')
     if (res.error) {
       toast({
@@ -198,28 +198,9 @@ const LeadSourcesTab: React.FC = () => {
         duration: 5000,
       })
     }
-  }
+  }, [currentCustomerId, toast])
 
-  // Load customers on mount
-  useEffect(() => {
-    loadCustomers()
-    const unsubscribe = onSettingsUpdated((detail) => {
-      const nextId = (detail as { currentCustomerId?: string | null })?.currentCustomerId
-      if (typeof nextId === 'string') {
-        setCurrentCustomerId(nextId)
-      }
-    })
-    return () => unsubscribe()
-  }, [])
-
-  // Load sources when customer changes
-  useEffect(() => {
-    if (currentCustomerId) {
-      loadSources()
-    }
-  }, [currentCustomerId])
-
-  const loadSnapshotLists = async (source: string) => {
+  const loadSnapshotLists = useCallback(async (source: string) => {
     const res = await api.get<{ source: string; lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
     if (res.error) {
       setSnapshotLists(prev => ({ ...prev, [source]: [] }))
@@ -228,9 +209,9 @@ const LeadSourcesTab: React.FC = () => {
     if (res.data) {
       setSnapshotLists(prev => ({ ...prev, [source]: res.data?.lists || [] }))
     }
-  }
+  }, [])
 
-  const loadSources = async () => {
+  const loadSources = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -262,7 +243,26 @@ const LeadSourcesTab: React.FC = () => {
     }
     
     setLoading(false)
-  }
+  }, [loadSnapshotLists])
+
+  // Load customers on mount
+  useEffect(() => {
+    void loadCustomers()
+    const unsubscribe = onSettingsUpdated((detail) => {
+      const nextId = (detail as { currentCustomerId?: string | null })?.currentCustomerId
+      if (typeof nextId === 'string') {
+        setCurrentCustomerId(nextId)
+      }
+    })
+    return () => unsubscribe()
+  }, [loadCustomers])
+
+  // Load sources when customer changes
+  useEffect(() => {
+    if (currentCustomerId) {
+      void loadSources()
+    }
+  }, [currentCustomerId, loadSources])
 
   const handleCustomerChange = (customerId: string) => {
     setCurrentCustomerId(customerId)

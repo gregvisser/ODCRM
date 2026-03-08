@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   AlertDescription,
@@ -1420,7 +1420,7 @@ const SequencesTab: React.FC = () => {
     if (auditNextCursor) loadAudits(auditNextCursor)
   }
 
-  const loadAuditSummary = async () => {
+  const loadAuditSummary = useCallback(async () => {
     if (!selectedCustomerId?.startsWith('cust_')) return
     const params = new URLSearchParams()
     params.set('sinceHours', String(auditSummarySinceHours))
@@ -1436,7 +1436,7 @@ const SequencesTab: React.FC = () => {
     }
     const d = res.data?.data
     setAuditSummary(d ? { total: d.total, byDecision: d.byDecision ?? {}, sinceHours: d.sinceHours } : null)
-  }
+  }, [selectedCustomerId, auditSummarySinceHours, auditQueueItemIdFilter, auditDecisionFilter])
 
   const handleExportAuditCsv = () => {
     if (!selectedCustomerId?.startsWith('cust_')) return
@@ -1465,9 +1465,9 @@ const SequencesTab: React.FC = () => {
 
   useEffect(() => {
     if (isAuditPanelOpen && selectedCustomerId?.startsWith('cust_')) {
-      loadAuditSummary()
+      void loadAuditSummary()
     }
-  }, [isAuditPanelOpen, selectedCustomerId, auditQueueItemIdFilter, auditDecisionFilter])
+  }, [isAuditPanelOpen, selectedCustomerId, auditQueueItemIdFilter, auditDecisionFilter, loadAuditSummary])
 
   useEffect(() => {
     if (!isQueuePreviewPanelOpen) return
@@ -2164,32 +2164,7 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const requestedSeq = params.get('sequenceId')
-    const requestedPanel = params.get('focusPanel')
-    setRequestedSequenceId(requestedSeq && requestedSeq.trim().length > 0 ? requestedSeq.trim() : null)
-    setRequestedFocusPanel(requestedPanel && requestedPanel.trim().length > 0 ? requestedPanel.trim() : null)
-    loadCustomers()
-    maybeOpenFromSnapshot()
-  }, [])
-
-  useEffect(() => {
-    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
-      loadData()
-    } else {
-      setSequences([])
-      setError(null)
-    }
-  }, [selectedCustomerId])
-
-  useEffect(() => {
-    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
-      loadFormOptions()
-    }
-  }, [selectedCustomerId])
-
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     const { data, error: apiError } = await api.get('/api/customers')
 
     if (apiError) {
@@ -2214,9 +2189,9 @@ const SequencesTab: React.FC = () => {
       setCustomers([])
       setSelectedCustomerId('')
     }
-  }
+  }, [])
 
-  const loadData = async (): Promise<SequenceCampaign[] | null> => {
+  const loadData = useCallback(async (): Promise<SequenceCampaign[] | null> => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
       setSequences([])
       setError(null)
@@ -2302,9 +2277,37 @@ const SequencesTab: React.FC = () => {
     setSequences(rows)
     setLoading(false)
     return rows
-  }
+  }, [selectedCustomerId])
 
-  const loadFormOptions = async () => {
+  const loadSnapshots = useCallback(async () => {
+    const results = await Promise.all(
+      LEAD_SOURCES.map((source) =>
+        api.get<{ lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
+      )
+    )
+
+    const errors = results
+      .map((res, idx) => (res.error ? `${LEAD_SOURCES[idx]}: ${res.error}` : null))
+      .filter(Boolean) as string[]
+
+    if (errors.length > 0) {
+      setSnapshotsError(`Failed to load snapshots: ${errors.join(', ')}`)
+    }
+
+    const combined: SnapshotOption[] = results.flatMap((res, idx) => {
+      const lists = res.data?.lists || []
+      return lists.map((list) => ({
+        ...list,
+        source: LEAD_SOURCES[idx],
+      }))
+    })
+
+    combined.sort((a, b) => new Date(b.lastSyncAt).getTime() - new Date(a.lastSyncAt).getTime())
+    setSnapshots(combined)
+    return combined
+  }, [])
+
+  const loadFormOptions = useCallback(async () => {
     setSnapshotsLoading(true)
     setLeadBatchesLoading(true)
     setTemplatesLoading(true)
@@ -2314,7 +2317,7 @@ const SequencesTab: React.FC = () => {
     setSendersError(null)
 
     const headers = selectedCustomerId?.startsWith('cust_') ? { 'X-Customer-Id': selectedCustomerId } : {}
-    const [snapshotsRes, batchesRes, templatesRes, sendersRes] = await Promise.all([
+    const [, batchesRes, templatesRes, sendersRes] = await Promise.all([
       loadSnapshots(),
       api.get<LeadSourceBatchOption[]>('/api/lead-sources/batches', { headers }),
       api.get<EmailTemplate[]>('/api/templates', { headers }),
@@ -2343,35 +2346,55 @@ const SequencesTab: React.FC = () => {
     setLeadBatchesLoading(false)
     setTemplatesLoading(false)
     setSendersLoading(false)
-  }
+  }, [selectedCustomerId, loadSnapshots])
 
-  const loadSnapshots = async () => {
-    const results = await Promise.all(
-      LEAD_SOURCES.map((source) =>
-        api.get<{ lists: SnapshotList[] }>(`/api/sheets/sources/${source}/lists`)
-      )
-    )
-
-    const errors = results
-      .map((res, idx) => (res.error ? `${LEAD_SOURCES[idx]}: ${res.error}` : null))
-      .filter(Boolean) as string[]
-
-    if (errors.length > 0) {
-      setSnapshotsError(`Failed to load snapshots: ${errors.join(', ')}`)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const requestedSeq = params.get('sequenceId')
+    const requestedPanel = params.get('focusPanel')
+    const snapshotId = params.get('snapshotId')
+    const view = params.get('view')
+    setRequestedSequenceId(requestedSeq && requestedSeq.trim().length > 0 ? requestedSeq.trim() : null)
+    setRequestedFocusPanel(requestedPanel && requestedPanel.trim().length > 0 ? requestedPanel.trim() : null)
+    if (view === 'sequences' && snapshotId) {
+      setMaterializedBatchKey(null)
+      setEditingSequence({
+        id: '',
+        name: '',
+        description: '',
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+        listId: snapshotId,
+        senderIdentityId: '',
+        steps: [
+          {
+            stepOrder: 1,
+            delayDaysFromPrevious: 0,
+            subjectTemplate: '',
+            bodyTemplateHtml: '',
+            bodyTemplateText: '',
+          },
+        ],
+      })
+      onOpen()
     }
+    void loadCustomers()
+  }, [loadCustomers, onOpen])
 
-    const combined: SnapshotOption[] = results.flatMap((res, idx) => {
-      const lists = res.data?.lists || []
-      return lists.map((list) => ({
-        ...list,
-        source: LEAD_SOURCES[idx],
-      }))
-    })
+  useEffect(() => {
+    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
+      void loadData()
+    } else {
+      setSequences([])
+      setError(null)
+    }
+  }, [selectedCustomerId, loadData])
 
-    combined.sort((a, b) => new Date(b.lastSyncAt).getTime() - new Date(a.lastSyncAt).getTime())
-    setSnapshots(combined)
-    return combined
-  }
+  useEffect(() => {
+    if (selectedCustomerId && selectedCustomerId.startsWith('cust_')) {
+      void loadFormOptions()
+    }
+  }, [selectedCustomerId, loadFormOptions])
 
   const getRecipientCount = (campaign: SequenceCampaign) => {
     return campaign.metrics?.totalProspects ?? 0
@@ -2462,7 +2485,7 @@ const SequencesTab: React.FC = () => {
     }
   }, [sequences])
 
-  const handleCreateSequence = () => {
+  const handleCreateSequence = useCallback(() => {
     // Check if templates exist
     if (templates.length === 0) {
       toast({
@@ -2495,7 +2518,7 @@ const SequencesTab: React.FC = () => {
       ],
     })
     onOpen()
-  }
+  }, [templates.length, toast, onOpen])
 
   const handleAddStep = () => {
     if (!editingSequence || !editingSequence.steps) return
@@ -3143,15 +3166,6 @@ const SequencesTab: React.FC = () => {
       case 'paused': return SettingsIcon
       default: return TimeIcon
     }
-  }
-
-  const maybeOpenFromSnapshot = () => {
-    const params = new URLSearchParams(window.location.search)
-    const snapshotId = params.get('snapshotId')
-    const view = params.get('view')
-    if (view !== 'sequences' || !snapshotId) return
-    handleCreateSequence()
-    setEditingSequence((prev) => (prev ? { ...prev, listId: snapshotId } : prev))
   }
 
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {

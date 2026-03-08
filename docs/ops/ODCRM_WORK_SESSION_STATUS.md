@@ -1,5 +1,30 @@
 # ODCRM Work Session Status
 
+## Active Session (Post-PR #170 Parity Noise + Remaining Lint)
+- Date: 2026-03-08
+- Baseline main SHA: `cf4d24fe6b50808f43a22abea3f394a359f357f5`
+- Starting strict parity: PASS (FE == BE == main SHA)
+- Baseline proofs: PASS
+  - `test:deploy-reliability-runtime`
+  - `test:dashboard-action-priority-runtime`
+  - `test:dashboard-data-contract-runtime`
+  - `test:google-sheets-data-plane-runtime`
+  - `test:customers-leads-reporting-truth-runtime`
+  - `test:customers-leads-view-runtime`
+  - `test:marketing-full-stack-runtime`
+- Baseline lint: `11 problems / 0 errors / 11 warnings`
+
+### In-Progress Results
+- Parity-noise root cause:
+  - `.github/workflows/prod-sha-drift-check.yml` ran `prod-check` without `EXPECT_SHA` and without retry-window envs, so it could fail red during normal rollout lag windows.
+- Parity-noise fix applied:
+  - Drift check now runs strict `EXPECT_SHA=${{ github.event.workflow_run.head_sha }}`.
+  - Added bounded retry window (`PARITY_MAX_ATTEMPTS=36`, `PARITY_RETRY_DELAY_MS=10000`) with `AUTO_RECOVER_BACKEND=false` for this passive drift job.
+  - Final parity correctness remains strict (`FE == BE == EXPECT_SHA`).
+- Lint remediation result:
+  - Reduced from `11/0/11` to `1/0/1`.
+  - Remaining warning is `react-hooks/incompatible-library` at `src/components/DataTable.tsx` (TanStack `useReactTable` compiler limitation), documented in lint remediation log.
+
 ## Active Session (Post-PR #169 Regression + Lint Remediation)
 - Date: 2026-03-08
 - Baseline main SHA: `39546c59bec16fbb4c4e2f965c48ad837b08fc18`
