@@ -118,6 +118,7 @@
     "test:sequences-tab-runtime": "node scripts/self-test-sequences-tab-runtime.mjs",
     "test:schedules-tab-runtime": "node scripts/self-test-schedules-tab-runtime.mjs",
     "test:inbox-receive-respond-runtime": "node scripts/self-test-inbox-receive-respond-runtime.mjs",
+    "test:marketing-full-stack-runtime": "node scripts/self-test-marketing-full-stack-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
