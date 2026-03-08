@@ -244,6 +244,7 @@ const ReadinessTab: React.FC = () => {
   const runHistoryRows = runHistoryData?.rows ?? []
   const previewCandidates = launchPreviewData?.firstBatch ?? []
   const previewExcluded = launchPreviewData?.excluded ?? []
+  const hasSelectedSequence = selectedSequenceId.trim().length > 0
 
   if (!customerId || !customerId.startsWith('cust_')) {
     return (
@@ -333,6 +334,15 @@ const ReadinessTab: React.FC = () => {
                 </Stat>
               </SimpleGrid>
 
+              {!hasSelectedSequence && (
+                <Alert status="info" mt={3} id="readiness-tab-no-sequence" data-testid="readiness-tab-no-sequence">
+                  <AlertIcon />
+                  <AlertDescription>
+                    No sequence is selected yet. Choose or create a sequence in Sequences before running preflight and launch checks.
+                  </AlertDescription>
+                </Alert>
+              )}
+
               <Text id="readiness-tab-last-updated" data-testid="readiness-tab-last-updated" fontSize="xs" color="gray.500" mt={3}>
                 Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Routes: /api/send-worker/exception-center, /api/send-worker/sequence-preflight, /api/send-worker/launch-preview, /api/send-worker/preview-vs-outcome, /api/send-worker/identity-capacity, /api/send-worker/run-history
               </Text>
@@ -392,6 +402,7 @@ const ReadinessTab: React.FC = () => {
                     id="readiness-tab-open-preflight"
                     data-testid="readiness-tab-open-preflight"
                     data-focus-target="sequence-preflight-panel"
+                    isDisabled={!hasSelectedSequence}
                     onClick={() => openSequencesTab('preflight')}
                   >
                     Open Sequence Preflight
@@ -424,6 +435,7 @@ const ReadinessTab: React.FC = () => {
                     id="readiness-tab-open-launch-preview"
                     data-testid="readiness-tab-open-launch-preview"
                     data-focus-target="launch-preview-panel"
+                    isDisabled={!hasSelectedSequence}
                     onClick={() => openSequencesTab('launch-preview')}
                   >
                     Open Launch Preview
@@ -447,6 +459,7 @@ const ReadinessTab: React.FC = () => {
                   id="readiness-tab-open-comparison"
                   data-testid="readiness-tab-open-comparison"
                   data-focus-target="preview-vs-outcome-panel"
+                  isDisabled={!hasSelectedSequence}
                   onClick={() => openSequencesTab('preview-vs-outcome')}
                 >
                   Open Preview vs Outcome
@@ -488,6 +501,7 @@ const ReadinessTab: React.FC = () => {
                   id="readiness-tab-open-run-history"
                   data-testid="readiness-tab-open-run-history"
                   data-focus-target="run-history-panel"
+                  isDisabled={!hasSelectedSequence}
                   onClick={() => openSequencesTab('run-history')}
                 >
                   Open Run History

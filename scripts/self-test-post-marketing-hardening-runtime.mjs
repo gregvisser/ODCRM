@@ -63,6 +63,7 @@ for (const marker of homeMarkers) {
 const readinessMarkers = [
   'readiness-tab-panel',
   'readiness-tab-next-actions',
+  'readiness-tab-no-sequence',
   'readiness-tab-open-preflight',
   'readiness-tab-open-launch-preview',
   'readiness-tab-open-comparison',
@@ -71,6 +72,12 @@ const readinessMarkers = [
 ]
 for (const marker of readinessMarkers) {
   if (!readinessSource.includes(marker)) fail(`ReadinessTab missing marker: ${marker}`)
+}
+const readinessDisabledGuards = [
+  'isDisabled={!hasSelectedSequence}',
+]
+for (const marker of readinessDisabledGuards) {
+  if (!readinessSource.includes(marker)) fail(`ReadinessTab missing hardening guard: ${marker}`)
 }
 
 const sequencesMarkers = [
