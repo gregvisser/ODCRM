@@ -4,7 +4,7 @@
  */
 
 import React, { useMemo } from 'react'
-import { Box, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
 import {
   CheckCircleIcon,
   RepeatIcon,
@@ -27,6 +27,9 @@ import InboxTab from './components/InboxTab'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
 import ReadinessTab from './components/ReadinessTab'
+import { getCurrentCustomerId } from '../../platform/stores/settings'
+import { useClientReadinessState } from '../../hooks/useClientReadinessState'
+import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
 // 'overview' and 'people' removed from the UI (2026-02-22).
 // Kept in the type union for backward compatibility so that deep-link URLs like
@@ -79,6 +82,32 @@ export default function MarketingHomePage({
 }) {
   const activeView = coerceViewId(view)
   const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
+  const customerId = getCurrentCustomerId()
+  const { interpretation: readiness } = useClientReadinessState(customerId)
+
+  const runReadinessNextStep = () => {
+    switch (readiness.nextStep.target) {
+      case 'onboarding':
+        window.dispatchEvent(new CustomEvent('navigateToOnboarding'))
+        break
+      case 'clients':
+        window.dispatchEvent(new CustomEvent('navigateToAccount'))
+        break
+      case 'marketing-inbox':
+        onNavigate?.('inbox')
+        break
+      case 'marketing-reports':
+        onNavigate?.('reports')
+        break
+      case 'marketing-sequences':
+        onNavigate?.('sequences')
+        break
+      case 'marketing-readiness':
+      default:
+        onNavigate?.('readiness')
+        break
+    }
+  }
 
   // Default navigation items — Overview and People tabs removed (2026-02-22).
   // Old ?view=overview and ?view=people URLs are handled by coerceViewId above.
@@ -183,9 +212,20 @@ export default function MarketingHomePage({
   return (
     <div data-testid="marketing-home-panel">
       <Box mb={3} data-testid="marketing-home-operator-guidance">
+        <HStack spacing={2} mb={1}>
+          <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="marketing-client-readiness-state">
+            {readiness.label}
+          </Badge>
+          <Text fontSize="sm" color="gray.600">{readiness.reason}</Text>
+        </HStack>
         <Text fontSize="sm" color="gray.600">
           Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
         </Text>
+        <HStack mt={2}>
+          <Button size="xs" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="marketing-readiness-next-step">
+            {readiness.nextStep.label}
+          </Button>
+        </HStack>
       </Box>
       <SubNavigation
         items={navItems}

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Box, Button, HStack, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
 import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { MdAssessment } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
@@ -7,6 +7,9 @@ import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 import MarketingLeadsTab from '../../components/MarketingLeadsTab'
+import { getCurrentCustomerId } from '../../platform/stores/settings'
+import { useClientReadinessState } from '../../hooks/useClientReadinessState'
+import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
 export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
 
@@ -28,9 +31,35 @@ export default function CustomersHomePage({
 }) {
   const activeView = coerceCustomersViewId(view)
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
+  const customerId = getCurrentCustomerId()
+  const { interpretation: readiness } = useClientReadinessState(customerId)
 
   const goToMarketingReadiness = () => {
     window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
+  }
+
+  const runReadinessNextStep = () => {
+    switch (readiness.nextStep.target) {
+      case 'onboarding':
+        window.dispatchEvent(new CustomEvent('navigateToOnboarding'))
+        break
+      case 'clients':
+        onNavigate?.('accounts')
+        break
+      case 'marketing-inbox':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'inbox' } }))
+        break
+      case 'marketing-reports':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'reports' } }))
+        break
+      case 'marketing-sequences':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'sequences' } }))
+        break
+      case 'marketing-readiness':
+      default:
+        goToMarketingReadiness()
+        break
+    }
   }
 
   const defaultNavItems: SubNavItem[] = [
@@ -102,10 +131,19 @@ export default function CustomersHomePage({
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
           OpenDoors Clients is for setup and data maintenance.
         </Text>
+        <HStack mt={2} spacing={2}>
+          <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">
+            {readiness.label}
+          </Badge>
+          <Text fontSize="sm" color="gray.700">{readiness.reason}</Text>
+        </HStack>
         <Text fontSize="sm" color="gray.700" mt={1}>
           After updating accounts, contacts, or lead prerequisites, continue in Marketing Readiness to run outreach operations.
         </Text>
         <HStack mt={3}>
+          <Button size="sm" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="customers-readiness-next-step">
+            {readiness.nextStep.label}
+          </Button>
           <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="customers-go-marketing-readiness">
             Continue in Marketing Readiness
           </Button>
@@ -123,5 +161,3 @@ export default function CustomersHomePage({
     </Box>
   )
 }
-
-

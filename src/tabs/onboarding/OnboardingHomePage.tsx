@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { Box, Button, Flex, HStack, Text } from '@chakra-ui/react'
+import { Badge, Box, Button, Flex, HStack, Text } from '@chakra-ui/react'
 import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
@@ -9,6 +9,8 @@ import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
 import { onboardingDebug } from './utils/debug'
+import { useClientReadinessState } from '../../hooks/useClientReadinessState'
+import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
 export type OnboardingViewId = 'overview' | 'customer-onboarding' | 'progress-tracker'
 
@@ -26,6 +28,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   const activeView = coerceViewId(view)
   // Use canonical settingsStore for customer selection (SINGLE SOURCE OF TRUTH)
   const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId() ?? '')
+  const { interpretation: readiness } = useClientReadinessState(selectedCustomerId || null)
 
   // Sync with settingsStore on mount and when settings change globally
   useEffect(() => {
@@ -53,6 +56,30 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   const handleContinueToMarketingReadiness = useCallback(() => {
     window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
   }, [])
+
+  const runReadinessNextStep = useCallback(() => {
+    switch (readiness.nextStep.target) {
+      case 'clients':
+        window.dispatchEvent(new CustomEvent('navigateToAccount'))
+        break
+      case 'marketing-inbox':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'inbox' } }))
+        break
+      case 'marketing-reports':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'reports' } }))
+        break
+      case 'marketing-sequences':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'sequences' } }))
+        break
+      case 'marketing-readiness':
+        handleContinueToMarketingReadiness()
+        break
+      case 'onboarding':
+      default:
+        onNavigate?.('customer-onboarding')
+        break
+    }
+  }, [handleContinueToMarketingReadiness, onNavigate, readiness.nextStep.target])
 
   const navItems: SubNavItem[] = useMemo(() => {
     // Overview is always available.
@@ -110,10 +137,26 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           <Text fontSize="sm" color="blue.900" fontWeight="semibold" data-testid="onboarding-role-framing">
             Onboarding is a setup progression area.
           </Text>
+          <HStack mt={2} spacing={2}>
+            <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="onboarding-client-readiness-state">
+              {readiness.label}
+            </Badge>
+            <Text fontSize="sm" color="blue.900">{readiness.reason}</Text>
+          </HStack>
           <Text fontSize="sm" color="blue.900" mt={1}>
             After setup tasks are complete for this client, continue in Marketing Readiness for daily outreach operations.
           </Text>
           <HStack mt={3}>
+            <Button
+              size="sm"
+              variant="outline"
+              colorScheme="teal"
+              onClick={runReadinessNextStep}
+              isDisabled={!selectedCustomerId}
+              data-testid="onboarding-readiness-next-step"
+            >
+              {readiness.nextStep.label}
+            </Button>
             <Button
               size="sm"
               colorScheme="blue"

@@ -34,6 +34,8 @@ import RequireActiveClient from '../../components/RequireActiveClient'
 import { useLiveLeadsPolling } from '../../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../../utils/liveLeadsApi'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
+import { useClientReadinessState } from '../../hooks/useClientReadinessState'
+import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
 type Lead = {
   [key: string]: string
@@ -218,6 +220,7 @@ export default function DashboardsHomePage() {
   const toast = useToast()
   const customerId = getCurrentCustomerId()
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const { interpretation: readiness } = useClientReadinessState(customerId)
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
 
@@ -235,6 +238,30 @@ export default function DashboardsHomePage() {
 
   const goToClientsMaintenance = () => {
     window.dispatchEvent(new CustomEvent('navigateToAccount'))
+  }
+
+  const runReadinessNextStep = () => {
+    switch (readiness.nextStep.target) {
+      case 'onboarding':
+        goToOnboardingSetup()
+        break
+      case 'clients':
+        goToClientsMaintenance()
+        break
+      case 'marketing-inbox':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'inbox' } }))
+        break
+      case 'marketing-reports':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'reports' } }))
+        break
+      case 'marketing-sequences':
+        window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'sequences' } }))
+        break
+      case 'marketing-readiness':
+      default:
+        goToMarketingReadiness()
+        break
+    }
   }
   
   const leadsRef = useRef(leads)
@@ -855,10 +882,26 @@ export default function DashboardsHomePage() {
         <Text fontWeight="semibold" color="blue.800" data-testid="dashboard-role-framing">
           Next step routing
         </Text>
+        <HStack mt={2} spacing={2} align="center">
+          <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="dashboard-client-readiness-state">
+            {readiness.label}
+          </Badge>
+          <Text fontSize="sm" color="blue.900">
+            {readiness.reason}
+          </Text>
+        </HStack>
         <Text fontSize="sm" color="blue.900" mt={1}>
           Use Dashboard for quick status. Continue setup in Onboarding or Clients when needed, then run daily outreach from Marketing Readiness. Settings remains admin-only.
         </Text>
         <HStack spacing={2} mt={3} flexWrap="wrap">
+          <Button
+            size="sm"
+            colorScheme="teal"
+            onClick={runReadinessNextStep}
+            data-testid="dashboard-readiness-next-step"
+          >
+            {readiness.nextStep.label}
+          </Button>
           <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="dashboard-go-marketing-readiness">
             Continue in Marketing Readiness
           </Button>
