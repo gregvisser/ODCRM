@@ -113,6 +113,9 @@ const TemplatesTab: React.FC = () => {
   const { isOpen: isPreviewOpen, onOpen: onPreviewOpen, onClose: onPreviewClose } = useDisclosure()
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
   const [previewingTemplate, setPreviewingTemplate] = useState<EmailTemplate | null>(null)
+  const [previewRendered, setPreviewRendered] = useState<{ subject: string; body: string } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const toast = useToast()
 
   useEffect(() => {
@@ -248,7 +251,33 @@ const TemplatesTab: React.FC = () => {
 
   const handlePreviewTemplate = (template: EmailTemplate) => {
     setPreviewingTemplate(template)
+    setPreviewLoading(true)
+    setPreviewError(null)
+    setPreviewRendered(null)
     onPreviewOpen()
+    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : undefined
+    void api.post<{ subject?: string; body?: string }>(
+      '/api/templates/preview',
+      {
+        subject: template.subject,
+        body: template.content,
+        variables: {
+          firstName: 'Alex',
+          companyName: 'Acme Ltd',
+          unsubscribeLink: 'https://example.com/unsubscribe',
+        },
+      },
+      { headers },
+    ).then((res) => {
+      if (res.error) {
+        setPreviewError(res.error)
+      } else {
+        setPreviewRendered({
+          subject: res.data?.subject || template.subject,
+          body: res.data?.body || template.content,
+        })
+      }
+    }).finally(() => setPreviewLoading(false))
   }
 
   const handleSaveTemplate = async () => {
@@ -418,7 +447,7 @@ const TemplatesTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
+    <Box id="templates-tab-panel" data-testid="templates-tab-panel">
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
@@ -442,6 +471,16 @@ const TemplatesTab: React.FC = () => {
             </Select>
           </FormControl>
           <Button 
+            id="templates-tab-refresh-btn"
+            data-testid="templates-tab-refresh-btn"
+            variant="outline"
+            onClick={loadData}
+          >
+            Refresh
+          </Button>
+          <Button 
+            id="templates-tab-create-btn"
+            data-testid="templates-tab-create-btn"
             leftIcon={<AddIcon />} 
             colorScheme="blue" 
             onClick={handleCreateTemplate}
@@ -451,6 +490,13 @@ const TemplatesTab: React.FC = () => {
           </Button>
         </HStack>
       </Flex>
+
+      <Alert id="templates-tab-compliance-banner" data-testid="templates-tab-compliance-banner" status="info" mb={4}>
+        <AlertIcon />
+        <AlertDescription>
+          Template rendering uses backend truth via <strong>/api/templates/preview</strong>. Keep unsubscribe/footer placeholders present to align with sending compliance enforcement.
+        </AlertDescription>
+      </Alert>
 
       {/* Error Display */}
       {error && (
@@ -540,7 +586,7 @@ const TemplatesTab: React.FC = () => {
       )}
 
       {/* Templates Grid */}
-      <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
+      <SimpleGrid id="templates-tab-grid" data-testid="templates-tab-grid" columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
         {filteredTemplates.map((template) => (
           <Card key={template.id} cursor="pointer" _hover={{ shadow: 'md' }}>
             <CardHeader pb={2}>
@@ -592,6 +638,9 @@ const TemplatesTab: React.FC = () => {
                   <Text fontSize="sm" fontWeight="semibold" color="gray.700">
                     Subject: {template.subject}
                   </Text>
+                  {!/\{\{\s*unsubscribeLink\s*\}\}|unsubscribe/i.test(template.content) && (
+                    <Badge mt={1} colorScheme="orange">No unsubscribe marker detected</Badge>
+                  )}
                   {template.previewText && (
                     <Text fontSize="sm" color="gray.600" noOfLines={2}>
                       {template.previewText}
@@ -745,7 +794,7 @@ const TemplatesTab: React.FC = () => {
       {/* Preview Template Modal */}
       <Modal isOpen={isPreviewOpen} onClose={onPreviewClose} size="4xl">
         <ModalOverlay />
-        <ModalContent>
+        <ModalContent id="templates-tab-preview-modal" data-testid="templates-tab-preview-modal">
           <ModalHeader>Template Preview: {previewingTemplate?.name}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
@@ -753,7 +802,7 @@ const TemplatesTab: React.FC = () => {
               <VStack spacing={4} align="stretch">
                 <Box>
                   <Text fontWeight="semibold">Subject:</Text>
-                  <Text p={3} bg="gray.50" borderRadius="md">{previewingTemplate.subject}</Text>
+                  <Text p={3} bg="gray.50" borderRadius="md">{previewRendered?.subject || previewingTemplate.subject}</Text>
                 </Box>
 
                 {previewingTemplate.previewText && (
@@ -764,7 +813,7 @@ const TemplatesTab: React.FC = () => {
                 )}
 
                 <Box>
-                  <Text fontWeight="semibold">Content:</Text>
+                  <Text fontWeight="semibold">Content (backend rendered):</Text>
                   <Box
                     p={4}
                     bg="white"
@@ -774,8 +823,14 @@ const TemplatesTab: React.FC = () => {
                     minH="300px"
                     whiteSpace="pre-wrap"
                   >
-                    {previewingTemplate.content}
+                    {previewLoading ? 'Rendering preview...' : (previewRendered?.body || previewingTemplate.content)}
                   </Box>
+                  {previewError ? (
+                    <Alert status="warning" mt={2}>
+                      <AlertIcon />
+                      <AlertDescription>{previewError}</AlertDescription>
+                    </Alert>
+                  ) : null}
                 </Box>
 
                 <HStack spacing={2}>
