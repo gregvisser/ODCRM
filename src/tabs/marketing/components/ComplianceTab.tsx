@@ -237,7 +237,7 @@ export default function ComplianceTab() {
 
   return (
     <RequireActiveClient>
-      <Box>
+      <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
         <VStack align="stretch" spacing={6}>
           <Box>
             <Heading size="lg" mb={2}>Suppression List</Heading>
@@ -246,7 +246,7 @@ export default function ComplianceTab() {
             </Text>
           </Box>
 
-          <Alert status="info">
+          <Alert id="suppression-tab-sheet-truth-banner" data-testid="suppression-tab-sheet-truth-banner" status="info">
             <AlertIcon />
             <AlertDescription fontSize="sm">
               Google Sheets import is now the primary source of truth for suppression lists. Manual edits remain available.
@@ -353,7 +353,7 @@ export default function ComplianceTab() {
             </VStack>
           </Box>
 
-          <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
+          <Box id="suppression-tab-import-panel" data-testid="suppression-tab-import-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
             <VStack align="stretch" spacing={4}>
               <HStack justify="space-between" flexWrap="wrap">
                 <Heading size="sm">Google Sheet Import</Heading>
@@ -390,7 +390,7 @@ export default function ComplianceTab() {
                     <option value="replace">Replace all {listTypeFilter}s</option>
                   </Select>
                 </FormControl>
-                <Button colorScheme="teal" onClick={handleImportFromSheet} isLoading={importing} loadingText="Importing">
+                <Button id="suppression-tab-import-btn" data-testid="suppression-tab-import-btn" colorScheme="teal" onClick={handleImportFromSheet} isLoading={importing} loadingText="Importing">
                   Import {listTypeFilter === 'email' ? 'Emails' : 'Domains'} From Sheet
                 </Button>
               </HStack>
@@ -416,7 +416,7 @@ export default function ComplianceTab() {
             </VStack>
           </Box>
 
-          <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
+          <Box id="suppression-tab-manual-panel" data-testid="suppression-tab-manual-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
             <Heading size="sm" mb={3}>Manual Entry</Heading>
             <HStack spacing={3} align="flex-end" flexWrap="wrap">
               <FormControl w={{ base: '100%', md: '180px' }}>
@@ -438,11 +438,11 @@ export default function ComplianceTab() {
                 <FormLabel fontSize="sm">Reason (optional)</FormLabel>
                 <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Requested removal" />
               </FormControl>
-              <Button colorScheme="teal" onClick={handleAdd}>Add</Button>
+              <Button id="suppression-tab-manual-add-btn" data-testid="suppression-tab-manual-add-btn" colorScheme="teal" onClick={handleAdd}>Add</Button>
             </HStack>
           </Box>
 
-          <Box bg="white" borderRadius="lg" borderWidth="1px" overflowX="auto">
+          <Box id="suppression-tab-entries-table" data-testid="suppression-tab-entries-table" bg="white" borderRadius="lg" borderWidth="1px" overflowX="auto">
             {loading ? (
               <Box textAlign="center" py={10}>
                 <Spinner size="lg" />
