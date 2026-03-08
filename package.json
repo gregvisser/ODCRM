@@ -138,6 +138,7 @@
     "test:lead-sheets-connection-contract-runtime": "node scripts/self-test-lead-sheets-connection-contract-runtime.mjs",
     "test:customers-leads-view-runtime": "node scripts/self-test-customers-leads-view-runtime.mjs",
     "test:leads-user-acceptance-runtime": "node scripts/self-test-leads-user-acceptance-runtime.mjs",
+    "test:whole-system-operator-acceptance-runtime": "node scripts/self-test-whole-system-operator-acceptance-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

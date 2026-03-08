@@ -143,6 +143,9 @@ export default function CustomersHomePage({
         <Text fontSize="sm" color="gray.700" mt={1} data-testid="customers-readiness-guidance">
           After updating accounts, contacts, or lead prerequisites, continue in Marketing Readiness to run outreach operations.
         </Text>
+        <Text fontSize="xs" color="gray.600" mt={1} data-testid="customers-module-continuity-guidance">
+          Use Clients for CRM/data maintenance. Use Onboarding for setup checkpoints. Use Marketing for daily outreach execution.
+        </Text>
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2} mt={3}>
           <VStack
             align="start"

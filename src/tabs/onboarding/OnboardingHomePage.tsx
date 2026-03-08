@@ -166,6 +166,9 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           <Text fontSize="sm" color="blue.900" mt={1} data-testid="onboarding-readiness-guidance">
             After setup tasks are complete for this client, continue in Marketing Readiness for daily outreach operations.
           </Text>
+          <Text fontSize="xs" color="blue.800" mt={1} data-testid="onboarding-module-continuity-guidance">
+            Use Onboarding for activation checkpoints, OpenDoors Clients for data fixes, then return to Marketing for daily operations.
+          </Text>
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2} mt={3} data-testid="onboarding-checkpoint-guidance">
             <VStack
               align="start"
