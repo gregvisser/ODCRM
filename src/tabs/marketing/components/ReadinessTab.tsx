@@ -142,11 +142,25 @@ const ReadinessTab: React.FC = () => {
 
   const customerId = getCurrentCustomerId()
 
-  const openSequencesTab = useCallback(() => {
+  const openSequencesTab = useCallback((target?: string) => {
+    const focusPanelByTarget: Record<string, string> = {
+      'preflight': 'sequence-preflight-panel',
+      'launch-preview': 'launch-preview-panel',
+      'preview-vs-outcome': 'preview-vs-outcome-panel',
+      'run-history': 'run-history-panel',
+      'queue-workbench-blocked': 'queue-workbench-panel',
+      'queue-workbench-failed': 'queue-workbench-panel',
+      'identity-capacity': 'identity-capacity-panel',
+      'exception-center': 'exception-center-panel',
+    }
     const params = new URLSearchParams(window.location.search)
     params.set('view', 'sequences')
     if (selectedSequenceId) {
       params.set('sequenceId', selectedSequenceId)
+    }
+    if (target) {
+      const panelId = focusPanelByTarget[target] || target
+      params.set('focusPanel', panelId)
     }
     window.location.search = params.toString()
   }, [selectedSequenceId])
@@ -343,7 +357,13 @@ const ReadinessTab: React.FC = () => {
                         <Text>{group.title || group.key || 'Exception group'}</Text>
                         <Badge>{group.count ?? 0}</Badge>
                       </HStack>
-                      <Button size="xs" id="readiness-tab-next-step-link" data-testid="readiness-tab-next-step-link" onClick={openSequencesTab}>
+                      <Button
+                        size="xs"
+                        id="readiness-tab-next-step-link"
+                        data-testid="readiness-tab-next-step-link"
+                        data-next-target={group.nextStep?.target || 'sequences'}
+                        onClick={() => openSequencesTab(group.nextStep?.target)}
+                      >
                         {group.nextStep?.label || 'Open Sequences'}
                       </Button>
                     </HStack>
@@ -366,7 +386,16 @@ const ReadinessTab: React.FC = () => {
                     <Text fontWeight="semibold">Warnings</Text>
                     {(preflightData?.warnings ?? []).length === 0 ? <Text color="gray.500">None</Text> : (preflightData?.warnings ?? []).slice(0, 5).map((row, idx) => <Text key={`w-${idx}`}>• {row}</Text>)}
                   </Box>
-                  <Button size="sm" variant="outline" id="readiness-tab-open-preflight" data-testid="readiness-tab-open-preflight" onClick={openSequencesTab}>Open Sequence Preflight</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    id="readiness-tab-open-preflight"
+                    data-testid="readiness-tab-open-preflight"
+                    data-focus-target="sequence-preflight-panel"
+                    onClick={() => openSequencesTab('preflight')}
+                  >
+                    Open Sequence Preflight
+                  </Button>
                 </VStack>
               </CardBody>
             </Card>
@@ -389,7 +418,16 @@ const ReadinessTab: React.FC = () => {
                       ))
                     )}
                   </Box>
-                  <Button size="sm" variant="outline" id="readiness-tab-open-launch-preview" data-testid="readiness-tab-open-launch-preview" onClick={openSequencesTab}>Open Launch Preview</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    id="readiness-tab-open-launch-preview"
+                    data-testid="readiness-tab-open-launch-preview"
+                    data-focus-target="launch-preview-panel"
+                    onClick={() => openSequencesTab('launch-preview')}
+                  >
+                    Open Launch Preview
+                  </Button>
                 </VStack>
               </CardBody>
             </Card>
@@ -402,7 +440,17 @@ const ReadinessTab: React.FC = () => {
                   <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Preview Only</StatLabel><StatNumber>{comparisonData?.summary?.previewOnly ?? 0}</StatNumber></Stat>
                   <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Outcome Only</StatLabel><StatNumber>{comparisonData?.summary?.outcomeOnly ?? 0}</StatNumber></Stat>
                 </SimpleGrid>
-                <Button mt={3} size="sm" variant="outline" id="readiness-tab-open-comparison" data-testid="readiness-tab-open-comparison" onClick={openSequencesTab}>Open Preview vs Outcome</Button>
+                <Button
+                  mt={3}
+                  size="sm"
+                  variant="outline"
+                  id="readiness-tab-open-comparison"
+                  data-testid="readiness-tab-open-comparison"
+                  data-focus-target="preview-vs-outcome-panel"
+                  onClick={() => openSequencesTab('preview-vs-outcome')}
+                >
+                  Open Preview vs Outcome
+                </Button>
               </CardBody>
             </Card>
 
@@ -433,7 +481,17 @@ const ReadinessTab: React.FC = () => {
                     </Tbody>
                   </Table>
                 </Box>
-                <Button mt={3} size="sm" variant="outline" id="readiness-tab-open-run-history" data-testid="readiness-tab-open-run-history" onClick={openSequencesTab}>Open Run History</Button>
+                <Button
+                  mt={3}
+                  size="sm"
+                  variant="outline"
+                  id="readiness-tab-open-run-history"
+                  data-testid="readiness-tab-open-run-history"
+                  data-focus-target="run-history-panel"
+                  onClick={() => openSequencesTab('run-history')}
+                >
+                  Open Run History
+                </Button>
               </CardBody>
             </Card>
           </SimpleGrid>
