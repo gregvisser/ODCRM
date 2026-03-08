@@ -85,6 +85,8 @@ type IdentityCapacityResponse = {
   }
 }
 
+const EMPTY_RUN_ROWS: RunHistoryRow[] = []
+
 const ReportsTab: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
@@ -145,7 +147,7 @@ const ReportsTab: React.FC = () => {
 
   const bySequence = outreachData?.bySequence ?? []
   const byIdentity = outreachData?.byIdentity ?? []
-  const runRows = runHistoryData?.rows ?? []
+  const runRows = runHistoryData?.rows ?? EMPTY_RUN_ROWS
 
   const topReasons = useMemo(() => {
     const counts = new Map<string, number>()
