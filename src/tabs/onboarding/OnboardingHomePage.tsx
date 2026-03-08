@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { Box, Flex, Text } from '@chakra-ui/react'
+import { Box, Button, Flex, HStack, Text } from '@chakra-ui/react'
 import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
@@ -48,6 +48,10 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
     // UX: after selecting/creating a customer, keep user in the unified onboarding form.
     onNavigate?.('customer-onboarding')
+  }, [onNavigate])
+
+  const handleContinueToMarketingReadiness = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
   }, [])
 
   const navItems: SubNavItem[] = useMemo(() => {
@@ -94,6 +98,39 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       )}
 
       <Box flex="1">
+        <Box
+          mb={4}
+          p={4}
+          bg="blue.50"
+          borderRadius="md"
+          border="1px solid"
+          borderColor="blue.100"
+          data-testid="onboarding-marketing-bridge"
+        >
+          <Text fontSize="sm" color="blue.900" fontWeight="semibold" data-testid="onboarding-role-framing">
+            Onboarding is a setup progression area.
+          </Text>
+          <Text fontSize="sm" color="blue.900" mt={1}>
+            After setup tasks are complete for this client, continue in Marketing Readiness for daily outreach operations.
+          </Text>
+          <HStack mt={3}>
+            <Button
+              size="sm"
+              colorScheme="blue"
+              onClick={handleContinueToMarketingReadiness}
+              isDisabled={!selectedCustomerId}
+              data-testid="onboarding-go-marketing-readiness"
+            >
+              Continue in Marketing Readiness
+            </Button>
+            {!selectedCustomerId ? (
+              <Text fontSize="xs" color="blue.700">
+                Select a client first.
+              </Text>
+            ) : null}
+          </HStack>
+        </Box>
+
         {!selectedCustomerId ? (
           <Box mb={4} p={4} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
             <Text fontSize="sm" color="gray.700">

@@ -167,13 +167,35 @@ function App() {
       setActiveView('customer-onboarding')
     }
 
+    const handleNavigateToMarketing = (event: Event) => {
+      const customEvent = event as CustomEvent<{ view?: OpenDoorsViewId }>
+      const requestedView = customEvent.detail?.view
+      const supportedViews: OpenDoorsViewId[] = [
+        'readiness',
+        'sequences',
+        'inbox',
+        'reports',
+        'email-accounts',
+        'templates',
+        'compliance',
+        'schedules',
+        'lists',
+      ]
+      const nextView = requestedView && supportedViews.includes(requestedView) ? requestedView : 'readiness'
+      setActiveTab('marketing-home')
+      setActiveView(nextView)
+      setFocusAccountName(undefined)
+    }
+
     window.addEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
     window.addEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
     window.addEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
+    window.addEventListener('navigateToMarketing', handleNavigateToMarketing as EventListener)
     return () => {
       window.removeEventListener('navigateToAccount', handleNavigateToAccount as EventListener)
       window.removeEventListener('navigateToLeads', handleNavigateToLeads as EventListener)
       window.removeEventListener('navigateToOnboarding', handleNavigateToOnboarding as EventListener)
+      window.removeEventListener('navigateToMarketing', handleNavigateToMarketing as EventListener)
     }
   }, [])
 

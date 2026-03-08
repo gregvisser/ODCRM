@@ -124,6 +124,7 @@
     "test:final-operator-facing-clarity-runtime": "node scripts/self-test-final-operator-facing-clarity-runtime.mjs",
     "test:sequences-delete-trust-runtime": "node scripts/self-test-sequences-delete-trust-runtime.mjs",
     "test:sequences-operator-clarity-runtime": "node scripts/self-test-sequences-operator-clarity-runtime.mjs",
+    "test:top-level-flow-spine-runtime": "node scripts/self-test-top-level-flow-spine-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Badge,
   Box,
+  Button,
   Heading,
   HStack,
   IconButton,
@@ -223,6 +224,18 @@ export default function DashboardsHomePage() {
   const [accountsData, setAccountsData] = useState<Account[]>([])
   const [hasSyncedCustomers, setHasSyncedCustomers] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
+
+  const goToMarketingReadiness = () => {
+    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
+  }
+
+  const goToOnboardingSetup = () => {
+    window.dispatchEvent(new CustomEvent('navigateToOnboarding'))
+  }
+
+  const goToClientsMaintenance = () => {
+    window.dispatchEvent(new CustomEvent('navigateToAccount'))
+  }
   
   const leadsRef = useRef(leads)
   useEffect(() => {
@@ -694,7 +707,7 @@ export default function DashboardsHomePage() {
               Client Lead Generation Dashboard
             </Heading>
             <Text fontSize="xs" color="gray.500" mt={1}>
-              Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
+              Daily overview: check status here, then move to setup fixes or marketing operations. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
             </Text>
           </Box>
           <HStack spacing={2}>
@@ -829,6 +842,33 @@ export default function DashboardsHomePage() {
             </StatHelpText>
           </Stat>
         </SimpleGrid>
+      </Box>
+
+      <Box
+        bg="blue.50"
+        p={3}
+        borderRadius="md"
+        border="1px"
+        borderColor="blue.100"
+        data-testid="dashboard-next-step-routing"
+      >
+        <Text fontWeight="semibold" color="blue.800" data-testid="dashboard-role-framing">
+          Next step routing
+        </Text>
+        <Text fontSize="sm" color="blue.900" mt={1}>
+          Use Dashboard for quick status. Continue setup in Onboarding or Clients when needed, then run daily outreach from Marketing Readiness. Settings remains admin-only.
+        </Text>
+        <HStack spacing={2} mt={3} flexWrap="wrap">
+          <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="dashboard-go-marketing-readiness">
+            Continue in Marketing Readiness
+          </Button>
+          <Button size="sm" variant="outline" colorScheme="purple" onClick={goToOnboardingSetup} data-testid="dashboard-go-onboarding-setup">
+            Complete setup in Onboarding
+          </Button>
+          <Button size="sm" variant="outline" colorScheme="gray" onClick={goToClientsMaintenance} data-testid="dashboard-go-clients-maintenance">
+            Fix client data in OpenDoors Clients
+          </Button>
+        </HStack>
       </Box>
 
       {/* Main Client Table */}
