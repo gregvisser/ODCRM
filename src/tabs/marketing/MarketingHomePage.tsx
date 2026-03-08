@@ -180,14 +180,15 @@ export default function MarketingHomePage({
   }
 
   return (
-    <SubNavigation
-      items={navItems}
-      activeId={activeView}
-      onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
-      onReorder={handleNavReorder}
-      title="Marketing"
-      enableDragDrop={true}
-    />
+    <div data-testid="marketing-home-panel">
+      <SubNavigation
+        items={navItems}
+        activeId={activeView}
+        onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
+        onReorder={handleNavReorder}
+        title="Marketing"
+        enableDragDrop={true}
+      />
+    </div>
   )
 }
-
