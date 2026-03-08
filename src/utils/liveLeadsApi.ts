@@ -27,9 +27,14 @@ export type LiveLeadsResponse = {
   rowCount: number
   leads: LiveLeadRow[]
   queriedAt: string
-  sourceUrl: string
+  sourceUrl: string | null
+  sourceOfTruth?: 'google_sheets' | 'db'
+  authoritative?: boolean
+  dataFreshness?: 'live' | 'diagnostic_stale'
   staleFallbackUsed?: boolean
   warning?: string
+  hint?: string
+  errorCode?: string
 }
 
 export type LiveLeadMetricsResponse = {
@@ -43,9 +48,14 @@ export type LiveLeadMetricsResponse = {
   breakdownByOwner: Record<string, number>
   rowCount: number
   queriedAt: string
-  sourceUrl: string
+  sourceUrl: string | null
+  sourceOfTruth?: 'google_sheets' | 'db'
+  authoritative?: boolean
+  dataFreshness?: 'live' | 'diagnostic_stale'
   staleFallbackUsed?: boolean
   warning?: string
+  hint?: string
+  errorCode?: string
 }
 
 type ApiErrorResponse = {

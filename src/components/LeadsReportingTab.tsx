@@ -56,6 +56,7 @@ function LeadsReportingTab() {
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt
   const liveWarning = liveData?.warning ?? null
+  const sourceOfTruth = liveData?.sourceOfTruth ?? null
 
   const [filters, setFilters] = useState({
     account: '',
@@ -117,7 +118,9 @@ function LeadsReportingTab() {
           No leads data available
         </Text>
         <Text fontSize="sm" color="gray.500" mt={2}>
-          Configure Client Leads sheets in account settings to view leads data
+          {sourceOfTruth === 'db'
+            ? 'No lead records are stored for this client yet.'
+            : 'Configure and validate the client Google Sheet URL in Accounts to load sheet-backed leads.'}
         </Text>
       </Box>
     )
@@ -282,7 +285,10 @@ function LeadsReportingTab() {
             Leads Reporting
           </Heading>
           <Text color="gray.600">
-            Live sheet-backed data via ODCRM ({filteredLeads.length} of {leads.length} leads)
+            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeads.length} of {leads.length} leads)
+          </Text>
+          <Text fontSize="xs" color="gray.500" mt={1}>
+            Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Last refreshed: {lastRefresh ? formatLastRefresh(lastRefresh) : 'Never'} • Polls every 30s

@@ -177,6 +177,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
   const liveWarning = liveData?.warning ?? null
+  const sourceOfTruth = liveData?.sourceOfTruth ?? null
 
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
@@ -294,11 +295,11 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
 
   // When leads are empty, fetch sync status so we can show lastError / lastSyncAt
   useEffect(() => {
-    if (leads.length > 0) { setSyncStatusForEmpty(null); return }
+    if (leads.length > 0 || sourceOfTruth === 'db') { setSyncStatusForEmpty(null); return }
     const customerId = getCurrentCustomerId()
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
-  }, [leads.length])
+  }, [leads.length, sourceOfTruth])
 
   // Get all unique column headers from all leads (excluding accountName)
   const allColumns = new Set<string>()
@@ -1223,8 +1224,11 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
               Marketing Leads
             </Heading>
             <Text color="gray.600" fontSize={{ base: "sm", md: "md" }}>
-              Live sheet-backed leads via ODCRM ({leads.length} total
+              {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed leads via ODCRM'} ({leads.length} total
               {filteredAndSortedLeads.length !== leads.length && `, ${filteredAndSortedLeads.length} filtered`})
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt={1}>
+              Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
             </Text>
             <Text fontSize="xs" color="gray.500" mt={2}>
               Last refreshed: {formatLastRefresh(lastRefresh)} • Polls every 30s
@@ -2478,4 +2482,3 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
 }
 
 export default MarketingLeadsTab
-

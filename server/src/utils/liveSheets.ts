@@ -224,6 +224,7 @@ export function getStaleCachedLeads(customerId: string, url: string): { data: Li
 
 /**
  * Fetch CSV from URL, parse, return live lead rows. Uses cache (30s success, 10s failure).
+ * Stale cached rows are available via getStaleCachedLeads for explicit diagnostics only.
  */
 export async function fetchAndParseLiveLeads(customerId: string, sheetUrl: string): Promise<LiveLeadRow[]> {
   const url = resolveCsvUrl(sheetUrl)
@@ -244,11 +245,6 @@ export async function fetchAndParseLiveLeads(customerId: string, sheetUrl: strin
     return leads
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fetch or parse CSV'
-    const stale = getStaleCachedLeads(customerId, url)
-    if (stale && stale.data.length > 0) {
-      // Preserve previous successful data during transient sheet/network failures.
-      return stale.data
-    }
     setCachedLeads(customerId, url, [], true, message)
     throw new Error(message)
   }

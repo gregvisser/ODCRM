@@ -79,6 +79,7 @@ function LeadsTab() {
   const leads = liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []
   const lastRefresh = lastUpdatedAt ?? new Date()
   const liveWarning = liveData?.warning ?? null
+  const sourceOfTruth = liveData?.sourceOfTruth ?? null
 
   const [filters, setFilters] = useState({
     account: '',
@@ -109,10 +110,15 @@ function LeadsTab() {
       setSheetValidateForEmpty(null)
       return
     }
+    if (sourceOfTruth === 'db') {
+      setSyncStatusForEmpty(null)
+      setSheetValidateForEmpty(null)
+      return
+    }
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
     getValidateSheetResult(customerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
-  }, [leads.length, customerId])
+  }, [leads.length, customerId, sourceOfTruth])
 
   // Load sequences on mount
   useEffect(() => {
@@ -360,7 +366,10 @@ function LeadsTab() {
             No leads data available
           </Text>
           <Text fontSize="sm" color="gray.500" mt={2}>
-            {whyZeroMessage ?? 'Configure Client Leads sheets in account settings to view leads data'}
+            {whyZeroMessage
+              ?? (sourceOfTruth === 'db'
+                ? 'No lead records are stored for this client yet.'
+                : 'Configure Client Leads sheets in account settings to view leads data')}
           </Text>
           {sheetValidateForEmpty?.hint && !sheetValidateForEmpty.ok && (
             <Text fontSize="sm" color="gray.500" mt={1} fontStyle="italic">{sheetValidateForEmpty.hint}</Text>
@@ -558,7 +567,10 @@ function LeadsTab() {
             Leads Generated
           </Heading>
           <Text color="gray.600">
-            Live sheet-backed data via ODCRM ({filteredLeads.length} of {leads.length} leads)
+            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeads.length} of {leads.length} leads)
+          </Text>
+          <Text fontSize="xs" color="gray.500" mt={1}>
+            Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
           </Text>
           <HStack spacing={2} mt={1} fontSize="xs" color="gray.500">
             <Text>Last synced: {formatLastRefresh(lastRefresh)}</Text>
