@@ -139,6 +139,8 @@ const InboxTab: React.FC = () => {
   const [replyContent, setReplyContent] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [isSendingReply, setIsSendingReply] = useState(false)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
 
   useEffect(() => {
     loadCustomers()
@@ -155,6 +157,7 @@ const InboxTab: React.FC = () => {
   }, [selectedCustomerId, view, dateRange, unreadOnly])
 
   const loadReplies = async () => {
+    if (!selectedCustomerId) return
     setLoading(true)
     setError(null)
 
@@ -173,14 +176,17 @@ const InboxTab: React.FC = () => {
         break
     }
 
+    const headers = { 'X-Customer-Id': selectedCustomerId }
     const { data, error: apiError } = await api.get<RepliesResponse>(
-      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}`
+      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}`,
+      { headers }
     )
     
     if (apiError) {
       setError(apiError)
     } else {
       setReplies(data?.items || [])
+      setLastUpdatedAt(new Date().toISOString())
     }
     
     setLoading(false)
@@ -205,9 +211,6 @@ const InboxTab: React.FC = () => {
       const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
       if (currentCustomer) {
         setSelectedCustomerId(storedCustomerId)
-      } else if (customerList.length > 0) {
-        setSelectedCustomerId(customerList[0].id)
-        setCurrentCustomerId(customerList[0].id)
       }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
@@ -218,18 +221,22 @@ const InboxTab: React.FC = () => {
   }
 
   const loadThreads = async () => {
+    if (!selectedCustomerId) return
     setLoading(true)
     setThreadsLoading(true)
     setError(null)
 
+    const headers = { 'X-Customer-Id': selectedCustomerId }
     const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
-      `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`
+      `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
+      { headers }
     )
 
     if (apiError) {
       setError(apiError)
     } else {
       setThreads(data?.threads || [])
+      setLastUpdatedAt(new Date().toISOString())
     }
 
     setThreadsLoading(false)
@@ -237,7 +244,9 @@ const InboxTab: React.FC = () => {
   }
 
   const loadThreadMessages = async (threadId: string) => {
-    const { data, error: apiError } = await api.get<{ threadId: string; messages: EmailMessage[] }>(`/api/inbox/threads/${threadId}/messages`)
+    if (!selectedCustomerId) return
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const { data, error: apiError } = await api.get<{ threadId: string; messages: EmailMessage[] }>(`/api/inbox/threads/${threadId}/messages`, { headers })
 
     if (apiError) {
       toast({
@@ -252,16 +261,23 @@ const InboxTab: React.FC = () => {
     const messages = data?.messages || []
     setSelectedThread(messages)
     setSelectedThreadId(threadId)
+    setLastUpdatedAt(new Date().toISOString())
     // Mark inbound messages as read
     if (messages.length > 0) markThreadRead(messages)
   }
 
   const sendReply = async () => {
-    if (!selectedThreadId || !replyContent.trim()) return
+    if (!selectedThreadId || !replyContent.trim() || !selectedCustomerId) return
+    setIsSendingReply(true)
 
-    const { error: apiError } = await api.post(`/api/inbox/threads/${selectedThreadId}/reply`, {
-      content: replyContent,
-    })
+    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const { error: apiError } = await api.post(
+      `/api/inbox/threads/${selectedThreadId}/reply`,
+      {
+        content: replyContent,
+      },
+      { headers }
+    )
 
     if (apiError) {
       toast({
@@ -270,6 +286,7 @@ const InboxTab: React.FC = () => {
         status: 'error',
         duration: 3000,
       })
+      setIsSendingReply(false)
       return
     }
 
@@ -282,7 +299,8 @@ const InboxTab: React.FC = () => {
 
     setReplyContent('')
     // Reload the thread to show the new message
-    loadThreadMessages(selectedThreadId)
+    await loadThreadMessages(selectedThreadId)
+    setIsSendingReply(false)
   }
 
   const handleRefresh = async () => {
@@ -301,6 +319,7 @@ const InboxTab: React.FC = () => {
           duration: 3000,
         })
       }
+      setLastUpdatedAt(new Date().toISOString())
     } finally {
       setIsRefreshing(false)
       // Reload the thread list
@@ -364,7 +383,7 @@ const InboxTab: React.FC = () => {
   if (loading) {
     return (
       <RequireActiveClient>
-        <Box textAlign="center" py={10}>
+        <Box textAlign="center" py={10} data-testid="inbox-tab-loading">
           <Spinner size="lg" />
           <Text mt={4}>Loading inbox...</Text>
         </Box>
@@ -374,7 +393,7 @@ const InboxTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
+    <Box data-testid="inbox-tab-panel">
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
@@ -385,6 +404,7 @@ const InboxTab: React.FC = () => {
         </VStack>
         <HStack>
           <Select
+            data-testid="inbox-tab-customer-select"
             size="sm"
             value={selectedCustomerId}
             onChange={(e) => {
@@ -393,6 +413,7 @@ const InboxTab: React.FC = () => {
             }}
             w="200px"
           >
+            <option value="">Select customer</option>
             {customers.map(customer => (
               <option key={customer.id} value={customer.id}>{customer.name}</option>
             ))}
@@ -419,11 +440,22 @@ const InboxTab: React.FC = () => {
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </Select>
-          <Button size="sm" isLoading={isRefreshing} onClick={handleRefresh}>
+          <Button data-testid="inbox-tab-refresh-btn" size="sm" isLoading={isRefreshing} onClick={handleRefresh} isDisabled={!selectedCustomerId}>
             Refresh
           </Button>
         </HStack>
       </Flex>
+
+      {!selectedCustomerId && (
+        <Alert status="warning" mb={4} data-testid="inbox-tab-no-customer">
+          <AlertIcon />
+          <AlertDescription>Select a customer to load inbox threads and replies.</AlertDescription>
+        </Alert>
+      )}
+
+      <Text fontSize="xs" color="gray.500" mb={4} data-testid="inbox-tab-last-updated">
+        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : 'Not loaded yet'}
+      </Text>
 
       {/* Error Display */}
       {error && (
@@ -439,10 +471,10 @@ const InboxTab: React.FC = () => {
         </Alert>
       )}
 
-      {view === 'threads' ? (
-        <Grid templateColumns={{ base: '1fr', lg: '300px 1fr' }} gap={6}>
+      {selectedCustomerId && view === 'threads' ? (
+        <Grid templateColumns={{ base: '1fr', lg: '300px 1fr' }} gap={6} data-testid="inbox-tab-threads-view">
           {/* Thread List */}
-          <Card>
+          <Card data-testid="inbox-tab-thread-list">
             <CardHeader>
               <Flex justify="space-between" align="center">
                 <Heading size="md">Email Threads</Heading>
@@ -512,7 +544,7 @@ const InboxTab: React.FC = () => {
           </Card>
 
           {/* Thread Messages */}
-          <Card>
+          <Card data-testid="inbox-tab-thread-detail">
             <CardHeader>
               <Heading size="md">
                 {selectedThread ? 'Thread Messages' : 'Select a thread'}
@@ -531,7 +563,7 @@ const InboxTab: React.FC = () => {
                       <HStack justify="space-between" mb={2}>
                         <HStack>
                           <Text fontWeight="medium">
-                            {message.direction === 'inbound' ? 'From:' : 'To:'}
+                            {message.direction === 'inbound' ? 'From: ' : 'To: '}
                             {message.direction === 'inbound' ? message.fromAddress : message.toAddress}
                           </Text>
                           {message.senderIdentity && (
@@ -551,7 +583,7 @@ const InboxTab: React.FC = () => {
                   ))}
 
                   {/* Reply Form */}
-                  <Box borderTop="1px" borderColor="gray.200" pt={4}>
+                  <Box borderTop="1px" borderColor="gray.200" pt={4} data-testid="inbox-tab-reply-composer">
                     <Heading size="sm" mb={3}>Reply</Heading>
                     <Textarea
                       placeholder="Type your reply..."
@@ -562,9 +594,11 @@ const InboxTab: React.FC = () => {
                     />
                     <HStack spacing={3}>
                       <Button
+                        data-testid="inbox-tab-send-reply-btn"
                         colorScheme="blue"
                         onClick={sendReply}
-                        isDisabled={!replyContent.trim()}
+                        isDisabled={!replyContent.trim() || isSendingReply}
+                        isLoading={isSendingReply}
                       >
                         Send Reply
                       </Button>
@@ -587,6 +621,9 @@ const InboxTab: React.FC = () => {
                                   reason: 'Opted out via inbox',
                                   source: 'inbox-optout',
                                 },
+                                {
+                                  headers: { 'X-Customer-Id': selectedCustomerId },
+                                }
                               )
                               if (error) {
                                 toast({ title: 'Failed to opt out', description: error, status: 'error', duration: 3000 })
@@ -613,10 +650,10 @@ const InboxTab: React.FC = () => {
             </CardBody>
           </Card>
         </Grid>
-      ) : (
+      ) : selectedCustomerId ? (
         <>
           {/* Stats */}
-          <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} mb={6}>
+          <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} mb={6} data-testid="inbox-tab-replies-stats">
             <Card>
               <CardBody>
                 <Stat>
@@ -644,7 +681,7 @@ const InboxTab: React.FC = () => {
           </SimpleGrid>
 
           {/* Search */}
-          <InputGroup mb={6}>
+          <InputGroup mb={6} data-testid="inbox-tab-search">
             <InputLeftElement pointerEvents="none">
               <SearchIcon color="gray.300" />
             </InputLeftElement>
@@ -655,13 +692,13 @@ const InboxTab: React.FC = () => {
             />
           </InputGroup>
         </>
-      )}
+      ) : null}
 
       {/* Replies List - Only show when view is replies */}
-      {view === 'replies' && (
+      {selectedCustomerId && view === 'replies' && (
         <>
           {filteredReplies.length === 0 ? (
-        <Card>
+        <Card data-testid="inbox-tab-replies-empty">
           <CardBody textAlign="center" py={10}>
             <EmailIcon boxSize={12} color="gray.300" mb={4} />
             <Text color="gray.500" fontSize="lg">
@@ -673,7 +710,7 @@ const InboxTab: React.FC = () => {
           </CardBody>
         </Card>
       ) : (
-        <Card>
+        <Card data-testid="inbox-tab-replies-table">
           <CardBody p={0}>
             <Table variant="simple">
               <Thead>

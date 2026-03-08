@@ -117,6 +117,7 @@
     "test:templates-tab-runtime": "node scripts/self-test-templates-tab-runtime.mjs",
     "test:sequences-tab-runtime": "node scripts/self-test-sequences-tab-runtime.mjs",
     "test:schedules-tab-runtime": "node scripts/self-test-schedules-tab-runtime.mjs",
+    "test:inbox-receive-respond-runtime": "node scripts/self-test-inbox-receive-respond-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {
