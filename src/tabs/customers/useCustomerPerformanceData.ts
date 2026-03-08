@@ -1,17 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  type Account,
-  type Lead,
-  loadAccountsFromStorage,
-  loadLeadsFromStorage,
-  calculateActualsFromLeads,
-} from '../../components/AccountsTab'
-import { on } from '../../platform/events'
-import { OdcrmStorageKeys } from '../../platform/keys'
-import { getItem } from '../../platform/storage'
+import { useMemo } from 'react'
+import { useCustomersFromDatabase } from '../../hooks/useCustomersFromDatabase'
+
+type PerformanceAccount = {
+  id?: string
+  name: string
+  defcon: number
+}
 
 export type AccountPerformanceRow = {
-  account: Account
+  account: PerformanceAccount
   weeklyActual: number
   monthlyActual: number
   weeklyTarget: number
@@ -33,18 +30,11 @@ export type PerformanceTotals = {
 export type PerformanceMeta = {
   currentMonthLabel: string
   currentWeekLabel: string
-  lastSyncedAt: Date
+  lastSyncedAt: Date | null
 }
 
 const MONTH_FORMATTER = new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric' })
 const DAY_FORMATTER = new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' })
-
-function getLastLeadSync(): Date | null {
-  const raw = getItem(OdcrmStorageKeys.marketingLeadsLastRefresh)
-  if (!raw) return null
-  const parsed = new Date(raw)
-  return Number.isNaN(parsed.getTime()) ? null : parsed
-}
 
 function getIsoWeek(date: Date): number {
   const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -65,69 +55,44 @@ function getWeekRangeLabel(reference: Date): string {
   return `Week ${getIsoWeek(reference)} • ${formattedRange}`
 }
 
+function toNumber(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
 export function useCustomerPerformanceData() {
-  const [accounts, setAccounts] = useState<Account[]>(() => loadAccountsFromStorage())
-  const [leads, setLeads] = useState<Lead[]>(() => loadLeadsFromStorage())
-  // Use current time for live reporting - data is always up-to-date
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date>(() => new Date())
-
-  useEffect(() => {
-    const offAccounts = on<Account[]>('accountsUpdated', (updated) => {
-      if (Array.isArray(updated) && updated.length > 0) {
-        setAccounts(updated)
-        // Update sync time when accounts change (data is live)
-        setLastSyncedAt(new Date())
-      } else {
-        setAccounts(loadAccountsFromStorage())
-        setLastSyncedAt(new Date())
-      }
-    })
-
-    const offLeads = on('leadsUpdated', () => {
-      setLeads(loadLeadsFromStorage())
-      // Update sync time when leads change (data is live)
-      setLastSyncedAt(new Date())
-    })
-
-    // Update sync time periodically to show it's live (every minute)
-    const interval = setInterval(() => {
-      setLastSyncedAt(new Date())
-    }, 60000) // Update every minute
-
-    return () => {
-      offAccounts()
-      offLeads()
-      clearInterval(interval)
-    }
-  }, [])
-
-  const leadCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    leads.forEach((lead) => {
-      const key = lead.accountName || 'Unknown'
-      counts.set(key, (counts.get(key) || 0) + 1)
-    })
-    return counts
-  }, [leads])
+  const { customers, loading, error } = useCustomersFromDatabase()
 
   const rows = useMemo<AccountPerformanceRow[]>(() => {
-    return accounts.map((account) => {
-      const actuals = calculateActualsFromLeads(account.name, leads)
-      const weeklyTarget = account.weeklyTarget ?? 0
-      const monthlyTarget = account.monthlyTarget ?? 0
-      const percentToTarget = monthlyTarget > 0 ? actuals.monthlyActual / monthlyTarget : 0
+    return (customers || []).map((customer) => {
+      const weeklyActual = toNumber(customer.weeklyLeadActual)
+      const monthlyActual = toNumber(customer.monthlyLeadActual)
+      const weeklyTarget = toNumber(customer.weeklyLeadTarget)
+      const monthlyTarget = toNumber(customer.monthlyLeadTarget)
+      const percentToTarget = monthlyTarget > 0 ? monthlyActual / monthlyTarget : 0
+
       return {
-        account,
-        weeklyActual: actuals.weeklyActual,
-        monthlyActual: actuals.monthlyActual,
+        account: {
+          id: customer.id,
+          name: customer.name,
+          defcon: typeof customer.defcon === 'number' ? customer.defcon : 3,
+        },
+        weeklyActual,
+        monthlyActual,
         weeklyTarget,
         monthlyTarget,
         percentToTarget,
-        spend: account.monthlySpendGBP ?? 0,
-        leadCount: leadCounts.get(account.name) ?? 0,
+        // This keeps the existing table column populated from current DB customer truth.
+        spend: toNumber(customer.monthlyRevenueFromCustomer),
+        // Transitional-safe approximation for report cards where row-level lead records are not joined here.
+        leadCount: monthlyActual,
       }
     })
-  }, [accounts, leads, leadCounts])
+  }, [customers])
 
   const totals = useMemo<PerformanceTotals>(() => {
     return rows.reduce<PerformanceTotals>(
@@ -143,6 +108,16 @@ export function useCustomerPerformanceData() {
     )
   }, [rows])
 
+  const lastSyncedAt = useMemo(() => {
+    let latest: Date | null = null
+    for (const customer of customers || []) {
+      const candidate = new Date(customer.updatedAt)
+      if (Number.isNaN(candidate.getTime())) continue
+      if (!latest || candidate > latest) latest = candidate
+    }
+    return latest
+  }, [customers])
+
   const meta = useMemo<PerformanceMeta>(() => {
     const now = new Date()
     return {
@@ -152,7 +127,6 @@ export function useCustomerPerformanceData() {
     }
   }, [lastSyncedAt])
 
-  return { rows, totals, meta }
+  return { rows, totals, meta, loading, error }
 }
-
 

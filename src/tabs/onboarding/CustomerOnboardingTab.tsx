@@ -912,7 +912,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const handleSuppressionFileChange = async (file: File | null) => {
     if (!file || !customer?.id) return
     const proceed = await confirmProceedIfDirty(
-      'You have unsaved onboarding changes. Uploading a suppression list will refresh this customer from the database.',
+      'You have unsaved onboarding changes. Uploading a legacy suppression file will refresh this customer from the database.',
     )
     if (!proceed) return
     setUploadingSuppression(true)
@@ -935,7 +935,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       }
 
       toast({
-        title: 'Suppression list uploaded',
+        title: 'Legacy suppression file uploaded',
         description: `Imported ${data.totalImported} emails (${data.totalSkipped} skipped)`,
         status: 'success',
         duration: 5000,
@@ -947,7 +947,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     } catch (error: any) {
       toast({
         title: 'Upload failed',
-        description: error?.message || 'Unable to upload suppression list',
+        description: error?.message || 'Unable to upload legacy suppression file',
         status: 'error',
         duration: 7000,
         isClosable: true,
@@ -956,6 +956,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setUploadingSuppression(false)
     }
   }
+
+  const openSuppressionSetup = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'suppression' } }))
+  }, [])
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
     items.find((item) => item.id === id)?.label || id
@@ -1659,8 +1663,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Suppression List (DNC)</FormLabel>
             <Stack spacing={3}>
               <Text fontSize="sm" color="gray.600">
-                Upload a customer-specific Do Not Contact list. Suppressed emails are excluded from outreach campaigns for this customer only.
+                Primary setup path: manage suppression email/domain sources in Marketing using linked Google Sheets for this customer.
               </Text>
+              <HStack spacing={3} align="center" flexWrap="wrap" data-testid="onboarding-suppression-sheets-guidance">
+                <Button size="sm" variant="solid" colorScheme="blue" onClick={openSuppressionSetup} data-testid="onboarding-go-suppression-setup">
+                  Open Suppression List Setup
+                </Button>
+                <Text fontSize="xs" color="gray.600">
+                  Configure both suppression emails and suppression domains there, then return to onboarding checkpoints.
+                </Text>
+              </HStack>
               <Input
                 type="file"
                 accept=".csv,.xlsx,.txt"
@@ -1668,6 +1680,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 id="suppression-upload"
                 onChange={(e) => void handleSuppressionFileChange(e.target.files?.[0] || null)}
               />
+              <Text fontSize="xs" color="gray.500" data-testid="onboarding-suppression-legacy-upload-note">
+                Legacy file import remains available for transition support, but Google Sheets-linked suppression sources are the live setup model.
+              </Text>
               <HStack spacing={3} align="center" flexWrap="wrap">
                 <Button
                   as="label"
@@ -1679,7 +1694,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   isLoading={uploadingSuppression}
                   isDisabled={uploadingSuppression}
                 >
-                  {suppressionMeta?.fileName ? 'Replace Suppression List' : 'Upload Suppression List'}
+                  {suppressionMeta?.fileName ? 'Replace Legacy Suppression File' : 'Upload Legacy Suppression File'}
                 </Button>
                 {suppressionMeta?.fileName ? (
                   <Stack spacing={0}>
@@ -1702,7 +1717,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   </Stack>
                 ) : (
                   <Text fontSize="sm" color="gray.500">
-                    No suppression list uploaded
+                    No legacy suppression file uploaded
                   </Text>
                 )}
               </HStack>
