@@ -468,7 +468,7 @@ const FIRST_BYTES_LEN = 200
 /** Safe preview of body: first N chars, control chars replaced by space. */
 function safeFirstBytes(text: string, maxLen: number = FIRST_BYTES_LEN): string {
   const slice = (text || '').slice(0, maxLen)
-  return slice.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, ' ')
+  return slice.replace(/[\p{Cc}\x7f]/gu, ' ')
 }
 
 /** Result of validating a sheet URL (no DB writes). Used by GET /api/leads/sync/validate. */
@@ -835,7 +835,7 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
     if (!dateValue) {
       for (const key of Object.keys(lead)) {
         const value = lead[key] || ''
-        if (value && /^\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}$/.test(value.trim())) {
+        if (value && /^\d{1,2}[./]\d{1,2}[./]\d{2,4}$/.test(value.trim())) {
           dateValue = value.trim()
           break
         }

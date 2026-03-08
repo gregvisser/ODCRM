@@ -35,9 +35,9 @@ export async function bingDiscoverUrls(options: {
   const url = `${base}/v7.0/search`
 
   const queries = [
-    `site:${domain} (accreditation OR certification OR ISO OR \"Cyber Essentials\" OR CHAS OR Constructionline OR SafeContractor)`,
-    `site:${domain} (about OR \"who we are\")`,
-    `site:${domain} (\"case studies\" OR testimonials)`,
+    `site:${domain} (accreditation OR certification OR ISO OR "Cyber Essentials" OR CHAS OR Constructionline OR SafeContractor)`,
+    `site:${domain} (about OR "who we are")`,
+    `site:${domain} ("case studies" OR testimonials)`,
   ]
 
   const discovered: string[] = []

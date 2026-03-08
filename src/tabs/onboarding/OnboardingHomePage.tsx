@@ -41,7 +41,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       }
     })
     return unsubscribe
-  }, [])
+  }, [selectedCustomerId])
 
   // Handler when customer changes via selector - update canonical store
   const handleCustomerChange = useCallback((customerId: string) => {

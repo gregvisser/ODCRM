@@ -1,5 +1,38 @@
 # ODCRM Work Session Status
 
+## Active Session (Post-PR #169 Regression + Lint Remediation)
+- Date: 2026-03-08
+- Baseline main SHA: `39546c59bec16fbb4c4e2f965c48ad837b08fc18`
+- Starting strict parity: PASS (FE == BE == main SHA)
+- Baseline proofs (Phase 0): PASS
+  - `test:deploy-reliability-runtime`
+  - `test:dashboard-action-priority-runtime`
+  - `test:dashboard-data-contract-runtime`
+  - `test:google-sheets-data-plane-runtime`
+  - `test:customers-leads-reporting-truth-runtime`
+  - `test:marketing-full-stack-runtime`
+- Baseline lint: `50 problems / 22 errors / 28 warnings`
+
+### Execution Plan
+1. Fix Dashboard regression first (PC showing no pulled-through data after PR #169).
+2. Prove dashboard fix with targeted runtime checks and add `test:dashboard-regression-runtime` if needed.
+3. Run full-system lint remediation pass and log every lint cluster in `ODCRM_LINT_REMEDIATION_LOG.md`.
+4. Run mandatory gates + targeted proofs.
+5. Ship one PR and verify strict post-merge parity.
+
+### In-Progress Results
+- Dashboard regression root cause found:
+  - KPI cards were bound to a single active-client metrics fetch.
+  - Device-local selected client differences could collapse dashboard KPI cards to empty/zero on one device while another device showed non-zero.
+- Dashboard fix applied:
+  - KPI cards now aggregate authoritative backend metrics across the current `/api/customers` scope using per-client metrics truth.
+  - Added explicit regression proof: `test:dashboard-regression-runtime`.
+- Current verification status (pre-PR):
+  - Mandatory gates: PASS (`tsc`, frontend build, server build)
+  - Proof bundle: PASS (`deploy reliability`, `dashboard action priority`, `dashboard data contract`, `dashboard regression`, `google sheets data plane`, `customers leads reporting truth`, `customers leads view`, `marketing full stack`)
+- Lint status after remediation pass:
+  - `11 problems / 0 errors / 11 warnings` (improved from `50 / 22 / 28`)
+
 ## Final Session State
 - Date: 2026-03-08
 - Final main SHA: `8e79034d525f26d80ce2952f7473679c8025b0bf`

@@ -32,7 +32,7 @@ export function parseDate(value: string): Date | null {
   if (!trimmed) return null
 
   // Try DD/MM/YYYY or DD.MM.YYYY
-  const dmyMatch = trimmed.match(/^(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{2,4})$/)
+  const dmyMatch = trimmed.match(/^(\d{1,2})[./](\d{1,2})[./](\d{2,4})$/)
   if (dmyMatch) {
     const [, d, m, y] = dmyMatch
     const year = y.length === 2 ? 2000 + parseInt(y) : parseInt(y)
@@ -98,7 +98,7 @@ export function calculateActualsFromLeads(accountName: string, leads: LeadRow[])
     if (!dateValue) {
       for (const key of Object.keys(lead)) {
         const value = lead[key] || ''
-        if (value && /^\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}$/.test(value.trim())) {
+        if (value && /^\d{1,2}[./]\d{1,2}[./]\d{2,4}$/.test(value.trim())) {
           dateValue = value.trim()
           break
         }
