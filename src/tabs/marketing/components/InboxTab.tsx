@@ -156,6 +156,13 @@ const InboxTab: React.FC = () => {
     }
   }, [selectedCustomerId, view, dateRange, unreadOnly])
 
+  useEffect(() => {
+    setSelectedThread(null)
+    setSelectedThreadId(null)
+    setReplyContent('')
+    setSearchQuery('')
+  }, [selectedCustomerId])
+
   const loadReplies = async () => {
     if (!selectedCustomerId) return
     setLoading(true)
@@ -206,6 +213,9 @@ const InboxTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
+      if (customerList.length === 0) {
+        setSelectedCustomerId('')
+      }
 
       const storedCustomerId = getCurrentCustomerId()
       const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
@@ -450,6 +460,12 @@ const InboxTab: React.FC = () => {
         <Alert status="warning" mb={4} data-testid="inbox-tab-no-customer">
           <AlertIcon />
           <AlertDescription>Select a customer to load inbox threads and replies.</AlertDescription>
+        </Alert>
+      )}
+      {customers.length === 0 && (
+        <Alert status="info" mb={4} data-testid="inbox-tab-no-customers">
+          <AlertIcon />
+          <AlertDescription>No customers are available for inbox operations.</AlertDescription>
         </Alert>
       )}
 

@@ -772,6 +772,9 @@ const SequencesTab: React.FC = () => {
   const [queueWorkbenchSelectedIds, setQueueWorkbenchSelectedIds] = useState<string[]>([])
   const [queueWorkbenchBulkAction, setQueueWorkbenchBulkAction] = useState<'QUEUED' | 'SKIPPED' | null>(null)
   const [queueWorkbenchBulkResult, setQueueWorkbenchBulkResult] = useState<QueueWorkbenchBulkResult | null>(null)
+  const [requestedSequenceId, setRequestedSequenceId] = useState<string | null>(null)
+  const [requestedFocusPanel, setRequestedFocusPanel] = useState<string | null>(null)
+  const [activeFocusPanel, setActiveFocusPanel] = useState<string | null>(null)
 
   // drill-down from preview row to enrollment queue
   const [queueDrillOpen, setQueueDrillOpen] = useState(false)
@@ -2160,6 +2163,11 @@ const SequencesTab: React.FC = () => {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const requestedSeq = params.get('sequenceId')
+    const requestedPanel = params.get('focusPanel')
+    setRequestedSequenceId(requestedSeq && requestedSeq.trim().length > 0 ? requestedSeq.trim() : null)
+    setRequestedFocusPanel(requestedPanel && requestedPanel.trim().length > 0 ? requestedPanel.trim() : null)
     loadCustomers()
     maybeOpenFromSnapshot()
   }, [])
@@ -2417,6 +2425,26 @@ const SequencesTab: React.FC = () => {
       setExceptionCenterError(null)
     }
   }, [readinessSequenceOptions, sequenceReadinessSequenceId])
+
+  useEffect(() => {
+    if (!requestedSequenceId) return
+    if (!readinessSequenceOptions.length) return
+    const exists = readinessSequenceOptions.some((opt) => opt.id === requestedSequenceId)
+    if (!exists) return
+    setSequenceReadinessSequenceId(requestedSequenceId)
+  }, [requestedSequenceId, readinessSequenceOptions])
+
+  useEffect(() => {
+    if (!requestedFocusPanel) return
+    const panelId = requestedFocusPanel
+    const timer = window.setTimeout(() => {
+      const panel = document.getElementById(panelId)
+      if (!panel) return
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setActiveFocusPanel(panelId)
+    }, 75)
+    return () => window.clearTimeout(timer)
+  }, [requestedFocusPanel, sequenceReadinessSequenceId, loading])
 
   const stats = useMemo(() => {
     return {
@@ -3175,9 +3203,9 @@ const SequencesTab: React.FC = () => {
             colorScheme="blue" 
             ml={4}
             onClick={() => {
-              // Navigate to templates tab
-              const event = new CustomEvent('navigate-to-view', { detail: { view: 'templates' } })
-              window.dispatchEvent(event)
+              const params = new URLSearchParams(window.location.search)
+              params.set('view', 'templates')
+              window.location.search = params.toString()
             }}
           >
             Go to Templates
@@ -3191,6 +3219,11 @@ const SequencesTab: React.FC = () => {
           <Text color="gray.600">
             Create and manage multi-step outreach sequences from lead snapshots
           </Text>
+          {activeFocusPanel ? (
+            <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
+              Focused panel: {activeFocusPanel}
+            </Text>
+          ) : null}
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
               <FormLabel fontSize="sm">Client</FormLabel>
