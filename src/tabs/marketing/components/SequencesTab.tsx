@@ -3096,7 +3096,7 @@ const SequencesTab: React.FC = () => {
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
       <RequireActiveClient>
-        <Box textAlign="center" py={10}>
+        <Box id="sequences-tab-no-customer" data-testid="sequences-tab-no-customer" textAlign="center" py={10}>
           <Text>Please select a client to view sequences.</Text>
         </Box>
       </RequireActiveClient>
@@ -3106,7 +3106,7 @@ const SequencesTab: React.FC = () => {
   if (loading && sequences.length === 0) {
     return (
       <RequireActiveClient>
-        <Box textAlign="center" py={10}>
+        <Box id="sequences-tab-loading" data-testid="sequences-tab-loading" textAlign="center" py={10}>
           <Text>Loading sequences...</Text>
         </Box>
       </RequireActiveClient>
@@ -3115,7 +3115,7 @@ const SequencesTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
+    <Box id="sequences-tab-panel" data-testid="sequences-tab-panel">
       {error && (
         <Alert status="error" mb={4}>
           <AlertIcon />
