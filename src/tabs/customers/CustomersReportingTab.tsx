@@ -39,10 +39,28 @@ function getDefconColor(defcon: number): string {
 }
 
 export default function CustomersReportingTab() {
-  const { rows, totals, meta } = useCustomerPerformanceData()
+  const { rows, totals, meta, loading, error } = useCustomerPerformanceData()
 
   const sortedRows = [...rows].sort((a, b) => b.spend - a.spend)
   const totalPercent = totals.monthlyTarget > 0 ? totals.monthlyActual / totals.monthlyTarget : 0
+
+  if (loading) {
+    return (
+      <Stack spacing={4}>
+        <Heading size="md">Loading reporting inputs</Heading>
+        <Text color="gray.600">Pulling current lead metrics from backend customer records.</Text>
+      </Stack>
+    )
+  }
+
+  if (error) {
+    return (
+      <Stack spacing={4}>
+        <Heading size="md">Reporting inputs are unavailable</Heading>
+        <Text color="gray.600">{error}</Text>
+      </Stack>
+    )
+  }
 
   return (
     <Stack spacing={8}>
@@ -75,7 +93,7 @@ export default function CustomersReportingTab() {
                   : 'Awaiting first sync'}
               </Heading>
               <Text fontSize="sm" color="whiteAlpha.600">
-                Source • Marketing Leads Tab
+                Source • backend customer lead metrics (synced from configured lead sources)
               </Text>
             </Box>
           </HStack>
@@ -116,6 +134,10 @@ export default function CustomersReportingTab() {
           </SimpleGrid>
         </Stack>
       </Box>
+
+      <Text fontSize="sm" color="gray.600" data-testid="customers-reporting-truth-note">
+        This report uses current backend customer lead metrics. If values are low or empty, verify the lead source setup in Clients and Marketing Lead Sources.
+      </Text>
 
       <Box borderRadius="2xl" border="1px solid" borderColor="gray.100" bg="white" boxShadow="xl" overflowX="auto">
         <Table variant="simple" size="sm">

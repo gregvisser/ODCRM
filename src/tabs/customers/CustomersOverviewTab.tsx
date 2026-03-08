@@ -70,7 +70,7 @@ function MetricCard({
 // Removed getDefconColor - using gray for all badges
 
 export default function CustomersOverviewTab() {
-  const { rows, totals, meta } = useCustomerPerformanceData()
+  const { rows, totals, meta, loading, error } = useCustomerPerformanceData()
 
   const sortedByPercent = [...rows].sort((a, b) => b.percentToTarget - a.percentToTarget)
   const topPerformers = sortedByPercent.slice(0, 4)
@@ -89,6 +89,28 @@ export default function CustomersOverviewTab() {
       hour: '2-digit',
       minute: '2-digit',
     }) ?? 'Awaiting first sync'
+
+  if (loading) {
+    return (
+      <Box textAlign="center" py={12}>
+        <Heading size="md">Loading client performance data</Heading>
+        <Text mt={2} color="text.muted">
+          Pulling current account and lead metrics from backend customer truth.
+        </Text>
+      </Box>
+    )
+  }
+
+  if (error) {
+    return (
+      <Box textAlign="center" py={12}>
+        <Heading size="md">Could not load client performance data</Heading>
+        <Text mt={2} color="text.muted">
+          {error}
+        </Text>
+      </Box>
+    )
+  }
 
   if (rows.length === 0) {
     return (
