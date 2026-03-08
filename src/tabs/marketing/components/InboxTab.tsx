@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   AlertDescription,
@@ -149,28 +149,7 @@ const InboxTab: React.FC = () => {
     window.location.search = params.toString()
   }
 
-  useEffect(() => {
-    loadCustomers()
-  }, [])
-
-  useEffect(() => {
-    if (selectedCustomerId) {
-      if (view === 'replies') {
-        void loadReplies()
-      } else {
-        void loadThreads()
-      }
-    }
-  }, [selectedCustomerId, view, dateRange, unreadOnly])
-
-  useEffect(() => {
-    setSelectedThread(null)
-    setSelectedThreadId(null)
-    setReplyContent('')
-    setSearchQuery('')
-  }, [selectedCustomerId])
-
-  const loadReplies = async () => {
+  const loadReplies = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
     setError(null)
@@ -204,9 +183,9 @@ const InboxTab: React.FC = () => {
     }
     
     setLoading(false)
-  }
+  }, [selectedCustomerId, dateRange])
 
-  const loadCustomers = async () => {
+  const loadCustomers = useCallback(async () => {
     setLoading(true)
     const { data, error: apiError } = await api.get('/api/customers')
 
@@ -235,9 +214,9 @@ const InboxTab: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
-  const loadThreads = async () => {
+  const loadThreads = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
     setThreadsLoading(true)
@@ -258,7 +237,28 @@ const InboxTab: React.FC = () => {
 
     setThreadsLoading(false)
     setLoading(false)
-  }
+  }, [selectedCustomerId, unreadOnly])
+
+  useEffect(() => {
+    void loadCustomers()
+  }, [loadCustomers])
+
+  useEffect(() => {
+    if (selectedCustomerId) {
+      if (view === 'replies') {
+        void loadReplies()
+      } else {
+        void loadThreads()
+      }
+    }
+  }, [selectedCustomerId, view, dateRange, unreadOnly, loadReplies, loadThreads])
+
+  useEffect(() => {
+    setSelectedThread(null)
+    setSelectedThreadId(null)
+    setReplyContent('')
+    setSearchQuery('')
+  }, [selectedCustomerId])
 
   const loadThreadMessages = async (threadId: string) => {
     if (!selectedCustomerId) return
@@ -483,7 +483,7 @@ const InboxTab: React.FC = () => {
       <Alert status="info" mb={4} data-testid="inbox-tab-operator-guidance">
         <AlertIcon />
         <Box>
-          <AlertTitle fontSize="sm">Operator flow</AlertTitle>
+          <AlertTitle fontSize="sm">Operator flow: What to do here</AlertTitle>
           <AlertDescription fontSize="sm">
             Review replies and unread threads here, then go to Sequences for remediation or Reports for trend verification.
           </AlertDescription>

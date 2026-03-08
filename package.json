@@ -121,6 +121,7 @@
     "test:marketing-full-stack-runtime": "node scripts/self-test-marketing-full-stack-runtime.mjs",
     "test:post-marketing-hardening-runtime": "node scripts/self-test-post-marketing-hardening-runtime.mjs",
     "test:operator-acceptance-hardening-runtime": "node scripts/self-test-operator-acceptance-hardening-runtime.mjs",
+    "test:final-operator-facing-clarity-runtime": "node scripts/self-test-final-operator-facing-clarity-runtime.mjs",
     "pilot:evidence": "pwsh -File scripts/pilot-evidence.ps1"
   },
   "dependencies": {

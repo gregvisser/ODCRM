@@ -184,7 +184,7 @@ export default function MarketingHomePage({
     <div data-testid="marketing-home-panel">
       <Box mb={3} data-testid="marketing-home-operator-guidance">
         <Text fontSize="sm" color="gray.600">
-          Start in Readiness to see current issues, then move to Sequences to inspect or act, Inbox to handle replies, and Reports to verify results.
+          Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
         </Text>
       </Box>
       <SubNavigation

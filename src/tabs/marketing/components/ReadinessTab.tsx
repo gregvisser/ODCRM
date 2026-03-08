@@ -276,9 +276,9 @@ const ReadinessTab: React.FC = () => {
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Readiness Operations Cockpit</Heading>
+                  <Heading size="md">Readiness: What Needs Attention</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="readiness-tab-operator-cue">
-                    Use this view to decide what to fix first, then jump into Sequences, Inbox, or Reports.
+                    Use this view to decide what to fix first, then move to Sequences, Inbox, or Reports.
                   </Text>
                 </VStack>
                 <HStack>
@@ -373,7 +373,7 @@ const ReadinessTab: React.FC = () => {
             <CardBody>
               {topExceptionGroups.length === 0 ? (
                 <VStack align="stretch" spacing={2}>
-                  <Text color="gray.500">No prioritized exceptions in this window.</Text>
+                  <Text color="gray.500">No priority issues were found in this window.</Text>
                   <HStack>
                     <Button size="xs" variant="outline" data-testid="readiness-tab-go-reports" onClick={() => openMarketingTab('reports')}>
                       Open Reports
