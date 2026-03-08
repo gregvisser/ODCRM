@@ -140,6 +140,9 @@ const SchedulesTab: React.FC = () => {
   const [schedules, setSchedules] = useState<DeliverySchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [editingSchedule, setEditingSchedule] = useState<DeliverySchedule | null>(null)
   const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null)
@@ -182,32 +185,37 @@ const SchedulesTab: React.FC = () => {
     loadData()
   }, [])
 
-  const loadData = async () => {
+  const loadData = async (isManualRefresh = false) => {
     try {
-      setLoading(true)
+      if (isManualRefresh) setRefreshing(true)
+      else setLoading(true)
+      setError(null)
       const [schedulesRes, emailsRes] = await Promise.all([
         api.get<CampaignSchedule[]>('/api/schedules'),
         api.get<ScheduledEmail[]>('/api/schedules/emails')
       ])
 
       if (schedulesRes.error) {
-        console.error('Failed to load schedules:', schedulesRes.error)
+        setError(schedulesRes.error)
         setSchedules([])
       } else {
         setSchedules((schedulesRes.data || []).map(toDeliverySchedule))
       }
 
       if (emailsRes.error) {
-        console.error('Failed to load scheduled emails:', emailsRes.error)
+        setError((prev) => prev ? `${prev}; ${emailsRes.error}` : emailsRes.error)
         setScheduledEmails([])
       } else {
         setScheduledEmails(emailsRes.data || [])
       }
+      setLastUpdatedAt(new Date().toISOString())
     } catch (error) {
       console.error('Error loading schedules:', error)
+      setError('Failed to load schedules data')
       setSchedules([])
       setScheduledEmails([])
     } finally {
+      setRefreshing(false)
       setLoading(false)
     }
   }
@@ -433,7 +441,7 @@ const SchedulesTab: React.FC = () => {
   if (loading) {
     return (
       <RequireActiveClient>
-        <Box textAlign="center" py={10}>
+        <Box id="schedules-tab-loading" data-testid="schedules-tab-loading" textAlign="center" py={10}>
           <Text>Loading schedules...</Text>
         </Box>
       </RequireActiveClient>
@@ -442,7 +450,23 @@ const SchedulesTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box>
+    <Box id="schedules-tab-panel" data-testid="schedules-tab-panel">
+      {error ? (
+        <Card mb={4}>
+          <CardBody>
+            <Text color="red.600" fontSize="sm">{error}</Text>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      <Card mb={4}>
+        <CardBody py={3}>
+          <Text fontSize="sm" color="gray.600">
+            Route truth: <strong>/api/schedules</strong> and <strong>/api/schedules/emails</strong>. Schedules represent campaign timing + sender-window applicability for this tenant.
+          </Text>
+        </CardBody>
+      </Card>
+
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
@@ -451,13 +475,24 @@ const SchedulesTab: React.FC = () => {
             View and manage active campaign schedules with upcoming sends
           </Text>
         </VStack>
-        <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSchedule}>
-          Create Schedule
-        </Button>
+        <HStack>
+          <Button
+            id="schedules-tab-refresh-btn"
+            data-testid="schedules-tab-refresh-btn"
+            variant="outline"
+            onClick={() => void loadData(true)}
+            isLoading={refreshing}
+          >
+            Refresh
+          </Button>
+          <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSchedule}>
+            Create Schedule
+          </Button>
+        </HStack>
       </Flex>
 
       {/* Stats */}
-      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
+      <SimpleGrid id="schedules-tab-stats" data-testid="schedules-tab-stats" columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
         <Card>
           <CardBody>
             <Stat>
@@ -500,9 +535,24 @@ const SchedulesTab: React.FC = () => {
         </Card>
       </SimpleGrid>
 
+      <Text id="schedules-tab-last-updated" data-testid="schedules-tab-last-updated" fontSize="xs" color="gray.500" mb={4}>
+        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Next scheduled send: {scheduledEmails[0]?.scheduledFor ? new Date(scheduledEmails[0].scheduledFor).toLocaleString() : 'none'}
+      </Text>
+
+      {!schedules.length && !scheduledEmails.length ? (
+        <Card id="schedules-tab-empty-state" data-testid="schedules-tab-empty-state" mb={6}>
+          <CardBody>
+            <Text fontWeight="semibold">No active schedules found</Text>
+            <Text fontSize="sm" color="gray.600" mt={1}>
+              Create a schedule or activate a paused campaign to see timing operations here.
+            </Text>
+          </CardBody>
+        </Card>
+      ) : null}
+
       <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6}>
         {/* Schedules List */}
-        <Card>
+        <Card id="schedules-tab-list" data-testid="schedules-tab-list">
           <CardHeader>
             <Heading size="md">Delivery Schedules</Heading>
           </CardHeader>
@@ -606,7 +656,7 @@ const SchedulesTab: React.FC = () => {
         </Card>
 
         {/* Upcoming Emails */}
-        <Card>
+        <Card id="schedules-tab-upcoming-table" data-testid="schedules-tab-upcoming-table">
           <CardHeader>
             <Heading size="md">Upcoming Emails</Heading>
           </CardHeader>
