@@ -21,7 +21,10 @@ const requiredProdCheckMarkers = [
   'PARITY_STATE:',
   'AUTO_RECOVER_BACKEND',
   'AUTO_RECOVERY: triggering backend deploy workflow dispatch...',
+  'findActiveBackendDeploy',
+  'AUTO_RECOVERY: skipped dispatch because backend deploy is already active',
   'triggerBackendRecovery',
+  'AUTO_RECOVER_MIN_STALE_MS',
   'RECOVERY_WORKFLOW',
 ]
 
@@ -34,6 +37,7 @@ for (const marker of requiredProdCheckMarkers) {
 const requiredParityWorkflowMarkers = [
   'AUTO_RECOVER_BACKEND: \'true\'',
   'AUTO_RECOVER_THRESHOLD_ATTEMPT: \'18\'',
+  'AUTO_RECOVER_MIN_STALE_MS: \'240000\'',
   'RECOVERY_WORKFLOW: deploy-backend-azure.yml',
   'PARITY_MAX_ATTEMPTS: \'90\'',
   'GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}',

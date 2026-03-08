@@ -45,6 +45,7 @@ jobs:
           PARITY_RETRY_DELAY_MS: '10000'
           AUTO_RECOVER_BACKEND: 'true'
           AUTO_RECOVER_THRESHOLD_ATTEMPT: '18'
+          AUTO_RECOVER_MIN_STALE_MS: '240000'
           RECOVERY_WORKFLOW: deploy-backend-azure.yml
           RECOVERY_REF: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
