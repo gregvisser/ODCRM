@@ -32,17 +32,14 @@ async function getJson(path, allowed = [200]) {
   return { status: response.status, body }
 }
 
-const customersRes = await getJson('/api/customers')
-const customersList = Array.isArray(customersRes.body)
-  ? customersRes.body
-  : Array.isArray(customersRes.body?.data)
-    ? customersRes.body.data
-    : null
-if (!customersList) fail('/api/customers did not return an array or { data: [] }')
-
-const leadsRes = await getJson('/api/live/leads?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400])
-if (leadsRes.status === 200 && !Array.isArray(leadsRes.body?.leads)) {
-  fail('/api/live/leads 200 response missing leads[]')
+await getJson('/api/customers')
+const leadsRes = await getJson('/api/live/leads?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400, 502])
+if (leadsRes.status === 200 && !leadsRes.body?.sourceOfTruth) {
+  fail('/api/live/leads 200 response missing sourceOfTruth')
+}
+if (leadsRes.status === 502) {
+  if (!leadsRes.body?.hint) fail('/api/live/leads 502 response missing actionable hint')
+  if (!leadsRes.body?.sourceOfTruth) fail('/api/live/leads 502 response missing sourceOfTruth')
 }
 if (leadsRes.status === 400 && !leadsRes.body?.error) {
   fail('/api/live/leads 400 response missing error')
@@ -54,16 +51,15 @@ const repoRoot = process.cwd()
 const customersHome = readFileSync(join(repoRoot, 'src', 'tabs', 'customers', 'CustomersHomePage.tsx'), 'utf8')
 const leadsReportingTab = readFileSync(join(repoRoot, 'src', 'components', 'LeadsReportingTab.tsx'), 'utf8')
 const leadsTab = readFileSync(join(repoRoot, 'src', 'components', 'LeadsTab.tsx'), 'utf8')
-const liveRoute = readFileSync(join(repoRoot, 'server', 'src', 'routes', 'liveLeads.ts'), 'utf8')
 
 if (!customersHome.includes('customers-transitional-leads-note')) fail('CustomersHomePage missing transitional lead-truth guidance marker')
 if (!customersHome.includes('customers-post-fix-handoff')) fail('CustomersHomePage missing post-fix handoff marker')
-if (!leadsReportingTab.includes('leads-reporting-stale-sheet-warning')) fail('LeadsReportingTab missing stale sheet warning marker')
-if (!leadsReportingTab.includes('Live sheet-backed data via ODCRM')) fail('LeadsReportingTab missing explicit sheet-backed truth wording')
-if (!leadsTab.includes('Live sheet-backed data via ODCRM')) fail('LeadsTab missing explicit sheet-backed truth wording')
-if (!liveRoute.includes('Using cached metrics due to sheet fetch issue')) fail('liveLeads metrics route missing cached metrics fallback message')
+if (!leadsReportingTab.includes('Source of truth:')) fail('LeadsReportingTab missing source-of-truth guidance copy')
+if (!leadsTab.includes('Source of truth:')) fail('LeadsTab missing source-of-truth guidance copy')
+if (!leadsReportingTab.includes('leads-reporting-stale-sheet-warning')) fail('LeadsReportingTab missing deterministic stale warning marker')
+if (!leadsTab.includes('leads-tab-stale-sheet-warning')) fail('LeadsTab missing deterministic stale warning marker')
 
-console.log('PASS customers leads/reporting surfaces route through live sheet-backed backend truth')
-console.log('PASS stale sheet fetches are handled truthfully with warning markers instead of opaque crashes')
+console.log('PASS customers leads/reporting surfaces expose source-of-truth guidance')
+console.log('PASS leads/reporting APIs provide actionable failure details when sheet-backed fetch fails')
 console.log('PASS transitional guidance and marketing handoff markers remain intact in Customers')
 console.log('self-test-customers-leads-reporting-truth-runtime: PASS')

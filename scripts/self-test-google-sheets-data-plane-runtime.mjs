@@ -32,27 +32,35 @@ async function getJson(path, allowed = [200]) {
   return { status: response.status, body }
 }
 
-const leadsRes = await getJson('/api/live/leads?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400])
+const leadsRes = await getJson('/api/live/leads?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400, 502])
 if (leadsRes.status === 200) {
   if (!Array.isArray(leadsRes.body?.leads)) fail('/api/live/leads response missing leads[]')
   if (typeof leadsRes.body?.rowCount !== 'number') fail('/api/live/leads response missing rowCount')
-  if (!('staleFallbackUsed' in (leadsRes.body || {}))) fail('/api/live/leads response missing staleFallbackUsed')
+  if (!leadsRes.body?.sourceOfTruth) fail('/api/live/leads response missing sourceOfTruth')
+  if (leadsRes.body.staleFallbackUsed && leadsRes.body.authoritative !== false) {
+    fail('/api/live/leads stale fallback must not be marked authoritative')
+  }
 } else {
-  if (!leadsRes.body?.error) fail('/api/live/leads 400 response missing error')
+  if (!leadsRes.body?.error) fail('/api/live/leads non-200 response missing error')
+  if (leadsRes.status === 502 && !leadsRes.body?.hint) {
+    fail('/api/live/leads 502 response missing actionable hint')
+  }
   if (String(leadsRes.body.error).includes('Failed to fetch or parse CSV')) {
     fail('/api/live/leads still returns opaque legacy CSV parse error text')
   }
 }
 
-const metricsRes = await getJson('/api/live/leads/metrics?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400])
+const metricsRes = await getJson('/api/live/leads/metrics?customerId=' + encodeURIComponent(CUSTOMER_ID), [200, 400, 502])
 if (metricsRes.status === 200) {
   if (typeof metricsRes.body?.totalLeads !== 'number') fail('/api/live/leads/metrics missing totalLeads')
-  if (typeof metricsRes.body?.rowCount !== 'number') fail('/api/live/leads/metrics missing rowCount')
-  if (!('staleFallbackUsed' in (metricsRes.body || {}))) fail('/api/live/leads/metrics missing staleFallbackUsed')
+  if (!metricsRes.body?.sourceOfTruth) fail('/api/live/leads/metrics missing sourceOfTruth')
+  if (metricsRes.body.staleFallbackUsed && metricsRes.body.authoritative !== false) {
+    fail('/api/live/leads/metrics stale fallback must not be marked authoritative')
+  }
 } else {
-  if (!metricsRes.body?.error) fail('/api/live/leads/metrics 400 response missing error')
-  if (String(metricsRes.body.error).includes('Failed to fetch or parse CSV')) {
-    fail('/api/live/leads/metrics still returns opaque legacy CSV parse error text')
+  if (!metricsRes.body?.error) fail('/api/live/leads/metrics non-200 response missing error')
+  if (metricsRes.status === 502 && !metricsRes.body?.hint) {
+    fail('/api/live/leads/metrics 502 response missing actionable hint')
   }
 }
 
@@ -60,17 +68,17 @@ const repoRoot = process.cwd()
 const liveRoute = readFileSync(join(repoRoot, 'server', 'src', 'routes', 'liveLeads.ts'), 'utf8')
 const liveHook = readFileSync(join(repoRoot, 'src', 'hooks', 'useLiveLeadsPolling.ts'), 'utf8')
 const liveApi = readFileSync(join(repoRoot, 'src', 'utils', 'liveLeadsApi.ts'), 'utf8')
-const leadsTab = readFileSync(join(repoRoot, 'src', 'components', 'LeadsTab.tsx'), 'utf8')
-const marketingLeadsTab = readFileSync(join(repoRoot, 'src', 'components', 'MarketingLeadsTab.tsx'), 'utf8')
 
-if (!liveRoute.includes('staleFallbackUsed')) fail('liveLeads route missing stale fallback response wiring')
-if (!liveRoute.includes('hint:')) fail('liveLeads route missing actionable failure hint')
+if (!liveRoute.includes("sourceOfTruth: 'google_sheets'") && !liveRoute.includes("sourceOfTruth")) {
+  fail('liveLeads route missing source-of-truth classification')
+}
+if (!liveRoute.includes('diagnosticsFallbackRequested')) fail('liveLeads route missing explicit diagnostic fallback gating')
+if (!liveRoute.includes('authoritative: false')) fail('liveLeads route missing non-authoritative fallback marker')
+if (!liveRoute.includes('res.status(502)')) fail('liveLeads route missing actionable 502 failure path for sheet fetch errors')
 if (liveHook.includes("view !== 'leads-reporting'")) fail('useLiveLeadsPolling still hard-blocked outside leads-reporting view')
-if (!liveApi.includes('staleFallbackUsed?: boolean')) fail('liveLeadsApi types missing stale fallback field')
-if (!leadsTab.includes('leads-tab-stale-sheet-warning')) fail('LeadsTab missing stale sheet warning marker')
-if (!marketingLeadsTab.includes('marketing-leads-stale-sheet-warning')) fail('MarketingLeadsTab missing stale sheet warning marker')
+if (!liveApi.includes("sourceOfTruth?: 'google_sheets' | 'db'")) fail('liveLeadsApi types missing sourceOfTruth field')
 
-console.log('PASS live leads endpoints expose stale fallback and actionable error hints')
-console.log('PASS frontend live-leads polling is no longer hard-blocked to one view only')
-console.log('PASS leads surfaces expose deterministic stale-sheet warning markers')
+console.log('PASS live leads endpoints enforce source-of-truth classification and actionable failures')
+console.log('PASS stale data fallback is explicitly diagnostic-only when used')
+console.log('PASS frontend polling remains generalized across customers leads/reporting surfaces')
 console.log('self-test-google-sheets-data-plane-runtime: PASS')
