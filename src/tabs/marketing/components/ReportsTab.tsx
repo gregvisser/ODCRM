@@ -186,9 +186,9 @@ const ReportsTab: React.FC = () => {
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Outreach Operations Reports</Heading>
+                  <Heading size="md">Reports: Recent Outreach Results</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
-                    Use this tab to review recent outcomes, then jump to Sequences or Inbox for follow-up.
+                    Review recent outcomes here, then jump to Sequences or Inbox for follow-up.
                   </Text>
                 </VStack>
                 <HStack>
@@ -263,7 +263,7 @@ const ReportsTab: React.FC = () => {
             <CardHeader><Heading size="sm">Operator Follow-Up</Heading></CardHeader>
             <CardBody>
               <Text fontSize="sm" color="gray.600" mb={3}>
-                If failures, skips, or mismatches are rising, open Sequences for inspection/remediation or Inbox for reply handling.
+                If failures, skips, or mismatches are rising, open Sequences for remediation or Inbox for reply handling.
               </Text>
               <HStack flexWrap="wrap">
                 <Button size="sm" variant="outline" data-testid="reports-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'run-history-panel')}>

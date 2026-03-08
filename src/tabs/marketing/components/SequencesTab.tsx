@@ -3220,7 +3220,7 @@ const SequencesTab: React.FC = () => {
             Create and manage multi-step outreach sequences from lead snapshots
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Use this workspace for inspect, act, and verify. Start from Readiness, then return there or to Reports after changes.
+            Use this workspace to inspect, act, and verify. Start from Readiness, then return there or to Reports after changes.
           </Text>
           {activeFocusPanel ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
