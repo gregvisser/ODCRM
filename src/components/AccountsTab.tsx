@@ -342,7 +342,6 @@ const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = OdcrmStorageKeys.accountsLastUpdated
 const STORAGE_KEY_SECTORS = OdcrmStorageKeys.sectors
 const STORAGE_KEY_TARGET_LOCATIONS = OdcrmStorageKeys.targetLocations
 const STORAGE_KEY_DELETED_ACCOUNTS = OdcrmStorageKeys.deletedAccounts
-const STORAGE_KEY_GOOGLE_SHEETS_CLEARED = 'odcrm_accounts_google_sheets_cleared_v1'
 
 // Load deleted contacts from storage
 function loadDeletedContactsFromStorage(): Set<string> {
@@ -653,9 +652,20 @@ export function loadAccountsFromStorage(): Account[] {
   const parsed = getJson<Account[]>(STORAGE_KEY_ACCOUNTS)
   if (parsed && Array.isArray(parsed)) {
     console.log('✅ Loaded accounts from storage:', parsed.length)
-    return parsed
+    return parsed.filter(isValidAccount)
   }
   return []
+}
+
+function isValidAccount(account: unknown): account is Account {
+  if (!account || typeof account !== 'object') return false
+  const value = account as Partial<Account>
+  return typeof value.name === 'string' && value.name.trim().length > 0
+}
+
+function sanitizeAccountsList(accounts: unknown): Account[] {
+  if (!Array.isArray(accounts)) return []
+  return accounts.filter(isValidAccount)
 }
 
 function loadLatestAccountsBackup(): Account[] | null {
@@ -3583,7 +3593,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       return []
     }
     console.log('[AccountsTab] Initializing from DB accounts:', dbAccounts.length)
-    return dbAccounts
+    return sanitizeAccountsList(dbAccounts)
   })
   
   // Sync accountsData when dbAccounts prop changes (DB refresh)
@@ -3593,25 +3603,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       return
     }
     console.log('[AccountsTab] DB accounts updated, syncing:', dbAccounts.length)
-    setAccountsData(dbAccounts)
+    setAccountsData(sanitizeAccountsList(dbAccounts))
   }, [dbAccounts])
-
-  useEffect(() => {
-    if (!isStorageAvailable()) return
-    if (!accountsData || accountsData.length === 0) return
-    if (getItem(STORAGE_KEY_GOOGLE_SHEETS_CLEARED)) return
-
-    const hasSheets = accountsData.some((account) => Boolean(account.clientLeadsSheetUrl))
-    setItem(STORAGE_KEY_GOOGLE_SHEETS_CLEARED, 'true')
-    if (!hasSheets) return
-
-    const cleared = (accountsData ?? []).map((account) =>
-      account.clientLeadsSheetUrl ? { ...account, clientLeadsSheetUrl: '' } : account,
-    )
-    setAccountsData(cleared)
-    saveAccountsToStorage(cleared)
-    emit('accountsUpdated', cleared)
-  }, [accountsData])
 
   // DISABLED: Auto-backup and autosave effect
   // This was causing localStorage write storms and backup key proliferation.
@@ -3620,6 +3613,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const accountsLastSavedJsonRef = useRef<string>('')
 
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY_ACCOUNTS && e.key !== STORAGE_KEY_ACCOUNTS_LAST_UPDATED) return
       if (!hasHydratedFromServerRef.current) return
@@ -3629,13 +3623,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       const loaded = loadAccountsFromStorage()
       if (loaded && Array.isArray(loaded) && loaded.length > 0) {
         const deletedAccountsSet = loadDeletedAccountsFromStorage()
-        setAccountsData(loaded.filter(acc => !deletedAccountsSet.has(acc.name)))
+        setAccountsData(loaded.filter((acc) => !deletedAccountsSet.has(acc.name)))
       }
     }
 
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [isServerSourceOfTruth])
 
   useEffect(() => {
     latestAccountsRef.current = accountsData
@@ -5118,7 +5112,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         </HStack>
       </HStack>
 
-      {accountsData.some((account) => account.sheetMetricsUnavailable) && (
+      {accountsData.some((account) => Boolean(account?.sheetMetricsUnavailable)) && (
         <Alert status="warning" borderRadius="md" mb={4}>
           <AlertIcon />
           <AlertDescription fontSize="sm">
