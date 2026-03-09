@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
+import { syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
@@ -25,6 +26,60 @@ type SyncMeta = {
   lastOutboundSyncAt: string | null
   lastError: string | null
   rowCount: number
+}
+
+type LeadResponse = {
+  id: string
+  customerId: string
+  occurredAt: string | null
+  source: string | null
+  owner: string | null
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  company: string | null
+  jobTitle: string | null
+  location: string | null
+  status: string | null
+  notes: string | null
+  syncStatus: string | null
+  createdAt: string
+}
+
+function mapLeadResponse(lead: {
+  id: string
+  customerId: string
+  occurredAt: Date | null
+  source: string | null
+  owner: string | null
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  company: string | null
+  jobTitle: string | null
+  location: string | null
+  status: string | null
+  notes: string | null
+  syncStatus: string | null
+  createdAt: Date
+}): LeadResponse {
+  return {
+    id: lead.id,
+    customerId: lead.customerId,
+    occurredAt: lead.occurredAt ? lead.occurredAt.toISOString() : null,
+    source: lead.source,
+    owner: lead.owner,
+    fullName: lead.fullName,
+    email: lead.email,
+    phone: lead.phone,
+    company: lead.company,
+    jobTitle: lead.jobTitle,
+    location: lead.location,
+    status: lead.status,
+    notes: lead.notes,
+    syncStatus: lead.syncStatus,
+    createdAt: lead.createdAt.toISOString(),
+  }
 }
 
 function formatDateInMetricsTz(date: Date): string {
@@ -333,21 +388,86 @@ router.post('/leads', async (req, res) => {
         createdAt: true,
       },
     })
+    let outboundSync = {
+      required: context.sourceOfTruth === 'google_sheets',
+      status: payload.syncStatus,
+      note:
+        context.sourceOfTruth === 'google_sheets'
+          ? 'Saved in ODCRM. Outbound Google Sheets sync is pending.'
+          : 'No outbound sheet sync required for DB-backed client.',
+      error: null as string | null,
+      rowReference: null as string | null,
+      rowNumber: null as number | null,
+    }
+
+    let leadForResponse: LeadResponse = mapLeadResponse(created)
+    if (context.sourceOfTruth === 'google_sheets') {
+      const outbound = await syncManualLeadOutbound({
+        prisma,
+        customerId,
+        leadId: created.id,
+      })
+      outboundSync = {
+        required: true,
+        status: outbound.status,
+        note: outbound.note,
+        error: outbound.error,
+        rowReference: outbound.rowReference,
+        rowNumber: outbound.rowNumber,
+      }
+      leadForResponse = outbound.lead
+    }
 
     return res.status(201).json({
-      lead: created,
+      lead: leadForResponse,
       sourceOfTruth: context.sourceOfTruth,
-      outboundSync: {
-        required: context.sourceOfTruth === 'google_sheets',
-        status: payload.syncStatus,
-        note:
-          context.sourceOfTruth === 'google_sheets'
-            ? 'Queued as pending outbound sync for Stage 2B implementation.'
-            : 'No outbound sheet sync required for DB-backed client.',
-      },
+      outboundSync,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to create lead'
+    return res.status(500).json({ error: message })
+  }
+})
+
+/**
+ * POST /api/live/leads/:leadId/retry-outbound
+ * Retry outbound Google Sheets sync for one lead.
+ */
+router.post('/leads/:leadId/retry-outbound', async (req, res) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const context = await getCustomerTruthContext(customerId)
+    if (!context) return res.status(404).json({ error: 'Customer not found' })
+    if (context.sourceOfTruth !== 'google_sheets') {
+      return res.status(400).json({ error: 'Outbound sheet sync retry is only available for sheet-backed clients' })
+    }
+
+    const leadId = String(req.params.leadId || '').trim()
+    if (!leadId) return res.status(400).json({ error: 'Lead id is required' })
+
+    const outbound = await syncManualLeadOutbound({
+      prisma,
+      customerId,
+      leadId,
+      forceRetry: true,
+    })
+
+    return res.json({
+      lead: outbound.lead,
+      sourceOfTruth: context.sourceOfTruth,
+      outboundSync: {
+        required: true,
+        status: outbound.status,
+        note: outbound.note,
+        error: outbound.error,
+        rowReference: outbound.rowReference,
+        rowNumber: outbound.rowNumber,
+      },
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to retry outbound lead sync'
     return res.status(500).json({ error: message })
   }
 })

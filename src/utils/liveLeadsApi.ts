@@ -125,8 +125,13 @@ export type CreateLiveLeadResponse = {
     required: boolean
     status: string
     note: string
+    error?: string | null
+    rowReference?: string | null
+    rowNumber?: number | null
   }
 }
+
+export type RetryLiveLeadOutboundResponse = CreateLiveLeadResponse
 
 export async function getLiveLeads(customerId: string): Promise<LiveLeadsResponse> {
   const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
@@ -157,6 +162,19 @@ export async function createLiveLead(customerId: string, payload: CreateLiveLead
     method: 'POST',
     headers: getCustomerHeaders(customerId),
     body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function retryLiveLeadOutboundSync(customerId: string, leadId: string): Promise<RetryLiveLeadOutboundResponse> {
+  const res = await fetch(`${API_BASE}/api/live/leads/${encodeURIComponent(leadId)}/retry-outbound?customerId=${encodeURIComponent(customerId)}`, {
+    method: 'POST',
+    headers: getCustomerHeaders(customerId),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse

@@ -60,13 +60,17 @@ function getCredentials(): ServiceAccountCredentials {
 /**
  * Create authenticated Google Sheets client
  */
-function getSheetsClient(): sheets_v4.Sheets {
+function getSheetsClient(options?: { writable?: boolean }): sheets_v4.Sheets {
   const credentials = getCredentials()
+
+  const scopes = options?.writable
+    ? ['https://www.googleapis.com/auth/spreadsheets']
+    : ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
   const auth = new google.auth.JWT({
     email: credentials.client_email,
     key: credentials.private_key,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    scopes,
   })
 
   return google.sheets({ version: 'v4', auth })
@@ -93,6 +97,109 @@ export function parseSheetUrl(url: string): { sheetId: string; gid: string | nul
   const gid = gidMatch ? gidMatch[1] : null
 
   return { sheetId, gid }
+}
+
+export interface AppendSheetRowResult {
+  sheetId: string
+  gid: string | null
+  sheetTitle: string
+  updatedRange: string | null
+  rowNumber: number | null
+}
+
+const CANONICAL_FIELD_ALIASES: Record<string, string[]> = {
+  occurredAt: ['date', 'created', 'created_at', 'timestamp', 'lead_date'],
+  fullName: ['name', 'full_name', 'lead_name', 'contact_name'],
+  firstName: ['first_name', 'firstname', 'given_name', 'first'],
+  lastName: ['last_name', 'lastname', 'surname', 'family_name', 'last'],
+  email: ['email', 'email_address', 'contact_email', 'e_mail', 'work_email'],
+  phone: ['phone', 'phone_number', 'mobile', 'telephone', 'cell', 'work_phone'],
+  company: ['company', 'company_name', 'organisation', 'organization', 'account_name', 'business'],
+  jobTitle: ['job_title', 'jobtitle', 'title', 'position', 'role'],
+  location: ['location', 'city', 'state', 'country', 'address'],
+  source: ['source', 'lead_source', 'channel', 'channel_of_lead', 'marketing_channel', 'utm_source'],
+  owner: ['owner', 'od_team_member', 'assigned_to', 'salesperson', 'agent', 'rep', 'team_member'],
+  status: ['status', 'lead_status', 'pipeline_status'],
+  notes: ['notes', 'comments', 'description'],
+  externalId: ['lead_id', 'external_id', 'row_id', 'sheet_row_id', 'id'],
+}
+
+function toCanonicalFieldKey(header: string): keyof typeof CANONICAL_FIELD_ALIASES | null {
+  const normalized = normalizeHeader(header)
+  if (!normalized) return null
+  const match = Object.entries(CANONICAL_FIELD_ALIASES).find(([, aliases]) => aliases.includes(normalized))
+  return (match?.[0] as keyof typeof CANONICAL_FIELD_ALIASES) ?? null
+}
+
+function parseAppendedRowNumber(updatedRange: string | null | undefined): number | null {
+  if (!updatedRange) return null
+  const m = updatedRange.match(/![A-Z]+(\d+):[A-Z]+(\d+)$/i)
+  if (!m) return null
+  const row = Number.parseInt(m[1], 10)
+  return Number.isFinite(row) ? row : null
+}
+
+function toSheetCell(value: unknown): string {
+  if (value == null) return ''
+  return String(value).trim()
+}
+
+/**
+ * Append one canonical lead row to a Google Sheet using its existing header order.
+ * Requires a sheet URL with spreadsheet id (gid optional).
+ */
+export async function appendCanonicalLeadRow(params: {
+  sheetUrl: string
+  canonicalRow: Record<string, unknown>
+}): Promise<AppendSheetRowResult> {
+  const { sheetId, gid } = parseSheetUrl(params.sheetUrl)
+  const sheets = getSheetsClient({ writable: true })
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+  })
+
+  const sheetsList = spreadsheet.data.sheets || []
+  let targetSheet = sheetsList[0]
+  if (gid) {
+    const gidNum = Number.parseInt(gid, 10)
+    const found = sheetsList.find((s) => s.properties?.sheetId === gidNum)
+    if (found) targetSheet = found
+  }
+  const sheetTitle = targetSheet?.properties?.title || 'Sheet1'
+
+  const headersRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `'${sheetTitle}'!1:1`,
+  })
+  const headerRow = (headersRes.data.values?.[0] || []).map((h) => String(h))
+  if (headerRow.length === 0) {
+    throw new Error('Outbound sync requires a header row in the destination sheet')
+  }
+
+  const rowValues = headerRow.map((header) => {
+    const canonicalKey = toCanonicalFieldKey(header)
+    if (!canonicalKey) return ''
+    return toSheetCell(params.canonicalRow[canonicalKey])
+  })
+
+  const appendRes = await sheets.spreadsheets.values.append({
+    spreadsheetId: sheetId,
+    range: `'${sheetTitle}'!A1`,
+    valueInputOption: 'USER_ENTERED',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [rowValues] },
+  })
+
+  const updatedRange = appendRes.data.updates?.updatedRange || null
+  return {
+    sheetId,
+    gid: targetSheet?.properties?.sheetId != null ? String(targetSheet.properties.sheetId) : gid,
+    sheetTitle,
+    updatedRange,
+    rowNumber: parseAppendedRowNumber(updatedRange),
+  }
 }
 
 /**
