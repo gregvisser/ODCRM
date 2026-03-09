@@ -6,7 +6,7 @@ import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
-import MarketingLeadsTab from '../../components/MarketingLeadsTab'
+import LeadsTab from '../../components/LeadsTab'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
@@ -79,10 +79,7 @@ export default function CustomersHomePage({
       id: 'leads-reporting',
       label: 'Leads',
       icon: MdAssessment,
-      content:
-        activeView === 'leads-reporting' ? (
-          <MarketingLeadsTab focusAccountName={focusAccountName} enabled />
-        ) : null,
+      content: activeView === 'leads-reporting' ? <LeadsTab /> : null,
     },
   ], [activeView, focusAccountName])
 
