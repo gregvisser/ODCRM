@@ -107,6 +107,14 @@ export interface AppendSheetRowResult {
   rowNumber: number | null
 }
 
+export interface UpdateSheetRowResult {
+  sheetId: string
+  gid: string | null
+  sheetTitle: string
+  updatedRange: string | null
+  rowNumber: number
+}
+
 const CANONICAL_FIELD_ALIASES: Record<string, string[]> = {
   occurredAt: ['date', 'created', 'created_at', 'timestamp', 'lead_date'],
   fullName: ['name', 'full_name', 'lead_name', 'contact_name'],
@@ -142,6 +150,17 @@ function parseAppendedRowNumber(updatedRange: string | null | undefined): number
 function toSheetCell(value: unknown): string {
   if (value == null) return ''
   return String(value).trim()
+}
+
+function toColumnName(index1Based: number): string {
+  let n = index1Based
+  let out = ''
+  while (n > 0) {
+    const rem = (n - 1) % 26
+    out = String.fromCharCode(65 + rem) + out
+    n = Math.floor((n - 1) / 26)
+  }
+  return out || 'A'
 }
 
 /**
@@ -199,6 +218,72 @@ export async function appendCanonicalLeadRow(params: {
     sheetTitle,
     updatedRange,
     rowNumber: parseAppendedRowNumber(updatedRange),
+  }
+}
+
+/**
+ * Update one canonical lead row at a known row number.
+ * This is strict row-targeted update and does not append.
+ */
+export async function updateCanonicalLeadRow(params: {
+  sheetUrl: string
+  rowNumber: number
+  gid?: string | null
+  canonicalRow: Record<string, unknown>
+}): Promise<UpdateSheetRowResult> {
+  if (!Number.isFinite(params.rowNumber) || params.rowNumber < 2) {
+    throw new Error('Outbound edit sync requires a valid row number >= 2')
+  }
+
+  const parsed = parseSheetUrl(params.sheetUrl)
+  const sheetId = parsed.sheetId
+  const requestedGid = params.gid ?? parsed.gid
+  const sheets = getSheetsClient({ writable: true })
+
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId: sheetId,
+    includeGridData: false,
+  })
+
+  const sheetsList = spreadsheet.data.sheets || []
+  let targetSheet = sheetsList[0]
+  if (requestedGid) {
+    const gidNum = Number.parseInt(String(requestedGid), 10)
+    const found = sheetsList.find((s) => s.properties?.sheetId === gidNum)
+    if (found) targetSheet = found
+  }
+  const sheetTitle = targetSheet?.properties?.title || 'Sheet1'
+
+  const headersRes = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: `'${sheetTitle}'!1:1`,
+  })
+  const headerRow = (headersRes.data.values?.[0] || []).map((h) => String(h))
+  if (headerRow.length === 0) {
+    throw new Error('Outbound edit sync requires a header row in the destination sheet')
+  }
+
+  const rowValues = headerRow.map((header) => {
+    const canonicalKey = toCanonicalFieldKey(header)
+    if (!canonicalKey) return ''
+    return toSheetCell(params.canonicalRow[canonicalKey])
+  })
+
+  const lastColumn = toColumnName(Math.max(1, headerRow.length))
+  const range = `'${sheetTitle}'!A${params.rowNumber}:${lastColumn}${params.rowNumber}`
+  const updateRes = await sheets.spreadsheets.values.update({
+    spreadsheetId: sheetId,
+    range,
+    valueInputOption: 'USER_ENTERED',
+    requestBody: { values: [rowValues] },
+  })
+
+  return {
+    sheetId,
+    gid: targetSheet?.properties?.sheetId != null ? String(targetSheet.properties.sheetId) : (requestedGid || null),
+    sheetTitle,
+    updatedRange: updateRes.data.updatedRange || null,
+    rowNumber: params.rowNumber,
   }
 }
 

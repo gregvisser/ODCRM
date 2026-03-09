@@ -1,7 +1,13 @@
 import type { LeadRecord, PrismaClient } from '@prisma/client'
-import { appendCanonicalLeadRow, type AppendSheetRowResult } from './googleSheetsService.js'
+import {
+  appendCanonicalLeadRow,
+  updateCanonicalLeadRow,
+  type AppendSheetRowResult,
+  type UpdateSheetRowResult,
+} from './googleSheetsService.js'
 
 export type LeadSyncStatus = 'pending_outbound' | 'synced' | 'sync_error'
+type PendingOperation = 'create' | 'update' | null
 
 export type OutboundSyncResult = {
   status: LeadSyncStatus
@@ -9,6 +15,7 @@ export type OutboundSyncResult = {
   error: string | null
   rowReference: string | null
   rowNumber: number | null
+  operation: 'create' | 'update'
   lead: {
     id: string
     customerId: string
@@ -34,6 +41,7 @@ const leadSelect = {
   sourceUrl: true,
   sheetGid: true,
   externalId: true,
+  externalRowFingerprint: true,
   occurredAt: true,
   source: true,
   owner: true,
@@ -61,6 +69,7 @@ type LeadForSync = Pick<
   | 'sourceUrl'
   | 'sheetGid'
   | 'externalId'
+  | 'externalRowFingerprint'
   | 'occurredAt'
   | 'source'
   | 'owner'
@@ -113,39 +122,73 @@ export function buildOutboundCanonicalRow(lead: LeadForSync): Record<string, str
   }
 }
 
-function buildRowReference(appendResult: AppendSheetRowResult): string {
-  const row = appendResult.rowNumber != null ? String(appendResult.rowNumber) : 'unknown'
-  const gid = appendResult.gid || 'unknown'
-  return `gsheet:${appendResult.sheetId}:${gid}:${row}`
+function buildRowReference(input: { sheetId: string; gid: string | null; rowNumber: number | null }): string {
+  const row = input.rowNumber != null ? String(input.rowNumber) : 'unknown'
+  const gid = input.gid || 'unknown'
+  return `gsheet:${input.sheetId}:${gid}:${row}`
 }
 
-export async function runOutboundAppend(params: {
-  lead: LeadForSync
-  appendFn?: (input: { sheetUrl: string; canonicalRow: Record<string, unknown> }) => Promise<AppendSheetRowResult>
-  now?: Date
-}): Promise<
-  | { ok: true; now: Date; append: AppendSheetRowResult; rowReference: string }
-  | { ok: false; now: Date; error: string }
-> {
-  const now = params.now ?? new Date()
-  const sheetUrl = clean(params.lead.sourceUrl)
-  if (!sheetUrl) {
-    return { ok: false, now, error: 'Sheet-backed customer has no leadsReportingUrl configured' }
-  }
+export function parseRowReference(rowReference: string | null | undefined): { sheetId: string; gid: string; rowNumber: number } | null {
+  const text = clean(rowReference)
+  if (!text) return null
+  const m = text.match(/^gsheet:([^:]+):([^:]+):(\d+)$/)
+  if (!m) return null
+  const rowNumber = Number.parseInt(m[3], 10)
+  if (!Number.isFinite(rowNumber) || rowNumber < 2) return null
+  return { sheetId: m[1], gid: m[2], rowNumber }
+}
 
-  try {
-    const append = await (params.appendFn ?? appendCanonicalLeadRow)({
-      sheetUrl,
-      canonicalRow: buildOutboundCanonicalRow(params.lead),
-    })
-    return { ok: true, now, append, rowReference: buildRowReference(append) }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Outbound Google Sheets sync failed'
-    return { ok: false, now, error: message }
+function getSyncStateObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const base = value as Record<string, unknown>
+  const sync = base.sync
+  if (!sync || typeof sync !== 'object') return {}
+  return sync as Record<string, unknown>
+}
+
+function getPendingOperationFromLead(lead: LeadForSync): PendingOperation {
+  const sync = getSyncStateObject(lead.normalizedData)
+  const pendingOperation = clean(sync.pendingOperation)
+  if (pendingOperation === 'update') return 'update'
+  if (pendingOperation === 'create') return 'create'
+  return null
+}
+
+function buildNormalizedDataWithSync(lead: LeadForSync, syncPatch: Record<string, unknown>): Record<string, unknown> {
+  const normalized =
+    typeof lead.normalizedData === 'object' && lead.normalizedData != null
+      ? (lead.normalizedData as Record<string, unknown>)
+      : {}
+  const currentSync = getSyncStateObject(normalized)
+  return {
+    ...normalized,
+    sync: {
+      ...currentSync,
+      ...syncPatch,
+    },
   }
 }
 
-function mapLeadResponse(lead: Pick<LeadForSync, 'id' | 'customerId' | 'occurredAt' | 'source' | 'owner' | 'fullName' | 'email' | 'phone' | 'company' | 'jobTitle' | 'location' | 'status' | 'notes' | 'syncStatus' | 'createdAt'>) {
+function mapLeadResponse(
+  lead: Pick<
+    LeadForSync,
+    | 'id'
+    | 'customerId'
+    | 'occurredAt'
+    | 'source'
+    | 'owner'
+    | 'fullName'
+    | 'email'
+    | 'phone'
+    | 'company'
+    | 'jobTitle'
+    | 'location'
+    | 'status'
+    | 'notes'
+    | 'syncStatus'
+    | 'createdAt'
+  >
+) {
   return {
     id: lead.id,
     customerId: lead.customerId,
@@ -172,6 +215,130 @@ async function loadLeadForSync(prisma: PrismaClient, customerId: string, leadId:
   }) as Promise<LeadForSync | null>
 }
 
+async function updateLeadSyncState(params: {
+  prisma: PrismaClient
+  customerId: string
+  now: Date
+  success: boolean
+  error?: string | null
+}) {
+  if (params.success) {
+    await params.prisma.leadSyncState.upsert({
+      where: { customerId: params.customerId },
+      create: {
+        customerId: params.customerId,
+        lastSyncAt: params.now,
+        lastSuccessAt: params.now,
+        lastOutboundSyncAt: params.now,
+        lastError: null,
+        syncStatus: 'success',
+      },
+      update: {
+        lastSyncAt: params.now,
+        lastSuccessAt: params.now,
+        lastOutboundSyncAt: params.now,
+        lastError: null,
+        syncStatus: 'success',
+      },
+    })
+    return
+  }
+
+  await params.prisma.leadSyncState.upsert({
+    where: { customerId: params.customerId },
+    create: {
+      customerId: params.customerId,
+      lastSyncAt: params.now,
+      lastError: params.error || 'Outbound lead sync failed',
+      syncStatus: 'error',
+    },
+    update: {
+      lastSyncAt: params.now,
+      lastError: params.error || 'Outbound lead sync failed',
+      syncStatus: 'error',
+    },
+  })
+}
+
+export async function runOutboundAppend(params: {
+  lead: LeadForSync
+  appendFn?: (input: { sheetUrl: string; canonicalRow: Record<string, unknown> }) => Promise<AppendSheetRowResult>
+  now?: Date
+}): Promise<
+  | { ok: true; now: Date; append: AppendSheetRowResult; rowReference: string }
+  | { ok: false; now: Date; error: string }
+> {
+  const now = params.now ?? new Date()
+  const sheetUrl = clean(params.lead.sourceUrl)
+  if (!sheetUrl) {
+    return { ok: false, now, error: 'Sheet-backed customer has no leadsReportingUrl configured' }
+  }
+
+  try {
+    const append = await (params.appendFn ?? appendCanonicalLeadRow)({
+      sheetUrl,
+      canonicalRow: buildOutboundCanonicalRow(params.lead),
+    })
+    return {
+      ok: true,
+      now,
+      append,
+      rowReference: buildRowReference({ sheetId: append.sheetId, gid: append.gid, rowNumber: append.rowNumber }),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Outbound Google Sheets sync failed'
+    return { ok: false, now, error: message }
+  }
+}
+
+export async function runOutboundUpdate(params: {
+  lead: LeadForSync
+  rowReference?: string | null
+  updateFn?: (input: {
+    sheetUrl: string
+    rowNumber: number
+    gid?: string | null
+    canonicalRow: Record<string, unknown>
+  }) => Promise<UpdateSheetRowResult>
+  now?: Date
+}): Promise<
+  | { ok: true; now: Date; update: UpdateSheetRowResult; rowReference: string }
+  | { ok: false; now: Date; error: string }
+> {
+  const now = params.now ?? new Date()
+  const sheetUrl = clean(params.lead.sourceUrl)
+  if (!sheetUrl) {
+    return { ok: false, now, error: 'Sheet-backed customer has no leadsReportingUrl configured' }
+  }
+
+  const parsedRowRef = parseRowReference(params.rowReference ?? params.lead.externalRowFingerprint)
+  if (!parsedRowRef) {
+    return {
+      ok: false,
+      now,
+      error: 'Outbound edit sync requires row linkage. Re-import leads or resync create before editing.',
+    }
+  }
+
+  try {
+    const update = await (params.updateFn ?? updateCanonicalLeadRow)({
+      sheetUrl,
+      gid: parsedRowRef.gid,
+      rowNumber: parsedRowRef.rowNumber,
+      canonicalRow: buildOutboundCanonicalRow(params.lead),
+    })
+    return {
+      ok: true,
+      now,
+      update,
+      rowReference: buildRowReference({ sheetId: update.sheetId, gid: update.gid, rowNumber: update.rowNumber }),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Outbound Google Sheets row update failed'
+    return { ok: false, now, error: message }
+  }
+}
+
 export async function syncManualLeadOutbound(params: {
   prisma: PrismaClient
   customerId: string
@@ -182,23 +349,14 @@ export async function syncManualLeadOutbound(params: {
   const lead = await loadLeadForSync(params.prisma, params.customerId, params.leadId)
   if (!lead) throw new Error('Lead not found for customer')
 
-  if (!params.forceRetry && lead.syncStatus === 'synced' && lead.lastOutboundSyncAt) {
+  if (lead.syncStatus === 'synced' && lead.lastOutboundSyncAt) {
     return {
       status: 'synced',
       note: 'Lead is already synced to Google Sheets.',
       error: null,
-      rowReference: null,
-      rowNumber: null,
-      lead: mapLeadResponse(lead),
-    }
-  }
-  if (params.forceRetry && lead.syncStatus === 'synced' && lead.lastOutboundSyncAt) {
-    return {
-      status: 'synced',
-      note: 'Lead is already synced to Google Sheets.',
-      error: null,
-      rowReference: null,
-      rowNumber: null,
+      rowReference: lead.externalRowFingerprint || null,
+      rowNumber: parseRowReference(lead.externalRowFingerprint)?.rowNumber || null,
+      operation: 'create',
       lead: mapLeadResponse(lead),
     }
   }
@@ -209,21 +367,19 @@ export async function syncManualLeadOutbound(params: {
   })
 
   if (attempt.ok === false) {
-    const attemptError = attempt.error
     const failed = await params.prisma.leadRecord.update({
       where: { id: lead.id },
       data: {
         syncStatus: 'sync_error',
-        syncError: attemptError,
-        normalizedData: {
-          ...(typeof lead.normalizedData === 'object' && lead.normalizedData != null ? (lead.normalizedData as Record<string, unknown>) : {}),
-          sync: {
-            sourceType: 'odcrm_manual',
-            outboundAt: null,
-            status: 'sync_error',
-            error: attemptError,
-          },
-        },
+        syncError: attempt.error,
+        normalizedData: buildNormalizedDataWithSync(lead, {
+          sourceType: 'odcrm_manual',
+          pendingOperation: 'create',
+          lastOperation: 'create',
+          outboundAt: null,
+          status: 'sync_error',
+          error: attempt.error,
+        }) as any,
       },
       select: {
         id: true,
@@ -243,26 +399,20 @@ export async function syncManualLeadOutbound(params: {
         createdAt: true,
       },
     })
-    await params.prisma.leadSyncState.upsert({
-      where: { customerId: params.customerId },
-        create: {
-          customerId: params.customerId,
-          lastSyncAt: attempt.now,
-          lastError: attemptError,
-          syncStatus: 'error',
-        },
-        update: {
-          lastSyncAt: attempt.now,
-          lastError: attemptError,
-          syncStatus: 'error',
-        },
-      })
+    await updateLeadSyncState({
+      prisma: params.prisma,
+      customerId: params.customerId,
+      now: attempt.now,
+      success: false,
+      error: attempt.error,
+    })
     return {
       status: 'sync_error',
       note: 'Lead saved in ODCRM, but outbound Google Sheets sync failed.',
-      error: attemptError,
+      error: attempt.error,
       rowReference: null,
       rowNumber: null,
+      operation: 'create',
       lead: mapLeadResponse(failed),
     }
   }
@@ -275,16 +425,15 @@ export async function syncManualLeadOutbound(params: {
       lastOutboundSyncAt: attempt.now,
       externalRowFingerprint: attempt.rowReference,
       sheetGid: attempt.append.gid || lead.sheetGid,
-      normalizedData: {
-        ...(typeof lead.normalizedData === 'object' && lead.normalizedData != null ? (lead.normalizedData as Record<string, unknown>) : {}),
-        sync: {
-          sourceType: 'odcrm_manual',
-          outboundAt: attempt.now.toISOString(),
-          status: 'synced',
-          error: null,
-          sheetRowReference: attempt.rowReference,
-        },
-      },
+      normalizedData: buildNormalizedDataWithSync(lead, {
+        sourceType: 'odcrm_manual',
+        pendingOperation: null,
+        lastOperation: 'create',
+        outboundAt: attempt.now.toISOString(),
+        status: 'synced',
+        error: null,
+        sheetRowReference: attempt.rowReference,
+      }) as any,
     },
     select: {
       id: true,
@@ -305,23 +454,11 @@ export async function syncManualLeadOutbound(params: {
     },
   })
 
-  await params.prisma.leadSyncState.upsert({
-    where: { customerId: params.customerId },
-    create: {
-      customerId: params.customerId,
-      lastSyncAt: attempt.now,
-      lastSuccessAt: attempt.now,
-      lastOutboundSyncAt: attempt.now,
-      lastError: null,
-      syncStatus: 'success',
-    },
-    update: {
-      lastSyncAt: attempt.now,
-      lastSuccessAt: attempt.now,
-      lastOutboundSyncAt: attempt.now,
-      lastError: null,
-      syncStatus: 'success',
-    },
+  await updateLeadSyncState({
+    prisma: params.prisma,
+    customerId: params.customerId,
+    now: attempt.now,
+    success: true,
   })
 
   return {
@@ -330,6 +467,169 @@ export async function syncManualLeadOutbound(params: {
     error: null,
     rowReference: attempt.rowReference,
     rowNumber: attempt.append.rowNumber,
+    operation: 'create',
     lead: mapLeadResponse(success),
   }
+}
+
+export async function syncManualLeadEditOutbound(params: {
+  prisma: PrismaClient
+  customerId: string
+  leadId: string
+  updateFn?: (input: {
+    sheetUrl: string
+    rowNumber: number
+    gid?: string | null
+    canonicalRow: Record<string, unknown>
+  }) => Promise<UpdateSheetRowResult>
+}): Promise<OutboundSyncResult> {
+  const lead = await loadLeadForSync(params.prisma, params.customerId, params.leadId)
+  if (!lead) throw new Error('Lead not found for customer')
+
+  const attempt = await runOutboundUpdate({
+    lead,
+    updateFn: params.updateFn,
+  })
+
+  if (attempt.ok === false) {
+    const failed = await params.prisma.leadRecord.update({
+      where: { id: lead.id },
+      data: {
+        syncStatus: 'sync_error',
+        syncError: attempt.error,
+        normalizedData: buildNormalizedDataWithSync(lead, {
+          sourceType: 'odcrm_manual',
+          pendingOperation: 'update',
+          lastOperation: 'update',
+          outboundAt: null,
+          status: 'sync_error',
+          error: attempt.error,
+        }) as any,
+      },
+      select: {
+        id: true,
+        customerId: true,
+        occurredAt: true,
+        source: true,
+        owner: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        company: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        syncStatus: true,
+        createdAt: true,
+      },
+    })
+    await updateLeadSyncState({
+      prisma: params.prisma,
+      customerId: params.customerId,
+      now: attempt.now,
+      success: false,
+      error: attempt.error,
+    })
+    return {
+      status: 'sync_error',
+      note: 'Lead updated in ODCRM, but outbound Google Sheets row update failed.',
+      error: attempt.error,
+      rowReference: lead.externalRowFingerprint || null,
+      rowNumber: parseRowReference(lead.externalRowFingerprint)?.rowNumber || null,
+      operation: 'update',
+      lead: mapLeadResponse(failed),
+    }
+  }
+
+  const success = await params.prisma.leadRecord.update({
+    where: { id: lead.id },
+    data: {
+      syncStatus: 'synced',
+      syncError: null,
+      lastOutboundSyncAt: attempt.now,
+      externalRowFingerprint: attempt.rowReference,
+      sheetGid: attempt.update.gid || lead.sheetGid,
+      normalizedData: buildNormalizedDataWithSync(lead, {
+        sourceType: 'odcrm_manual',
+        pendingOperation: null,
+        lastOperation: 'update',
+        outboundAt: attempt.now.toISOString(),
+        status: 'synced',
+        error: null,
+        sheetRowReference: attempt.rowReference,
+      }) as any,
+    },
+    select: {
+      id: true,
+      customerId: true,
+      occurredAt: true,
+      source: true,
+      owner: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      company: true,
+      jobTitle: true,
+      location: true,
+      status: true,
+      notes: true,
+      syncStatus: true,
+      createdAt: true,
+    },
+  })
+
+  await updateLeadSyncState({
+    prisma: params.prisma,
+    customerId: params.customerId,
+    now: attempt.now,
+    success: true,
+  })
+
+  return {
+    status: 'synced',
+    note: 'Lead update synced to Google Sheets.',
+    error: null,
+    rowReference: attempt.rowReference,
+    rowNumber: attempt.update.rowNumber,
+    operation: 'update',
+    lead: mapLeadResponse(success),
+  }
+}
+
+export async function retryLeadOutboundSync(params: {
+  prisma: PrismaClient
+  customerId: string
+  leadId: string
+  appendFn?: (input: { sheetUrl: string; canonicalRow: Record<string, unknown> }) => Promise<AppendSheetRowResult>
+  updateFn?: (input: {
+    sheetUrl: string
+    rowNumber: number
+    gid?: string | null
+    canonicalRow: Record<string, unknown>
+  }) => Promise<UpdateSheetRowResult>
+}): Promise<OutboundSyncResult> {
+  const lead = await loadLeadForSync(params.prisma, params.customerId, params.leadId)
+  if (!lead) throw new Error('Lead not found for customer')
+
+  const hasRowLinkage = parseRowReference(lead.externalRowFingerprint) != null
+  const pendingOperation = getPendingOperationFromLead(lead)
+  const operation: 'create' | 'update' = pendingOperation === 'update' || hasRowLinkage ? 'update' : 'create'
+
+  if (operation === 'update') {
+    return syncManualLeadEditOutbound({
+      prisma: params.prisma,
+      customerId: params.customerId,
+      leadId: params.leadId,
+      updateFn: params.updateFn,
+    })
+  }
+
+  return syncManualLeadOutbound({
+    prisma: params.prisma,
+    customerId: params.customerId,
+    leadId: params.leadId,
+    forceRetry: true,
+    appendFn: params.appendFn,
+  })
 }

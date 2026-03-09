@@ -7,6 +7,7 @@ const lead = {
   sourceUrl: 'https://docs.google.com/spreadsheets/d/testSheetId/edit#gid=0',
   sheetGid: '0',
   externalId: 'odcrm_manual:cust_sheet:2026-03-09T10:00:00.000Z:abcd1234',
+  externalRowFingerprint: null,
   occurredAt: new Date('2026-03-09T00:00:00.000Z'),
   source: 'linkedin',
   owner: 'Alex',
