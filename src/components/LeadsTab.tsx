@@ -63,10 +63,18 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
   return rows.map((row, i) => {
     const lead: Lead = {
       ...row.raw,
-      id: `live-${i}`,
+      id: row.id || `live-${i}`,
       accountName,
       source: row.source ?? undefined,
       owner: row.owner ?? undefined,
+      Name: row.fullName ?? row.name ?? undefined,
+      Email: row.email ?? undefined,
+      Phone: row.phone ?? undefined,
+      Company: row.company ?? undefined,
+      'Job Title': row.jobTitle ?? undefined,
+      Location: row.location ?? undefined,
+      Status: row.status ?? undefined,
+      Notes: row.notes ?? undefined,
       Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
     }
     return lead
@@ -84,6 +92,7 @@ function LeadsTab() {
   const lastRefresh = lastUpdatedAt ?? new Date()
   const liveWarning = liveData?.warning ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null
+  const apiDisplayColumns = liveData?.displayColumns ?? []
 
   const [filters, setFilters] = useState({
     account: '',
@@ -437,15 +446,19 @@ function LeadsTab() {
     'Score',
   ]
 
-  // Get all unique column headers; ensure Channel/Owner from API (source/owner) are included
+  // Use backend-provided visible columns when available; fallback to local derivation.
   const allColumns = new Set<string>()
-  leads.forEach((lead) => {
-    Object.keys(lead).forEach((key) => {
-      if (key !== 'accountName') allColumns.add(key)
+  if (apiDisplayColumns.length > 0) {
+    apiDisplayColumns.forEach((col) => allColumns.add(col))
+  } else {
+    leads.forEach((lead) => {
+      Object.keys(lead).forEach((key) => {
+        if (key !== 'accountName') allColumns.add(key)
+      })
+      if (lead.source != null || lead['Channel of Lead'] != null || lead['Channel'] != null) allColumns.add('Channel')
+      if (lead.owner != null || lead['OD Team Member'] != null || lead['Owner'] != null) allColumns.add('Owner')
     })
-    if (lead.source != null || lead['Channel of Lead'] != null || lead['Channel'] != null) allColumns.add('Channel')
-    if (lead.owner != null || lead['OD Team Member'] != null || lead['Owner'] != null) allColumns.add('Owner')
-  })
+  }
 
   // Build columns array: specified order first, then any remaining columns
   const orderedColumns: string[] = []
@@ -466,7 +479,10 @@ function LeadsTab() {
   const columns = [...orderedColumns, ...remainingColumns.sort()]
   
   // Filter columns based on visibility
-  const displayedColumns = columns.filter(col => visibleColumns.has(col))
+  const displayedColumns = (() => {
+    const selected = columns.filter(col => visibleColumns.has(col))
+    return selected.length > 0 ? selected : columns
+  })()
   
   // Toggle column visibility
   const toggleColumnVisibility = (column: string) => {

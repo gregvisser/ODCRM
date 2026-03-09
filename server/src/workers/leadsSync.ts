@@ -1,6 +1,7 @@
 import cron from 'node-cron'
 import crypto from 'crypto'
 import type { PrismaClient } from '@prisma/client'
+import { buildExternalRowFingerprint, extractCanonicalLeadRecord } from '../services/leadCanonicalMapping.js'
 
 type LeadRow = {
   [key: string]: string
@@ -745,6 +746,63 @@ function getOwner(lead: LeadRow): string | null {
   return null
 }
 
+function buildNormalizedSyncPayload(lead: LeadRow, customerId: string, sheetGid: string | null | undefined, externalId: string | null, syncAt: Date) {
+  const raw = Object.entries(lead).reduce<Record<string, string>>((acc, [key, value]) => {
+    if (key !== '__rowIndex') {
+      acc[key] = String(value ?? '')
+    }
+    return acc
+  }, {})
+  const canonical = extractCanonicalLeadRecord(raw)
+  const rowIndex = typeof (lead as { __rowIndex?: number }).__rowIndex === 'number'
+    ? (lead as { __rowIndex?: number }).__rowIndex
+    : null
+  const fingerprint = buildExternalRowFingerprint({
+    customerId,
+    sourceType: 'google_sheets',
+    sheetGid: sheetGid ?? null,
+    rowIndex,
+    raw,
+    externalId,
+  })
+
+  return {
+    canonical,
+    fingerprint,
+    raw,
+    normalizedData: {
+      canonical: {
+        ...canonical,
+        occurredAt: canonical.occurredAt ? canonical.occurredAt.toISOString() : null,
+      },
+      requiredFields: {
+        occurredAt: canonical.occurredAt ? canonical.occurredAt.toISOString() : null,
+        source: canonical.source,
+        owner: canonical.owner,
+      },
+      optionalFields: {
+        externalId: canonical.externalId,
+        firstName: canonical.firstName,
+        lastName: canonical.lastName,
+        fullName: canonical.fullName,
+        email: canonical.email,
+        phone: canonical.phone,
+        company: canonical.company,
+        jobTitle: canonical.jobTitle,
+        location: canonical.location,
+        status: canonical.status,
+        notes: canonical.notes,
+      },
+      sync: {
+        sourceType: 'google_sheets',
+        inboundAt: syncAt.toISOString(),
+        outboundAt: null,
+        status: 'synced',
+      },
+    },
+  }
+}
+
 function isUnknownFieldError (err: unknown, field: string): boolean {
   const msg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
     ? (err as any).message
@@ -1123,6 +1181,7 @@ async function syncCustomerLeads(
           const recordsToProcess = leads.map((lead) => {
             const stableId = generateStableLeadId(lead, customer.id)
             const externalId = getExternalId(lead, customer.id, gidUsed)
+            const normalized = buildNormalizedSyncPayload(lead, customer.id, gidUsed, externalId, syncStartedAt)
             return {
               id: stableId,
               customerId: customer.id,
@@ -1131,9 +1190,24 @@ async function syncCustomerLeads(
               sourceUrl: sheetUrl,
               sheetGid: gidUsed,
               externalId,
-              occurredAt: getOccurredAt(lead),
-              source: getSource(lead),
-              owner: getOwner(lead),
+              occurredAt: normalized.canonical.occurredAt ?? getOccurredAt(lead),
+              source: normalized.canonical.source ?? getSource(lead),
+              owner: normalized.canonical.owner ?? getOwner(lead),
+              normalizedData: normalized.normalizedData,
+              externalSourceType: 'google_sheets' as const,
+              externalRowFingerprint: normalized.fingerprint,
+              firstName: normalized.canonical.firstName,
+              lastName: normalized.canonical.lastName,
+              fullName: normalized.canonical.fullName,
+              email: normalized.canonical.email,
+              phone: normalized.canonical.phone,
+              company: normalized.canonical.company,
+              jobTitle: normalized.canonical.jobTitle,
+              location: normalized.canonical.location,
+              notes: normalized.canonical.notes,
+              syncStatus: 'synced' as const,
+              syncError: null,
+              lastInboundSyncAt: syncStartedAt,
             }
           })
 
@@ -1164,6 +1238,21 @@ async function syncCustomerLeads(
                     occurredAt: record.occurredAt,
                     source: record.source,
                     owner: record.owner,
+                    normalizedData: record.normalizedData,
+                    externalSourceType: record.externalSourceType,
+                    externalRowFingerprint: record.externalRowFingerprint,
+                    firstName: record.firstName,
+                    lastName: record.lastName,
+                    fullName: record.fullName,
+                    email: record.email,
+                    phone: record.phone,
+                    company: record.company,
+                    jobTitle: record.jobTitle,
+                    location: record.location,
+                    notes: record.notes,
+                    syncStatus: record.syncStatus,
+                    syncError: record.syncError,
+                    lastInboundSyncAt: record.lastInboundSyncAt,
                   },
                   update: {
                     data: record.data,
@@ -1172,6 +1261,21 @@ async function syncCustomerLeads(
                     occurredAt: record.occurredAt,
                     source: record.source,
                     owner: record.owner,
+                    normalizedData: record.normalizedData,
+                    externalSourceType: record.externalSourceType,
+                    externalRowFingerprint: record.externalRowFingerprint,
+                    firstName: record.firstName,
+                    lastName: record.lastName,
+                    fullName: record.fullName,
+                    email: record.email,
+                    phone: record.phone,
+                    company: record.company,
+                    jobTitle: record.jobTitle,
+                    location: record.location,
+                    notes: record.notes,
+                    syncStatus: record.syncStatus,
+                    syncError: null,
+                    lastInboundSyncAt: record.lastInboundSyncAt,
                     updatedAt: new Date(),
                   },
                 })
@@ -1190,6 +1294,21 @@ async function syncCustomerLeads(
                         occurredAt: record.occurredAt,
                         source: record.source,
                         owner: record.owner,
+                        normalizedData: record.normalizedData,
+                        externalSourceType: record.externalSourceType,
+                        externalRowFingerprint: record.externalRowFingerprint,
+                        firstName: record.firstName,
+                        lastName: record.lastName,
+                        fullName: record.fullName,
+                        email: record.email,
+                        phone: record.phone,
+                        company: record.company,
+                        jobTitle: record.jobTitle,
+                        location: record.location,
+                        notes: record.notes,
+                        syncStatus: record.syncStatus,
+                        syncError: null,
+                        lastInboundSyncAt: record.lastInboundSyncAt,
                         updatedAt: new Date(),
                       },
                     })
@@ -1224,6 +1343,7 @@ async function syncCustomerLeads(
         } else {
           const recordsToProcess = leads.map((lead) => {
             const stableId = generateStableLeadId(lead, customer.id)
+            const normalized = buildNormalizedSyncPayload(lead, customer.id, gidUsed, null, syncStartedAt)
             return {
               id: stableId,
               customerId: customer.id,
@@ -1231,6 +1351,24 @@ async function syncCustomerLeads(
               data: lead,
               sourceUrl: sheetUrl,
               sheetGid: gidUsed,
+              occurredAt: normalized.canonical.occurredAt ?? getOccurredAt(lead),
+              source: normalized.canonical.source ?? getSource(lead),
+              owner: normalized.canonical.owner ?? getOwner(lead),
+              normalizedData: normalized.normalizedData,
+              externalSourceType: 'google_sheets' as const,
+              externalRowFingerprint: normalized.fingerprint,
+              firstName: normalized.canonical.firstName,
+              lastName: normalized.canonical.lastName,
+              fullName: normalized.canonical.fullName,
+              email: normalized.canonical.email,
+              phone: normalized.canonical.phone,
+              company: normalized.canonical.company,
+              jobTitle: normalized.canonical.jobTitle,
+              location: normalized.canonical.location,
+              notes: normalized.canonical.notes,
+              syncStatus: 'synced' as const,
+              syncError: null,
+              lastInboundSyncAt: syncStartedAt,
             }
           })
 
@@ -1256,11 +1394,47 @@ async function syncCustomerLeads(
                     data: record.data,
                     sourceUrl: record.sourceUrl,
                     sheetGid: record.sheetGid,
+                    occurredAt: record.occurredAt,
+                    source: record.source,
+                    owner: record.owner,
+                    normalizedData: record.normalizedData,
+                    externalSourceType: record.externalSourceType,
+                    externalRowFingerprint: record.externalRowFingerprint,
+                    firstName: record.firstName,
+                    lastName: record.lastName,
+                    fullName: record.fullName,
+                    email: record.email,
+                    phone: record.phone,
+                    company: record.company,
+                    jobTitle: record.jobTitle,
+                    location: record.location,
+                    notes: record.notes,
+                    syncStatus: record.syncStatus,
+                    syncError: record.syncError,
+                    lastInboundSyncAt: record.lastInboundSyncAt,
                   },
                   update: {
                     data: record.data,
                     sourceUrl: record.sourceUrl,
                     sheetGid: record.sheetGid,
+                    occurredAt: record.occurredAt,
+                    source: record.source,
+                    owner: record.owner,
+                    normalizedData: record.normalizedData,
+                    externalSourceType: record.externalSourceType,
+                    externalRowFingerprint: record.externalRowFingerprint,
+                    firstName: record.firstName,
+                    lastName: record.lastName,
+                    fullName: record.fullName,
+                    email: record.email,
+                    phone: record.phone,
+                    company: record.company,
+                    jobTitle: record.jobTitle,
+                    location: record.location,
+                    notes: record.notes,
+                    syncStatus: record.syncStatus,
+                    syncError: null,
+                    lastInboundSyncAt: record.lastInboundSyncAt,
                     updatedAt: new Date(),
                   },
                 })
@@ -1309,7 +1483,9 @@ async function syncCustomerLeads(
           id: `lead_sync_${customer.id}`,
           customerId: customer.id,
           lastSyncAt: syncStartedAt,
+          lastInboundSyncAt: syncStartedAt,
           lastSuccessAt: syncStartedAt,
+          syncStatus: 'success',
           rowCount: leads.length,
           lastChecksum: checksum,
           lastError: fallbackMessage,
@@ -1326,7 +1502,9 @@ async function syncCustomerLeads(
         },
         update: {
           lastSyncAt: syncStartedAt,
+          lastInboundSyncAt: syncStartedAt,
           lastSuccessAt: syncStartedAt,
+          syncStatus: 'success',
           rowCount: leads.length,
           lastChecksum: checksum,
           lastError: fallbackMessage,
@@ -1366,6 +1544,8 @@ async function syncCustomerLeads(
         id: `lead_sync_${customer.id}`,
         customerId: customer.id,
         lastSyncAt: syncStartedAt,
+        lastInboundSyncAt: syncStartedAt,
+        syncStatus: 'error',
         lastError: message,
         isRunning: false,
         progressPercent: 0,
@@ -1375,6 +1555,8 @@ async function syncCustomerLeads(
       },
       update: {
         lastSyncAt: syncStartedAt,
+        lastInboundSyncAt: syncStartedAt,
+        syncStatus: 'error',
         lastError: message,
         isRunning: false,
         progressPercent: 0,
@@ -1437,6 +1619,8 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
       id: `lead_sync_${customerId}`,
       customerId,
       lastSyncAt: now,
+      lastInboundSyncAt: now,
+      syncStatus: 'syncing',
       isRunning: true,
       lastError: null,
       progressPercent: 0,
@@ -1444,6 +1628,8 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
     },
     update: {
       lastSyncAt: now,
+      lastInboundSyncAt: now,
+      syncStatus: 'syncing',
       isRunning: true,
       lastError: null,
       progressPercent: 0,
@@ -1459,7 +1645,7 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
   if (!customer) {
     await prisma.leadSyncState.update({
       where: { customerId },
-      data: { isRunning: false, lastError: 'Customer not found' },
+      data: { isRunning: false, syncStatus: 'error', lastError: 'Customer not found' },
     })
     throw new Error('Customer not found')
   }
@@ -1469,6 +1655,7 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
       where: { customerId },
       data: {
         isRunning: false,
+        syncStatus: 'error',
         lastError: 'Customer has no leads reporting URL configured',
       },
     })

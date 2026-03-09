@@ -739,16 +739,32 @@ model LeadRecord {
   customerId String
   accountName String
   data       Json
+  normalizedData Json?
   sourceUrl  String?
   sheetGid   String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   // Sheet-derived fields for display and filtering
+  externalSourceType String? // google_sheets | manual | import
   externalId String?  // Sheet row id or "sheetGid:rowNumber"
+  externalRowFingerprint String?
   occurredAt DateTime? // Lead date from sheet (Date, Created At, etc.)
   source     String?  // Channel/Source from sheet
   owner      String?  // Owner/Team member from sheet
+  firstName  String?
+  lastName   String?
+  fullName   String?
+  email      String?
+  phone      String?
+  company    String?
+  jobTitle   String?
+  location   String?
+  notes      String?
+  lastInboundSyncAt DateTime?
+  lastOutboundSyncAt DateTime?
+  syncStatus String? // synced | error | pending
+  syncError  String?
 
   // Lead status and conversion tracking
   status     LeadStatus @default(new)
@@ -767,6 +783,9 @@ model LeadRecord {
   @@index([customerId, occurredAt])
   @@index([customerId, source])
   @@index([customerId, owner])
+  @@index([customerId, externalSourceType])
+  @@index([customerId, email])
+  @@index([customerId, syncStatus])
   @@index([accountName])
   @@index([updatedAt])
   @@index([status])
@@ -779,8 +798,12 @@ model LeadSyncState {
   id            String   @id @default(cuid())
   customerId    String   @unique
   lastSyncAt    DateTime?
+  lastInboundSyncAt DateTime?
+  lastOutboundSyncAt DateTime?
   lastSuccessAt DateTime?
+  syncStatus    String?  // syncing | success | error | paused
   lastError     String?
+  lastOutboundError String?
   rowCount      Int?
   lastChecksum  String?  // MD5 checksum for change detection
   
