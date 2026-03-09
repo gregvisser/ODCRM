@@ -34,7 +34,6 @@ import { emit, on } from '../../platform/events'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
 import RequireActiveClient from '../../components/RequireActiveClient'
-import { useLiveLeadMetricsPolling } from '../../hooks/useLiveLeadsPolling'
 import { DataTable, type DataTableColumn } from '../../components/DataTable'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
@@ -166,16 +165,9 @@ function buildAccountFromCustomer(customer: CustomerApi): Account {
 export default function DashboardsHomePage() {
   const toast = useToast()
   const customerId = getCurrentCustomerId()
-  const {
-    data: liveMetricsData,
-    loading: metricsLoading,
-    error: metricsError,
-    lastUpdatedAt: metricsUpdatedAt,
-    refetch: refetchMetrics,
-  } = useLiveLeadMetricsPolling(customerId || null)
   const { interpretation: readiness, signal: readinessSignal } = useClientReadinessState(customerId)
-  const sourceOfTruth = liveMetricsData?.sourceOfTruth ?? null
-  const lastRefresh = metricsUpdatedAt ?? new Date()
+  const [kpiLastUpdatedAt, setKpiLastUpdatedAt] = useState<Date | null>(null)
+  const lastRefresh = kpiLastUpdatedAt ?? new Date()
 
   const [accountsData, setAccountsData] = useState<Account[]>([])
   const [kpiCustomerScope, setKpiCustomerScope] = useState<Array<{ id: string; name: string; leadsReportingUrl?: string | null }>>([])
@@ -198,6 +190,7 @@ export default function DashboardsHomePage() {
     try {
       const summary = await fetchLiveMetricsForCustomers(customers)
       setAggregatedMetrics(summary)
+      setKpiLastUpdatedAt(new Date())
       if ((summary.errors || []).length > 0 && summary.perCustomer.length === 0) {
         setAggregatedMetricsError('Backend metrics are currently unavailable for the configured customer scope.')
       }
@@ -304,7 +297,6 @@ export default function DashboardsHomePage() {
     const init = async () => {
       const list = await syncFromCustomers()
       await Promise.allSettled([
-        refetchMetrics(),
         refetchAggregatedMetrics(
           (list || []).map((customer) => ({
             id: customer.id,
@@ -319,9 +311,9 @@ export default function DashboardsHomePage() {
 
     const offAccountsUpdated = on<Account[]>('accountsUpdated', (accounts) => {
       if (accounts && accounts.length > 0) setAccountsData(accounts)
-      void Promise.allSettled([refetchMetrics(), refetchAggregatedMetrics()])
+      void refetchAggregatedMetrics()
     })
-    const offLeadsUpdated = on('leadsUpdated', () => void Promise.allSettled([refetchMetrics(), refetchAggregatedMetrics()]))
+    const offLeadsUpdated = on('leadsUpdated', () => void refetchAggregatedMetrics())
 
     const refreshInterval = setInterval(async () => {
       const syncCustomers = async () => {
@@ -337,7 +329,7 @@ export default function DashboardsHomePage() {
         setAccountsData(hydrated)
         emit('accountsUpdated', hydrated)
       }
-      await Promise.allSettled([syncCustomers(), refetchMetrics(), refetchAggregatedMetrics()])
+      await Promise.allSettled([syncCustomers(), refetchAggregatedMetrics()])
     }, 30 * 1000)
 
     return () => {
@@ -345,34 +337,24 @@ export default function DashboardsHomePage() {
       offLeadsUpdated()
       clearInterval(refreshInterval)
     }
-  }, [refetchMetrics, refetchAggregatedMetrics, hasSyncedCustomers])
+  }, [refetchAggregatedMetrics, hasSyncedCustomers])
 
   const now = new Date()
   const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
   const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
-  const aggregatedMetricsAvailable = Boolean(aggregatedMetrics && aggregatedMetrics.perCustomer.length > 0)
-  const kpiMetricsAvailable = aggregatedMetricsAvailable || (Boolean(liveMetricsData) && !metricsError)
-  const metricsAuthoritative = aggregatedMetricsAvailable
-    ? true
-    : liveMetricsData?.authoritative !== false && liveMetricsData?.dataFreshness !== 'diagnostic_stale'
-  const showKpiContractError = !(metricsLoading || aggregatedMetricsLoading) && (!kpiMetricsAvailable || !metricsAuthoritative)
-  const weekTotal = kpiMetricsAvailable && metricsAuthoritative
-    ? (aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.week ?? 0) : (liveMetricsData?.weekLeads ?? 0))
-    : 0
-  const monthTotal = kpiMetricsAvailable && metricsAuthoritative
-    ? (aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.month ?? 0) : (liveMetricsData?.monthLeads ?? 0))
-    : 0
-  const todayTotal = kpiMetricsAvailable && metricsAuthoritative
-    ? (aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.today ?? 0) : (liveMetricsData?.todayLeads ?? 0))
-    : 0
-  const channelBreakdown: Record<string, number> =
-    kpiMetricsAvailable && metricsAuthoritative
-      ? (aggregatedMetricsAvailable ? (aggregatedMetrics?.breakdownBySource ?? {}) : (liveMetricsData?.breakdownBySource ?? {}))
-      : {}
-  const teamBreakdown: Record<string, number> =
-    kpiMetricsAvailable && metricsAuthoritative
-      ? (aggregatedMetricsAvailable ? (aggregatedMetrics?.breakdownByOwner ?? {}) : (liveMetricsData?.breakdownByOwner ?? {}))
-      : {}
+  const scopedCustomerCount = kpiCustomerScope.filter((c) => c.id && c.name).length
+  const aggregatedMetricsAvailable = Boolean(
+    aggregatedMetrics &&
+      aggregatedMetrics.perCustomer.length > 0 &&
+      aggregatedMetrics.errors.length === 0 &&
+      aggregatedMetrics.perCustomer.length === scopedCustomerCount
+  )
+  const showKpiContractError = !aggregatedMetricsLoading && !aggregatedMetricsAvailable
+  const weekTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.week ?? 0) : 0
+  const monthTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.month ?? 0) : 0
+  const todayTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.today ?? 0) : 0
+  const channelBreakdown: Record<string, number> = aggregatedMetricsAvailable ? (aggregatedMetrics?.breakdownBySource ?? {}) : {}
+  const teamBreakdown: Record<string, number> = aggregatedMetricsAvailable ? (aggregatedMetrics?.breakdownByOwner ?? {}) : {}
 
   const salesLeaderboard = Object.entries(teamBreakdown)
     .map(([name, leads]) => ({ name, leads }))
@@ -486,7 +468,7 @@ export default function DashboardsHomePage() {
   const currentMonth = now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   const weekNumber = Math.ceil((now.getDate() + new Date(now.getFullYear(), now.getMonth(), now.getDate()).getDay()) / 7)
 
-  if ((metricsLoading || aggregatedMetricsLoading) && !liveMetricsData && !aggregatedMetrics) {
+  if (aggregatedMetricsLoading && !aggregatedMetrics) {
     return (
       <RequireActiveClient>
         <Box textAlign="center" py={12}>
@@ -640,7 +622,7 @@ export default function DashboardsHomePage() {
               Secondary metrics and trend context after triage decisions. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
             </Text>
             <Text fontSize="xs" color="gray.500" mt={1} data-testid="dashboard-kpi-source-of-truth-mode">
-              KPI source of truth: {aggregatedMetricsAvailable ? 'Backend multi-client metrics (sheets/db per client)' : sourceOfTruth === 'google_sheets' ? 'Google Sheets (backend-validated)' : sourceOfTruth === 'db' ? 'Database' : 'Unavailable'}
+              KPI source of truth: {aggregatedMetricsAvailable ? 'Backend multi-client metrics (sheets/db per client)' : 'Unavailable'}
             </Text>
           </Box>
           <HStack spacing={2}>
@@ -674,7 +656,7 @@ export default function DashboardsHomePage() {
                       duration: 5000,
                     })
                     setTimeout(() => {
-                      void Promise.allSettled([refetchMetrics(), refetchAggregatedMetrics()])
+                      void refetchAggregatedMetrics()
                     }, 10000)
                   }
                 } catch (err: any) {
@@ -709,7 +691,6 @@ export default function DashboardsHomePage() {
 
               const results = await Promise.allSettled([
                 syncFromCustomers(),
-                refetchMetrics(),
                 refetchAggregatedMetrics(),
               ])
 
@@ -743,7 +724,7 @@ export default function DashboardsHomePage() {
                 })
               }
             }}
-              isLoading={metricsLoading || aggregatedMetricsLoading}
+              isLoading={aggregatedMetricsLoading}
               colorScheme="blue"
               size="sm"
               title="Refresh dashboard data"
@@ -763,7 +744,7 @@ export default function DashboardsHomePage() {
             <Box>
               <AlertTitle fontSize="sm">Live KPI truth is currently unavailable</AlertTitle>
               <AlertDescription fontSize="sm">
-                {aggregatedMetricsError || metricsError || liveMetricsData?.warning || liveMetricsData?.hint || 'The dashboard could not load authoritative KPI metrics from backend truth. Refresh after checking lead source access.'}
+                {aggregatedMetricsError || 'The dashboard could not load authoritative KPI metrics from backend truth. Refresh after checking lead source access.'}
               </AlertDescription>
             </Box>
           </Alert>
@@ -821,7 +802,7 @@ export default function DashboardsHomePage() {
         enablePagination={false}
         enableExport
         compact
-        loading={metricsLoading || aggregatedMetricsLoading}
+        loading={aggregatedMetricsLoading}
         emptyMessage="No client data available"
       />
 
@@ -829,7 +810,7 @@ export default function DashboardsHomePage() {
       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
         {/* Channel Breakdown */}
         <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
-          <Heading size="sm" mb={2}>Source Breakdown</Heading>
+          <Heading size="sm" mb={2}>Source Breakdown (Current Week)</Heading>
           <VStack align="stretch" spacing={2}>
             {Object.entries(channelBreakdown)
               .sort((a, b) => b[1] - a[1])
@@ -845,20 +826,6 @@ export default function DashboardsHomePage() {
               <Text color="gray.400" fontSize="sm">No leads this week</Text>
             )}
           </VStack>
-
-          <Box mt={3} p={3} bg="gray.50" borderRadius="md">
-            <Text fontWeight="semibold" fontSize="sm" mb={1}>Month-to-Date</Text>
-            <Text fontSize="2xl" fontWeight="bold" color="blue.600">{monthTotal}</Text>
-            {Object.entries(channelBreakdown).map(([channel, count]) => {
-              const percentage = monthTotal > 0 ? (count / monthTotal) * 100 : 0
-              return (
-                <HStack key={channel} justify="space-between" mt={2}>
-                  <Text fontSize="sm">{channel}</Text>
-                  <Text fontSize="sm" color="gray.600">{percentage.toFixed(0)}%</Text>
-                </HStack>
-              )
-            })}
-          </Box>
         </Box>
 
         {/* Week Progress - INCH BY INCH */}
@@ -960,7 +927,7 @@ export default function DashboardsHomePage() {
       </Box>
 
       <Text fontSize="xs" color="gray.400" textAlign="center">
-        Last synced: {lastRefresh.toLocaleString('en-GB')} | KPI truth: {aggregatedMetricsAvailable ? 'Backend metrics aggregation across client scope' : sourceOfTruth === 'google_sheets' ? 'Google Sheets (via backend sync)' : sourceOfTruth === 'db' ? 'Database' : 'Unavailable'}
+        Last synced: {lastRefresh.toLocaleString('en-GB')} | KPI truth: {aggregatedMetricsAvailable ? 'Backend metrics aggregation across client scope' : 'Unavailable'}
       </Text>
     </VStack>
     </RequireActiveClient>
