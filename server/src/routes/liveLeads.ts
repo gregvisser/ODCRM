@@ -295,6 +295,27 @@ async function getSyncMeta(customerId: string, sourceOfTruth: TruthSource): Prom
   }
 }
 
+async function maybeBootstrapSheetBackedLeads(params: {
+  customerId: string
+  sourceOfTruth: TruthSource
+  rowCount: number
+  sync: SyncMeta
+}): Promise<{ started: boolean; error: string | null }> {
+  const { customerId, sourceOfTruth, rowCount, sync } = params
+  if (sourceOfTruth !== 'google_sheets') return { started: false, error: null }
+  if (rowCount > 0) return { started: false, error: null }
+  if (sync.lastSyncAt || sync.lastInboundSyncAt || sync.lastSuccessAt) return { started: false, error: null }
+
+  try {
+    // First-access bootstrap for sheet-backed clients that have never synced.
+    await triggerManualSync(prisma, customerId)
+    return { started: true, error: null }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to bootstrap sheet sync'
+    return { started: false, error: message }
+  }
+}
+
 const createLeadSchema = z.object({
   occurredAt: z.string().optional().nullable(),
   firstName: z.string().optional().nullable(),
@@ -757,7 +778,7 @@ router.get('/leads', async (req, res) => {
 
     const { customer, configuredSheetUrl, sourceOfTruth } = context
 
-    const dbRows = await prisma.leadRecord.findMany({
+    let dbRows = await prisma.leadRecord.findMany({
       where: { customerId },
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -780,11 +801,48 @@ router.get('/leads', async (req, res) => {
       },
     })
 
-    const leads = mapDbLeadRows(dbRows)
-    const sync = await getSyncMeta(customerId, sourceOfTruth)
+    let leads = mapDbLeadRows(dbRows)
+    let sync = await getSyncMeta(customerId, sourceOfTruth)
+    const bootstrap = await maybeBootstrapSheetBackedLeads({
+      customerId,
+      sourceOfTruth,
+      rowCount: leads.length,
+      sync,
+    })
+    if (bootstrap.started) {
+      dbRows = await prisma.leadRecord.findMany({
+        where: { customerId },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          occurredAt: true,
+          createdAt: true,
+          source: true,
+          owner: true,
+          company: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          jobTitle: true,
+          location: true,
+          status: true,
+          syncStatus: true,
+          notes: true,
+          accountName: true,
+          data: true,
+        },
+      })
+      leads = mapDbLeadRows(dbRows)
+      sync = await getSyncMeta(customerId, sourceOfTruth)
+    }
     const displayColumns = deriveDisplayColumns(leads)
 
     const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
+    const warning = bootstrap.error
+      ? `Initial sheet sync failed: ${bootstrap.error}`
+      : bootstrap.started && leads.length === 0
+        ? 'Initial sheet sync ran but no lead rows were imported.'
+        : undefined
 
     return res.json({
       customerId,
@@ -798,6 +856,7 @@ router.get('/leads', async (req, res) => {
       authoritative,
       dataFreshness: 'live' as Freshness,
       staleFallbackUsed: false,
+      warning,
       sync,
     })
   } catch (e) {
@@ -822,7 +881,7 @@ router.get('/leads/metrics', async (req, res) => {
     const { sourceOfTruth, configuredSheetUrl } = context
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtc()
 
-    const dbRows = await prisma.leadRecord.findMany({
+    let dbRows = await prisma.leadRecord.findMany({
       where: { customerId },
       orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
       select: {
@@ -845,7 +904,7 @@ router.get('/leads/metrics', async (req, res) => {
       },
     })
 
-    const leads = mapDbLeadRows(dbRows).map((lead, idx) => {
+    let leads = mapDbLeadRows(dbRows).map((lead, idx) => {
       if (lead.occurredAt) return lead
       const createdAt = dbRows[idx]?.createdAt
       return {
@@ -853,6 +912,47 @@ router.get('/leads/metrics', async (req, res) => {
         occurredAt: createdAt ? createdAt.toISOString() : null,
       }
     })
+
+    let sync = await getSyncMeta(customerId, sourceOfTruth)
+    const bootstrap = await maybeBootstrapSheetBackedLeads({
+      customerId,
+      sourceOfTruth,
+      rowCount: leads.length,
+      sync,
+    })
+    if (bootstrap.started) {
+      dbRows = await prisma.leadRecord.findMany({
+        where: { customerId },
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          id: true,
+          occurredAt: true,
+          createdAt: true,
+          source: true,
+          owner: true,
+          accountName: true,
+          company: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          jobTitle: true,
+          location: true,
+          status: true,
+          syncStatus: true,
+          notes: true,
+          data: true,
+        },
+      })
+      leads = mapDbLeadRows(dbRows).map((lead, idx) => {
+        if (lead.occurredAt) return lead
+        const createdAt = dbRows[idx]?.createdAt
+        return {
+          ...lead,
+          occurredAt: createdAt ? createdAt.toISOString() : null,
+        }
+      })
+      sync = await getSyncMeta(customerId, sourceOfTruth)
+    }
 
     let todayLeads = 0
     let weekLeads = 0
@@ -871,8 +971,12 @@ router.get('/leads/metrics', async (req, res) => {
       breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
     }
 
-    const sync = await getSyncMeta(customerId, sourceOfTruth)
     const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
+    const warning = bootstrap.error
+      ? `Initial sheet sync failed: ${bootstrap.error}`
+      : bootstrap.started && leads.length === 0
+        ? 'Initial sheet sync ran but no lead rows were imported.'
+        : undefined
 
     return res.json({
       customerId,
@@ -890,6 +994,7 @@ router.get('/leads/metrics', async (req, res) => {
       authoritative,
       dataFreshness: 'live' as Freshness,
       staleFallbackUsed: false,
+      warning,
       sync,
     })
   } catch (e) {
