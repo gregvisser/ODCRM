@@ -260,6 +260,13 @@ export async function fetchLiveMetricsForCustomers(
     async (c) => {
       try {
         const data = await getLiveLeadMetrics(c.id)
+        if (data.authoritative === false || data.dataFreshness === 'diagnostic_stale') {
+          return {
+            customerId: c.id,
+            name: c.name,
+            fetchError: data.warning || data.hint || 'Metrics are not currently authoritative for this customer',
+          }
+        }
         const counts = data.counts ?? {
           today: data.todayLeads,
           week: data.weekLeads,

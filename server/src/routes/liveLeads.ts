@@ -203,6 +203,7 @@ function mapDbLeadRows(rows: Array<{
   id: string
   occurredAt: Date | null
   createdAt: Date
+  externalSourceType?: string | null
   source: string | null
   owner: string | null
   company: string | null
@@ -888,6 +889,7 @@ router.get('/leads/metrics', async (req, res) => {
         id: true,
         occurredAt: true,
         createdAt: true,
+        externalSourceType: true,
         source: true,
         owner: true,
         accountName: true,
@@ -907,9 +909,10 @@ router.get('/leads/metrics', async (req, res) => {
     let leads = mapDbLeadRows(dbRows).map((lead, idx) => {
       if (lead.occurredAt) return lead
       const createdAt = dbRows[idx]?.createdAt
+      const allowCreatedAtFallback = dbRows[idx]?.externalSourceType === 'odcrm_manual'
       return {
         ...lead,
-        occurredAt: createdAt ? createdAt.toISOString() : null,
+        occurredAt: allowCreatedAtFallback && createdAt ? createdAt.toISOString() : null,
       }
     })
 
@@ -928,6 +931,7 @@ router.get('/leads/metrics', async (req, res) => {
           id: true,
           occurredAt: true,
           createdAt: true,
+          externalSourceType: true,
           source: true,
           owner: true,
           accountName: true,
@@ -946,9 +950,10 @@ router.get('/leads/metrics', async (req, res) => {
       leads = mapDbLeadRows(dbRows).map((lead, idx) => {
         if (lead.occurredAt) return lead
         const createdAt = dbRows[idx]?.createdAt
+        const allowCreatedAtFallback = dbRows[idx]?.externalSourceType === 'odcrm_manual'
         return {
           ...lead,
-          occurredAt: createdAt ? createdAt.toISOString() : null,
+          occurredAt: allowCreatedAtFallback && createdAt ? createdAt.toISOString() : null,
         }
       })
       sync = await getSyncMeta(customerId, sourceOfTruth)
@@ -965,10 +970,12 @@ router.get('/leads/metrics', async (req, res) => {
       if (at && at >= todayStart && at < todayEnd) todayLeads++
       if (at && at >= weekStart && at < weekEnd) weekLeads++
       if (at && at >= monthStart && at < monthEnd) monthLeads++
-      const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
-      const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
-      breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
-      breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
+      if (at && at >= weekStart && at < weekEnd) {
+        const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
+        const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
+        breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
+        breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
+      }
     }
 
     const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)

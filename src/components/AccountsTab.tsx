@@ -805,9 +805,10 @@ export function calculateActualsFromLeads(accountName: string, leads: Lead[]): {
     
     // FIRST: Check ALL fields for DD.MM.YY format (like "05.01.26") - this is the key!
     for (const key of Object.keys(lead)) {
-      const value = lead[key] || ''
-      if (value && value.trim() && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value.trim())) {
-        dateValue = value.trim()
+      const rawValue = lead[key]
+      const value = typeof rawValue === 'string' ? rawValue.trim() : ''
+      if (value && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value)) {
+        dateValue = value
         dateFieldName = key
         break
       }
@@ -815,13 +816,14 @@ export function calculateActualsFromLeads(accountName: string, leads: Lead[]): {
     
     // SECOND: If no DD.MM.YY format found, check for date fields in the same order as MarketingLeadsTab
     if (!dateValue || !dateValue.trim()) {
-      dateValue =
-        lead['Date'] ||
-        lead['date'] ||
-        lead['Week'] ||
-        lead['week'] ||
-        lead['First Meeting Date'] ||
+      const fallbackDateValue =
+        lead['Date'] ??
+        lead['date'] ??
+        lead['Week'] ??
+        lead['week'] ??
+        lead['First Meeting Date'] ??
         ''
+      dateValue = typeof fallbackDateValue === 'string' ? fallbackDateValue : String(fallbackDateValue || '')
       
       if (dateValue) {
         dateFieldName = lead['Date'] ? 'Date' : lead['date'] ? 'date' : lead['Week'] ? 'Week' : lead['week'] ? 'week' : lead['First Meeting Date'] ? 'First Meeting Date' : 'unknown'
@@ -4209,6 +4211,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
   // Update accounts with actuals from marketing leads
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     const leads = loadLeadsFromStorage()
 
     setAccountsData((prev) => {
@@ -4250,10 +4253,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       
       return updated
     })
-  }, []) // Run once on mount
+  }, [isServerSourceOfTruth]) // Run once on mount in cache mode; no-op for DB source of truth
 
   // Listen for leads updates
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     const handleLeadsUpdated = () => {
       const leads = loadLeadsFromStorage()
 
@@ -4307,7 +4311,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     // Listen for custom event when leads are updated
     const off = on('leadsUpdated', () => handleLeadsUpdated())
     return () => off()
-  }, [selectedAccount])
+  }, [selectedAccount, isServerSourceOfTruth])
 
   // Sync selectedCustomerId when selectedAccount becomes null (drawer closed)
   // Main selection happens in handleAccountClick - this is just cleanup
@@ -5468,6 +5472,11 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
   // Load leads data function
   const loadLeadsData = useCallback(async (forceRefresh: boolean = false) => {
+    if (isServerSourceOfTruth) {
+      setLeads([])
+      setLeadsLoading(false)
+      return
+    }
     const cachedLeads = loadLeadsFromStorage()
     
     // Check if we should refresh
@@ -5507,11 +5516,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     } finally {
       setLeadsLoading(false)
     }
-  }, [accountsData])
+  }, [accountsData, isServerSourceOfTruth])
 
   // Load leads ONCE on mount - do NOT depend on loadLeadsData to prevent infinite loops
   const hasLoadedLeadsRef = useRef(false)
   useEffect(() => {
+    if (isServerSourceOfTruth) {
+      setLeads([])
+      setLeadsLoading(false)
+      return
+    }
     if (hasLoadedLeadsRef.current) return
     hasLoadedLeadsRef.current = true
     
@@ -5523,7 +5537,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
 
     void loadLeadsData(false)
-  }, [loadLeadsData]) // loadLeadsData is guarded by hasLoadedLeadsRef to remain mount-safe
+  }, [loadLeadsData, isServerSourceOfTruth]) // loadLeadsData is guarded by hasLoadedLeadsRef to remain mount-safe
 
   // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
