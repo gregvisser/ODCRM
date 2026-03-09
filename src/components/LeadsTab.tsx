@@ -44,7 +44,7 @@ import {
   ModalBody,
   ModalFooter,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon } from '@chakra-ui/icons'
+import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon, EditIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { getCurrentCustomerId } from '../platform/stores/settings'
@@ -62,7 +62,7 @@ import {
   type ValidateSheetResult
 } from '../utils/leadsApi'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
-import { createLiveLead, retryLiveLeadOutboundSync, type LiveLeadRow } from '../utils/liveLeadsApi'
+import { createLiveLead, retryLiveLeadOutboundSync, updateLiveLead, type LiveLeadRow } from '../utils/liveLeadsApi'
 
 type Lead = LeadRecord & {
   [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
@@ -123,8 +123,24 @@ function LeadsTab() {
   const [sheetValidateForEmpty, setSheetValidateForEmpty] = useState<ValidateSheetResult | null>(null)
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false)
   const [isCreatingLead, setIsCreatingLead] = useState(false)
+  const [isEditLeadOpen, setIsEditLeadOpen] = useState(false)
+  const [isUpdatingLead, setIsUpdatingLead] = useState(false)
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null)
   const [retryingLeadId, setRetryingLeadId] = useState<string | null>(null)
   const [addLeadForm, setAddLeadForm] = useState({
+    occurredAt: '',
+    fullName: '',
+    email: '',
+    phone: '',
+    company: '',
+    jobTitle: '',
+    location: '',
+    source: '',
+    owner: '',
+    status: 'new',
+    notes: '',
+  })
+  const [editLeadForm, setEditLeadForm] = useState({
     occurredAt: '',
     fullName: '',
     email: '',
@@ -537,6 +553,36 @@ function LeadsTab() {
   const getOwnerValue = (lead: Lead) =>
     lead.owner ?? lead['OD Team Member'] ?? lead['Owner'] ?? ''
 
+  const toInputDate = (value: string | undefined): string => {
+    if (!value) return ''
+    const isoMatch = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    if (isoMatch) return isoMatch[1]
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return ''
+    const year = parsed.getFullYear()
+    const month = String(parsed.getMonth() + 1).padStart(2, '0')
+    const day = String(parsed.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+
+  const openEditLeadModal = (lead: Lead, leadId: string) => {
+    setEditingLeadId(leadId)
+    setEditLeadForm({
+      occurredAt: toInputDate(String(lead.Date || '')),
+      fullName: String(lead.Name || lead.fullName || ''),
+      email: String(lead.Email || lead.email || ''),
+      phone: String(lead.Phone || lead.phone || ''),
+      company: String(lead.Company || lead.company || ''),
+      jobTitle: String(lead['Job Title'] || lead.jobTitle || ''),
+      location: String(lead.Location || lead.location || ''),
+      source: String(getChannelValue(lead) || ''),
+      owner: String(getOwnerValue(lead) || ''),
+      status: String(lead.status || lead.Status || 'new'),
+      notes: String(lead.Notes || lead.notes || ''),
+    })
+    setIsEditLeadOpen(true)
+  }
+
   const handleCreateLead = async () => {
     if (!customerId) return
     if (!addLeadForm.fullName.trim() && !addLeadForm.email.trim() && !addLeadForm.company.trim() && !addLeadForm.phone.trim()) {
@@ -625,6 +671,58 @@ function LeadsTab() {
       })
     } finally {
       setRetryingLeadId(null)
+    }
+  }
+
+  const handleUpdateLead = async () => {
+    if (!customerId || !editingLeadId) return
+    if (!editLeadForm.fullName.trim() && !editLeadForm.email.trim() && !editLeadForm.company.trim() && !editLeadForm.phone.trim()) {
+      toast({
+        title: 'Lead details required',
+        description: 'Provide at least a name, email, company, or phone number.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setIsUpdatingLead(true)
+    try {
+      const result = await updateLiveLead(customerId, editingLeadId, {
+        occurredAt: editLeadForm.occurredAt || null,
+        fullName: editLeadForm.fullName || null,
+        email: editLeadForm.email || null,
+        phone: editLeadForm.phone || null,
+        company: editLeadForm.company || null,
+        jobTitle: editLeadForm.jobTitle || null,
+        location: editLeadForm.location || null,
+        source: editLeadForm.source || null,
+        owner: editLeadForm.owner || null,
+        status: (editLeadForm.status as 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted') || 'new',
+        notes: editLeadForm.notes || null,
+      })
+      const outboundStatus = String(result.outboundSync.status || '')
+      toast({
+        title: 'Lead updated',
+        description: result.outboundSync.note + (result.outboundSync.error ? ` (${result.outboundSync.error})` : ''),
+        status: outboundStatus === 'sync_error' ? 'warning' : 'success',
+        duration: 6000,
+        isClosable: true,
+      })
+      setIsEditLeadOpen(false)
+      setEditingLeadId(null)
+      await refetch()
+    } catch (e) {
+      toast({
+        title: 'Failed to update lead',
+        description: e instanceof Error ? e.message : 'Unable to update lead',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setIsUpdatingLead(false)
     }
   }
 
@@ -943,6 +1041,16 @@ function LeadsTab() {
                     </Td>
                     <Td px={3} py={2} position="sticky" left={10} bg={isSelected ? 'blue.50' : 'white'} zIndex={5} whiteSpace="nowrap">
                       <VStack align="stretch" spacing={1}>
+                        <Button
+                          size="xs"
+                          leftIcon={<EditIcon />}
+                          colorScheme="gray"
+                          variant="outline"
+                          onClick={() => openEditLeadModal(lead, leadId)}
+                          isDisabled={convertingLeadId !== null || retryingLeadId === leadId}
+                        >
+                          Edit
+                        </Button>
                         {!isConverted ? (
                           <Menu>
                             <MenuButton 
@@ -1136,6 +1244,79 @@ function LeadsTab() {
             </Button>
             <Button colorScheme="blue" onClick={handleCreateLead} isLoading={isCreatingLead}>
               Save Lead
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      <Modal isOpen={isEditLeadOpen} onClose={() => { setIsEditLeadOpen(false); setEditingLeadId(null) }} size="xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Edit Lead</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+              <FormControl>
+                <FormLabel>Date</FormLabel>
+                <Input type="date" value={editLeadForm.occurredAt} onChange={(e) => setEditLeadForm({ ...editLeadForm, occurredAt: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Full Name</FormLabel>
+                <Input value={editLeadForm.fullName} onChange={(e) => setEditLeadForm({ ...editLeadForm, fullName: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Email</FormLabel>
+                <Input type="email" value={editLeadForm.email} onChange={(e) => setEditLeadForm({ ...editLeadForm, email: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Phone</FormLabel>
+                <Input value={editLeadForm.phone} onChange={(e) => setEditLeadForm({ ...editLeadForm, phone: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Company</FormLabel>
+                <Input value={editLeadForm.company} onChange={(e) => setEditLeadForm({ ...editLeadForm, company: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Job Title</FormLabel>
+                <Input value={editLeadForm.jobTitle} onChange={(e) => setEditLeadForm({ ...editLeadForm, jobTitle: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Location</FormLabel>
+                <Input value={editLeadForm.location} onChange={(e) => setEditLeadForm({ ...editLeadForm, location: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Source / Channel</FormLabel>
+                <Input value={editLeadForm.source} onChange={(e) => setEditLeadForm({ ...editLeadForm, source: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Owner / Employee</FormLabel>
+                <Input value={editLeadForm.owner} onChange={(e) => setEditLeadForm({ ...editLeadForm, owner: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Status</FormLabel>
+                <Select value={editLeadForm.status} onChange={(e) => setEditLeadForm({ ...editLeadForm, status: e.target.value })}>
+                  <option value="new">new</option>
+                  <option value="qualified">qualified</option>
+                  <option value="nurturing">nurturing</option>
+                  <option value="closed">closed</option>
+                  <option value="converted">converted</option>
+                </Select>
+              </FormControl>
+              <FormControl gridColumn={{ base: 'span 1', md: 'span 2' }}>
+                <FormLabel>Notes</FormLabel>
+                <Textarea value={editLeadForm.notes} onChange={(e) => setEditLeadForm({ ...editLeadForm, notes: e.target.value })} />
+              </FormControl>
+            </SimpleGrid>
+            <Text fontSize="xs" color="gray.500" mt={3}>
+              For sheet-backed clients this saves edits in ODCRM first, then attempts a row-targeted Google Sheets update.
+            </Text>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={() => { setIsEditLeadOpen(false); setEditingLeadId(null) }}>
+              Cancel
+            </Button>
+            <Button colorScheme="blue" onClick={handleUpdateLead} isLoading={isUpdatingLead}>
+              Save Changes
             </Button>
           </ModalFooter>
         </ModalContent>

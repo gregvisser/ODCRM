@@ -128,10 +128,13 @@ export type CreateLiveLeadResponse = {
     error?: string | null
     rowReference?: string | null
     rowNumber?: number | null
+    operation?: 'create' | 'update'
   }
 }
 
 export type RetryLiveLeadOutboundResponse = CreateLiveLeadResponse
+export type UpdateLiveLeadInput = CreateLiveLeadInput
+export type UpdateLiveLeadResponse = CreateLiveLeadResponse
 
 export async function getLiveLeads(customerId: string): Promise<LiveLeadsResponse> {
   const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
@@ -175,6 +178,20 @@ export async function retryLiveLeadOutboundSync(customerId: string, leadId: stri
   const res = await fetch(`${API_BASE}/api/live/leads/${encodeURIComponent(leadId)}/retry-outbound?customerId=${encodeURIComponent(customerId)}`, {
     method: 'POST',
     headers: getCustomerHeaders(customerId),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function updateLiveLead(customerId: string, leadId: string, payload: UpdateLiveLeadInput): Promise<UpdateLiveLeadResponse> {
+  const res = await fetch(`${API_BASE}/api/live/leads/${encodeURIComponent(leadId)}?customerId=${encodeURIComponent(customerId)}`, {
+    method: 'PUT',
+    headers: getCustomerHeaders(customerId),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse

@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
-import { syncManualLeadOutbound } from '../services/leadOutboundSync.js'
+import { retryLeadOutboundSync, syncManualLeadEditOutbound, syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
@@ -311,6 +311,27 @@ const createLeadSchema = z.object({
   notes: z.string().optional().nullable(),
 })
 
+function normalizeText(value: unknown): string | null {
+  if (value == null) return null
+  const text = String(value).trim()
+  return text.length > 0 ? text : null
+}
+
+function parseOptionalDate(value: unknown): Date | null {
+  const text = normalizeText(value)
+  if (!text) return null
+  const parsed = new Date(text)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function asMutableMap(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {}
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [k, v]) => {
+    acc[k] = asString(v)
+    return acc
+  }, {})
+}
+
 /**
  * POST /api/live/leads
  * Create normalized lead in ODCRM operational DB layer.
@@ -398,6 +419,7 @@ router.post('/leads', async (req, res) => {
       error: null as string | null,
       rowReference: null as string | null,
       rowNumber: null as number | null,
+      operation: 'create' as 'create' | 'update',
     }
 
     let leadForResponse: LeadResponse = mapLeadResponse(created)
@@ -414,6 +436,7 @@ router.post('/leads', async (req, res) => {
         error: outbound.error,
         rowReference: outbound.rowReference,
         rowNumber: outbound.rowNumber,
+        operation: outbound.operation,
       }
       leadForResponse = outbound.lead
     }
@@ -425,6 +448,223 @@ router.post('/leads', async (req, res) => {
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Failed to create lead'
+    return res.status(500).json({ error: message })
+  }
+})
+
+/**
+ * PUT /api/live/leads/:leadId
+ * Update normalized lead in ODCRM; for sheet-backed clients, DB update first then outbound row update.
+ */
+router.put('/leads/:leadId', async (req, res) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const parsed = createLeadSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid lead payload', details: parsed.error.flatten() })
+  }
+
+  try {
+    const context = await getCustomerTruthContext(customerId)
+    if (!context) return res.status(404).json({ error: 'Customer not found' })
+
+    const leadId = String(req.params.leadId || '').trim()
+    if (!leadId) return res.status(400).json({ error: 'Lead id is required' })
+
+    const existing = await prisma.leadRecord.findFirst({
+      where: { id: leadId, customerId },
+      select: {
+        id: true,
+        customerId: true,
+        sourceUrl: true,
+        sheetGid: true,
+        externalId: true,
+        externalSourceType: true,
+        externalRowFingerprint: true,
+        occurredAt: true,
+        source: true,
+        owner: true,
+        firstName: true,
+        lastName: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        company: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        syncStatus: true,
+        syncError: true,
+        lastInboundSyncAt: true,
+        lastOutboundSyncAt: true,
+        createdAt: true,
+        accountName: true,
+        data: true,
+        normalizedData: true,
+      },
+    })
+    if (!existing) return res.status(404).json({ error: 'Lead not found for customer' })
+
+    const values = parsed.data
+    const resolveText = (incoming: unknown, current: string | null): string | null => {
+      if (incoming === undefined) return current
+      return normalizeText(incoming)
+    }
+
+    const occurredAt = values.occurredAt === undefined ? existing.occurredAt : parseOptionalDate(values.occurredAt)
+    const fullName = resolveText(values.fullName, existing.fullName)
+    const firstName = resolveText(values.firstName, existing.firstName)
+    const lastName = resolveText(values.lastName, existing.lastName)
+    const email = resolveText(values.email, existing.email)?.toLowerCase() || null
+    const phone = resolveText(values.phone, existing.phone)
+    const company = resolveText(values.company, existing.company)
+    const jobTitle = resolveText(values.jobTitle, existing.jobTitle)
+    const location = resolveText(values.location, existing.location)
+    const source = resolveText(values.source, existing.source)
+    const owner = resolveText(values.owner, existing.owner)
+    const notes = resolveText(values.notes, existing.notes)
+    const status = values.status === undefined ? existing.status : values.status
+
+    const hasIdentity = [fullName, email, company, phone].some((v) => typeof v === 'string' && v.trim() !== '')
+    if (!hasIdentity) {
+      return res.status(400).json({ error: 'At least one of fullName, email, company, or phone is required' })
+    }
+
+    const raw = asMutableMap(existing.data)
+    raw.Date = occurredAt ? occurredAt.toISOString().slice(0, 10) : ''
+    raw.Name = fullName || ''
+    raw['First Name'] = firstName || ''
+    raw['Last Name'] = lastName || ''
+    raw.Email = email || ''
+    raw.Phone = phone || ''
+    raw.Company = company || ''
+    raw['Job Title'] = jobTitle || ''
+    raw.Location = location || ''
+    raw.Source = source || ''
+    raw.Owner = owner || ''
+    raw.Status = status || ''
+    raw.Notes = notes || ''
+
+    const normalizedBase =
+      typeof existing.normalizedData === 'object' && existing.normalizedData != null
+        ? (existing.normalizedData as Record<string, unknown>)
+        : {}
+    const previousSync =
+      normalizedBase.sync && typeof normalizedBase.sync === 'object'
+        ? (normalizedBase.sync as Record<string, unknown>)
+        : {}
+    const nowIso = new Date().toISOString()
+    const pendingStatus = context.sourceOfTruth === 'google_sheets' ? 'pending_outbound' : 'synced'
+    const normalizedData = {
+      ...normalizedBase,
+      canonical: {
+        occurredAt: occurredAt ? occurredAt.toISOString() : null,
+        source,
+        owner,
+        fullName,
+        firstName,
+        lastName,
+        email,
+        phone,
+        company,
+        jobTitle,
+        location,
+        status: status || 'new',
+        notes,
+      },
+      sync: {
+        ...previousSync,
+        sourceType: 'odcrm_manual',
+        status: pendingStatus,
+        error: null,
+        pendingOperation: context.sourceOfTruth === 'google_sheets' ? 'update' : null,
+        lastOperation: 'update',
+        lastEditOrigin: 'odcrm',
+        lastEditAt: nowIso,
+      },
+    }
+
+    const edited = await prisma.leadRecord.update({
+      where: { id: existing.id },
+      data: {
+        data: raw,
+        normalizedData,
+        occurredAt,
+        source,
+        owner,
+        firstName,
+        lastName,
+        fullName,
+        email,
+        phone,
+        company,
+        jobTitle,
+        location,
+        status,
+        notes,
+        syncStatus: pendingStatus,
+        syncError: null,
+      },
+      select: {
+        id: true,
+        customerId: true,
+        occurredAt: true,
+        source: true,
+        owner: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        company: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        syncStatus: true,
+        createdAt: true,
+      },
+    })
+
+    let outboundSync = {
+      required: context.sourceOfTruth === 'google_sheets',
+      status: pendingStatus,
+      note:
+        context.sourceOfTruth === 'google_sheets'
+          ? 'Lead updated in ODCRM. Outbound Google Sheets row sync is pending.'
+          : 'No outbound sheet sync required for DB-backed client.',
+      error: null as string | null,
+      rowReference: null as string | null,
+      rowNumber: null as number | null,
+      operation: 'update' as 'create' | 'update',
+    }
+
+    let leadForResponse: LeadResponse = mapLeadResponse(edited)
+    if (context.sourceOfTruth === 'google_sheets') {
+      const outbound = await syncManualLeadEditOutbound({
+        prisma,
+        customerId,
+        leadId: existing.id,
+      })
+      outboundSync = {
+        required: true,
+        status: outbound.status,
+        note: outbound.note,
+        error: outbound.error,
+        rowReference: outbound.rowReference,
+        rowNumber: outbound.rowNumber,
+        operation: outbound.operation,
+      }
+      leadForResponse = outbound.lead
+    }
+
+    return res.json({
+      lead: leadForResponse,
+      sourceOfTruth: context.sourceOfTruth,
+      outboundSync,
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to update lead'
     return res.status(500).json({ error: message })
   }
 })
@@ -447,11 +687,10 @@ router.post('/leads/:leadId/retry-outbound', async (req, res) => {
     const leadId = String(req.params.leadId || '').trim()
     if (!leadId) return res.status(400).json({ error: 'Lead id is required' })
 
-    const outbound = await syncManualLeadOutbound({
+    const outbound = await retryLeadOutboundSync({
       prisma,
       customerId,
       leadId,
-      forceRetry: true,
     })
 
     return res.json({
@@ -464,6 +703,7 @@ router.post('/leads/:leadId/retry-outbound', async (req, res) => {
         error: outbound.error,
         rowReference: outbound.rowReference,
         rowNumber: outbound.rowNumber,
+        operation: outbound.operation,
       },
     })
   } catch (e) {
