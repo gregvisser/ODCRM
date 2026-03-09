@@ -15,13 +15,14 @@
  * See ARCHITECTURE.md for full details.
  */
 
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import { Box, Spinner, Alert, AlertIcon, AlertTitle, AlertDescription, Button, VStack, Text, Badge, HStack, useToast } from '@chakra-ui/react'
 import { useCustomersFromDatabase } from '../hooks/useCustomersFromDatabase'
 import { databaseCustomersToAccounts, type Account } from '../utils/customerAccountMapper'
 import type { DatabaseCustomer } from '../hooks/useCustomersFromDatabase'
 import { setJson, getJson } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
+import { fetchLiveMetricsForCustomers } from '../utils/liveLeadsApi'
 import AccountsTab from './AccountsTab'
 
 // Migration flag key - used to show toast only once
@@ -135,9 +136,72 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const { customers, loading, error, refetch } = useCustomersFromDatabase()
   const toast = useToast()
   const hasMigratedRef = useRef(false)
+  const [metricsByCustomerId, setMetricsByCustomerId] = useState<Record<string, { week: number; month: number; total: number }>>({})
 
-  // Convert database customers to Account format (derived state, recalculates when customers change)
-  const dbAccounts = databaseCustomersToAccounts(customers)
+  // Convert database customers to Account format and overlay live lead metrics for sheet-backed clients.
+  const dbAccounts = useMemo(() => {
+    const mapped = databaseCustomersToAccounts(customers)
+    const customerById = new Map(customers.map((customer) => [customer.id, customer] as const))
+    return mapped.map((account) => {
+      const customerId = typeof account.id === 'string' ? account.id : ''
+      const customer = customerById.get(customerId)
+      const isSheetBacked = Boolean(customer?.leadsReportingUrl?.trim())
+      if (!isSheetBacked) {
+        return {
+          ...account,
+          sheetMetricsUnavailable: false,
+        }
+      }
+      const metrics = metricsByCustomerId[customerId]
+      if (!metrics) {
+        return {
+          ...account,
+          leads: 0,
+          weeklyActual: 0,
+          monthlyActual: 0,
+          sheetMetricsUnavailable: true,
+        }
+      }
+      return {
+        ...account,
+        leads: metrics.total,
+        weeklyActual: metrics.week,
+        monthlyActual: metrics.month,
+        sheetMetricsUnavailable: false,
+      }
+    })
+  }, [customers, metricsByCustomerId])
+
+  useEffect(() => {
+    if (loading) return
+    const scoped = customers
+      .filter((customer) => customer.id && customer.name)
+      .map((customer) => ({
+        id: customer.id,
+        name: customer.name,
+        leadsReportingUrl: customer.leadsReportingUrl || null,
+      }))
+    if (scoped.length === 0) {
+      setMetricsByCustomerId({})
+      return
+    }
+    void (async () => {
+      try {
+        const summary = await fetchLiveMetricsForCustomers(scoped)
+        const next = summary.perCustomer.reduce<Record<string, { week: number; month: number; total: number }>>((acc, customer) => {
+          acc[customer.customerId] = {
+            week: customer.counts.week,
+            month: customer.counts.month,
+            total: customer.counts.total,
+          }
+          return acc
+        }, {})
+        setMetricsByCustomerId(next)
+      } catch {
+        setMetricsByCustomerId({})
+      }
+    })()
+  }, [customers, loading])
   
   // ONE-TIME migration: Fix legacy localStorage entries
   // Uses BOTH ref (session) and localStorage flag (persistent) to ensure single execution

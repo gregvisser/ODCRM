@@ -71,9 +71,6 @@ import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { api } from '../utils/api'
-import { getCurrentCustomerId } from '../platform/stores/settings'
-import { fetchLeadsFromApi, persistLeadsToStorage } from '../utils/leadsApi'
-import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import MigrateAccountsPanel from './MigrateAccountsPanel'
 import { GoogleSheetLink } from './links/GoogleSheetLink'
 
@@ -318,6 +315,7 @@ export type Account = {
   weeklyActual: number
   monthlyTarget: number
   monthlyActual: number
+  sheetMetricsUnavailable?: boolean
   weeklyReport: string
   users: AccountUser[]
   clientLeadsSheetUrl?: string
@@ -343,55 +341,8 @@ const STORAGE_KEY_ACCOUNTS = OdcrmStorageKeys.accounts
 const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = OdcrmStorageKeys.accountsLastUpdated
 const STORAGE_KEY_SECTORS = OdcrmStorageKeys.sectors
 const STORAGE_KEY_TARGET_LOCATIONS = OdcrmStorageKeys.targetLocations
-const STORAGE_KEY_LEADS = OdcrmStorageKeys.leads
 const STORAGE_KEY_DELETED_ACCOUNTS = OdcrmStorageKeys.deletedAccounts
 const STORAGE_KEY_GOOGLE_SHEETS_CLEARED = 'odcrm_accounts_google_sheets_cleared_v1'
-
-// Lead type for marketing leads
-export type Lead = {
-  [key: string]: string
-  accountName: string
-}
-
-// Load leads from storage
-export function loadLeadsFromStorage(): Lead[] {
-  const parsed = getJson<Lead[]>(STORAGE_KEY_LEADS)
-  if (parsed && Array.isArray(parsed)) {
-    console.log('✅ Loaded leads from storage:', parsed.length)
-    return parsed
-  }
-  console.log('⚠️ No leads found in storage')
-  return []
-}
-
-function loadMarketingLeadsLastRefresh(): Date | null {
-  const stored = getItem(OdcrmStorageKeys.marketingLeadsLastRefresh)
-  if (!stored) return null
-  const parsed = new Date(stored)
-  return isNaN(parsed.getTime()) ? null : parsed
-}
-
-function shouldRefreshMarketingLeads(leads: Lead[]): boolean {
-  if (leads.length === 0) return true
-  const lastRefreshTime = loadMarketingLeadsLastRefresh()
-  if (!lastRefreshTime) return true
-
-  try {
-    const accountsUpdatedIso = getItem(OdcrmStorageKeys.accountsLastUpdated)
-    if (accountsUpdatedIso) {
-      const accountsUpdatedAt = new Date(accountsUpdatedIso)
-      if (!isNaN(accountsUpdatedAt.getTime()) && accountsUpdatedAt > lastRefreshTime) {
-        return true
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  const now = new Date()
-  const thirtyMinutesInMs = 30 * 60 * 1000
-  return now.getTime() - lastRefreshTime.getTime() >= thirtyMinutesInMs
-}
 
 // Load deleted contacts from storage
 function loadDeletedContactsFromStorage(): Set<string> {
@@ -684,192 +635,6 @@ function seedContactsIfEmpty() {
   } catch (error) {
     console.warn('Failed to seed contacts into localStorage:', error)
   }
-}
-
-// Helper to parse dates in various formats (same as MarketingLeadsTab)
-function parseDate(dateStr: string): Date | null {
-  if (!dateStr || dateStr.trim() === '') return null
-  
-  const trimmed = dateStr.trim()
-  
-  // Try DD.MM.YY or DD.MM.YYYY format (from the Google Sheet)
-  const ddmmyy = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-  if (ddmmyy) {
-    const day = parseInt(ddmmyy[1], 10)
-    const month = parseInt(ddmmyy[2], 10) - 1
-    const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-    const date = new Date(year, month, day)
-    if (!isNaN(date.getTime())) return date
-  }
-  
-  // Try DD/MM/YY or DD/MM/YYYY format
-  const ddmmyySlash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
-  if (ddmmyySlash) {
-    const day = parseInt(ddmmyySlash[1], 10)
-    const month = parseInt(ddmmyySlash[2], 10) - 1
-    const year = parseInt(ddmmyySlash[3], 10) < 100 ? 2000 + parseInt(ddmmyySlash[3], 10) : parseInt(ddmmyySlash[3], 10)
-    const date = new Date(year, month, day)
-    if (!isNaN(date.getTime())) return date
-  }
-  
-  // Try DD-MM-YY or DD-MM-YYYY format
-  const ddmmyyDash = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{2,4})$/)
-  if (ddmmyyDash) {
-    const day = parseInt(ddmmyyDash[1], 10)
-    const month = parseInt(ddmmyyDash[2], 10) - 1
-    const year = parseInt(ddmmyyDash[3], 10) < 100 ? 2000 + parseInt(ddmmyyDash[3], 10) : parseInt(ddmmyyDash[3], 10)
-    const date = new Date(year, month, day)
-    if (!isNaN(date.getTime())) return date
-  }
-  
-  // Try YYYY-MM-DD format (ISO)
-  const yyyymmdd = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
-  if (yyyymmdd) {
-    const year = parseInt(yyyymmdd[1], 10)
-    const month = parseInt(yyyymmdd[2], 10) - 1
-    const day = parseInt(yyyymmdd[3], 10)
-    const date = new Date(year, month, day)
-    if (!isNaN(date.getTime())) return date
-  }
-  
-  // Try standard date parsing (handles various formats)
-  const parsed = new Date(trimmed)
-  if (!isNaN(parsed.getTime())) {
-    // Validate the parsed date is reasonable (not too far in past/future)
-    const year = parsed.getFullYear()
-    if (year >= 2000 && year <= 2100) {
-      return parsed
-    }
-  }
-  
-  return null
-}
-
-// Calculate weekly and monthly actuals from leads for an account
-// Uses the same logic as MarketingLeadsTab for consistency
-export function calculateActualsFromLeads(accountName: string, leads: Lead[]): { weeklyActual: number; monthlyActual: number } {
-  const now = new Date()
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const endOfToday = new Date(startOfToday)
-  endOfToday.setDate(endOfToday.getDate() + 1) // End of today (start of tomorrow)
-  
-  // Current week: Monday to Sunday of the current week
-  const currentWeekStart = new Date(startOfToday)
-  const dayOfWeek = currentWeekStart.getDay()
-  const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek // Monday = 1, Sunday = 0
-  currentWeekStart.setDate(currentWeekStart.getDate() + diff)
-  currentWeekStart.setHours(0, 0, 0, 0)
-  
-  // End of current week: Start of next Monday (exclusive, like MarketingLeadsTab)
-  const currentWeekEnd = new Date(currentWeekStart)
-  currentWeekEnd.setDate(currentWeekEnd.getDate() + 7) // Start of next Monday
-
-  // Current month: first day of month to last day of month
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  monthStart.setHours(0, 0, 0, 0)
-  
-  // End of month: Start of next month (exclusive, like MarketingLeadsTab)
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-
-  // Filter leads for this account
-  const accountLeads = leads.filter(lead => lead.accountName === accountName)
-
-  let weeklyActual = 0
-  let monthlyActual = 0
-  let leadsWithoutDates = 0
-  const dateFieldsFound: string[] = []
-
-  // Debug: Log date ranges and sample leads
-  if (accountLeads.length > 0) {
-    console.log(`📅 Date ranges for ${accountName}:`, {
-      weekStart: currentWeekStart.toISOString().split('T')[0],
-      weekEnd: currentWeekEnd.toISOString().split('T')[0],
-      monthStart: monthStart.toISOString().split('T')[0],
-      monthEnd: monthEnd.toISOString().split('T')[0],
-      totalLeads: accountLeads.length,
-      currentDate: now.toISOString().split('T')[0]
-    })
-    
-    // Log first 3 leads to see their structure
-    console.log(`📋 Sample leads for ${accountName}:`, accountLeads.slice(0, 3).map(lead => {
-      const allFields = Object.entries(lead).map(([k, v]) => `${k}: "${v}"`).join(', ')
-      return { fields: Object.keys(lead), sample: allFields.substring(0, 200) }
-    }))
-  }
-
-  // Use the same date field detection logic as MarketingLeadsTab
-  // But prioritize checking ALL fields for DD.MM.YY format first (like "05.01.26")
-  accountLeads.forEach((lead, index) => {
-    let dateValue = ''
-    let dateFieldName = ''
-    
-    // FIRST: Check ALL fields for DD.MM.YY format (like "05.01.26") - this is the key!
-    for (const key of Object.keys(lead)) {
-      const rawValue = lead[key]
-      const value = typeof rawValue === 'string' ? rawValue.trim() : ''
-      if (value && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value)) {
-        dateValue = value
-        dateFieldName = key
-        break
-      }
-    }
-    
-    // SECOND: If no DD.MM.YY format found, check for date fields in the same order as MarketingLeadsTab
-    if (!dateValue || !dateValue.trim()) {
-      const fallbackDateValue =
-        lead['Date'] ??
-        lead['date'] ??
-        lead['Week'] ??
-        lead['week'] ??
-        lead['First Meeting Date'] ??
-        ''
-      dateValue = typeof fallbackDateValue === 'string' ? fallbackDateValue : String(fallbackDateValue || '')
-      
-      if (dateValue) {
-        dateFieldName = lead['Date'] ? 'Date' : lead['date'] ? 'date' : lead['Week'] ? 'Week' : lead['week'] ? 'week' : lead['First Meeting Date'] ? 'First Meeting Date' : 'unknown'
-      }
-    }
-
-    // Track which field was used
-    if (dateFieldName && !dateFieldsFound.includes(dateFieldName)) {
-      dateFieldsFound.push(dateFieldName)
-    }
-
-    const parsedDate = parseDate(dateValue)
-    
-    if (!parsedDate) {
-      leadsWithoutDates++
-      if (index < 3) {
-        console.log(`⚠️ Lead ${index + 1} for ${accountName}: No parseable date.`, {
-          dateValue: dateValue || 'EMPTY',
-          dateFieldName: dateFieldName || 'NOT FOUND',
-          sampleFields: Object.entries(lead).slice(0, 8).map(([k, v]) => `${k}: "${String(v).substring(0, 30)}"`).join(', ')
-        })
-      }
-      return
-    }
-
-    // Use parsed date directly (same as MarketingLeadsTab) - no normalization needed
-    // Check if within current week (Monday to Sunday) - use exclusive end like MarketingLeadsTab
-    if (parsedDate >= currentWeekStart && parsedDate < currentWeekEnd) {
-      weeklyActual++
-    }
-
-    // Check if within current month (first day to last day of month) - use exclusive end like MarketingLeadsTab
-    if (parsedDate >= monthStart && parsedDate < monthEnd) {
-      monthlyActual++
-    }
-  })
-
-  // Log debugging info
-  if (accountLeads.length > 0) {
-    console.log(`📊 ${accountName}: ${accountLeads.length} total leads, ${weeklyActual} this week, ${monthlyActual} this month, ${leadsWithoutDates} without dates`)
-    if (dateFieldsFound.length > 0) {
-      console.log(`   Date fields found: ${dateFieldsFound.join(', ')}`)
-    }
-  }
-
-  return { weeklyActual, monthlyActual }
 }
 
 // Load deleted account names from storage
@@ -2619,31 +2384,9 @@ function getFieldConfig(contactsData: StoredContact[]): FieldConfig[] {
   {
     label: 'Leads Generated This Month',
     render: (account) => {
-      const leads = loadLeadsFromStorage()
-      const accountLeads = leads.filter(lead => lead.accountName === account.name)
-      const now = new Date()
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-      const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-      
-      let monthlyLeads = 0
-      accountLeads.forEach(lead => {
-        const dateValue =
-          lead['Date'] ||
-          lead['date'] ||
-          lead['Week'] ||
-          lead['week'] ||
-          lead['First Meeting Date'] ||
-          lead['first meeting date'] ||
-          ''
-        const parsedDate = parseDate(dateValue)
-        if (parsedDate && parsedDate >= monthStart && parsedDate < endOfToday) {
-          monthlyLeads++
-        }
-      })
-      
       return (
-        <Badge colorScheme={monthlyLeads > 0 ? 'teal' : 'gray'} fontSize="sm" px={2} py={1}>
-          {monthlyLeads}
+        <Badge colorScheme={account.sheetMetricsUnavailable ? 'orange' : account.monthlyActual > 0 ? 'teal' : 'gray'} fontSize="sm" px={2} py={1}>
+          {account.sheetMetricsUnavailable ? '—' : (account.monthlyActual || 0)}
         </Badge>
       )
     },
@@ -3779,24 +3522,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const [sortColumn, setSortColumn] = useState<string | null>('spend')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   
-  // Leads section state - load ONCE via useState initializer, not on every render
-  const [leads, setLeads] = useState<Lead[]>(() => {
-    const cached = loadLeadsFromStorage()
-    return cached
-  })
-  const [leadsLoading, setLeadsLoading] = useState(() => {
-    const cached = loadLeadsFromStorage()
-    return cached.length === 0
-  })
-  const [leadsError, setLeadsError] = useState<string | null>(null)
-  const [leadsLastRefresh, setLeadsLastRefresh] = useState<Date>(() => {
-    const stored = getItem(OdcrmStorageKeys.leadsLastRefresh)
-    if (!stored) return new Date()
-    const d = new Date(stored)
-    return isNaN(d.getTime()) ? new Date() : d
-  })
-  const [leadsFilter, setLeadsFilter] = useState<string>('')
-  
   // Save column widths to localStorage
   useEffect(() => {
     setItem('odcrm_accounts_column_widths', JSON.stringify(columnWidths))
@@ -4208,110 +3933,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     return merged
   })
   const [editingFields, setEditingFields] = useState<Record<string, string>>({}) // Track which fields are being edited: { "accountName:fieldName": "value" }
-
-  // Update accounts with actuals from marketing leads
-  useEffect(() => {
-    if (isServerSourceOfTruth) return
-    const leads = loadLeadsFromStorage()
-
-    setAccountsData((prev) => {
-      const updated = prev.map((account) => {
-        if (leads.length === 0) {
-          if ((account.weeklyActual || 0) !== 0 || (account.monthlyActual || 0) !== 0 || (account.leads || 0) !== 0) {
-            return { ...account, weeklyActual: 0, monthlyActual: 0, leads: 0 }
-          }
-          return account
-        }
-
-        const actuals = calculateActualsFromLeads(account.name, leads)
-        const leadCount = leads.filter((l) => l.accountName === account.name).length
-        // Only update if values have changed to avoid unnecessary re-renders
-        if (
-          account.weeklyActual !== actuals.weeklyActual ||
-          account.monthlyActual !== actuals.monthlyActual ||
-          account.leads !== leadCount
-        ) {
-          return {
-            ...account,
-            weeklyActual: actuals.weeklyActual,
-            monthlyActual: actuals.monthlyActual,
-            leads: leadCount,
-          }
-        }
-        return account
-      })
-      
-      // Save to localStorage if any changes were made
-      const hasChanges = updated.some((acc, idx) => 
-        acc.weeklyActual !== prev[idx].weeklyActual ||
-        acc.monthlyActual !== prev[idx].monthlyActual ||
-        acc.leads !== prev[idx].leads
-      )
-      if (hasChanges) {
-        saveAccountsToStorage(updated)
-      }
-      
-      return updated
-    })
-  }, [isServerSourceOfTruth]) // Run once on mount in cache mode; no-op for DB source of truth
-
-  // Listen for leads updates
-  useEffect(() => {
-    if (isServerSourceOfTruth) return
-    const handleLeadsUpdated = () => {
-      const leads = loadLeadsFromStorage()
-
-      setAccountsData((prev) => {
-        const updated = prev.map((account) => {
-          if (leads.length === 0) {
-            if ((account.weeklyActual || 0) !== 0 || (account.monthlyActual || 0) !== 0 || (account.leads || 0) !== 0) {
-              return { ...account, weeklyActual: 0, monthlyActual: 0, leads: 0 }
-            }
-            return account
-          }
-
-          const actuals = calculateActualsFromLeads(account.name, leads)
-          const leadCount = leads.filter((l) => l.accountName === account.name).length
-          if (
-            account.weeklyActual !== actuals.weeklyActual ||
-            account.monthlyActual !== actuals.monthlyActual ||
-            account.leads !== leadCount
-          ) {
-            return {
-              ...account,
-              weeklyActual: actuals.weeklyActual,
-              monthlyActual: actuals.monthlyActual,
-              leads: leadCount,
-            }
-          }
-          return account
-        })
-        
-        const hasChanges = updated.some((acc, idx) => 
-          acc.weeklyActual !== prev[idx].weeklyActual ||
-          acc.monthlyActual !== prev[idx].monthlyActual ||
-          acc.leads !== prev[idx].leads
-        )
-        if (hasChanges) {
-          saveAccountsToStorage(updated)
-          emit('accountsUpdated', updated)
-          // Update selected account if it's open
-          if (selectedAccount) {
-            const updatedAccount = updated.find(a => a.name === selectedAccount.name)
-            if (updatedAccount) {
-              setSelectedAccount(updatedAccount)
-            }
-          }
-        }
-        
-        return updated
-      })
-    }
-
-    // Listen for custom event when leads are updated
-    const off = on('leadsUpdated', () => handleLeadsUpdated())
-    return () => off()
-  }, [selectedAccount, isServerSourceOfTruth])
 
   // Sync selectedCustomerId when selectedAccount becomes null (drawer closed)
   // Main selection happens in handleAccountClick - this is just cleanup
@@ -5470,76 +5091,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const accountNames = (accountsData ?? []).map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
   const fieldConfig = getFieldConfig(contactsData)
 
-  // Load leads data function
-  const loadLeadsData = useCallback(async (forceRefresh: boolean = false) => {
-    if (isServerSourceOfTruth) {
-      setLeads([])
-      setLeadsLoading(false)
-      return
-    }
-    const cachedLeads = loadLeadsFromStorage()
-    
-    // Check if we should refresh
-    if (!forceRefresh && !shouldRefreshMarketingLeads(cachedLeads)) {
-      console.log('Skipping leads refresh - less than 30 minutes since last refresh')
-      setLeads(cachedLeads)
-      setLeadsLoading(false)
-      return
-    }
-
-    setLeadsLoading(true)
-    setLeadsError(null)
-
-    try {
-      const customerId = getCurrentCustomerId()
-      if (!customerId) {
-        console.warn('Missing customerId – leads fetch skipped')
-        setLeadsLoading(false)
-        return
-      }
-      const { leads: allLeads, lastSyncAt } = await fetchLeadsFromApi(customerId)
-      const sheetAccounts = new Set(
-        (accountsData ?? [])
-          .filter((account) => Boolean(account.clientLeadsSheetUrl?.trim()))
-          .map((account) => account.name),
-      )
-      const filteredLeads = sheetAccounts.size
-        ? allLeads.filter((lead) => sheetAccounts.has(lead.accountName))
-        : []
-      const refreshTime = persistLeadsToStorage(filteredLeads, lastSyncAt)
-      setLeads(filteredLeads)
-      setLeadsLastRefresh(refreshTime)
-      syncAccountLeadCountsFromLeads(filteredLeads)
-    } catch (err) {
-      setLeadsError('Failed to load leads data from the server.')
-      console.error('Error loading leads:', err)
-    } finally {
-      setLeadsLoading(false)
-    }
-  }, [accountsData, isServerSourceOfTruth])
-
-  // Load leads ONCE on mount - do NOT depend on loadLeadsData to prevent infinite loops
-  const hasLoadedLeadsRef = useRef(false)
-  useEffect(() => {
-    if (isServerSourceOfTruth) {
-      setLeads([])
-      setLeadsLoading(false)
-      return
-    }
-    if (hasLoadedLeadsRef.current) return
-    hasLoadedLeadsRef.current = true
-    
-    const cachedLeads = loadLeadsFromStorage()
-    if (!shouldRefreshMarketingLeads(cachedLeads)) {
-      setLeads(cachedLeads)
-      setLeadsLoading(false)
-      return
-    }
-
-    void loadLeadsData(false)
-  }, [loadLeadsData, isServerSourceOfTruth]) // loadLeadsData is guarded by hasLoadedLeadsRef to remain mount-safe
-
-  // Keep a local copy of the SAME marketing leads that Marketing → Leads uses.
   return (
     <>
       <HStack justify="space-between" mb={6} flexWrap="wrap" gap={3}>
@@ -5566,6 +5117,15 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
           </Button>
         </HStack>
       </HStack>
+
+      {accountsData.some((account) => account.sheetMetricsUnavailable) && (
+        <Alert status="warning" borderRadius="md" mb={4}>
+          <AlertIcon />
+          <AlertDescription fontSize="sm">
+            Live sheet-backed lead metrics are currently unavailable for one or more accounts. Values are shown as `—` until live sync succeeds.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Migration Panel - show if no accounts exist */}
       {!hasStoredAccounts && <MigrateAccountsPanel />}
@@ -5882,7 +5442,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   </Td>
                   <Td isNumeric>
                     <Text fontSize="sm" color="text.primary">
-                      {account.weeklyActual || 0}
+                      {account.sheetMetricsUnavailable ? '—' : (account.weeklyActual || 0)}
                     </Text>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
@@ -5930,7 +5490,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   </Td>
                   <Td isNumeric>
                     <Text fontSize="sm" color="text.primary">
-                      {account.monthlyActual || 0}
+                      {account.sheetMetricsUnavailable ? '—' : (account.monthlyActual || 0)}
                     </Text>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
@@ -5978,7 +5538,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   </Td>
                   <Td isNumeric>
                     <Text fontSize="sm" color="text.primary">
-                      {account.monthlyTarget > 0 
+                      {account.sheetMetricsUnavailable
+                        ? '—'
+                        : account.monthlyTarget > 0 
                         ? `${((account.monthlyActual || 0) / account.monthlyTarget * 100).toFixed(1)}%`
                         : '0%'}
                     </Text>

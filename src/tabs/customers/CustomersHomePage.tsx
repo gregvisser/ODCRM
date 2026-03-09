@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Badge, Box, Button, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
+import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
 import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
 import { MdAssessment } from 'react-icons/md'
 import { SubNavigation, type SubNavItem } from '../../design-system'
@@ -140,55 +140,8 @@ export default function CustomersHomePage({
         <Text fontSize="sm" color="gray.700" mt={1} data-testid="customers-readiness-guidance">
           After updating accounts, contacts, or lead prerequisites, continue in Marketing Readiness to run outreach operations.
         </Text>
-        <Text fontSize="xs" color="gray.600" mt={1} data-testid="customers-module-continuity-guidance">
-          Use Clients for CRM/data maintenance. Use Onboarding for setup checkpoints. Use Marketing for daily outreach execution.
-        </Text>
-        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={2} mt={3}>
-          <VStack
-            align="start"
-            spacing={0}
-            p={2}
-            borderRadius="md"
-            border="1px solid"
-            borderColor="gray.200"
-            bg="white"
-            data-testid="customers-subarea-guidance-accounts"
-          >
-            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Accounts</Text>
-            <Text fontSize="sm" color="gray.700">Company-level records and ownership context.</Text>
-          </VStack>
-          <VStack
-            align="start"
-            spacing={0}
-            p={2}
-            borderRadius="md"
-            border="1px solid"
-            borderColor="gray.200"
-            bg="white"
-            data-testid="customers-subarea-guidance-contacts"
-          >
-            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Contacts</Text>
-            <Text fontSize="sm" color="gray.700">Recipient-level email and outreach readiness details.</Text>
-          </VStack>
-          <VStack
-            align="start"
-            spacing={0}
-            p={2}
-            borderRadius="md"
-            border="1px solid"
-            borderColor="gray.200"
-            bg="white"
-            data-testid="customers-subarea-guidance-leads"
-          >
-            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="gray.600">Leads</Text>
-            <Text fontSize="sm" color="gray.700">Lead performance and reporting signals for follow-up planning.</Text>
-          </VStack>
-        </SimpleGrid>
         <Text fontSize="xs" color="gray.600" mt={2} data-testid="customers-transitional-leads-note">
           During transition, lead-source updates may still come from linked Google Sheets and are reflected here when synced.
-        </Text>
-        <Text fontSize="xs" color="gray.600" mt={2} data-testid="customers-post-fix-handoff">
-          When data checks are complete, move back to Marketing Readiness for send planning and operations.
         </Text>
         <HStack mt={3}>
           <Button size="sm" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="customers-readiness-next-step">
