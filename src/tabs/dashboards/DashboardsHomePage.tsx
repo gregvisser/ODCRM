@@ -191,8 +191,10 @@ export default function DashboardsHomePage() {
       const summary = await fetchLiveMetricsForCustomers(customers)
       setAggregatedMetrics(summary)
       setKpiLastUpdatedAt(new Date())
-      if ((summary.errors || []).length > 0 && summary.perCustomer.length === 0) {
-        setAggregatedMetricsError('Backend metrics are currently unavailable for the configured customer scope.')
+      if ((summary.errors || []).length > 0) {
+        const names = summary.errors.map((e) => e.name).filter(Boolean).slice(0, 3)
+        const suffix = names.length > 0 ? ` (${names.join(', ')}${summary.errors.length > names.length ? ', ...' : ''})` : ''
+        setAggregatedMetricsError(`Backend metrics are currently unavailable for part of the configured customer scope${suffix}.`)
       }
     } catch (error) {
       setAggregatedMetrics(null)
@@ -343,6 +345,8 @@ export default function DashboardsHomePage() {
   const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
   const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
   const scopedCustomerCount = kpiCustomerScope.filter((c) => c.id && c.name).length
+  const customerByName = new Map(kpiCustomerScope.map((customer) => [customer.name, customer] as const))
+  const metricsByCustomerId = new Map((aggregatedMetrics?.perCustomer || []).map((customer) => [customer.customerId, customer] as const))
   const aggregatedMetricsAvailable = Boolean(
     aggregatedMetrics &&
       aggregatedMetrics.perCustomer.length > 0 &&
@@ -363,10 +367,25 @@ export default function DashboardsHomePage() {
 
   const accountsWithPercentages = accountsData
     .map((account) => ({
-      ...account,
-      monthlyPercentage: account.monthlyTarget > 0 
-        ? ((account.monthlyActual || 0) / account.monthlyTarget) * 100 
-        : 0,
+      ...(() => {
+        const scopedCustomer = customerByName.get(account.name)
+        const scopedMetrics = scopedCustomer ? metricsByCustomerId.get(scopedCustomer.id) : undefined
+        const isSheetBacked = Boolean(scopedCustomer?.leadsReportingUrl || account.clientLeadsSheetUrl?.trim())
+        const sheetMetricsUnavailable = isSheetBacked && !scopedMetrics
+        const weeklyActual = isSheetBacked ? (scopedMetrics?.counts.week ?? 0) : (account.weeklyActual || 0)
+        const monthlyActual = isSheetBacked ? (scopedMetrics?.counts.month ?? 0) : (account.monthlyActual || 0)
+        const leads = isSheetBacked ? (scopedMetrics?.counts.total ?? 0) : (account.leads || 0)
+        return {
+          ...account,
+          weeklyActual,
+          monthlyActual,
+          leads,
+          sheetMetricsUnavailable,
+          monthlyPercentage: account.monthlyTarget > 0
+            ? (monthlyActual / account.monthlyTarget) * 100
+            : 0,
+        }
+      })(),
     }))
     .sort((a, b) => b.monthlySpendGBP - a.monthlySpendGBP)
   
@@ -392,7 +411,7 @@ export default function DashboardsHomePage() {
       id: 'weeklyActual',
       header: 'Week Actual',
       accessorKey: 'weeklyActual',
-      cell: ({ value }) => value || 0,
+      cell: ({ value, row }) => row.original.sheetMetricsUnavailable ? '—' : (value || 0),
       sortable: true,
       width: 100,
     },
@@ -408,7 +427,7 @@ export default function DashboardsHomePage() {
       id: 'monthlyActual',
       header: 'Month Actual',
       accessorKey: 'monthlyActual',
-      cell: ({ value }) => value || 0,
+      cell: ({ value, row }) => row.original.sheetMetricsUnavailable ? '—' : (value || 0),
       sortable: true,
       width: 120,
     },
