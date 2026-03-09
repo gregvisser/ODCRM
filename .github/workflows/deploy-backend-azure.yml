@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: deploy-backend-main
-  cancel-in-progress: true
+  # Serialize backend deploys to avoid overlapping OneDeploy operations (409 conflicts).
+  cancel-in-progress: false
 
 env:
   ALWAYS_DEPLOY_BACKEND: true
