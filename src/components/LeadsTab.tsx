@@ -62,7 +62,7 @@ import {
   type ValidateSheetResult
 } from '../utils/leadsApi'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
-import { createLiveLead, type LiveLeadRow } from '../utils/liveLeadsApi'
+import { createLiveLead, retryLiveLeadOutboundSync, type LiveLeadRow } from '../utils/liveLeadsApi'
 
 type Lead = LeadRecord & {
   [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
@@ -86,6 +86,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
       Location: row.location ?? undefined,
       Status: row.status ?? undefined,
       'Sync Status': row.syncStatus ?? undefined,
+      syncStatus: row.syncStatus ?? undefined,
       Notes: row.notes ?? undefined,
       Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
     }
@@ -122,6 +123,7 @@ function LeadsTab() {
   const [sheetValidateForEmpty, setSheetValidateForEmpty] = useState<ValidateSheetResult | null>(null)
   const [isAddLeadOpen, setIsAddLeadOpen] = useState(false)
   const [isCreatingLead, setIsCreatingLead] = useState(false)
+  const [retryingLeadId, setRetryingLeadId] = useState<string | null>(null)
   const [addLeadForm, setAddLeadForm] = useState({
     occurredAt: '',
     fullName: '',
@@ -190,6 +192,14 @@ function LeadsTab() {
       case 'converted': return 'green'
       default: return 'gray'
     }
+  }
+
+  const getSyncStatusColor = (status?: string) => {
+    const normalized = String(status || '').toLowerCase()
+    if (normalized === 'synced') return 'green'
+    if (normalized === 'pending_outbound') return 'yellow'
+    if (normalized === 'sync_error') return 'red'
+    return 'gray'
   }
 
   // Handle convert lead to contact
@@ -555,10 +565,11 @@ function LeadsTab() {
         status: (addLeadForm.status as 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted') || 'new',
         notes: addLeadForm.notes || null,
       })
+      const outboundStatus = String(result.outboundSync.status || '')
       toast({
         title: 'Lead added',
         description: result.outboundSync.note,
-        status: 'success',
+        status: outboundStatus === 'sync_error' ? 'warning' : 'success',
         duration: 5000,
         isClosable: true,
       })
@@ -587,6 +598,33 @@ function LeadsTab() {
       })
     } finally {
       setIsCreatingLead(false)
+    }
+  }
+
+  const handleRetryOutboundSync = async (leadId: string) => {
+    if (!customerId || !leadId) return
+    setRetryingLeadId(leadId)
+    try {
+      const result = await retryLiveLeadOutboundSync(customerId, leadId)
+      const status = String(result.outboundSync.status || '')
+      toast({
+        title: status === 'synced' ? 'Lead sync completed' : 'Lead sync retry finished',
+        description: result.outboundSync.note + (result.outboundSync.error ? ` (${result.outboundSync.error})` : ''),
+        status: status === 'synced' ? 'success' : 'warning',
+        duration: 6000,
+        isClosable: true,
+      })
+      await refetch()
+    } catch (e) {
+      toast({
+        title: 'Retry failed',
+        description: e instanceof Error ? e.message : 'Unable to retry outbound sync',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setRetryingLeadId(null)
     }
   }
 
@@ -904,36 +942,50 @@ function LeadsTab() {
                       />
                     </Td>
                     <Td px={3} py={2} position="sticky" left={10} bg={isSelected ? 'blue.50' : 'white'} zIndex={5} whiteSpace="nowrap">
-                      {!isConverted ? (
-                        <Menu>
-                          <MenuButton 
-                            as={Button} 
-                            size="xs" 
-                            colorScheme="blue"
-                            isLoading={convertingLeadId === leadId}
+                      <VStack align="stretch" spacing={1}>
+                        {!isConverted ? (
+                          <Menu>
+                            <MenuButton 
+                              as={Button} 
+                              size="xs" 
+                              colorScheme="blue"
+                              isLoading={convertingLeadId === leadId}
+                              isDisabled={convertingLeadId !== null || retryingLeadId === leadId}
+                            >
+                              Convert
+                            </MenuButton>
+                            <MenuList>
+                              <MenuItem onClick={() => handleConvertLead(leadId)}>
+                                Convert to Contact
+                              </MenuItem>
+                              {sequences.length > 0 && (
+                                <>
+                                  <MenuItem isDisabled>Convert & Enroll:</MenuItem>
+                                  {sequences.map((seq) => (
+                                    <MenuItem key={seq.id} onClick={() => handleConvertLead(leadId, seq.id)}>
+                                      {seq.name}
+                                    </MenuItem>
+                                  ))}
+                                </>
+                              )}
+                            </MenuList>
+                          </Menu>
+                        ) : (
+                          <Badge colorScheme="green" fontSize="xs">Converted</Badge>
+                        )}
+                        {sourceOfTruth === 'google_sheets' && String(lead.syncStatus || '').toLowerCase() === 'sync_error' && (
+                          <Button
+                            size="xs"
+                            colorScheme="orange"
+                            variant="outline"
+                            onClick={() => handleRetryOutboundSync(leadId)}
+                            isLoading={retryingLeadId === leadId}
                             isDisabled={convertingLeadId !== null}
                           >
-                            Convert
-                          </MenuButton>
-                          <MenuList>
-                            <MenuItem onClick={() => handleConvertLead(leadId)}>
-                              Convert to Contact
-                            </MenuItem>
-                            {sequences.length > 0 && (
-                              <>
-                                <MenuItem isDisabled>Convert & Enroll:</MenuItem>
-                                {sequences.map((seq) => (
-                                  <MenuItem key={seq.id} onClick={() => handleConvertLead(leadId, seq.id)}>
-                                    {seq.name}
-                                  </MenuItem>
-                                ))}
-                              </>
-                            )}
-                          </MenuList>
-                        </Menu>
-                      ) : (
-                        <Badge colorScheme="green" fontSize="xs">Converted</Badge>
-                      )}
+                            Retry Sync
+                          </Button>
+                        )}
+                      </VStack>
                     </Td>
                     {displayedColumns.map((col) => {
                       if (col === 'Account') {
@@ -961,6 +1013,20 @@ function LeadsTab() {
                             <Badge colorScheme={getStatusColor(status)} fontSize="xs" textTransform="capitalize">
                               {status}
                             </Badge>
+                          </Td>
+                        )
+                      }
+                      if (col === 'Sync Status') {
+                        const syncStatus = String(lead.syncStatus || lead['Sync Status'] || '').trim()
+                        return (
+                          <Td key={col} px={3} py={2} bg={isSelected ? 'blue.50' : 'white'}>
+                            {syncStatus ? (
+                              <Badge colorScheme={getSyncStatusColor(syncStatus)} fontSize="xs">
+                                {syncStatus}
+                              </Badge>
+                            ) : (
+                              <Text fontSize="xs" color="gray.400">-</Text>
+                            )}
                           </Td>
                         )
                       }
@@ -1061,7 +1127,7 @@ function LeadsTab() {
               </FormControl>
             </SimpleGrid>
             <Text fontSize="xs" color="gray.500" mt={3}>
-              For sheet-backed clients this stores the lead in ODCRM now and marks outbound sync as pending for Stage 2B.
+              For sheet-backed clients this saves in ODCRM first, then attempts Google Sheets outbound sync.
             </Text>
           </ModalBody>
           <ModalFooter>
