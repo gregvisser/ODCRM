@@ -769,9 +769,17 @@ export default function DashboardsHomePage() {
           </Alert>
         )}
 
-        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+        <SimpleGrid columns={{ base: 1, md: 4 }} spacing={3}>
           <Stat>
-            <StatLabel fontSize="xs">Total Leads This Week</StatLabel>
+            <StatLabel fontSize="xs">Leads Today</StatLabel>
+            <StatNumber fontSize="2xl" color="teal.500">
+              {showKpiContractError ? '—' : todayTotal}
+            </StatNumber>
+            <StatHelpText fontSize="xs">Metrics timezone: Europe/London</StatHelpText>
+          </Stat>
+
+          <Stat>
+            <StatLabel fontSize="xs">Leads This Week (Mon-Sun)</StatLabel>
             <StatNumber fontSize="2xl" color="orange.500">
               {showKpiContractError ? '—' : weekTotal}
             </StatNumber>
@@ -785,7 +793,7 @@ export default function DashboardsHomePage() {
           </Stat>
 
           <Stat>
-            <StatLabel fontSize="xs">Month-to-Date</StatLabel>
+            <StatLabel fontSize="xs">Leads This Month</StatLabel>
             <StatNumber fontSize="2xl" color="orange.500">
               {showKpiContractError ? '—' : monthTotal}
             </StatNumber>
@@ -821,7 +829,7 @@ export default function DashboardsHomePage() {
       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
         {/* Channel Breakdown */}
         <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
-          <Heading size="sm" mb={2}>Channel</Heading>
+          <Heading size="sm" mb={2}>Source Breakdown</Heading>
           <VStack align="stretch" spacing={2}>
             {Object.entries(channelBreakdown)
               .sort((a, b) => b[1] - a[1])
@@ -912,7 +920,7 @@ export default function DashboardsHomePage() {
       {/* Sales Leaderboard */}
       <Box bg="white" p={3} borderRadius="md" shadow="sm" border="1px" borderColor="gray.200">
         <HStack justify="space-between" mb={2}>
-          <Heading size="sm" color="blue.700">Sales Leaderboard</Heading>
+          <Heading size="sm" color="blue.700">Owner Breakdown (Employees)</Heading>
           <Badge colorScheme="blue" fontSize="xs" px={2}>Current Week</Badge>
         </HStack>
         

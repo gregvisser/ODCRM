@@ -4,8 +4,10 @@
  * - For sheet-backed clients, Google Sheets is supported as external sync source via importer.
  */
 import { Router } from 'express'
+import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync } from '../workers/leadsSync.js'
+import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
@@ -110,7 +112,7 @@ function isBlank(value: unknown): boolean {
   return String(value).trim() === ''
 }
 
-function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: string | null; owner: string | null; raw: Record<string, string>; fullName: string | null; email: string | null; phone: string | null; company: string | null; jobTitle: string | null; location: string | null; status: string | null; notes: string | null }>): string[] {
+function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: string | null; owner: string | null; syncStatus: string | null; raw: Record<string, string>; fullName: string | null; email: string | null; phone: string | null; company: string | null; jobTitle: string | null; location: string | null; status: string | null; notes: string | null }>): string[] {
   const canonicalCandidates: Array<{ label: string; getter: (row: (typeof rows)[number]) => unknown }> = [
     { label: 'Date', getter: (row) => row.occurredAt },
     { label: 'Name', getter: (row) => row.fullName },
@@ -122,6 +124,7 @@ function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: s
     { label: 'Channel', getter: (row) => row.source },
     { label: 'Owner', getter: (row) => row.owner },
     { label: 'Status', getter: (row) => row.status },
+    { label: 'Sync Status', getter: (row) => row.syncStatus },
     { label: 'Notes', getter: (row) => row.notes },
   ]
 
@@ -136,7 +139,7 @@ function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: s
     })
   }
 
-  const canonicalRawAliases = new Set(['Date', 'Name', 'Email', 'Phone', 'Company', 'Job Title', 'Location', 'Channel', 'Owner', 'Status', 'Notes'])
+  const canonicalRawAliases = new Set(['Date', 'Name', 'Email', 'Phone', 'Company', 'Job Title', 'Location', 'Channel', 'Owner', 'Status', 'Sync Status', 'Notes'])
   const raw = Array.from(rawKeys).filter((key) => !canonicalRawAliases.has(key)).sort((a, b) => a.localeCompare(b))
   return [...canonical, ...raw]
 }
@@ -154,6 +157,7 @@ function mapDbLeadRows(rows: Array<{
   jobTitle: string | null
   location: string | null
   status: string | null
+  syncStatus: string | null
   notes: string | null
   accountName: string
   data: unknown
@@ -170,6 +174,7 @@ function mapDbLeadRows(rows: Array<{
   jobTitle: string | null
   location: string | null
   status: string | null
+  syncStatus: string | null
   notes: string | null
   raw: Record<string, string>
 }> {
@@ -199,6 +204,7 @@ function mapDbLeadRows(rows: Array<{
       jobTitle,
       location,
       status: row.status,
+      syncStatus: row.syncStatus,
       notes,
       raw,
     }
@@ -233,6 +239,118 @@ async function getSyncMeta(customerId: string, sourceOfTruth: TruthSource): Prom
     rowCount: state?.rowCount ?? 0,
   }
 }
+
+const createLeadSchema = z.object({
+  occurredAt: z.string().optional().nullable(),
+  firstName: z.string().optional().nullable(),
+  lastName: z.string().optional().nullable(),
+  fullName: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  company: z.string().optional().nullable(),
+  jobTitle: z.string().optional().nullable(),
+  location: z.string().optional().nullable(),
+  source: z.string().optional().nullable(),
+  owner: z.string().optional().nullable(),
+  status: z.enum(['new', 'qualified', 'nurturing', 'closed', 'converted']).optional().nullable(),
+  notes: z.string().optional().nullable(),
+})
+
+/**
+ * POST /api/live/leads
+ * Create normalized lead in ODCRM operational DB layer.
+ */
+router.post('/leads', async (req, res) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  const parsed = createLeadSchema.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid lead payload', details: parsed.error.flatten() })
+  }
+
+  try {
+    const context = await getCustomerTruthContext(customerId)
+    if (!context) return res.status(404).json({ error: 'Customer not found' })
+
+    const values = parsed.data
+    const hasIdentity = [values.fullName, values.email, values.company, values.phone].some((v) => typeof v === 'string' && v.trim() !== '')
+    if (!hasIdentity) {
+      return res.status(400).json({ error: 'At least one of fullName, email, company, or phone is required' })
+    }
+
+    const payload = buildManualLeadCreatePayload({
+      customerId,
+      accountName: context.customer.name || '',
+      sourceOfTruth: context.sourceOfTruth,
+      values,
+    })
+
+    const created = await prisma.leadRecord.create({
+      data: {
+        customerId,
+        accountName: context.customer.name || '',
+        data: payload.rawData,
+        normalizedData: payload.normalizedData,
+        sourceUrl: context.sourceOfTruth === 'google_sheets' ? context.configuredSheetUrl : null,
+        sheetGid: null,
+        externalSourceType: payload.externalSourceType,
+        externalId: payload.externalId,
+        externalRowFingerprint: null,
+        occurredAt: payload.occurredAt,
+        source: payload.source,
+        owner: payload.owner,
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        fullName: payload.fullName,
+        email: payload.email,
+        phone: payload.phone,
+        company: payload.company,
+        jobTitle: payload.jobTitle,
+        location: payload.location,
+        status: payload.leadStatus,
+        notes: payload.notes,
+        syncStatus: payload.syncStatus,
+        syncError: payload.syncError,
+        lastInboundSyncAt: payload.lastInboundSyncAt,
+        lastOutboundSyncAt: payload.lastOutboundSyncAt,
+      },
+      select: {
+        id: true,
+        customerId: true,
+        occurredAt: true,
+        source: true,
+        owner: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        company: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        syncStatus: true,
+        createdAt: true,
+      },
+    })
+
+    return res.status(201).json({
+      lead: created,
+      sourceOfTruth: context.sourceOfTruth,
+      outboundSync: {
+        required: context.sourceOfTruth === 'google_sheets',
+        status: payload.syncStatus,
+        note:
+          context.sourceOfTruth === 'google_sheets'
+            ? 'Queued as pending outbound sync for Stage 2B implementation.'
+            : 'No outbound sheet sync required for DB-backed client.',
+      },
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to create lead'
+    return res.status(500).json({ error: message })
+  }
+})
 
 /**
  * POST /api/live/leads/import
@@ -295,6 +413,7 @@ router.get('/leads', async (req, res) => {
         jobTitle: true,
         location: true,
         status: true,
+        syncStatus: true,
         notes: true,
         accountName: true,
         data: true,
@@ -360,6 +479,7 @@ router.get('/leads/metrics', async (req, res) => {
         jobTitle: true,
         location: true,
         status: true,
+        syncStatus: true,
         notes: true,
         data: true,
       },

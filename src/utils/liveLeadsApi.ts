@@ -1,5 +1,5 @@
 /**
- * Live leads API — reads from Google Sheets (published CSV). No DB writes.
+ * Live leads API — reads normalized ODCRM lead records.
  * Uses /api/live/leads and /api/live/leads/metrics with x-customer-id header.
  */
 
@@ -26,6 +26,7 @@ export type LiveLeadRow = {
   location?: string | null
   status?: string | null
   notes?: string | null
+  syncStatus?: string | null
   raw: Record<string, string>
 }
 
@@ -85,6 +86,48 @@ type ApiErrorResponse = {
   hint?: string
 }
 
+export type CreateLiveLeadInput = {
+  occurredAt?: string | null
+  firstName?: string | null
+  lastName?: string | null
+  fullName?: string | null
+  email?: string | null
+  phone?: string | null
+  company?: string | null
+  jobTitle?: string | null
+  location?: string | null
+  source?: string | null
+  owner?: string | null
+  status?: 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted' | null
+  notes?: string | null
+}
+
+export type CreateLiveLeadResponse = {
+  lead: {
+    id: string
+    customerId: string
+    occurredAt: string | null
+    source: string | null
+    owner: string | null
+    fullName: string | null
+    email: string | null
+    phone: string | null
+    company: string | null
+    jobTitle: string | null
+    location: string | null
+    status: string | null
+    notes: string | null
+    syncStatus: string | null
+    createdAt: string
+  }
+  sourceOfTruth: 'google_sheets' | 'db'
+  outboundSync: {
+    required: boolean
+    status: string
+    note: string
+  }
+}
+
 export async function getLiveLeads(customerId: string): Promise<LiveLeadsResponse> {
   const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
     headers: getCustomerHeaders(customerId),
@@ -100,6 +143,20 @@ export async function getLiveLeads(customerId: string): Promise<LiveLeadsRespons
 export async function getLiveLeadMetrics(customerId: string): Promise<LiveLeadMetricsResponse> {
   const res = await fetch(`${API_BASE}/api/live/leads/metrics?customerId=${encodeURIComponent(customerId)}`, {
     headers: getCustomerHeaders(customerId),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export async function createLiveLead(customerId: string, payload: CreateLiveLeadInput): Promise<CreateLiveLeadResponse> {
+  const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
+    method: 'POST',
+    headers: getCustomerHeaders(customerId),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
