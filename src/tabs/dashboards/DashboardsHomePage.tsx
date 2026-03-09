@@ -57,6 +57,12 @@ type CustomerApi = {
   monthlyLeadActual?: number | null
 }
 
+function isCustomerApi(value: unknown): value is CustomerApi {
+  if (!value || typeof value !== 'object') return false
+  const customer = value as Partial<CustomerApi>
+  return typeof customer.id === 'string' && customer.id.trim().length > 0 && typeof customer.name === 'string'
+}
+
 const DEFAULT_ABOUT_SECTIONS: Account['aboutSections'] = {
   whatTheyDo: '',
   accreditations: '',
@@ -265,7 +271,7 @@ export default function DashboardsHomePage() {
         return [] as CustomerApi[]
       }
       
-      const list = Array.isArray(data) ? data : []
+      const list = Array.isArray(data) ? data.filter(isCustomerApi) : []
       setKpiCustomerScope(list.map((customer) => ({
         id: customer.id,
         name: customer.name || customer.id,
@@ -323,7 +329,7 @@ export default function DashboardsHomePage() {
     const refreshInterval = setInterval(async () => {
       const syncCustomers = async () => {
         const { data, error } = await api.get<CustomerApi[]>('/api/customers')
-        const list = Array.isArray(data) ? data : []
+        const list = Array.isArray(data) ? data.filter(isCustomerApi) : []
         if (error || list.length === 0) return
         setKpiCustomerScope(list.map((customer) => ({
           id: customer.id,
@@ -413,7 +419,7 @@ export default function DashboardsHomePage() {
       id: 'weeklyActual',
       header: 'Week Actual',
       accessorKey: 'weeklyActual',
-      cell: ({ value, row }) => row.original.sheetMetricsUnavailable ? '—' : (value || 0),
+      cell: ({ value, row }) => row?.original?.sheetMetricsUnavailable ? '—' : (value || 0),
       sortable: true,
       width: 100,
     },
@@ -429,7 +435,7 @@ export default function DashboardsHomePage() {
       id: 'monthlyActual',
       header: 'Month Actual',
       accessorKey: 'monthlyActual',
-      cell: ({ value, row }) => row.original.sheetMetricsUnavailable ? '—' : (value || 0),
+      cell: ({ value, row }) => row?.original?.sheetMetricsUnavailable ? '—' : (value || 0),
       sortable: true,
       width: 120,
     },
