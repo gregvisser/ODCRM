@@ -13,12 +13,31 @@ function getCustomerHeaders(customerId: string): Record<string, string> {
 }
 
 export type LiveLeadRow = {
+  id: string
   occurredAt: string | null
   source: string | null
   owner: string | null
   company: string | null
   name: string | null
+  fullName?: string | null
+  email?: string | null
+  phone?: string | null
+  jobTitle?: string | null
+  location?: string | null
+  status?: string | null
+  notes?: string | null
   raw: Record<string, string>
+}
+
+export type LiveLeadSyncMeta = {
+  mode: 'sheet_backed' | 'db_backed'
+  status: string | null
+  lastSyncAt: string | null
+  lastSuccessAt: string | null
+  lastInboundSyncAt: string | null
+  lastOutboundSyncAt: string | null
+  lastError: string | null
+  rowCount: number
 }
 
 export type LiveLeadsResponse = {
@@ -26,6 +45,7 @@ export type LiveLeadsResponse = {
   customerName?: string
   rowCount: number
   leads: LiveLeadRow[]
+  displayColumns?: string[]
   queriedAt: string
   sourceUrl: string | null
   sourceOfTruth?: 'google_sheets' | 'db'
@@ -35,6 +55,7 @@ export type LiveLeadsResponse = {
   warning?: string
   hint?: string
   errorCode?: string
+  sync?: LiveLeadSyncMeta
 }
 
 export type LiveLeadMetricsResponse = {
@@ -56,6 +77,7 @@ export type LiveLeadMetricsResponse = {
   warning?: string
   hint?: string
   errorCode?: string
+  sync?: LiveLeadSyncMeta
 }
 
 type ApiErrorResponse = {

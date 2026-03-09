@@ -1,18 +1,29 @@
 /**
- * Live leads truth surface.
- * - Sheet-backed clients: Google Sheets is authoritative.
- * - Non-sheet-backed clients: DB lead records are authoritative.
- *
- * Diagnostic stale cache can be requested explicitly via ?diagnosticFallback=1
- * but is never returned as authoritative live truth by default.
+ * Live leads truth surface (normalized Stage 1 foundation).
+ * - ODCRM reads from normalized lead_records for all clients.
+ * - For sheet-backed clients, Google Sheets is supported as external sync source via importer.
  */
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { fetchAndParseLiveLeads, getStaleCachedLeads, resolveCsvUrl, type LiveLeadRow } from '../utils/liveSheets.js'
+import { triggerManualSync } from '../workers/leadsSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
 const METRICS_TIMEZONE = process.env.LEADS_METRICS_TIMEZONE || 'Europe/London'
+
+type TruthSource = 'google_sheets' | 'db'
+type Freshness = 'live' | 'diagnostic_stale'
+
+type SyncMeta = {
+  mode: 'sheet_backed' | 'db_backed'
+  status: string | null
+  lastSyncAt: string | null
+  lastSuccessAt: string | null
+  lastInboundSyncAt: string | null
+  lastOutboundSyncAt: string | null
+  lastError: string | null
+  rowCount: number
+}
 
 function formatDateInMetricsTz(date: Date): string {
   const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: METRICS_TIMEZONE, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -80,9 +91,6 @@ function getMetricsTimeRangesUtc(): {
   return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd }
 }
 
-type TruthSource = 'google_sheets' | 'db'
-type Freshness = 'live' | 'diagnostic_stale'
-
 function asString(value: unknown): string {
   if (typeof value === 'string') return value
   if (value == null) return ''
@@ -97,75 +105,104 @@ function asRawMap(value: unknown): Record<string, string> {
   }, {})
 }
 
+function isBlank(value: unknown): boolean {
+  if (value == null) return true
+  return String(value).trim() === ''
+}
+
+function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: string | null; owner: string | null; raw: Record<string, string>; fullName: string | null; email: string | null; phone: string | null; company: string | null; jobTitle: string | null; location: string | null; status: string | null; notes: string | null }>): string[] {
+  const canonicalCandidates: Array<{ label: string; getter: (row: (typeof rows)[number]) => unknown }> = [
+    { label: 'Date', getter: (row) => row.occurredAt },
+    { label: 'Name', getter: (row) => row.fullName },
+    { label: 'Email', getter: (row) => row.email },
+    { label: 'Phone', getter: (row) => row.phone },
+    { label: 'Company', getter: (row) => row.company },
+    { label: 'Job Title', getter: (row) => row.jobTitle },
+    { label: 'Location', getter: (row) => row.location },
+    { label: 'Channel', getter: (row) => row.source },
+    { label: 'Owner', getter: (row) => row.owner },
+    { label: 'Status', getter: (row) => row.status },
+    { label: 'Notes', getter: (row) => row.notes },
+  ]
+
+  const canonical = canonicalCandidates
+    .filter((col) => rows.some((row) => !isBlank(col.getter(row))))
+    .map((col) => col.label)
+
+  const rawKeys = new Set<string>()
+  for (const row of rows) {
+    Object.entries(row.raw).forEach(([key, value]) => {
+      if (!isBlank(value)) rawKeys.add(key)
+    })
+  }
+
+  const canonicalRawAliases = new Set(['Date', 'Name', 'Email', 'Phone', 'Company', 'Job Title', 'Location', 'Channel', 'Owner', 'Status', 'Notes'])
+  const raw = Array.from(rawKeys).filter((key) => !canonicalRawAliases.has(key)).sort((a, b) => a.localeCompare(b))
+  return [...canonical, ...raw]
+}
+
 function mapDbLeadRows(rows: Array<{
+  id: string
   occurredAt: Date | null
   createdAt: Date
   source: string | null
   owner: string | null
+  company: string | null
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  jobTitle: string | null
+  location: string | null
+  status: string | null
+  notes: string | null
   accountName: string
   data: unknown
-}>): LiveLeadRow[] {
+}>): Array<{
+  id: string
+  occurredAt: string | null
+  source: string | null
+  owner: string | null
+  company: string | null
+  name: string | null
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  jobTitle: string | null
+  location: string | null
+  status: string | null
+  notes: string | null
+  raw: Record<string, string>
+}> {
   return rows.map((row) => {
     const raw = asRawMap(row.data)
     const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
     const source = row.source ?? (raw['Channel of Lead'] || raw['channel'] || raw['Source'] || null)
     const owner = row.owner ?? (raw['OD Team Member'] || raw['Owner'] || raw['owner'] || null)
-    const company = raw['Company'] || raw['company'] || row.accountName || null
-    const name = raw['Name'] || raw['name'] || null
-    return { occurredAt, source, owner, company, name, raw }
+    const company = row.company ?? (raw['Company'] || raw['company'] || row.accountName || null)
+    const fullName = row.fullName ?? (raw['Name'] || raw['name'] || null)
+    const email = row.email ?? (raw['Email'] || raw['email'] || null)
+    const phone = row.phone ?? (raw['Phone'] || raw['phone'] || raw['Mobile'] || raw['mobile'] || null)
+    const jobTitle = row.jobTitle ?? (raw['Job Title'] || raw['jobTitle'] || raw['Title'] || null)
+    const location = row.location ?? (raw['Location'] || raw['location'] || null)
+    const notes = row.notes ?? (raw['Notes'] || raw['notes'] || null)
+
+    return {
+      id: row.id,
+      occurredAt,
+      source,
+      owner,
+      company,
+      name: fullName,
+      fullName,
+      email,
+      phone,
+      jobTitle,
+      location,
+      status: row.status,
+      notes,
+      raw,
+    }
   })
-}
-
-function classifySheetError(sheetUrl: string, message: string): { code: string; hint: string } {
-  const normalizedUrl = sheetUrl.trim()
-  const lowered = message.toLowerCase()
-
-  if (!normalizedUrl) {
-    return {
-      code: 'SHEET_URL_MISSING',
-      hint: 'Add a Google Sheet URL in Clients > Accounts before loading sheet-backed leads.',
-    }
-  }
-
-  if (!/^https?:\/\//i.test(normalizedUrl)) {
-    return {
-      code: 'SHEET_URL_INVALID',
-      hint: 'Use a full Google Sheets URL such as https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0.',
-    }
-  }
-
-  if (lowered.includes('http 401') || lowered.includes('http 403')) {
-    return {
-      code: 'SHEET_ACCESS_DENIED',
-      hint: 'The sheet is not accessible. Share it for view access or publish the sheet so ODCRM can read it.',
-    }
-  }
-
-  if (lowered.includes('http 404')) {
-    return {
-      code: 'SHEET_NOT_FOUND',
-      hint: 'The configured sheet URL could not be found. Verify the sheet ID and gid in Clients > Accounts.',
-    }
-  }
-
-  if (lowered.includes('html instead of csv')) {
-    return {
-      code: 'SHEET_NOT_FETCHABLE_AS_CSV',
-      hint: 'Use a normal Google Sheets URL. ODCRM normalizes it to export CSV internally. Ensure the linked sheet is readable by ODCRM.',
-    }
-  }
-
-  if (lowered.includes('aborted') || lowered.includes('timeout')) {
-    return {
-      code: 'SHEET_TIMEOUT',
-      hint: 'The sheet request timed out. Verify URL accessibility and retry after confirming the sheet is reachable.',
-    }
-  }
-
-  return {
-    code: 'SHEET_FETCH_FAILED',
-    hint: 'Unable to read this Google Sheet right now. Verify URL format and sheet access permissions for this client.',
-  }
 }
 
 async function getCustomerTruthContext(customerId: string) {
@@ -183,112 +220,56 @@ async function getCustomerTruthContext(customerId: string) {
   }
 }
 
+async function getSyncMeta(customerId: string, sourceOfTruth: TruthSource): Promise<SyncMeta> {
+  const state = await prisma.leadSyncState.findUnique({ where: { customerId } })
+  return {
+    mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
+    status: state?.syncStatus ?? null,
+    lastSyncAt: state?.lastSyncAt ? state.lastSyncAt.toISOString() : null,
+    lastSuccessAt: state?.lastSuccessAt ? state.lastSuccessAt.toISOString() : null,
+    lastInboundSyncAt: state?.lastInboundSyncAt ? state.lastInboundSyncAt.toISOString() : null,
+    lastOutboundSyncAt: state?.lastOutboundSyncAt ? state.lastOutboundSyncAt.toISOString() : null,
+    lastError: state?.lastError ?? null,
+    rowCount: state?.rowCount ?? 0,
+  }
+}
+
 /**
- * GET /api/live/leads?customerId=...
+ * POST /api/live/leads/import
+ * Trigger inbound Google Sheets -> normalized ODCRM lead mirror sync for sheet-backed clients.
  */
-router.get('/leads', async (req, res) => {
+router.post('/leads/import', async (req, res) => {
   const customerId = requireCustomerId(req, res)
   if (!customerId) return
 
-  const diagnosticsFallbackRequested = String(req.query.diagnosticFallback || '') === '1'
-
   try {
     const context = await getCustomerTruthContext(customerId)
-    if (!context) {
-      return res.status(404).json({ error: 'Customer not found' })
+    if (!context) return res.status(404).json({ error: 'Customer not found' })
+
+    if (context.sourceOfTruth !== 'google_sheets') {
+      return res.status(400).json({ error: 'Inbound sheet import is only available for sheet-backed clients' })
     }
 
-    const { customer, configuredSheetUrl, sourceOfTruth } = context
-
-    if (sourceOfTruth === 'db') {
-      const dbRows = await prisma.leadRecord.findMany({
-        where: { customerId },
-        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-        select: {
-          occurredAt: true,
-          createdAt: true,
-          source: true,
-          owner: true,
-          accountName: true,
-          data: true,
-        },
-      })
-      const leads = mapDbLeadRows(dbRows)
-      return res.json({
-        customerId,
-        customerName: customer.name || '',
-        rowCount: leads.length,
-        leads,
-        queriedAt: new Date().toISOString(),
-        sourceUrl: null,
-        sourceOfTruth,
-        authoritative: true,
-        dataFreshness: 'live' as Freshness,
-        staleFallbackUsed: false,
-      })
-    }
-
-    const sourceUrl = resolveCsvUrl(configuredSheetUrl)
-    try {
-      const leads = await fetchAndParseLiveLeads(customerId, configuredSheetUrl)
-      return res.json({
-        customerId,
-        customerName: customer.name || '',
-        rowCount: leads.length,
-        leads,
-        queriedAt: new Date().toISOString(),
-        sourceUrl,
-        sourceOfTruth,
-        authoritative: true,
-        dataFreshness: 'live' as Freshness,
-        staleFallbackUsed: false,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch live leads'
-      const issue = classifySheetError(configuredSheetUrl, message)
-      const stale = getStaleCachedLeads(customerId, configuredSheetUrl)
-
-      if (diagnosticsFallbackRequested && stale) {
-        return res.json({
-          customerId,
-          customerName: customer.name || '',
-          rowCount: stale.data.length,
-          leads: stale.data,
-          queriedAt: new Date().toISOString(),
-          sourceUrl,
-          sourceOfTruth,
-          authoritative: false,
-          dataFreshness: 'diagnostic_stale' as Freshness,
-          staleFallbackUsed: true,
-          warning: `Diagnostic fallback only. Last known cached rows returned because live sheet fetch failed: ${message}`,
-          hint: issue.hint,
-          errorCode: issue.code,
-        })
-      }
-
-      return res.status(502).json({
-        error: message,
-        hint: issue.hint,
-        errorCode: issue.code,
-        sourceOfTruth,
-        sourceUrl,
-        staleFallbackAvailable: !!stale,
-      })
-    }
+    await triggerManualSync(prisma, customerId)
+    const sync = await getSyncMeta(customerId, context.sourceOfTruth)
+    return res.json({
+      customerId,
+      sourceOfTruth: context.sourceOfTruth,
+      sync,
+      importedAt: new Date().toISOString(),
+    })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to fetch live leads'
+    const message = e instanceof Error ? e.message : 'Failed to import leads'
     return res.status(500).json({ error: message })
   }
 })
 
 /**
- * GET /api/live/leads/metrics?customerId=...
+ * GET /api/live/leads
  */
-router.get('/leads/metrics', async (req, res) => {
+router.get('/leads', async (req, res) => {
   const customerId = requireCustomerId(req, res)
   if (!customerId) return
-
-  const diagnosticsFallbackRequested = String(req.query.diagnosticFallback || '') === '1'
 
   try {
     const context = await getCustomerTruthContext(customerId)
@@ -297,117 +278,142 @@ router.get('/leads/metrics', async (req, res) => {
     }
 
     const { customer, configuredSheetUrl, sourceOfTruth } = context
+
+    const dbRows = await prisma.leadRecord.findMany({
+      where: { customerId },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        occurredAt: true,
+        createdAt: true,
+        source: true,
+        owner: true,
+        company: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        accountName: true,
+        data: true,
+      },
+    })
+
+    const leads = mapDbLeadRows(dbRows)
+    const sync = await getSyncMeta(customerId, sourceOfTruth)
+    const displayColumns = deriveDisplayColumns(leads)
+
+    const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
+
+    return res.json({
+      customerId,
+      customerName: customer.name || '',
+      rowCount: leads.length,
+      leads,
+      displayColumns,
+      queriedAt: new Date().toISOString(),
+      sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
+      sourceOfTruth,
+      authoritative,
+      dataFreshness: 'live' as Freshness,
+      staleFallbackUsed: false,
+      sync,
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Failed to fetch leads'
+    return res.status(500).json({ error: message })
+  }
+})
+
+/**
+ * GET /api/live/leads/metrics
+ */
+router.get('/leads/metrics', async (req, res) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const context = await getCustomerTruthContext(customerId)
+    if (!context) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const { sourceOfTruth, configuredSheetUrl } = context
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtc()
 
-    const buildMetricsResponse = (
-      leads: LiveLeadRow[],
-      sourceUrl: string | null,
-      authoritative: boolean,
-      dataFreshness: Freshness,
-      staleFallbackUsed: boolean,
-      warning?: string,
-      hint?: string,
-      errorCode?: string
-    ) => {
-      let todayLeads = 0
-      let weekLeads = 0
-      let monthLeads = 0
-      const breakdownBySource: Record<string, number> = {}
-      const breakdownByOwner: Record<string, number> = {}
+    const dbRows = await prisma.leadRecord.findMany({
+      where: { customerId },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        occurredAt: true,
+        createdAt: true,
+        source: true,
+        owner: true,
+        accountName: true,
+        company: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
+        data: true,
+      },
+    })
 
-      for (const row of leads) {
-        const at = row.occurredAt ? new Date(row.occurredAt) : null
-        if (at && at >= todayStart && at < todayEnd) todayLeads++
-        if (at && at >= weekStart && at < weekEnd) weekLeads++
-        if (at && at >= monthStart && at < monthEnd) monthLeads++
-        const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
-        const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
-        breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
-        breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
-      }
-
+    const leads = mapDbLeadRows(dbRows).map((lead, idx) => {
+      if (lead.occurredAt) return lead
+      const createdAt = dbRows[idx]?.createdAt
       return {
-        customerId,
-        totalLeads: leads.length,
-        todayLeads,
-        weekLeads,
-        monthLeads,
-        counts: { today: todayLeads, week: weekLeads, month: monthLeads, total: leads.length },
-        breakdownBySource,
-        breakdownByOwner,
-        rowCount: leads.length,
-        queriedAt: new Date().toISOString(),
-        sourceUrl,
-        sourceOfTruth,
-        authoritative,
-        dataFreshness,
-        staleFallbackUsed,
-        warning,
-        hint,
-        errorCode,
+        ...lead,
+        occurredAt: createdAt ? createdAt.toISOString() : null,
       }
+    })
+
+    let todayLeads = 0
+    let weekLeads = 0
+    let monthLeads = 0
+    const breakdownBySource: Record<string, number> = {}
+    const breakdownByOwner: Record<string, number> = {}
+
+    for (const row of leads) {
+      const at = row.occurredAt ? new Date(row.occurredAt) : null
+      if (at && at >= todayStart && at < todayEnd) todayLeads++
+      if (at && at >= weekStart && at < weekEnd) weekLeads++
+      if (at && at >= monthStart && at < monthEnd) monthLeads++
+      const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
+      const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
+      breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
+      breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
     }
 
-    if (sourceOfTruth === 'db') {
-      const dbRows = await prisma.leadRecord.findMany({
-        where: { customerId },
-        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }],
-        select: {
-          occurredAt: true,
-          createdAt: true,
-          source: true,
-          owner: true,
-          accountName: true,
-          data: true,
-        },
-      })
-      const leads = mapDbLeadRows(dbRows).map((lead, idx) => {
-        if (lead.occurredAt) return lead
-        // Use createdAt fallback from DB rows for metrics when occurredAt is absent.
-        const createdAt = dbRows[idx]?.createdAt
-        return {
-          ...lead,
-          occurredAt: createdAt ? createdAt.toISOString() : null,
-        }
-      })
-      return res.json(buildMetricsResponse(leads, null, true, 'live', false))
-    }
+    const sync = await getSyncMeta(customerId, sourceOfTruth)
+    const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
 
-    const sourceUrl = resolveCsvUrl(configuredSheetUrl)
-    try {
-      const leads = await fetchAndParseLiveLeads(customerId, configuredSheetUrl)
-      return res.json(buildMetricsResponse(leads, sourceUrl, true, 'live', false))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to fetch live lead metrics'
-      const issue = classifySheetError(configuredSheetUrl, message)
-      const stale = getStaleCachedLeads(customerId, configuredSheetUrl)
-
-      if (diagnosticsFallbackRequested && stale) {
-        return res.json(
-          buildMetricsResponse(
-            stale.data,
-            sourceUrl,
-            false,
-            'diagnostic_stale',
-            true,
-            `Diagnostic fallback only. Cached metrics returned because live sheet fetch failed: ${message}`,
-            issue.hint,
-            issue.code
-          )
-        )
-      }
-
-      return res.status(502).json({
-        error: message,
-        hint: issue.hint,
-        errorCode: issue.code,
-        sourceOfTruth,
-        sourceUrl,
-        staleFallbackAvailable: !!stale,
-      })
-    }
+    return res.json({
+      customerId,
+      totalLeads: leads.length,
+      todayLeads,
+      weekLeads,
+      monthLeads,
+      counts: { today: todayLeads, week: weekLeads, month: monthLeads, total: leads.length },
+      breakdownBySource,
+      breakdownByOwner,
+      rowCount: leads.length,
+      queriedAt: new Date().toISOString(),
+      sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
+      sourceOfTruth,
+      authoritative,
+      dataFreshness: 'live' as Freshness,
+      staleFallbackUsed: false,
+      sync,
+    })
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to fetch live lead metrics'
+    const message = e instanceof Error ? e.message : 'Failed to fetch lead metrics'
     return res.status(500).json({ error: message })
   }
 })
