@@ -32,6 +32,17 @@ import {
   MenuItem,
   Checkbox,
   VStack,
+  Input,
+  Textarea,
+  FormControl,
+  FormLabel,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalCloseButton,
+  ModalBody,
+  ModalFooter,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
@@ -51,7 +62,7 @@ import {
   type ValidateSheetResult
 } from '../utils/leadsApi'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
-import type { LiveLeadRow } from '../utils/liveLeadsApi'
+import { createLiveLead, type LiveLeadRow } from '../utils/liveLeadsApi'
 
 type Lead = LeadRecord & {
   [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
@@ -74,6 +85,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
       'Job Title': row.jobTitle ?? undefined,
       Location: row.location ?? undefined,
       Status: row.status ?? undefined,
+      'Sync Status': row.syncStatus ?? undefined,
       Notes: row.notes ?? undefined,
       Date: row.occurredAt ? new Date(row.occurredAt).toLocaleDateString() : (row.raw['Date'] ?? row.raw['date'] ?? ''),
     }
@@ -108,6 +120,21 @@ function LeadsTab() {
   const [sequences, setSequences] = useState<Array<{ id: string; name: string; description?: string }>>([])
   const [syncStatusForEmpty, setSyncStatusForEmpty] = useState<SyncStatus | null>(null)
   const [sheetValidateForEmpty, setSheetValidateForEmpty] = useState<ValidateSheetResult | null>(null)
+  const [isAddLeadOpen, setIsAddLeadOpen] = useState(false)
+  const [isCreatingLead, setIsCreatingLead] = useState(false)
+  const [addLeadForm, setAddLeadForm] = useState({
+    occurredAt: '',
+    fullName: '',
+    email: '',
+    phone: '',
+    company: '',
+    jobTitle: '',
+    location: '',
+    source: '',
+    owner: '',
+    status: 'new',
+    notes: '',
+  })
 
   const toast = useToast()
 
@@ -500,6 +527,69 @@ function LeadsTab() {
   const getOwnerValue = (lead: Lead) =>
     lead.owner ?? lead['OD Team Member'] ?? lead['Owner'] ?? ''
 
+  const handleCreateLead = async () => {
+    if (!customerId) return
+    if (!addLeadForm.fullName.trim() && !addLeadForm.email.trim() && !addLeadForm.company.trim() && !addLeadForm.phone.trim()) {
+      toast({
+        title: 'Lead details required',
+        description: 'Provide at least a name, email, company, or phone number.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    setIsCreatingLead(true)
+    try {
+      const result = await createLiveLead(customerId, {
+        occurredAt: addLeadForm.occurredAt || null,
+        fullName: addLeadForm.fullName || null,
+        email: addLeadForm.email || null,
+        phone: addLeadForm.phone || null,
+        company: addLeadForm.company || null,
+        jobTitle: addLeadForm.jobTitle || null,
+        location: addLeadForm.location || null,
+        source: addLeadForm.source || null,
+        owner: addLeadForm.owner || null,
+        status: (addLeadForm.status as 'new' | 'qualified' | 'nurturing' | 'closed' | 'converted') || 'new',
+        notes: addLeadForm.notes || null,
+      })
+      toast({
+        title: 'Lead added',
+        description: result.outboundSync.note,
+        status: 'success',
+        duration: 5000,
+        isClosable: true,
+      })
+      setIsAddLeadOpen(false)
+      setAddLeadForm({
+        occurredAt: '',
+        fullName: '',
+        email: '',
+        phone: '',
+        company: '',
+        jobTitle: '',
+        location: '',
+        source: '',
+        owner: '',
+        status: 'new',
+        notes: '',
+      })
+      await refetch()
+    } catch (e) {
+      toast({
+        title: 'Failed to add lead',
+        description: e instanceof Error ? e.message : 'Unable to create lead',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setIsCreatingLead(false)
+    }
+  }
+
   // Filter leads based on filter criteria
   const filteredLeads = leads
     .filter((lead) => {
@@ -623,6 +713,14 @@ function LeadsTab() {
           </HStack>
         </Box>
         <HStack spacing={2}>
+          <Button
+            size="sm"
+            leftIcon={<AddIcon />}
+            colorScheme="blue"
+            onClick={() => setIsAddLeadOpen(true)}
+          >
+            Add Lead
+          </Button>
           {selectedLeads.size > 0 && (
             <Menu>
               <MenuButton as={Button} size="sm" colorScheme="blue" leftIcon={<AddIcon />}>
@@ -670,7 +768,7 @@ function LeadsTab() {
           <Box>
             <HStack mb={2} justify="space-between">
               <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
-                Account
+                Customer / Client
               </Text>
               {(filters.account || filters.channelOfLead) && (
                 <Button
@@ -685,7 +783,7 @@ function LeadsTab() {
               )}
             </HStack>
             <Select
-              placeholder="All Accounts"
+              placeholder="All Customers"
               value={filters.account}
               onChange={(e) => setFilters({ ...filters, account: e.target.value })}
               size="sm"
@@ -903,6 +1001,79 @@ function LeadsTab() {
           </Table>
         </Box>
       )}
+
+      <Modal isOpen={isAddLeadOpen} onClose={() => setIsAddLeadOpen(false)} size="xl">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Add Lead</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+              <FormControl>
+                <FormLabel>Date</FormLabel>
+                <Input type="date" value={addLeadForm.occurredAt} onChange={(e) => setAddLeadForm({ ...addLeadForm, occurredAt: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Full Name</FormLabel>
+                <Input value={addLeadForm.fullName} onChange={(e) => setAddLeadForm({ ...addLeadForm, fullName: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Email</FormLabel>
+                <Input type="email" value={addLeadForm.email} onChange={(e) => setAddLeadForm({ ...addLeadForm, email: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Phone</FormLabel>
+                <Input value={addLeadForm.phone} onChange={(e) => setAddLeadForm({ ...addLeadForm, phone: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Company</FormLabel>
+                <Input value={addLeadForm.company} onChange={(e) => setAddLeadForm({ ...addLeadForm, company: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Job Title</FormLabel>
+                <Input value={addLeadForm.jobTitle} onChange={(e) => setAddLeadForm({ ...addLeadForm, jobTitle: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Location</FormLabel>
+                <Input value={addLeadForm.location} onChange={(e) => setAddLeadForm({ ...addLeadForm, location: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Source / Channel</FormLabel>
+                <Input value={addLeadForm.source} onChange={(e) => setAddLeadForm({ ...addLeadForm, source: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Owner / Employee</FormLabel>
+                <Input value={addLeadForm.owner} onChange={(e) => setAddLeadForm({ ...addLeadForm, owner: e.target.value })} />
+              </FormControl>
+              <FormControl>
+                <FormLabel>Status</FormLabel>
+                <Select value={addLeadForm.status} onChange={(e) => setAddLeadForm({ ...addLeadForm, status: e.target.value })}>
+                  <option value="new">new</option>
+                  <option value="qualified">qualified</option>
+                  <option value="nurturing">nurturing</option>
+                  <option value="closed">closed</option>
+                  <option value="converted">converted</option>
+                </Select>
+              </FormControl>
+              <FormControl gridColumn={{ base: 'span 1', md: 'span 2' }}>
+                <FormLabel>Notes</FormLabel>
+                <Textarea value={addLeadForm.notes} onChange={(e) => setAddLeadForm({ ...addLeadForm, notes: e.target.value })} />
+              </FormControl>
+            </SimpleGrid>
+            <Text fontSize="xs" color="gray.500" mt={3}>
+              For sheet-backed clients this stores the lead in ODCRM now and marks outbound sync as pending for Stage 2B.
+            </Text>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={() => setIsAddLeadOpen(false)}>
+              Cancel
+            </Button>
+            <Button colorScheme="blue" onClick={handleCreateLead} isLoading={isCreatingLead}>
+              Save Lead
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Stack>
   )
 }
