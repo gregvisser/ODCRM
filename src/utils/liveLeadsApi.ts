@@ -237,13 +237,13 @@ function runWithConcurrency<T, R>(items: T[], fn: (item: T) => Promise<R>, concu
 
 /**
  * Fetch live metrics for each customer (max CONCURRENCY). For "All Accounts Combined".
- * Only includes customers with leadsReportingUrl.
+ * Includes both sheet-backed and DB-backed customers.
  */
 export async function fetchLiveMetricsForCustomers(
   customers: Array<{ id: string; name: string; leadsReportingUrl?: string | null }>
 ): Promise<AggregateMetricsResult> {
-  const withSheets = customers.filter((c) => c.leadsReportingUrl != null && String(c.leadsReportingUrl).trim() !== '')
-  if (withSheets.length === 0) {
+  const scopedCustomers = customers.filter((c) => c.id && c.name)
+  if (scopedCustomers.length === 0) {
     return {
       totals: { today: 0, week: 0, month: 0, total: 0 },
       breakdownBySource: {},
@@ -256,7 +256,7 @@ export async function fetchLiveMetricsForCustomers(
   }
 
   const results = await runWithConcurrency(
-    withSheets,
+    scopedCustomers,
     async (c) => {
       try {
         const data = await getLiveLeadMetrics(c.id)

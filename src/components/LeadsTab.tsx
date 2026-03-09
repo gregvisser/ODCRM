@@ -45,7 +45,6 @@ import {
   ModalFooter,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon, EditIcon } from '@chakra-ui/icons'
-import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { clearCurrentCustomerId, getCurrentCustomerId, setCurrentCustomerId } from '../platform/stores/settings'
 import {
@@ -120,7 +119,6 @@ function LeadsTab() {
   const apiDisplayColumns = liveData?.displayColumns ?? []
 
   const [filters, setFilters] = useState({
-    account: '',
     channelOfLead: '',
   })
   
@@ -210,7 +208,7 @@ function LeadsTab() {
   const handleCustomerChange = (nextCustomerId: string) => {
     setSelectedCustomerId(nextCustomerId)
     setSelectedLeads(new Set())
-    setFilters({ account: '', channelOfLead: '' })
+    setFilters({ channelOfLead: '' })
     if (nextCustomerId) {
       setCurrentCustomerId(nextCustomerId)
     } else {
@@ -254,11 +252,6 @@ function LeadsTab() {
       )}
     </Box>
   )
-
-  // Sync account lead counts when live leads change (for badge updates)
-  useEffect(() => {
-    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
-  }, [leads])
 
   // When leads are empty, fetch sync status and validator to show why 0 leads
   useEffect(() => {
@@ -857,7 +850,6 @@ function LeadsTab() {
   // Filter leads based on filter criteria
   const filteredLeads = leads
     .filter((lead) => {
-      if (filters.account && lead.accountName !== filters.account) return false
       const channel = getChannelValue(lead)
       if (filters.channelOfLead && !channel?.toLowerCase().includes(filters.channelOfLead.toLowerCase()))
         return false
@@ -898,7 +890,6 @@ function LeadsTab() {
     })
 
   // Get unique values for filter dropdowns
-  const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
   const uniqueChannels = Array.from(
     new Set(leads.map((lead) => getChannelValue(lead)).filter((c) => c && c.trim() !== '')),
   ).sort()
@@ -1031,40 +1022,31 @@ function LeadsTab() {
       <Box p={4} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
         <SimpleGrid columns={{ base: 1, md: 3 }} gap={4}>
           <Box>
+            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
+              Client scope
+            </Text>
+            <Text fontSize="xs" color="gray.600">
+              Client selection is controlled by the selector at the top of this tab.
+            </Text>
+          </Box>
+
+          <Box>
             <HStack mb={2} justify="space-between">
               <Text fontSize="xs" textTransform="uppercase" color="gray.500" fontWeight="semibold">
-                Customer / Client
+                Channel of Lead
               </Text>
-              {(filters.account || filters.channelOfLead) && (
+              {filters.channelOfLead && (
                 <Button
                   size="xs"
                   variant="ghost"
                   colorScheme="gray"
                   leftIcon={<RepeatIcon />}
-                  onClick={() => setFilters({ account: '', channelOfLead: '' })}
+                  onClick={() => setFilters({ channelOfLead: '' })}
                 >
                   Reset
                 </Button>
               )}
             </HStack>
-            <Select
-              placeholder="All Customers"
-              value={filters.account}
-              onChange={(e) => setFilters({ ...filters, account: e.target.value })}
-              size="sm"
-            >
-              {uniqueAccounts.map((account) => (
-                <option key={account} value={account}>
-                  {account}
-                </option>
-              ))}
-            </Select>
-          </Box>
-
-          <Box>
-            <Text fontSize="xs" textTransform="uppercase" color="gray.500" mb={2} fontWeight="semibold">
-              Channel of Lead
-            </Text>
             <Select
               placeholder="All Channels"
               value={filters.channelOfLead}
@@ -1092,7 +1074,8 @@ function LeadsTab() {
                   <MenuItem key={col} onClick={() => toggleColumnVisibility(col)}>
                     <Checkbox 
                       isChecked={visibleColumns.has(col)} 
-                      onChange={() => toggleColumnVisibility(col)}
+                      isReadOnly
+                      pointerEvents="none"
                       mr={2}
                     >
                       {col}
