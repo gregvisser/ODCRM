@@ -1,22 +1,22 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
-import { InfoIcon, EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
+import { EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
 import { isClientUI } from '../../platform/mode'
 import CustomerSelector from './components/CustomerSelector'
-import OnboardingOverview from './OnboardingOverview'
 import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
 import { onboardingDebug } from './utils/debug'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
-export type OnboardingViewId = 'overview' | 'customer-onboarding' | 'progress-tracker'
+export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'
 
 function coerceViewId(view?: string): OnboardingViewId {
-  if (view === 'overview' || view === 'customer-onboarding' || view === 'progress-tracker') return view
-  return 'overview'
+  if (view === 'progress-tracker' || view === 'customer-onboarding') return view
+  // Legacy deep-link compatibility: old "overview" routes now land in the unified onboarding form.
+  return 'customer-onboarding'
 }
 
 interface OnboardingHomePageProps {
@@ -82,15 +82,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   }, [handleContinueToMarketingReadiness, onNavigate, readiness.nextStep.target])
 
   const navItems: SubNavItem[] = useMemo(() => {
-    // Overview is always available.
     const items: SubNavItem[] = [
-      {
-        id: 'overview',
-        label: 'Overview',
-        icon: InfoIcon,
-        content: <OnboardingOverview customerId={selectedCustomerId || undefined} />,
-        sortOrder: 0,
-      },
       {
         id: 'progress-tracker',
         label: 'Progress Tracker',
@@ -132,6 +124,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
   const canProceedToOperations = readiness.state === 'ready-for-outreach' || readiness.state === 'outreach-active'
   const blockersCount = activationChecks.filter((item) => !item.complete).length
+  const effectiveActiveView: OnboardingViewId = selectedCustomerId ? activeView : 'progress-tracker'
 
   return (
     <Flex direction="column" h="100%">
@@ -278,7 +271,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         <SubNavigation
           key={`onboarding-${selectedCustomerId || 'no-customer'}`}
           items={navItems}
-          activeId={activeView}
+          activeId={effectiveActiveView}
           onChange={(id) => onNavigate?.(id as OnboardingViewId)}
           title="Onboarding"
           enableDragDrop={false}

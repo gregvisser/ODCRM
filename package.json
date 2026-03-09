@@ -84,6 +84,7 @@
     "test:optout-suppression-runtime": "node scripts/self-test-optout-suppression-runtime.mjs",
     "test:outreach-report-runtime": "node scripts/self-test-outreach-report-runtime.mjs",
     "test:onboarding-readiness-runtime": "node scripts/self-test-onboarding-readiness-runtime.mjs",
+    "test:onboarding-ui-flow-runtime": "node scripts/self-test-onboarding-ui-flow-runtime.mjs",
     "test:live-send-gates-runtime": "node scripts/self-test-live-send-gates-runtime.mjs",
     "test:identities-email-runtime": "node scripts/self-test-identities-email-runtime.mjs",
     "test:sending-engine-status-runtime": "node scripts/self-test-sending-engine-status-runtime.mjs",
