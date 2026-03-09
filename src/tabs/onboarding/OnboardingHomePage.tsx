@@ -116,8 +116,8 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     })
     return [
       mapCheck('Email identities connected', signal.checks.emailIdentitiesConnected),
-      mapCheck('Suppression source configured', signal.checks.suppressionConfigured),
-      mapCheck('Lead source configured (transitional sheet-linked)', signal.checks.leadSourceConfigured),
+      mapCheck('Suppression setup configured (transitional: sheet-linked or DB)', signal.checks.suppressionConfigured),
+      mapCheck('Lead source configured (transitional: sheet-linked or DB)', signal.checks.leadSourceConfigured),
       mapCheck('Template and sequence basics ready', signal.checks.templateAndSequenceReady),
     ]
   }, [signal.checks])
@@ -227,7 +227,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
             </SimpleGrid>
           </VStack>
           <Text fontSize="xs" color="blue.800" mt={2} data-testid="onboarding-transitional-leads-note">
-            Lead-source readiness may include linked Google Sheets during transition, so this view reflects integrated signals rather than ODCRM-only lead ownership.
+            Transitional readiness signals can include linked Google Sheets and DB-backed data, so this checkpoint reflects integrated setup status.
           </Text>
           <Text fontSize="xs" color="blue.800" mt={2} data-testid="onboarding-operations-handoff">
             When this client is done enough to proceed, move to Marketing Readiness for send planning, sequencing, inbox handling, and reporting.

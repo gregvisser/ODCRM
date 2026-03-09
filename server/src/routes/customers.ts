@@ -102,6 +102,33 @@ const upsertCustomerContactSchema = z.object({
   notes: z.string().optional().nullable(),
 })
 
+function getHeaderCustomerId(req: any): string {
+  return (
+    (req.headers?.['x-customer-id'] as string | undefined) ||
+    (req.headers?.['x-customerid'] as string | undefined) ||
+    ''
+  ).trim()
+}
+
+function enforceTenantHeaderForCustomerRoute(
+  req: any,
+  res: any,
+  customerId: string,
+  requestId?: string,
+): boolean {
+  const headerCustomerId = getHeaderCustomerId(req)
+  if (headerCustomerId && headerCustomerId !== customerId) {
+    const payload: Record<string, unknown> = {
+      error: 'tenant_mismatch',
+      message: 'X-Customer-Id does not match URL customer id',
+    }
+    if (requestId) payload.requestId = requestId
+    res.status(403).json(payload)
+    return false
+  }
+  return true
+}
+
 // GET /api/customers/diagnostic - Test database connection
 router.get('/diagnostic', async (req, res) => {
   try {
@@ -854,6 +881,7 @@ router.put('/:id/onboarding', async (req, res) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id, requestId)) return
     const ifMatchUpdatedAtRaw =
       (req.header('If-Match-Updated-At') || req.header('if-match-updated-at') || '').trim() || null
 
@@ -2323,6 +2351,7 @@ router.post('/sync-leads-urls', async (req, res) => {
 router.post('/:id/complete-onboarding', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
     // SECURITY: Derive actor identity from server-side auth context ONLY
     // NEVER trust client-supplied identity fields
@@ -2430,6 +2459,7 @@ router.post('/:id/complete-onboarding', async (req, res) => {
 router.get('/:id/audit', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
     const { action } = req.query
 
     // Verify customer exists
@@ -2628,6 +2658,7 @@ router.put('/:id/onboarding-progress', async (req, res) => {
 router.put('/:id/progress-tracker', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
     const bodySchema = z.object({
       group: z.enum(['sales', 'ops', 'am']),
@@ -2730,6 +2761,7 @@ router.put('/:id/progress-tracker', async (req, res) => {
 router.post('/:id/agreement', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
     const { fileName, dataUrl } = req.body
 
     // Validate customer exists
@@ -3041,6 +3073,7 @@ router.get('/:id/agreement-download', async (req, res) => {
 router.get('/:id/agreement/download', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
     const customer = await prisma.customer.findUnique({
       where: { id },
@@ -3123,6 +3156,7 @@ router.post('/:id/attachments', (req, res) => {
   attachmentsUpload.single('file')(req as any, res as any, async (err: any) => {
     try {
       const { id } = req.params as any
+      if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
       if (err) {
         // Handle multer size limit
@@ -3355,6 +3389,7 @@ router.post('/:id/attachments', (req, res) => {
 router.get('/:id/attachments/:attachmentId/download', async (req, res) => {
   try {
     const { id, attachmentId } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
     const customer = await prisma.customer.findUnique({
       where: { id },
@@ -3405,6 +3440,7 @@ router.post('/:id/suppression-import', (req, res) => {
   suppressionUpload.single('file')(req as any, res as any, async (err: any) => {
     try {
       const { id } = req.params as any
+      if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
       if (err) {
         if (err?.code === 'LIMIT_FILE_SIZE') {
@@ -3733,6 +3769,7 @@ router.post('/:id/suppression-import', (req, res) => {
 router.get('/:id/suppression-summary', async (req, res) => {
   try {
     const { id } = req.params
+    if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
     const [count, customer] = await Promise.all([
       prisma.suppressionEntry.count({ where: { customerId: id, type: 'email' } }),
       prisma.customer.findUnique({ where: { id }, select: { id: true, accountData: true } }),

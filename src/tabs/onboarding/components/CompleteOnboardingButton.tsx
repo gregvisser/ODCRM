@@ -18,6 +18,7 @@ interface CompleteOnboardingButtonProps {
   customerId: string
   customerName: string
   currentStatus: string
+  isDisabled?: boolean
   onStatusUpdated?: () => void
 }
 
@@ -32,6 +33,7 @@ export function CompleteOnboardingButton({
   customerId,
   customerName,
   currentStatus,
+  isDisabled = false,
   onStatusUpdated,
 }: CompleteOnboardingButtonProps) {
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null)
@@ -179,6 +181,7 @@ export function CompleteOnboardingButton({
           size="md"
           onClick={onOpen}
           width="fit-content"
+          isDisabled={isDisabled}
         >
           Complete Onboarding
         </Button>

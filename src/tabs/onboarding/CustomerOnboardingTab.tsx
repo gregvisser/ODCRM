@@ -50,6 +50,7 @@ import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
+import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
 import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
 import type {
   Account,
@@ -64,6 +65,7 @@ import type {
 type CustomerApi = {
   id: string
   name: string
+  clientStatus?: 'active' | 'inactive' | 'onboarding' | 'win_back' | string | null
   domain?: string | null
   website?: string | null
   whatTheyDo?: string | null
@@ -1324,6 +1326,35 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   return (
     <Stack spacing={6}>
+      {/* Completion action surfaced in the live onboarding flow (previously only in legacy Overview). */}
+      <Box border="1px solid" borderColor="blue.200" borderRadius="xl" p={6} bg="blue.50">
+        <Stack spacing={3}>
+          <HStack justify="space-between" align="center" flexWrap="wrap">
+            <Text fontSize="lg" fontWeight="semibold">Onboarding Completion</Text>
+            <Badge colorScheme={customer.clientStatus === 'active' ? 'green' : 'orange'}>
+              {customer.clientStatus === 'active' ? 'Active' : 'Onboarding'}
+            </Badge>
+          </HStack>
+          <Text fontSize="sm" color="gray.700">
+            When onboarding checkpoints are complete, mark this customer as active to finalize onboarding.
+          </Text>
+          {isDirty ? (
+            <Text fontSize="xs" color="orange.700">
+              You have unsaved changes. Save onboarding first, then complete onboarding.
+            </Text>
+          ) : null}
+          <CompleteOnboardingButton
+            customerId={customer.id}
+            customerName={customer.name}
+            currentStatus={customer.clientStatus || 'onboarding'}
+            isDisabled={isDirty || isSaving}
+            onStatusUpdated={() => {
+              void fetchCustomer()
+            }}
+          />
+        </Stack>
+      </Box>
+
       {/* Account Details Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
@@ -1663,14 +1694,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Suppression List (DNC)</FormLabel>
             <Stack spacing={3}>
               <Text fontSize="sm" color="gray.600">
-                Primary setup path: manage suppression email/domain sources in Marketing using linked Google Sheets for this customer.
+                Primary setup path: configure suppression email/domain sources in Marketing for this customer.
               </Text>
               <HStack spacing={3} align="center" flexWrap="wrap" data-testid="onboarding-suppression-sheets-guidance">
                 <Button size="sm" variant="solid" colorScheme="blue" onClick={openSuppressionSetup} data-testid="onboarding-go-suppression-setup">
                   Open Suppression List Setup
                 </Button>
                 <Text fontSize="xs" color="gray.600">
-                  Configure both suppression emails and suppression domains there, then return to onboarding checkpoints.
+                  Configure suppression email and domain sources there, then return to onboarding checkpoints.
                 </Text>
               </HStack>
               <Input
@@ -1681,7 +1712,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 onChange={(e) => void handleSuppressionFileChange(e.target.files?.[0] || null)}
               />
               <Text fontSize="xs" color="gray.500" data-testid="onboarding-suppression-legacy-upload-note">
-                Legacy file import remains available for transition support, but Google Sheets-linked suppression sources are the live setup model.
+                Legacy file import remains available during transition support. Live suppression readiness is based on linked source setup and existing customer-scoped DB entries.
               </Text>
               <HStack spacing={3} align="center" flexWrap="wrap">
                 <Button
