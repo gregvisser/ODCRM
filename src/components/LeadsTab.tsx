@@ -47,7 +47,7 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon, EditIcon } from '@chakra-ui/icons'
 import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
-import { getCurrentCustomerId } from '../platform/stores/settings'
+import { clearCurrentCustomerId, getCurrentCustomerId, setCurrentCustomerId } from '../platform/stores/settings'
 import {
   convertLeadToContact,
   bulkConvertLeads,
@@ -63,10 +63,16 @@ import {
 } from '../utils/leadsApi'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
 import { createLiveLead, retryLiveLeadOutboundSync, updateLiveLead, type LiveLeadRow } from '../utils/liveLeadsApi'
+import { api } from '../utils/api'
 
 type Lead = LeadRecord & {
   [key: string]: string | number | null | undefined // Dynamic fields from Google Sheet
   accountName: string
+}
+
+type CustomerOption = {
+  id: string
+  name: string
 }
 
 /** Map live API rows to Lead shape for table (accountName, source, owner, id, raw fields). */
@@ -96,8 +102,14 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 
 function LeadsTab() {
-  const customerId = getCurrentCustomerId() || ''
-  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [customersLoading, setCustomersLoading] = useState(true)
+  const [customersError, setCustomersError] = useState<string | null>(null)
+  const activeCustomerId = selectedCustomerId.trim()
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(activeCustomerId || null, {
+    enabled: activeCustomerId !== '',
+  })
   const leads = useMemo(
     () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
     [liveData]
@@ -156,6 +168,93 @@ function LeadsTab() {
 
   const toast = useToast()
 
+  const loadCustomers = useCallback(async () => {
+    setCustomersLoading(true)
+    setCustomersError(null)
+    try {
+      const { data, error } = await api.get<CustomerOption[]>('/api/customers')
+      if (error) {
+        setCustomersError(error)
+        setCustomers([])
+        return
+      }
+      const list = Array.isArray(data) ? data.filter((c) => c && c.id && c.name) : []
+      setCustomers(list)
+      if (selectedCustomerId && !list.some((customer) => customer.id === selectedCustomerId)) {
+        setSelectedCustomerId('')
+        clearCurrentCustomerId()
+      }
+    } catch (e) {
+      setCustomersError(e instanceof Error ? e.message : 'Failed to load clients')
+      setCustomers([])
+    } finally {
+      setCustomersLoading(false)
+    }
+  }, [selectedCustomerId])
+
+  useEffect(() => {
+    loadCustomers()
+    const offAccountsUpdated = on('accountsUpdated', () => {
+      void loadCustomers()
+    })
+    return () => {
+      offAccountsUpdated()
+    }
+  }, [loadCustomers])
+
+  const selectedCustomerName = useMemo(
+    () => customers.find((customer) => customer.id === activeCustomerId)?.name || '',
+    [customers, activeCustomerId]
+  )
+
+  const handleCustomerChange = (nextCustomerId: string) => {
+    setSelectedCustomerId(nextCustomerId)
+    setSelectedLeads(new Set())
+    setFilters({ account: '', channelOfLead: '' })
+    if (nextCustomerId) {
+      setCurrentCustomerId(nextCustomerId)
+    } else {
+      clearCurrentCustomerId()
+    }
+  }
+
+  const customerSelector = (
+    <Box borderWidth="1px" borderRadius="lg" p={3} bg="white" data-testid="leads-tab-customer-selector">
+      <HStack justify="space-between" align="start" mb={2} flexWrap="wrap">
+        <Box>
+          <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+            Client
+          </Text>
+          <Text fontSize="xs" color="gray.600">
+            {selectedCustomerName
+              ? `Showing leads for ${selectedCustomerName}`
+              : 'Select a client to load leads, add/edit rows, and run sync actions.'}
+          </Text>
+        </Box>
+        <Button size="xs" variant="ghost" leftIcon={<RepeatIcon />} onClick={() => void loadCustomers()} isLoading={customersLoading}>
+          Refresh clients
+        </Button>
+      </HStack>
+      <Select
+        placeholder={customersLoading ? 'Loading clients...' : 'Select a client'}
+        value={selectedCustomerId}
+        onChange={(e) => handleCustomerChange(e.target.value)}
+        data-testid="leads-tab-customer-select"
+      >
+        {customers.map((customer) => (
+          <option key={customer.id} value={customer.id}>
+            {customer.name}
+          </option>
+        ))}
+      </Select>
+      {customersError && (
+        <Text mt={2} fontSize="xs" color="red.500">
+          Failed to load clients: {customersError}
+        </Text>
+      )}
+    </Box>
+  )
+
   // Sync account lead counts when live leads change (for badge updates)
   useEffect(() => {
     if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
@@ -173,13 +272,17 @@ function LeadsTab() {
       setSheetValidateForEmpty(null)
       return
     }
-    if (!customerId) return
-    getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
-    getValidateSheetResult(customerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
-  }, [leads.length, customerId, sourceOfTruth])
+    if (!activeCustomerId) return
+    getSyncStatus(activeCustomerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
+    getValidateSheetResult(activeCustomerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
+  }, [leads.length, activeCustomerId, sourceOfTruth])
 
   // Load sequences on mount
   useEffect(() => {
+    if (!activeCustomerId) {
+      setSequences([])
+      return
+    }
     getSequences().then(({ data, error }) => {
       if (data) {
         setSequences(data)
@@ -187,7 +290,7 @@ function LeadsTab() {
         console.error('Failed to load sequences:', error)
       }
     })
-  }, [])
+  }, [activeCustomerId])
 
   // Helper to format last refresh time
   const formatLastRefresh = (date: Date) => {
@@ -224,7 +327,7 @@ function LeadsTab() {
     
     setConvertingLeadId(leadId)
     try {
-      const { data, error } = await convertLeadToContact(leadId, sequenceId)
+      const { data, error } = await convertLeadToContact(leadId, sequenceId, activeCustomerId)
       if (error) {
         toast({
           title: 'Conversion failed',
@@ -274,7 +377,7 @@ function LeadsTab() {
 
     setBulkConverting(true)
     try {
-      const { data, error } = await bulkConvertLeads(Array.from(selectedLeads), sequenceId)
+      const { data, error } = await bulkConvertLeads(Array.from(selectedLeads), sequenceId, activeCustomerId)
       if (error) {
         toast({
           title: 'Bulk conversion failed',
@@ -310,7 +413,7 @@ function LeadsTab() {
   // Handle export to CSV
   const handleExportCSV = async () => {
     try {
-      const { data, error } = await exportLeadsToCSV()
+      const { data, error } = await exportLeadsToCSV(activeCustomerId)
       if (error) {
         toast({
           title: 'Export failed',
@@ -381,33 +484,55 @@ function LeadsTab() {
     }
   }, [refetch, toast])
 
+  if (!activeCustomerId) {
+    return (
+      <Stack spacing={4}>
+        {customerSelector}
+        <Box textAlign="center" py={12} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
+          <Text fontSize="lg" color="gray.600">
+            Select a client to view leads
+          </Text>
+          <Text fontSize="sm" color="gray.500" mt={2}>
+            This tab now manages lead operations directly. Choose a client above to load data.
+          </Text>
+        </Box>
+      </Stack>
+    )
+  }
+
   if (loading) {
     return (
-      <Box textAlign="center" py={12}>
-        <Spinner size="xl" color="brand.500" thickness="4px" />
-        <Text mt={4} color="gray.600">
-          Loading leads data from the server...
-        </Text>
-      </Box>
+      <Stack spacing={4}>
+        {customerSelector}
+        <Box textAlign="center" py={12}>
+          <Spinner size="xl" color="brand.500" thickness="4px" />
+          <Text mt={4} color="gray.600">
+            Loading leads data from the server...
+          </Text>
+        </Box>
+      </Stack>
     )
   }
 
   if (error) {
     return (
-      <Alert status="error" borderRadius="lg" data-testid="leads-acceptance-actionable-error">
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Error loading leads</AlertTitle>
-          <AlertDescription>
-            <Text>{error}</Text>
-            <Text mt={2} fontSize="sm">
-              {sourceOfTruth === 'db'
-                ? 'This client uses ODCRM database lead records. Confirm leads exist in ODCRM for this client.'
-                : 'This client uses Google Sheets-backed lead truth. Confirm the linked sheet URL is valid and readable by ODCRM.'}
-            </Text>
-          </AlertDescription>
-        </Box>
-      </Alert>
+      <Stack spacing={4}>
+        {customerSelector}
+        <Alert status="error" borderRadius="lg" data-testid="leads-acceptance-actionable-error">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Error loading leads</AlertTitle>
+            <AlertDescription>
+              <Text>{error}</Text>
+              <Text mt={2} fontSize="sm">
+                {sourceOfTruth === 'db'
+                  ? 'This client uses ODCRM database lead records. Confirm leads exist in ODCRM for this client.'
+                  : 'This client uses Google Sheets-backed lead truth. Confirm the linked sheet URL is valid and readable by ODCRM.'}
+              </Text>
+            </AlertDescription>
+          </Box>
+        </Alert>
+      </Stack>
     )
   }
 
@@ -424,7 +549,9 @@ function LeadsTab() {
               : sheetValidateForEmpty.error
             : null)
     return (
-      <Stack spacing={4} py={12}>
+      <Stack spacing={4}>
+        {customerSelector}
+        <Stack spacing={4} py={12}>
         {liveWarning && (
           <Alert status="warning" borderRadius="lg" maxW="2xl" mx="auto" data-testid="leads-tab-stale-sheet-warning">
             <AlertIcon />
@@ -476,6 +603,7 @@ function LeadsTab() {
             </Box>
           </Alert>
         )}
+        </Stack>
       </Stack>
     )
   }
@@ -584,7 +712,7 @@ function LeadsTab() {
   }
 
   const handleCreateLead = async () => {
-    if (!customerId) return
+    if (!activeCustomerId) return
     if (!addLeadForm.fullName.trim() && !addLeadForm.email.trim() && !addLeadForm.company.trim() && !addLeadForm.phone.trim()) {
       toast({
         title: 'Lead details required',
@@ -598,7 +726,7 @@ function LeadsTab() {
 
     setIsCreatingLead(true)
     try {
-      const result = await createLiveLead(customerId, {
+      const result = await createLiveLead(activeCustomerId, {
         occurredAt: addLeadForm.occurredAt || null,
         fullName: addLeadForm.fullName || null,
         email: addLeadForm.email || null,
@@ -648,10 +776,10 @@ function LeadsTab() {
   }
 
   const handleRetryOutboundSync = async (leadId: string) => {
-    if (!customerId || !leadId) return
+    if (!activeCustomerId || !leadId) return
     setRetryingLeadId(leadId)
     try {
-      const result = await retryLiveLeadOutboundSync(customerId, leadId)
+      const result = await retryLiveLeadOutboundSync(activeCustomerId, leadId)
       const status = String(result.outboundSync.status || '')
       toast({
         title: status === 'synced' ? 'Lead sync completed' : 'Lead sync retry finished',
@@ -675,7 +803,7 @@ function LeadsTab() {
   }
 
   const handleUpdateLead = async () => {
-    if (!customerId || !editingLeadId) return
+    if (!activeCustomerId || !editingLeadId) return
     if (!editLeadForm.fullName.trim() && !editLeadForm.email.trim() && !editLeadForm.company.trim() && !editLeadForm.phone.trim()) {
       toast({
         title: 'Lead details required',
@@ -689,7 +817,7 @@ function LeadsTab() {
 
     setIsUpdatingLead(true)
     try {
-      const result = await updateLiveLead(customerId, editingLeadId, {
+      const result = await updateLiveLead(activeCustomerId, editingLeadId, {
         occurredAt: editLeadForm.occurredAt || null,
         fullName: editLeadForm.fullName || null,
         email: editLeadForm.email || null,
@@ -815,6 +943,7 @@ function LeadsTab() {
 
   return (
     <Stack spacing={6}>
+      {customerSelector}
       {liveWarning && (
         <Alert status="warning" borderRadius="lg" data-testid="leads-tab-stale-sheet-warning">
           <AlertIcon />
