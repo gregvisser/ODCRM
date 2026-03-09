@@ -125,6 +125,8 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
 
 function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): Account {
   const updated: Account = { ...account }
+  updated.id = customer.id
+  updated._databaseId = customer.id
   if (customer.name) updated.name = customer.name
   if (customer.domain) updated.website = normalizeCustomerWebsite(customer.domain)
   if (customer.sector) updated.sector = customer.sector
@@ -143,6 +145,8 @@ function applyCustomerFieldsToAccount(account: Account, customer: CustomerApi): 
 
 function buildAccountFromCustomer(customer: CustomerApi): Account {
   const fallback = normalizeAccountDefaults({
+    id: customer.id,
+    _databaseId: customer.id,
     name: customer.name,
     website: normalizeCustomerWebsite(customer.domain),
     sector: customer.sector || '',
@@ -311,8 +315,7 @@ export default function DashboardsHomePage() {
 
     void init()
 
-    const offAccountsUpdated = on<Account[]>('accountsUpdated', (accounts) => {
-      if (accounts && accounts.length > 0) setAccountsData(accounts)
+    const offAccountsUpdated = on<Account[]>('accountsUpdated', () => {
       void refetchAggregatedMetrics()
     })
     const offLeadsUpdated = on('leadsUpdated', () => void refetchAggregatedMetrics())
@@ -345,15 +348,13 @@ export default function DashboardsHomePage() {
   const totalWeeklyTarget = accountsData.reduce((sum, acc) => sum + (acc.weeklyTarget || 0), 0)
   const totalMonthlyTarget = accountsData.reduce((sum, acc) => sum + (acc.monthlyTarget || 0), 0)
   const scopedCustomerCount = kpiCustomerScope.filter((c) => c.id && c.name).length
-  const customerByName = new Map(kpiCustomerScope.map((customer) => [customer.name, customer] as const))
   const metricsByCustomerId = new Map((aggregatedMetrics?.perCustomer || []).map((customer) => [customer.customerId, customer] as const))
-  const aggregatedMetricsAvailable = Boolean(
+  const aggregatedMetricsAvailable = Boolean(aggregatedMetrics && aggregatedMetrics.perCustomer.length > 0)
+  const hasMetricsCoverageGap = Boolean(
     aggregatedMetrics &&
-      aggregatedMetrics.perCustomer.length > 0 &&
-      aggregatedMetrics.errors.length === 0 &&
-      aggregatedMetrics.perCustomer.length === scopedCustomerCount
+      (aggregatedMetrics.errors.length > 0 || aggregatedMetrics.perCustomer.length !== scopedCustomerCount)
   )
-  const showKpiContractError = !aggregatedMetricsLoading && !aggregatedMetricsAvailable
+  const showKpiContractError = !aggregatedMetricsLoading && (!aggregatedMetricsAvailable || hasMetricsCoverageGap)
   const weekTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.week ?? 0) : 0
   const monthTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.month ?? 0) : 0
   const todayTotal = aggregatedMetricsAvailable ? (aggregatedMetrics?.totals.today ?? 0) : 0
@@ -368,8 +369,9 @@ export default function DashboardsHomePage() {
   const accountsWithPercentages = accountsData
     .map((account) => ({
       ...(() => {
-        const scopedCustomer = customerByName.get(account.name)
-        const scopedMetrics = scopedCustomer ? metricsByCustomerId.get(scopedCustomer.id) : undefined
+        const accountCustomerId = typeof account.id === 'string' && account.id.trim() ? account.id : ''
+        const scopedCustomer = kpiCustomerScope.find((customer) => customer.id === accountCustomerId)
+        const scopedMetrics = accountCustomerId ? metricsByCustomerId.get(accountCustomerId) : undefined
         const isSheetBacked = Boolean(scopedCustomer?.leadsReportingUrl || account.clientLeadsSheetUrl?.trim())
         const sheetMetricsUnavailable = isSheetBacked && !scopedMetrics
         const weeklyActual = isSheetBacked ? (scopedMetrics?.counts.week ?? 0) : (account.weeklyActual || 0)
@@ -641,7 +643,11 @@ export default function DashboardsHomePage() {
               Secondary metrics and trend context after triage decisions. Auto-refreshes every 30 seconds • Last updated: {lastRefresh.toLocaleTimeString()}
             </Text>
             <Text fontSize="xs" color="gray.500" mt={1} data-testid="dashboard-kpi-source-of-truth-mode">
-              KPI source of truth: {aggregatedMetricsAvailable ? 'Backend multi-client metrics (sheets/db per client)' : 'Unavailable'}
+              KPI source of truth: {!aggregatedMetricsAvailable
+                ? 'Unavailable'
+                : hasMetricsCoverageGap
+                  ? 'Backend metrics (partial customer coverage)'
+                  : 'Backend multi-client metrics (sheets/db per client)'}
             </Text>
           </Box>
           <HStack spacing={2}>
@@ -761,9 +767,12 @@ export default function DashboardsHomePage() {
           >
             <AlertIcon />
             <Box>
-              <AlertTitle fontSize="sm">Live KPI truth is currently unavailable</AlertTitle>
+              <AlertTitle fontSize="sm">{hasMetricsCoverageGap ? 'Live KPI truth is partially unavailable' : 'Live KPI truth is currently unavailable'}</AlertTitle>
               <AlertDescription fontSize="sm">
-                {aggregatedMetricsError || 'The dashboard could not load authoritative KPI metrics from backend truth. Refresh after checking lead source access.'}
+                {aggregatedMetricsError
+                  || (hasMetricsCoverageGap
+                    ? 'KPI metrics are partial because one or more clients are missing authoritative live metrics.'
+                    : 'The dashboard could not load authoritative KPI metrics from backend truth. Refresh after checking lead source access.')}
               </AlertDescription>
             </Box>
           </Alert>
@@ -946,7 +955,11 @@ export default function DashboardsHomePage() {
       </Box>
 
       <Text fontSize="xs" color="gray.400" textAlign="center">
-        Last synced: {lastRefresh.toLocaleString('en-GB')} | KPI truth: {aggregatedMetricsAvailable ? 'Backend metrics aggregation across client scope' : 'Unavailable'}
+        Last synced: {lastRefresh.toLocaleString('en-GB')} | KPI truth: {!aggregatedMetricsAvailable
+          ? 'Unavailable'
+          : hasMetricsCoverageGap
+            ? 'Backend metrics aggregation (partial customer coverage)'
+            : 'Backend metrics aggregation across client scope'}
       </Text>
     </VStack>
     </RequireActiveClient>
