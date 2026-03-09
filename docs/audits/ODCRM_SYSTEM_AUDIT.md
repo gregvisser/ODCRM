@@ -27,7 +27,7 @@ Route mounts in [`server/src/index.ts`](../../server/src/index.ts) confirm broad
 | Dashboard | `DashboardsHomePage` | KPI stats, lead source split, account table | `/api/customers`, live leads hooks | Usable but hard to follow |
 | OpenDoors Clients | `CustomersHomePage` | Accounts, Contacts, Leads | `/api/customers`, `/api/contacts`, leads endpoints | Usable but hard to follow |
 | OpenDoors Marketing | `MarketingHomePage` | 9-tab operator suite incl. readiness/sequences/inbox | `/api/send-worker/*`, `/api/send-queue/*`, `/api/inbox/*`, reports, templates, sheets | Complete |
-| Onboarding | `OnboardingHomePage` | Overview, Progress Tracker, Client Onboarding | `/api/onboarding/readiness`, customer onboarding routes | Partial (strong pieces, weak handoff) |
+| Onboarding | `OnboardingHomePage` | Progress Tracker, Client Onboarding | `/api/onboarding/readiness`, customer onboarding routes | Partial (strong pieces, weak handoff) |
 | Settings | `SettingsHomePage` | User Authorization | `/api/users`, user preference routes | Partial (admin-only narrow scope) |
 
 ## Area-By-Area Audit
