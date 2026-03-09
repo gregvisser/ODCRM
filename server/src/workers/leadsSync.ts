@@ -1464,12 +1464,34 @@ async function syncCustomerLeads(
         }
       }
 
-      // Update customer with aggregated data
+      // Update customer with aggregated data and a non-destructive accountData lead-count snapshot
+      const existingCustomerForSnapshot = await tx.customer.findUnique({
+        where: { id: customer.id },
+        select: { accountData: true },
+      })
+      const accountDataBase =
+        existingCustomerForSnapshot?.accountData && typeof existingCustomerForSnapshot.accountData === 'object'
+          ? (existingCustomerForSnapshot.accountData as Record<string, unknown>)
+          : {}
+      const accountDetailsBase =
+        accountDataBase.accountDetails && typeof accountDataBase.accountDetails === 'object'
+          ? (accountDataBase.accountDetails as Record<string, unknown>)
+          : {}
+      const nextAccountData = {
+        ...accountDataBase,
+        leads: leads.length,
+        accountDetails: {
+          ...accountDetailsBase,
+          leads: leads.length,
+        },
+      }
+
       await tx.customer.update({
         where: { id: customer.id },
         data: {
           weeklyLeadActual: weeklyActual,
           monthlyLeadActual: monthlyActual,
+          accountData: nextAccountData,
         },
       })
 
