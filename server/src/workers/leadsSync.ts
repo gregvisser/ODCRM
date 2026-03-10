@@ -65,6 +65,47 @@ function extractGid(url: string): string | null {
   }
 }
 
+type SheetFetchTarget = {
+  url: string
+  gid: string | null
+  sheetId: string
+}
+
+function buildPublishedCsvTarget(sheetUrl: string): SheetFetchTarget | null {
+  try {
+    const parsed = new URL(sheetUrl)
+    const publishedMatch = parsed.pathname.match(/^\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)\/pub(?:html)?$/)
+    if (!publishedMatch) return null
+
+    parsed.searchParams.set('output', 'csv')
+    if (!parsed.searchParams.has('single')) parsed.searchParams.set('single', 'true')
+
+    return {
+      url: parsed.toString(),
+      gid: parsed.searchParams.get('gid'),
+      sheetId: publishedMatch[1],
+    }
+  } catch {
+    return null
+  }
+}
+
+function buildSheetFetchTargets(sheetUrl: string): SheetFetchTarget[] {
+  const publishedTarget = buildPublishedCsvTarget(sheetUrl)
+  if (publishedTarget) return [publishedTarget]
+
+  const sheetId = extractSheetId(sheetUrl)
+  if (!sheetId) return []
+
+  const extractedGid = extractGid(sheetUrl)
+  const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
+  return gidsToTry.map((gid) => ({
+    url: `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`,
+    gid,
+    sheetId,
+  }))
+}
+
 /** Normalize header for matching: trim, lowercase, collapse whitespace, remove punctuation. */
 function normalizeHeaderForMatch(header: string): string {
   return header
@@ -189,17 +230,17 @@ async function fetchLeadsFromSheetUrl(
   onProgress?: (progress: { percent: number; message: string }) => void
 ): Promise<{ leads: LeadRow[]; gidUsed?: string; diagnostics: any }> {
   const startTime = Date.now()
-  const sheetId = extractSheetId(sheetUrl)
-  if (!sheetId) {
+  const fetchTargets = buildSheetFetchTargets(sheetUrl)
+  if (fetchTargets.length === 0) {
     throw new Error('Invalid Google Sheets URL format')
   }
+  const sheetId = fetchTargets[0].sheetId
 
   console.log(`📄 FETCHING SHEET - ${accountName}`)
   console.log(`   Sheet ID: ${sheetId}`)
   console.log(`   URL: ${sheetUrl}`)
 
   const extractedGid = extractGid(sheetUrl)
-  const gidsToTry = extractedGid ? [extractedGid, '0'] : ['0']
 
   let lastError: Error | null = null
   const diagnostics: {
@@ -232,12 +273,12 @@ async function fetchLeadsFromSheetUrl(
   // Update progress
   onProgress?.({ percent: 10, message: 'Fetching sheet data...' })
 
-  for (const gid of gidsToTry) {
+  for (const target of fetchTargets) {
     try {
-      diagnostics.gidsAttempted.push(gid)
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+      diagnostics.gidsAttempted.push(target.gid ?? 'published')
+      const csvUrl = target.url
 
-      console.log(`   Trying GID ${gid}: ${csvUrl}`)
+      console.log(`   Trying ${target.gid ? `GID ${target.gid}` : 'published CSV'}: ${csvUrl}`)
 
       // Fetch with retry logic
       const fetchStart = Date.now()
@@ -314,7 +355,7 @@ async function fetchLeadsFromSheetUrl(
 
       if (rows.length < 2) {
         console.log(`   ⚠️  Only ${rows.length} rows (need at least 2 for headers + data)`)
-        return { leads: [], gidUsed: gid, diagnostics }
+        return { leads: [], gidUsed: target.gid ?? undefined, diagnostics }
       }
 
       onProgress?.({ percent: 60, message: 'Detecting headers...' })
@@ -452,11 +493,11 @@ async function fetchLeadsFromSheetUrl(
 
       onProgress?.({ percent: 100, message: 'Complete' })
 
-      return { leads, gidUsed: gid, diagnostics }
+      return { leads, gidUsed: target.gid ?? undefined, diagnostics }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Failed to parse CSV data'
       diagnostics.errors.push(errorMsg)
-      console.log(`   ❌ Error with GID ${gid}: ${errorMsg}`)
+      console.log(`   ❌ Error with ${target.gid ? `GID ${target.gid}` : 'published CSV'}: ${errorMsg}`)
       lastError = error instanceof Error ? error : new Error('Failed to parse CSV data')
       continue
     }
@@ -492,12 +533,12 @@ export type ValidateSheetResult =
  * No DB writes. Used for "Test sheet" validation.
  */
 export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetResult & { sheetGid?: string }> {
-  const sheetId = extractSheetId(sheetUrl)
-  if (!sheetId) {
+  const fetchTargets = buildSheetFetchTargets(sheetUrl)
+  if (fetchTargets.length === 0) {
     return { ok: false, error: 'Invalid Google Sheets URL format', hint: 'Use a full URL like https://docs.google.com/spreadsheets/d/...' }
   }
-  const gid = extractGid(sheetUrl) || '0'
-  const finalUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`
+  const target = fetchTargets[0]
+  const finalUrl = target.url
 
   let response: Response
   try {
@@ -592,7 +633,7 @@ export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetR
 
   return {
     ok: true,
-    sheetGid: gid,
+    sheetGid: target.gid ?? undefined,
     finalUrl,
     httpStatus: 200,
     contentType: contentType || 'text/csv',
@@ -1162,7 +1203,7 @@ async function syncCustomerLeads(
         let existingExternalIdByStableId = new Map<string, string | null>()
         try {
           const existingRecords = await tx.leadRecord.findMany({
-              where: { customerId: customer.id, externalId: { not: null } },
+              where: { customerId: customer.id },
               select: { id: true, externalId: true },
             })
           existingByExternalId = new Set(
@@ -1225,8 +1266,9 @@ async function syncCustomerLeads(
             for (const record of batch) {
               processedExternalIds.add(record.externalId)
               try {
+                const hasPriorStableId = existingExternalIdByStableId.has(record.id)
                 const priorExternalId = existingExternalIdByStableId.get(record.id)
-                if (priorExternalId && priorExternalId !== record.externalId) {
+                if (hasPriorStableId && priorExternalId !== record.externalId) {
                   await tx.leadRecord.update({
                     where: { id: record.id },
                     data: {
@@ -1327,7 +1369,7 @@ async function syncCustomerLeads(
               } catch (err: any) {
                 if (err?.code === 'P2002') {
                   throw new Error(
-                    `Lead row identity conflict for customer ${customer.id} and externalId ${record.externalId}: ${err?.message || err}`
+                    `Lead row identity conflict for customer ${customer.id}, stableId ${record.id}, and externalId ${record.externalId}: ${err?.message || err}`
                   )
                 }
                 throw err
