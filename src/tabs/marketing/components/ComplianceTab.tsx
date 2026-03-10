@@ -28,8 +28,8 @@ import {
 } from '@chakra-ui/react'
 import { DeleteIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
-import RequireActiveClient from '../../../components/RequireActiveClient'
+import { clearCurrentCustomerId, getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
 
 type SuppressionEntry = {
   id: string
@@ -84,6 +84,7 @@ const DEFAULT_DOMAIN_DNC_URL =
   'https://docs.google.com/spreadsheets/d/1BV6ab9e1bA5xl_DiWMmY5CnD1rjfylHKQsKt_dxd2cE/edit?usp=drive_link'
 
 export default function ComplianceTab() {
+  const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState<string>(getCurrentCustomerId())
@@ -99,6 +100,10 @@ export default function ComplianceTab() {
   const [dataHealthLoading, setDataHealthLoading] = useState(false)
   const [dataHealthError, setDataHealthError] = useState<string | null>(null)
   const toast = useToast()
+  const selectedCustomer = useMemo(
+    () => (Array.isArray(customers) ? customers.find((customer) => customer.id === customerId) ?? null : null),
+    [customerId, customers],
+  )
 
   const filteredEntries = useMemo(
     () => entries.filter((e) => e.type === listTypeFilter),
@@ -106,7 +111,11 @@ export default function ComplianceTab() {
   )
 
   const loadEntries = useCallback(async () => {
-    if (!customerId) return
+    if (!customerId) {
+      setEntries([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
     const { data, error } = await api.get<SuppressionEntry[]>(`/api/suppression?customerId=${customerId}`)
     if (error) {
@@ -118,7 +127,13 @@ export default function ComplianceTab() {
   }, [customerId, toast])
 
   const loadDataHealth = useCallback(async () => {
-    if (!customerId) return
+    if (!customerId) {
+      setLeadSourceHealth([])
+      setSuppressionSheetHealth(null)
+      setDataHealthError(null)
+      setDataHealthLoading(false)
+      return
+    }
     setDataHealthLoading(true)
     setDataHealthError(null)
     const [leadRes, suppressionRes] = await Promise.all([
@@ -158,7 +173,7 @@ export default function ComplianceTab() {
   useEffect(() => {
     const unsubscribe = onSettingsUpdated((detail) => {
       const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
-      if (next) setCustomerId(next)
+      setCustomerId(next || '')
     })
     return () => unsubscribe()
   }, [])
@@ -167,7 +182,20 @@ export default function ComplianceTab() {
     setSheetUrl(listTypeFilter === 'email' ? DEFAULT_EMAIL_DNC_URL : DEFAULT_DOMAIN_DNC_URL)
   }, [listTypeFilter])
 
+  const handleCustomerChange = useCallback((nextCustomerId: string) => {
+    setCustomerId(nextCustomerId)
+    if (nextCustomerId) {
+      setCurrentCustomerId(nextCustomerId)
+      return
+    }
+    clearCurrentCustomerId()
+  }, [])
+
   const handleAdd = async () => {
+    if (!customerId) {
+      toast({ title: 'Select a client first', description: 'Choose the target client before adding suppression entries.', status: 'warning' })
+      return
+    }
     const normalized = value.trim().toLowerCase()
     if (!normalized) {
       toast({ title: 'Value is required', status: 'error' })
@@ -191,6 +219,10 @@ export default function ComplianceTab() {
   }
 
   const handleDelete = async (id: string) => {
+    if (!customerId) {
+      toast({ title: 'Select a client first', description: 'Choose the target client before removing suppression entries.', status: 'warning' })
+      return
+    }
     const snapshot = entries
     setEntries((prev) => prev.filter((e) => e.id !== id))
     const { error } = await api.delete(`/api/suppression/${id}?customerId=${customerId}`)
@@ -204,6 +236,10 @@ export default function ComplianceTab() {
   }
 
   const handleImportFromSheet = async () => {
+    if (!customerId) {
+      toast({ title: 'Select a client first', description: 'Choose the target client before importing a suppression sheet.', status: 'warning' })
+      return
+    }
     if (!sheetUrl.trim()) {
       toast({ title: 'Google Sheet URL is required', status: 'error' })
       return
@@ -236,22 +272,78 @@ export default function ComplianceTab() {
   }
 
   return (
-    <RequireActiveClient>
-      <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
-        <VStack align="stretch" spacing={6}>
-          <Box>
-            <Heading size="lg" mb={2}>Suppression List</Heading>
-            <Text fontSize="sm" color="gray.600">
-              Manage customer-scoped Do Not Contact rules for email addresses and domains.
-            </Text>
-          </Box>
+    <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
+      <VStack align="stretch" spacing={6}>
+        <Box>
+          <Heading size="lg" mb={2}>Suppression List</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Manage customer-scoped Do Not Contact rules for email addresses and domains.
+          </Text>
+        </Box>
 
-          <Alert id="suppression-tab-sheet-truth-banner" data-testid="suppression-tab-sheet-truth-banner" status="info">
-            <AlertIcon />
-            <AlertDescription fontSize="sm">
-              Google Sheets import is now the primary source of truth for suppression lists. Manual edits remain available.
-            </AlertDescription>
-          </Alert>
+        <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
+          <VStack align="stretch" spacing={3}>
+            <HStack justify="space-between" align="flex-start" flexWrap="wrap">
+              <Box>
+                <Heading size="sm">Target Client</Heading>
+                <Text fontSize="sm" color="gray.600">
+                  All suppression imports, manual entries, deletes, list results, and health cards apply only to the selected client.
+                </Text>
+              </Box>
+              <Badge colorScheme={customerId ? 'blue' : 'orange'}>
+                {selectedCustomer?.name || (customerId ? `Selected: ${customerId}` : 'No client selected')}
+              </Badge>
+            </HStack>
+
+            <FormControl>
+              <FormLabel fontSize="sm">Client</FormLabel>
+              <Select
+                value={customerId}
+                onChange={(e) => handleCustomerChange(e.target.value)}
+                placeholder={customersLoading ? 'Loading clients...' : 'Select a client'}
+                isDisabled={customersLoading}
+              >
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
+                  </option>
+                ))}
+              </Select>
+            </FormControl>
+
+            {selectedCustomer ? (
+              <Text fontSize="xs" color="gray.500">
+                {`Customer ID: ${selectedCustomer.id}`}
+              </Text>
+            ) : null}
+
+            {customersError ? (
+              <Alert status="error">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">{customersError}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            {!customerId ? (
+              <Alert status="warning">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">
+                  Select a client before importing, adding, deleting, or reviewing suppression entries.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </VStack>
+        </Box>
+
+        <Alert id="suppression-tab-sheet-truth-banner" data-testid="suppression-tab-sheet-truth-banner" status="info">
+          <AlertIcon />
+          <AlertDescription fontSize="sm">
+            Google Sheets imports populate this selected client&apos;s DB-backed suppression list. The suppression list below is client-specific and does not affect other clients automatically.
+          </AlertDescription>
+        </Alert>
+
+        {customerId ? (
+          <>
 
           <Box id="marketing-data-health-panel" data-testid="marketing-data-health-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
             <VStack align="stretch" spacing={3}>
@@ -262,7 +354,7 @@ export default function ComplianceTab() {
                 </Button>
               </HStack>
               <Text fontSize="sm" color="gray.600">
-                Live view of Google Sheets-linked Lead Sources and suppression list linkage/health for this client.
+                {`Live view of Google Sheets-linked Lead Sources and suppression list linkage/health for ${selectedCustomer?.name || 'the selected client'}.`}
               </Text>
               {dataHealthError ? (
                 <Alert status="error">
@@ -417,7 +509,7 @@ export default function ComplianceTab() {
           </Box>
 
           <Box id="suppression-tab-manual-panel" data-testid="suppression-tab-manual-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
-            <Heading size="sm" mb={3}>Manual Entry</Heading>
+            <Heading size="sm" mb={3}>{`Manual Entry${selectedCustomer?.name ? ` for ${selectedCustomer.name}` : ''}`}</Heading>
             <HStack spacing={3} align="flex-end" flexWrap="wrap">
               <FormControl w={{ base: '100%', md: '180px' }}>
                 <FormLabel fontSize="sm">Type</FormLabel>
@@ -462,7 +554,9 @@ export default function ComplianceTab() {
                   {filteredEntries.length === 0 ? (
                     <Tr>
                       <Td colSpan={5} textAlign="center" py={8}>
-                        <Text color="gray.500">No suppressed {listTypeFilter}s found.</Text>
+                        <Text color="gray.500">
+                          {`No suppressed ${listTypeFilter}s found for ${selectedCustomer?.name || 'the selected client'}.`}
+                        </Text>
                       </Td>
                     </Tr>
                   ) : (
@@ -489,8 +583,9 @@ export default function ComplianceTab() {
               </Table>
             )}
           </Box>
-        </VStack>
-      </Box>
-    </RequireActiveClient>
+          </>
+        ) : null}
+      </VStack>
+    </Box>
   )
 }

@@ -2373,6 +2373,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             {`Monthly price: £${agreementExtraction.fields.agreedMonthlyPrice.toLocaleString('en-GB')}`}
                           </Text>
                         ) : null}
+                        {agreementExtraction.fields?.contractSignedDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Contract signed date: ${agreementExtraction.fields.contractSignedDate}`}
+                          </Text>
+                        ) : null}
                         {agreementExtraction.fields?.contractStartDate ? (
                           <Text fontSize="sm" color="gray.700">
                             {`Contract start date: ${agreementExtraction.fields.contractStartDate}`}
@@ -2383,6 +2388,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             {`Service start date: ${agreementExtraction.fields.serviceStartDate}`}
                           </Text>
                         ) : null}
+                        {agreementExtraction.fields?.billingStartDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Billing start date: ${agreementExtraction.fields.billingStartDate}`}
+                          </Text>
+                        ) : null}
                         {agreementExtraction.fields?.contractTermMonths ? (
                           <Text fontSize="sm" color="gray.700">
                             {`Contract term: ${agreementExtraction.fields.contractTermMonths} months`}
@@ -2391,6 +2401,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                         {agreementExtraction.fields?.contractEndDate ? (
                           <Text fontSize="sm" color="gray.700">
                             {`Contract end date: ${agreementExtraction.fields.contractEndDate}`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.renewalDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Renewal date: ${agreementExtraction.fields.renewalDate}`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.agreementSummary ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Agreement summary: ${agreementExtraction.fields.agreementSummary}`}
                           </Text>
                         ) : null}
                       </Stack>
