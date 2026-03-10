@@ -29,6 +29,7 @@ export type ProgressTrackerMetaState = Record<string, any> & {
 export const AUTO_TICK_ITEMS: ReadonlyArray<{ group: ProgressGroup; itemKey: string }> = [
   // Sales Team
   { group: 'sales', itemKey: 'sales_client_agreement' },
+  { group: 'sales', itemKey: 'sales_contract_signed' },
   { group: 'sales', itemKey: 'sales_start_date' },
   { group: 'sales', itemKey: 'sales_assign_am' },
   // Operations Team
@@ -146,6 +147,7 @@ export function applyAutoTicksToAccountData(params: ApplyAutoTickParams): {
 
   // Apply rules (idempotent: mark only, never unmark)
   if (hasAgreement) markComplete('sales', 'sales_client_agreement')
+  if (hasAgreement) markComplete('sales', 'sales_contract_signed')
   if (startDate) markComplete('sales', 'sales_start_date')
   if (assignedManagerId) markComplete('sales', 'sales_assign_am')
   if (clientCreatedOnCrm) markComplete('ops', 'ops_added_crm')
