@@ -88,6 +88,7 @@ type ChecklistState = Record<string, boolean>
 // Auto-ticked items (from Customer Onboarding actions). ops_emails_linked is DB-derived (linkedEmailCount >= 5), read-only.
 const AUTO_TICK_KEY_SET = new Set<string>([
   'sales.sales_client_agreement',
+  'sales.sales_contract_signed',
   'sales.sales_start_date',
   'sales.sales_assign_am',
   'ops.ops_added_crm',

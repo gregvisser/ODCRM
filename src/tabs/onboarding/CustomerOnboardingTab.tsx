@@ -337,6 +337,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     uploadedByEmail?: string | null
     totalImported?: number | null
     totalSuppressedEmails?: number | null
+    totalSuppressedDomains?: number | null
   } | null>(null)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
@@ -356,6 +357,20 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       weeklyTarget: accountData?.weeklyTarget as number | undefined,
       _databaseId: customer.id,
     } as Partial<Account>
+  }, [customer])
+
+  const agreementExtraction = useMemo(() => {
+    const raw = customer?.accountData && typeof customer.accountData === 'object'
+      ? (customer.accountData as any).agreementExtraction
+      : null
+    if (!raw || typeof raw !== 'object') return null
+    return {
+      status: typeof raw.status === 'string' ? raw.status : null,
+      extractionSource: typeof raw.extractionSource === 'string' ? raw.extractionSource : null,
+      extractedAt: typeof raw.extractedAt === 'string' ? raw.extractedAt : null,
+      warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((value: unknown) => typeof value === 'string') : [],
+      fields: raw.fields && typeof raw.fields === 'object' ? raw.fields : {},
+    }
   }, [customer])
 
   // Fetch customer data by ID
@@ -493,6 +508,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       try {
         const { data } = await api.get<{
           totalSuppressedEmails: number
+          totalSuppressedDomains?: number
+          scope?: string
           lastUpload: {
             fileName: string | null
             fileUrl?: string | null
@@ -511,6 +528,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           uploadedByEmail: data?.lastUpload?.uploadedByEmail ?? null,
           totalImported: data?.lastUpload?.totalImported ?? null,
           totalSuppressedEmails: typeof data?.totalSuppressedEmails === 'number' ? data.totalSuppressedEmails : null,
+          totalSuppressedDomains: typeof data?.totalSuppressedDomains === 'number' ? data.totalSuppressedDomains : null,
         })
       } catch {
         if (!cancelled) setSuppressionMeta(null)
@@ -877,6 +895,15 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         success: boolean
         agreement: { fileName: string; blobName: string; uploadedAt: string }
         progressUpdated: boolean
+        agreementExtraction?: {
+          status?: string
+          warnings?: string[]
+          fields?: {
+            agreedMonthlyPrice?: number | null
+            contractStartDate?: string | null
+            serviceStartDate?: string | null
+          }
+        }
       }>(
         `/api/customers/${customer.id}/agreement`,
         { fileName: file.name, dataUrl },
@@ -894,11 +921,29 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           fileName: data.agreement.fileName,
           uploadedAt: data.agreement.uploadedAt,
         })
+        const extractedStartDate =
+          data.agreementExtraction?.fields?.contractStartDate ||
+          data.agreementExtraction?.fields?.serviceStartDate ||
+          null
+        const extractedPrice = data.agreementExtraction?.fields?.agreedMonthlyPrice
+        const warningSummary = Array.isArray(data.agreementExtraction?.warnings)
+          ? data.agreementExtraction?.warnings?.join(' ')
+          : ''
         toast({
           title: 'Agreement uploaded',
-          description: 'Progress Tracker has been automatically updated.',
-          status: 'success',
-          duration: 4000,
+          description:
+            data.agreementExtraction?.status === 'failed'
+              ? warningSummary || 'Agreement stored, but no defensible fields could be extracted automatically.'
+              : [
+                  data.progressUpdated ? 'Progress Tracker updated automatically.' : 'Agreement stored.',
+                  extractedStartDate ? `Start date set to ${extractedStartDate}.` : null,
+                  typeof extractedPrice === 'number' ? `Monthly price set to £${extractedPrice.toLocaleString('en-GB')}.` : null,
+                  warningSummary || null,
+                ]
+                  .filter(Boolean)
+                  .join(' '),
+          status: data.agreementExtraction?.status === 'failed' ? 'warning' : 'success',
+          duration: 6000,
         })
         
         // DB rehydration is mandatory: refresh customer to reflect metadata + any progress tracker updates
@@ -914,7 +959,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const handleSuppressionFileChange = async (file: File | null) => {
     if (!file || !customer?.id) return
     const proceed = await confirmProceedIfDirty(
-      'You have unsaved onboarding changes. Uploading a legacy suppression file will refresh this customer from the database.',
+      'You have unsaved onboarding changes. Uploading a legacy suppression file for this customer will refresh this customer from the database.',
     )
     if (!proceed) return
     setUploadingSuppression(true)
@@ -938,7 +983,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       toast({
         title: 'Legacy suppression file uploaded',
-        description: `Imported ${data.totalImported} emails (${data.totalSkipped} skipped)`,
+        description: `Imported ${data.totalImported} customer-specific email suppressions (${data.totalSkipped} skipped). Other clients are unaffected.`,
         status: 'success',
         duration: 5000,
         isClosable: true,
@@ -1694,14 +1739,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Suppression List (DNC)</FormLabel>
             <Stack spacing={3}>
               <Text fontSize="sm" color="gray.600">
-                Primary setup path: configure suppression email/domain sources in Marketing for this customer.
+                Primary setup path: configure suppression email/domain sources in Marketing for this customer only.
               </Text>
               <HStack spacing={3} align="center" flexWrap="wrap" data-testid="onboarding-suppression-sheets-guidance">
                 <Button size="sm" variant="solid" colorScheme="blue" onClick={openSuppressionSetup} data-testid="onboarding-go-suppression-setup">
                   Open Suppression List Setup
                 </Button>
                 <Text fontSize="xs" color="gray.600">
-                  Configure suppression email and domain sources there, then return to onboarding checkpoints.
+                  Configure suppression email and domain sources there, then return to onboarding checkpoints. Suppression applies only to this client and does not block other clients automatically.
                 </Text>
               </HStack>
               <Input
@@ -1712,7 +1757,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 onChange={(e) => void handleSuppressionFileChange(e.target.files?.[0] || null)}
               />
               <Text fontSize="xs" color="gray.500" data-testid="onboarding-suppression-legacy-upload-note">
-                Legacy file import remains available during transition support. Live suppression readiness is based on linked source setup and existing customer-scoped DB entries.
+                Legacy file import remains available during transition support. Imported suppression entries are stored in the DB for this customer only. Live suppression readiness is based on linked source setup and existing customer-scoped DB entries.
               </Text>
               <HStack spacing={3} align="center" flexWrap="wrap">
                 <Button
@@ -1741,6 +1786,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                       {typeof suppressionMeta.totalSuppressedEmails === 'number'
                         ? `${suppressionMeta.totalSuppressedEmails} suppressed emails`
                         : 'Suppression list uploaded'}
+                      {typeof suppressionMeta.totalSuppressedDomains === 'number'
+                        ? ` · ${suppressionMeta.totalSuppressedDomains} suppressed domains`
+                        : ''}
                       {suppressionMeta.uploadedAt
                         ? ` · Uploaded ${new Date(suppressionMeta.uploadedAt).toLocaleDateString()}`
                         : ''}
@@ -2234,7 +2282,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Customer Agreement (PDF/Word)</FormLabel>
             <Stack spacing={3}>
               <Text fontSize="sm" color="gray.600">
-                Upload the signed customer agreement. This will automatically tick “Client Agreement and Approval” in the Progress Tracker.
+                Upload the signed customer agreement. ODCRM will store it, extract defensible commercial fields automatically, update onboarding fields, and tick the relevant progress items without manual re-entry.
               </Text>
               <Stack spacing={2}>
                 <Input
@@ -2283,6 +2331,70 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     </Text>
                   )}
                 </HStack>
+                {agreementExtraction ? (
+                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={3} bg="gray.50">
+                    <Stack spacing={2}>
+                      <HStack spacing={2} flexWrap="wrap">
+                        <Badge
+                          colorScheme={
+                            agreementExtraction.status === 'succeeded'
+                              ? 'green'
+                              : agreementExtraction.status === 'partial'
+                                ? 'orange'
+                                : 'red'
+                          }
+                        >
+                          {agreementExtraction.status === 'succeeded'
+                            ? 'Extraction complete'
+                            : agreementExtraction.status === 'partial'
+                              ? 'Extraction partial'
+                              : 'Extraction needs review'}
+                        </Badge>
+                        {agreementExtraction.extractedAt ? (
+                          <Text fontSize="xs" color="gray.500">
+                            {`Processed ${new Date(agreementExtraction.extractedAt).toLocaleString('en-GB')}`}
+                          </Text>
+                        ) : null}
+                      </HStack>
+                      <Stack spacing={1}>
+                        {typeof agreementExtraction.fields?.agreedMonthlyPrice === 'number' ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Monthly price: £${agreementExtraction.fields.agreedMonthlyPrice.toLocaleString('en-GB')}`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.contractStartDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Contract start date: ${agreementExtraction.fields.contractStartDate}`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.serviceStartDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Service start date: ${agreementExtraction.fields.serviceStartDate}`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.contractTermMonths ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Contract term: ${agreementExtraction.fields.contractTermMonths} months`}
+                          </Text>
+                        ) : null}
+                        {agreementExtraction.fields?.contractEndDate ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Contract end date: ${agreementExtraction.fields.contractEndDate}`}
+                          </Text>
+                        ) : null}
+                      </Stack>
+                      {agreementExtraction.warnings.length > 0 ? (
+                        <Stack spacing={1}>
+                          {agreementExtraction.warnings.map((warning) => (
+                            <Text key={warning} fontSize="xs" color="orange.700">
+                              {warning}
+                            </Text>
+                          ))}
+                        </Stack>
+                      ) : null}
+                    </Stack>
+                  </Box>
+                ) : null}
               </Stack>
             </Stack>
           </FormControl>
