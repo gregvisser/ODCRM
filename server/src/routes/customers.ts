@@ -111,6 +111,24 @@ function getHeaderCustomerId(req: any): string {
   ).trim()
 }
 
+async function countLinkedOutreachEmailIdentities(
+  db: Pick<PrismaClient, 'emailIdentity'>,
+  customerId: string,
+): Promise<number | null> {
+  try {
+    return await db.emailIdentity.count({
+      where: {
+        customerId,
+        isActive: true,
+        provider: { in: ['outlook', 'smtp'] },
+      },
+    })
+  } catch (error) {
+    console.warn(`[linkedEmailCount] lookup failed for customerId=${customerId}`, error)
+    return null
+  }
+}
+
 function enforceTenantHeaderForCustomerRoute(
   req: any,
   res: any,
@@ -662,13 +680,7 @@ router.get('/:id', async (req, res) => {
 
     // linkedEmailCount: active EmailIdentity count for Progress Tracker "Emails" step (same definition as Marketing list)
     try {
-      const linkedEmailCount = await prisma.emailIdentity.count({
-        where: {
-          customerId: id,
-          isActive: true,
-          provider: { in: ['outlook', 'smtp'] },
-        },
-      })
+      const linkedEmailCount = await countLinkedOutreachEmailIdentities(prisma as PrismaClient, id)
       ;(serialized as any).linkedEmailCount = linkedEmailCount
     } catch (err) {
       console.warn(`[${correlationId}] linkedEmailCount lookup failed`, err)
@@ -1072,6 +1084,7 @@ router.put('/:id/onboarding', async (req, res) => {
       const nextLeadsReportingUrl =
         Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl') ? updateData.leadsReportingUrl : existing.leadsReportingUrl
       const hasLeadGoogleSheet = typeof nextLeadsReportingUrl === 'string' ? nextLeadsReportingUrl.trim().length > 0 : false
+      const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
 
       // Keep progressTracker.updatedAt consistent with Customer.updatedAt for this save.
       const nowIso = updateData.updatedAt instanceof Date ? updateData.updatedAt.toISOString() : new Date().toISOString()
@@ -1080,6 +1093,7 @@ router.put('/:id/onboarding', async (req, res) => {
         accountData: mergedAccountDataBase,
         hasAgreement,
         hasLeadGoogleSheet,
+        linkedEmailCount,
         actorUserId: onboardingActorUserId,
         nowIso,
       })
@@ -2875,6 +2889,7 @@ router.post('/:id/agreement', async (req, res) => {
       }
 
       const hasLeadGoogleSheet = typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim().length > 0 : false
+      const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
       const currentAccountData =
         existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
       const agreementAutomation = applyAgreementAutomation({
@@ -2889,6 +2904,7 @@ router.post('/:id/agreement', async (req, res) => {
         accountData: agreementAutomation.accountData,
         hasAgreement: true,
         hasLeadGoogleSheet,
+        linkedEmailCount,
         actorUserId,
         nowIso: now.toISOString(),
       })
@@ -3235,7 +3251,16 @@ router.post('/:id/attachments', (req, res) => {
       // Validate customer exists + not archived
       const customer = await prisma.customer.findUnique({
         where: { id },
-        select: { id: true, name: true, isArchived: true, accountData: true },
+        select: {
+          id: true,
+          name: true,
+          isArchived: true,
+          accountData: true,
+          agreementBlobName: true,
+          agreementContainerName: true,
+          agreementFileUrl: true,
+          leadsReportingUrl: true,
+        },
       })
       if (!customer) {
         return res.status(404).json({ error: 'Customer not found' })
@@ -3287,13 +3312,20 @@ router.post('/:id/attachments', (req, res) => {
         uploadedByEmail: actorEmail,
       }
 
-      const updatedCustomer = await prisma.$transaction(async (tx) => {
+      const updateResult = await prisma.$transaction(async (tx) => {
         // Prevent lost updates when multiple uploads happen close together.
         await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
 
         const existing = await tx.customer.findUnique({
           where: { id },
-          select: { id: true, accountData: true },
+          select: {
+            id: true,
+            accountData: true,
+            agreementBlobName: true,
+            agreementContainerName: true,
+            agreementFileUrl: true,
+            leadsReportingUrl: true,
+          },
         })
         if (!existing) return null
 
@@ -3368,14 +3400,42 @@ router.post('/:id/attachments', (req, res) => {
               }
             }
           }
+
+          if (attachmentType === 'payment_confirmation') {
+            nextAccountData.firstPaymentEvidence = {
+              attachmentId: attachment.id,
+              fileName: attachment.fileName,
+              fileUrl: attachment.fileUrl,
+              mimeType: attachment.mimeType,
+              blobName: attachment.blobName,
+              containerName: attachment.containerName,
+              size: attachment.size,
+              uploadedAt: attachment.uploadedAt,
+              uploadedByEmail: attachment.uploadedByEmail,
+            }
+          }
         } catch {
           // ignore profile wiring failures - attachments[] still persists
         }
 
+        const autoTicked =
+          attachmentType === 'payment_confirmation'
+            ? applyAutoTicksToAccountData({
+                accountData: nextAccountData,
+                hasAgreement:
+                  Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl),
+                hasLeadGoogleSheet:
+                  typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim().length > 0 : false,
+                linkedEmailCount: await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id),
+                actorUserId: actorEmail,
+                nowIso: now.toISOString(),
+              })
+            : { accountData: nextAccountData, changed: false, applied: [] as Array<{ group: 'sales' | 'ops' | 'am'; itemKey: string }> }
+
         const next = await tx.customer.update({
           where: { id },
           data: {
-            accountData: nextAccountData,
+            accountData: autoTicked.accountData,
             updatedAt: new Date(),
           },
           select: { id: true },
@@ -3401,10 +3461,13 @@ router.post('/:id/attachments', (req, res) => {
           // ignore audit failures
         }
 
-        return next
+        return {
+          updatedCustomer: next,
+          autoTickedItems: autoTicked.applied,
+        }
       })
 
-      if (!updatedCustomer) {
+      if (!updateResult?.updatedCustomer) {
         return res.status(500).json({
           error: 'database_update_failed',
           message: 'Attachment blob uploaded but database update failed',
@@ -3415,7 +3478,12 @@ router.post('/:id/attachments', (req, res) => {
         `[attachments] ✅ customerId=${id} type=${attachmentType} file=${file.originalname} blob=${uploadResult.containerName}/${uploadResult.blobName}`
       )
 
-      return res.status(201).json({ success: true, attachment })
+      return res.status(201).json({
+        success: true,
+        attachment,
+        progressUpdated: updateResult.autoTickedItems.length > 0,
+        autoTickedItems: updateResult.autoTickedItems,
+      })
     } catch (error) {
       console.error('Error uploading attachment:', error)
       return res.status(500).json({
@@ -3751,10 +3819,12 @@ router.post('/:id/suppression-import', (req, res) => {
         const hasAgreement =
           Boolean(customer.agreementBlobName && customer.agreementContainerName) || Boolean(customer.agreementFileUrl)
         const hasLeadGoogleSheet = typeof customer.leadsReportingUrl === 'string' ? customer.leadsReportingUrl.trim().length > 0 : false
+        const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
         const autoTicked = applyAutoTicksToAccountData({
           accountData: nextAccountData,
           hasAgreement,
           hasLeadGoogleSheet,
+          linkedEmailCount,
           actorUserId,
           nowIso,
         })

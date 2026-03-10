@@ -20,6 +20,8 @@ const extraction: AgreementExtractionResult = {
   fields: {
     agreedMonthlyPrice: 2500,
     pricingText: '£2,500 per month',
+    startDateAgreed: '2026-04-01',
+    daysPerWeek: 5,
     contractSignedDate: '2026-03-10',
     contractStartDate: '2026-04-01',
     serviceStartDate: null,
@@ -31,6 +33,8 @@ const extraction: AgreementExtractionResult = {
   },
   evidence: {
     agreedMonthlyPrice: '£2,500 per month',
+    startDateAgreed: 'has been agreed from w/c 1st April 2026',
+    daysPerWeek: "A total of 5 day's a week",
     contractStartDate: 'Contract start date: 2026-04-01',
   },
 }
@@ -49,6 +53,10 @@ assert(
   'expected extracted start date to populate accountDetails.startDateAgreed',
 )
 assert(
+  automation.accountData?.accountDetails?.daysPerWeek === 5,
+  'expected extracted days per week to populate accountDetails.daysPerWeek',
+)
+assert(
   automation.accountData?.onboardingProgress?.steps?.documents?.complete === true,
   'expected onboarding documents step to auto-complete',
 )
@@ -57,6 +65,7 @@ const autoTicked = applyAutoTicksToAccountData({
   accountData: automation.accountData,
   hasAgreement: true,
   hasLeadGoogleSheet: false,
+  linkedEmailCount: 1,
   actorUserId: 'tester@example.com',
   nowIso: '2026-03-10T12:00:00.000Z',
 })
@@ -64,6 +73,7 @@ const autoTicked = applyAutoTicksToAccountData({
 assert(autoTicked.accountData?.progressTracker?.sales?.sales_client_agreement === true, 'expected sales_client_agreement auto-tick')
 assert(autoTicked.accountData?.progressTracker?.sales?.sales_contract_signed === true, 'expected sales_contract_signed auto-tick')
 assert(autoTicked.accountData?.progressTracker?.sales?.sales_start_date === true, 'expected sales_start_date auto-tick')
+assert(autoTicked.accountData?.progressTracker?.ops?.ops_emails_linked === true, 'expected ops_emails_linked auto-tick at one linked email')
 
 const partialExtraction: AgreementExtractionResult = {
   status: 'partial',
@@ -73,6 +83,8 @@ const partialExtraction: AgreementExtractionResult = {
   fields: {
     agreedMonthlyPrice: null,
     pricingText: null,
+    startDateAgreed: null,
+    daysPerWeek: null,
     contractSignedDate: null,
     contractStartDate: null,
     serviceStartDate: '2026-05-01',
@@ -111,6 +123,8 @@ const failedExtraction: AgreementExtractionResult = {
   fields: {
     agreedMonthlyPrice: null,
     pricingText: null,
+    startDateAgreed: null,
+    daysPerWeek: null,
     contractSignedDate: null,
     contractStartDate: null,
     serviceStartDate: null,
@@ -139,6 +153,66 @@ assert(
   'expected failed extraction not to invent a start date',
 )
 
+const paymentEvidenceAutoTick = applyAutoTicksToAccountData({
+  accountData: {
+    attachments: [{ id: 'att_payment', type: 'payment_confirmation', fileName: 'payment.pdf' }],
+    firstPaymentEvidence: {
+      attachmentId: 'att_payment',
+      fileName: 'payment.pdf',
+      fileUrl: '/api/customers/cust_test/attachments/att_payment/download',
+    },
+  },
+  hasAgreement: false,
+  hasLeadGoogleSheet: false,
+  linkedEmailCount: 0,
+  actorUserId: 'tester@example.com',
+  nowIso: '2026-03-10T12:00:00.000Z',
+})
+
+assert(
+  paymentEvidenceAutoTick.accountData?.progressTracker?.sales?.sales_first_payment === true,
+  'expected payment confirmation evidence to auto-tick sales_first_payment',
+)
+
+const replacementAutomation = applyAgreementAutomation({
+  accountData: {
+    accountDetails: { startDateAgreed: '2025-01-01', daysPerWeek: 2 },
+    agreementExtraction: {
+      status: 'partial',
+      extractionSource: 'deterministic-fallback',
+      extractedAt: '2026-01-01T00:00:00.000Z',
+      warnings: ['old warning'],
+      fields: {
+        agreedMonthlyPrice: null,
+        pricingText: null,
+        startDateAgreed: '2025-01-01',
+        daysPerWeek: 2,
+        contractSignedDate: null,
+        contractStartDate: null,
+        serviceStartDate: null,
+        billingStartDate: null,
+        contractEndDate: null,
+        renewalDate: null,
+        contractTermMonths: null,
+        agreementSummary: 'old stale summary',
+      },
+      evidence: { agreementSummary: 'old stale summary' },
+    },
+  },
+  extraction,
+  actorUserId: 'tester@example.com',
+  nowIso: '2026-03-10T12:00:00.000Z',
+})
+
+assert(
+  replacementAutomation.accountData?.agreementExtraction?.fields?.agreementSummary === 'Monthly retained service agreement.',
+  'expected new agreement upload to replace stale agreementExtraction summary',
+)
+assert(
+  replacementAutomation.accountData?.agreementExtraction?.fields?.daysPerWeek === 5,
+  'expected new agreement upload to replace stale agreementExtraction daysPerWeek',
+)
+
 async function runExtractionGuardTests() {
   const originalGeminiApiKey = process.env.GEMINI_API_KEY
   const originalGoogleGeminiApiKey = process.env.GOOGLE_GEMINI_API_KEY
@@ -151,6 +225,8 @@ async function runExtractionGuardTests() {
   try {
     const readableText = [
       'Master Services Agreement',
+      'The service has been agreed from w/c 6th January 2025.',
+      "A total of 5 day's a week will be delivered.",
       'Contract start date: 2026-04-01',
       'Service start date: 2026-04-15',
       'Monthly service fee £2,500 per month.',
@@ -169,6 +245,8 @@ async function runExtractionGuardTests() {
     assert(readableExtraction.status === 'partial', 'expected deterministic readable extraction to stay partial')
     assert(readableExtraction.fields.agreementSummary !== null, 'expected readable fallback extraction to keep agreement summary')
     assert(readableExtraction.fields.agreedMonthlyPrice === 2500, 'expected readable fallback extraction to keep monthly price')
+    assert(readableExtraction.fields.startDateAgreed === '2025-01-06', 'expected readable fallback extraction to parse w/c start date')
+    assert(readableExtraction.fields.daysPerWeek === 5, 'expected readable fallback extraction to parse days per week')
 
     const rawPdfText = [
       '%PDF-1.7',

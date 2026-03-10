@@ -327,6 +327,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
+  const [uploadingPaymentConfirmation, setUploadingPaymentConfirmation] = useState(false)
   const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
   const [uploadingSuppression, setUploadingSuppression] = useState(false)
   const [suppressionMeta, setSuppressionMeta] = useState<{
@@ -371,6 +372,36 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((value: unknown) => typeof value === 'string') : [],
       fields: raw.fields && typeof raw.fields === 'object' ? raw.fields : {},
     }
+  }, [customer])
+
+  const paymentConfirmationEvidence = useMemo(() => {
+    const rawAccountData =
+      customer?.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
+    const direct = rawAccountData?.firstPaymentEvidence
+    if (direct && typeof direct === 'object') {
+      return {
+        fileName: typeof direct.fileName === 'string' ? direct.fileName : null,
+        fileUrl: typeof direct.fileUrl === 'string' ? direct.fileUrl : null,
+        uploadedAt: typeof direct.uploadedAt === 'string' ? direct.uploadedAt : null,
+      }
+    }
+
+    const attachments = Array.isArray(rawAccountData?.attachments) ? rawAccountData.attachments : []
+    const latest = attachments
+      .filter((attachment: any) => attachment && attachment.type === 'payment_confirmation')
+      .sort((a: any, b: any) => {
+        const aTime = typeof a?.uploadedAt === 'string' ? Date.parse(a.uploadedAt) : 0
+        const bTime = typeof b?.uploadedAt === 'string' ? Date.parse(b.uploadedAt) : 0
+        return bTime - aTime
+      })[0]
+
+    return latest
+      ? {
+          fileName: typeof latest.fileName === 'string' ? latest.fileName : null,
+          fileUrl: typeof latest.fileUrl === 'string' ? latest.fileUrl : null,
+          uploadedAt: typeof latest.uploadedAt === 'string' ? latest.uploadedAt : null,
+        }
+      : null
   }, [customer])
 
   // Fetch customer data by ID
@@ -900,6 +931,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           warnings?: string[]
           fields?: {
             agreedMonthlyPrice?: number | null
+            startDateAgreed?: string | null
+            daysPerWeek?: number | null
             contractStartDate?: string | null
             serviceStartDate?: string | null
           }
@@ -922,9 +955,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           uploadedAt: data.agreement.uploadedAt,
         })
         const extractedStartDate =
+          data.agreementExtraction?.fields?.startDateAgreed ||
           data.agreementExtraction?.fields?.contractStartDate ||
           data.agreementExtraction?.fields?.serviceStartDate ||
           null
+        const extractedDaysPerWeek = data.agreementExtraction?.fields?.daysPerWeek
         const extractedPrice = data.agreementExtraction?.fields?.agreedMonthlyPrice
         const warningSummary = Array.isArray(data.agreementExtraction?.warnings)
           ? data.agreementExtraction?.warnings?.join(' ')
@@ -946,6 +981,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               : [
                   data.progressUpdated ? 'Progress Tracker updated automatically.' : 'Agreement stored.',
                   extractedStartDate ? `Start date set to ${extractedStartDate}.` : null,
+                  typeof extractedDaysPerWeek === 'number' ? `Days a week set to ${extractedDaysPerWeek}.` : null,
                   typeof extractedPrice === 'number' ? `Monthly price set to £${extractedPrice.toLocaleString('en-GB')}.` : null,
                   warningSummary || null,
                 ]
@@ -968,6 +1004,63 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setUploadingAgreement(false)
     }
     reader.readAsDataURL(file)
+  }
+
+  const handlePaymentConfirmationFileChange = async (file: File | null) => {
+    if (!file || !customer?.id) return
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading payment confirmation evidence will refresh this customer from the database.',
+    )
+    if (!proceed) return
+
+    setUploadingPaymentConfirmation(true)
+    void (async () => {
+      try {
+        const formData = new FormData()
+        formData.append('file', file, file.name)
+        formData.append('attachmentType', 'payment_confirmation')
+
+        const response = await fetch(`/api/customers/${customer.id}/attachments`, {
+          method: 'POST',
+          body: formData,
+        })
+
+        let payload: any = null
+        try {
+          payload = await response.json()
+        } catch {
+          payload = null
+        }
+
+        if (!response.ok || !payload?.success) {
+          const message = payload?.message || payload?.error || `Upload failed (${response.status})`
+          throw new Error(message)
+        }
+
+        await fetchCustomer()
+        emit('customerUpdated', { id: customer.id })
+
+        toast({
+          title: 'Payment confirmation uploaded',
+          description: payload?.progressUpdated
+            ? 'First payment evidence stored. Progress Tracker updated automatically.'
+            : 'First payment evidence stored.',
+          status: 'success',
+          duration: 5000,
+          isClosable: true,
+        })
+      } catch (error: any) {
+        toast({
+          title: 'Upload failed',
+          description: error?.message || 'Unable to upload payment confirmation evidence',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      } finally {
+        setUploadingPaymentConfirmation(false)
+      }
+    })()
   }
 
   const handleSuppressionFileChange = async (file: File | null) => {
@@ -2376,6 +2469,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             {`Monthly price: £${agreementExtraction.fields.agreedMonthlyPrice.toLocaleString('en-GB')}`}
                           </Text>
                         ) : null}
+                        {agreementExtraction.fields?.startDateAgreed ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Start date agreed: ${agreementExtraction.fields.startDateAgreed}`}
+                          </Text>
+                        ) : null}
+                        {typeof agreementExtraction.fields?.daysPerWeek === 'number' ? (
+                          <Text fontSize="sm" color="gray.700">
+                            {`Days a week: ${agreementExtraction.fields.daysPerWeek}`}
+                          </Text>
+                        ) : null}
                         {agreementExtraction.fields?.contractSignedDate ? (
                           <Text fontSize="sm" color="gray.700">
                             {`Contract signed date: ${agreementExtraction.fields.contractSignedDate}`}
@@ -2429,6 +2532,64 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     </Stack>
                   </Box>
                 ) : null}
+                <Divider />
+                <Stack spacing={3}>
+                  <FormLabel mb={0}>First Payment Received Evidence</FormLabel>
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"
+                    display="none"
+                    id="payment-confirmation-upload"
+                    onChange={(e) => void handlePaymentConfirmationFileChange(e.target.files?.[0] || null)}
+                  />
+                  <HStack spacing={3} align="center" flexWrap="wrap">
+                    <Button
+                      as="label"
+                      htmlFor="payment-confirmation-upload"
+                      leftIcon={<AttachmentIcon />}
+                      variant="outline"
+                      size="sm"
+                      isLoading={uploadingPaymentConfirmation}
+                      isDisabled={uploadingPaymentConfirmation}
+                    >
+                      {paymentConfirmationEvidence?.fileName ? 'Replace Payment Confirmation' : 'Upload Payment Confirmation'}
+                    </Button>
+                    {paymentConfirmationEvidence?.fileName ? (
+                      <HStack spacing={2}>
+                        {paymentConfirmationEvidence.fileUrl ? (
+                          <Button
+                            as={Link}
+                            size="sm"
+                            variant="link"
+                            colorScheme="teal"
+                            fontWeight="medium"
+                            href={paymentConfirmationEvidence.fileUrl}
+                            isExternal
+                            rel="noopener noreferrer"
+                          >
+                            {paymentConfirmationEvidence.fileName}
+                          </Button>
+                        ) : (
+                          <Text fontSize="sm" color="gray.700">
+                            {paymentConfirmationEvidence.fileName}
+                          </Text>
+                        )}
+                        {paymentConfirmationEvidence.uploadedAt ? (
+                          <Text fontSize="xs" color="gray.500">
+                            {`(Uploaded ${new Date(paymentConfirmationEvidence.uploadedAt).toLocaleDateString('en-GB')})`}
+                          </Text>
+                        ) : null}
+                      </HStack>
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">
+                        No payment confirmation uploaded
+                      </Text>
+                    )}
+                  </HStack>
+                  <Text fontSize="xs" color="gray.500">
+                    Uploading payment confirmation evidence will automatically tick “First Payment Received”.
+                  </Text>
+                </Stack>
               </Stack>
             </Stack>
           </FormControl>
