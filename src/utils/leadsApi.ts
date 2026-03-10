@@ -1,5 +1,6 @@
 import { emit } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
+import { getCurrentCustomerId } from '../platform/stores/settings'
 import { setItem, setJson } from '../platform/storage'
 import { api } from './api'
 
@@ -56,6 +57,10 @@ export type ScoreLeadResponse = {
   status: string
 }
 
+function resolveCustomerId(customerId?: string): string {
+  return String(customerId || getCurrentCustomerId() || '').trim()
+}
+
 export async function fetchLeadsFromApi(customerId: string): Promise<LeadsApiResponse> {
   if (!customerId || String(customerId).trim() === '') {
     console.warn('Missing customerId – leads fetch blocked')
@@ -95,7 +100,7 @@ export async function convertLeadToContact(
   customerId?: string
 ): Promise<{ data?: ConvertLeadResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   try {
     const headers = getCustomerHeaders(id)
     const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/convert?customerId=${encodeURIComponent(id)}`, {
@@ -123,7 +128,7 @@ export async function bulkConvertLeads(
   customerId?: string
 ): Promise<{ data?: BulkConvertResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   try {
     const headers = getCustomerHeaders(id)
     const response = await fetch(`${API_BASE_URL}/api/leads/bulk-convert?customerId=${encodeURIComponent(id)}`, {
@@ -147,7 +152,7 @@ export async function bulkConvertLeads(
 // Score a lead
 export async function scoreLead(leadId: string, customerId?: string): Promise<{ data?: ScoreLeadResponse; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   try {
     const headers = getCustomerHeaders(id)
     const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/score?customerId=${encodeURIComponent(id)}`, {
@@ -174,7 +179,7 @@ export async function updateLeadStatus(
   customerId?: string
 ): Promise<{ data?: LeadRecord; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   try {
     const headers = getCustomerHeaders(id)
     const response = await fetch(`${API_BASE_URL}/api/leads/${leadId}/status?customerId=${encodeURIComponent(id)}`, {
@@ -198,7 +203,7 @@ export async function updateLeadStatus(
 // Export leads to CSV
 export async function exportLeadsToCSV(customerId?: string): Promise<{ data?: Blob; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = customerId || localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   try {
     const headers = getCustomerHeaders(id)
     const response = await fetch(`${API_BASE_URL}/api/leads/export/csv?customerId=${encodeURIComponent(id)}`, {
@@ -218,16 +223,13 @@ export async function exportLeadsToCSV(customerId?: string): Promise<{ data?: Bl
 }
 
 // Get sequences for enrollment
-export async function getSequences(): Promise<{ data?: Array<{ id: string; name: string; description?: string }>; error?: string }> {
+export async function getSequences(customerId?: string): Promise<{ data?: Array<{ id: string; name: string; description?: string }>; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const customerId = localStorage.getItem('currentCustomerId') || ''
+  const id = resolveCustomerId(customerId)
   
   try {
-    const response = await fetch(`${API_BASE_URL}/api/sequences?customerId=${customerId}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Customer-Id': customerId,
-      },
+    const response = await fetch(`${API_BASE_URL}/api/sequences?customerId=${encodeURIComponent(id)}`, {
+      headers: getCustomerHeaders(id),
     })
 
     if (!response.ok) {
@@ -308,7 +310,7 @@ export type SyncMetrics = {
 // Get sync status
 export async function getSyncStatus(customerId?: string): Promise<{ data?: SyncStatus; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) {
     console.warn('Missing customerId – getSyncStatus blocked')
     return { error: 'Missing customerId' }
@@ -343,7 +345,7 @@ export type ValidateSheetResult = {
 /** Validate customer's leads sheet URL (no DB writes). Used to explain "why 0 leads". */
 export async function getValidateSheetResult(customerId?: string): Promise<{ data?: ValidateSheetResult; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) return { error: 'Missing customerId' }
   try {
     const response = await fetch(`${API_BASE_URL}/api/leads/sync/validate?customerId=${encodeURIComponent(id)}`, {
@@ -385,7 +387,7 @@ export async function getAllSyncStatuses(): Promise<{ data?: { total: number; st
 // Trigger manual sync
 export async function triggerSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) {
     console.warn('Missing customerId – triggerSync blocked')
     return { error: 'Missing customerId' }
@@ -411,7 +413,7 @@ export async function triggerSync(customerId?: string): Promise<{ data?: { succe
 // Pause sync
 export async function pauseSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) {
     console.warn('Missing customerId – pauseSync blocked')
     return { error: 'Missing customerId' }
@@ -437,7 +439,7 @@ export async function pauseSync(customerId?: string): Promise<{ data?: { success
 // Resume sync
 export async function resumeSync(customerId?: string): Promise<{ data?: { success: boolean; message: string; customerId: string }; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) {
     console.warn('Missing customerId – resumeSync blocked')
     return { error: 'Missing customerId' }
@@ -463,7 +465,7 @@ export async function resumeSync(customerId?: string): Promise<{ data?: { succes
 // Get sync metrics
 export async function getSyncMetrics(customerId?: string): Promise<{ data?: SyncMetrics; error?: string }> {
   const API_BASE_URL = import.meta.env.VITE_API_URL || ''
-  const id = (customerId || localStorage.getItem('currentCustomerId') || '').trim()
+  const id = resolveCustomerId(customerId)
   if (!id) {
     console.warn('Missing customerId – getSyncMetrics blocked')
     return { error: 'Missing customerId' }
