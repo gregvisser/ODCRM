@@ -327,7 +327,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingAccreditations, setUploadingAccreditations] = useState<Record<string, boolean>>({})
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
-  const [uploadingPaymentConfirmation, setUploadingPaymentConfirmation] = useState(false)
   const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
   const [uploadingSuppression, setUploadingSuppression] = useState(false)
   const [suppressionMeta, setSuppressionMeta] = useState<{
@@ -358,50 +357,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       weeklyTarget: accountData?.weeklyTarget as number | undefined,
       _databaseId: customer.id,
     } as Partial<Account>
-  }, [customer])
-
-  const agreementExtraction = useMemo(() => {
-    const raw = customer?.accountData && typeof customer.accountData === 'object'
-      ? (customer.accountData as any).agreementExtraction
-      : null
-    if (!raw || typeof raw !== 'object') return null
-    return {
-      status: typeof raw.status === 'string' ? raw.status : null,
-      extractionSource: typeof raw.extractionSource === 'string' ? raw.extractionSource : null,
-      extractedAt: typeof raw.extractedAt === 'string' ? raw.extractedAt : null,
-      warnings: Array.isArray(raw.warnings) ? raw.warnings.filter((value: unknown) => typeof value === 'string') : [],
-      fields: raw.fields && typeof raw.fields === 'object' ? raw.fields : {},
-    }
-  }, [customer])
-
-  const paymentConfirmationEvidence = useMemo(() => {
-    const rawAccountData =
-      customer?.accountData && typeof customer.accountData === 'object' ? (customer.accountData as any) : {}
-    const direct = rawAccountData?.firstPaymentEvidence
-    if (direct && typeof direct === 'object') {
-      return {
-        fileName: typeof direct.fileName === 'string' ? direct.fileName : null,
-        fileUrl: typeof direct.fileUrl === 'string' ? direct.fileUrl : null,
-        uploadedAt: typeof direct.uploadedAt === 'string' ? direct.uploadedAt : null,
-      }
-    }
-
-    const attachments = Array.isArray(rawAccountData?.attachments) ? rawAccountData.attachments : []
-    const latest = attachments
-      .filter((attachment: any) => attachment && attachment.type === 'payment_confirmation')
-      .sort((a: any, b: any) => {
-        const aTime = typeof a?.uploadedAt === 'string' ? Date.parse(a.uploadedAt) : 0
-        const bTime = typeof b?.uploadedAt === 'string' ? Date.parse(b.uploadedAt) : 0
-        return bTime - aTime
-      })[0]
-
-    return latest
-      ? {
-          fileName: typeof latest.fileName === 'string' ? latest.fileName : null,
-          fileUrl: typeof latest.fileUrl === 'string' ? latest.fileUrl : null,
-          uploadedAt: typeof latest.uploadedAt === 'string' ? latest.uploadedAt : null,
-        }
-      : null
   }, [customer])
 
   // Fetch customer data by ID
@@ -925,18 +880,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       const { data, error } = await api.post<{
         success: boolean
         agreement: { fileName: string; blobName: string; uploadedAt: string }
-        progressUpdated: boolean
-        agreementExtraction?: {
-          status?: string
-          warnings?: string[]
-          fields?: {
-            agreedMonthlyPrice?: number | null
-            startDateAgreed?: string | null
-            daysPerWeek?: number | null
-            contractStartDate?: string | null
-            serviceStartDate?: string | null
-          }
-        }
       }>(
         `/api/customers/${customer.id}/agreement`,
         { fileName: file.name, dataUrl },
@@ -954,45 +897,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           fileName: data.agreement.fileName,
           uploadedAt: data.agreement.uploadedAt,
         })
-        const extractedStartDate =
-          data.agreementExtraction?.fields?.startDateAgreed ||
-          data.agreementExtraction?.fields?.contractStartDate ||
-          data.agreementExtraction?.fields?.serviceStartDate ||
-          null
-        const extractedDaysPerWeek = data.agreementExtraction?.fields?.daysPerWeek
-        const extractedPrice = data.agreementExtraction?.fields?.agreedMonthlyPrice
-        const warningSummary = Array.isArray(data.agreementExtraction?.warnings)
-          ? data.agreementExtraction?.warnings?.join(' ')
-          : ''
-        const extractionStatus = data.agreementExtraction?.status
-        const unreadableExtractionWarning = /readable form|image-based|unreadable/i.test(warningSummary)
         toast({
-          title:
-            extractionStatus === 'failed'
-              ? unreadableExtractionWarning
-                ? 'Agreement uploaded but text was unreadable'
-                : 'Agreement uploaded with no extractable fields'
-              : extractionStatus === 'partial'
-                ? 'Agreement uploaded with partial extraction'
-                : 'Agreement uploaded',
-          description:
-            extractionStatus === 'failed'
-              ? warningSummary || 'Agreement stored, but no defensible fields could be extracted automatically.'
-              : [
-                  data.progressUpdated ? 'Progress Tracker updated automatically.' : 'Agreement stored.',
-                  extractedStartDate ? `Start date set to ${extractedStartDate}.` : null,
-                  typeof extractedDaysPerWeek === 'number' ? `Days a week set to ${extractedDaysPerWeek}.` : null,
-                  typeof extractedPrice === 'number' ? `Monthly price set to £${extractedPrice.toLocaleString('en-GB')}.` : null,
-                  warningSummary || null,
-                ]
-                  .filter(Boolean)
-                  .join(' '),
-          status:
-            extractionStatus === 'succeeded'
-              ? 'success'
-              : extractionStatus === 'partial'
-                ? 'warning'
-                : 'warning',
+          title: 'Agreement uploaded',
+          description: 'Agreement stored successfully.',
+          status: 'success',
           duration: 6000,
         })
         
@@ -1004,63 +912,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setUploadingAgreement(false)
     }
     reader.readAsDataURL(file)
-  }
-
-  const handlePaymentConfirmationFileChange = async (file: File | null) => {
-    if (!file || !customer?.id) return
-    const proceed = await confirmProceedIfDirty(
-      'You have unsaved onboarding changes. Uploading payment confirmation evidence will refresh this customer from the database.',
-    )
-    if (!proceed) return
-
-    setUploadingPaymentConfirmation(true)
-    void (async () => {
-      try {
-        const formData = new FormData()
-        formData.append('file', file, file.name)
-        formData.append('attachmentType', 'payment_confirmation')
-
-        const response = await fetch(`/api/customers/${customer.id}/attachments`, {
-          method: 'POST',
-          body: formData,
-        })
-
-        let payload: any = null
-        try {
-          payload = await response.json()
-        } catch {
-          payload = null
-        }
-
-        if (!response.ok || !payload?.success) {
-          const message = payload?.message || payload?.error || `Upload failed (${response.status})`
-          throw new Error(message)
-        }
-
-        await fetchCustomer()
-        emit('customerUpdated', { id: customer.id })
-
-        toast({
-          title: 'Payment confirmation uploaded',
-          description: payload?.progressUpdated
-            ? 'First payment evidence stored. Progress Tracker updated automatically.'
-            : 'First payment evidence stored.',
-          status: 'success',
-          duration: 5000,
-          isClosable: true,
-        })
-      } catch (error: any) {
-        toast({
-          title: 'Upload failed',
-          description: error?.message || 'Unable to upload payment confirmation evidence',
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        })
-      } finally {
-        setUploadingPaymentConfirmation(false)
-      }
-    })()
   }
 
   const handleSuppressionFileChange = async (file: File | null) => {
@@ -2388,9 +2239,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <FormControl>
             <FormLabel>Customer Agreement (PDF/Word)</FormLabel>
             <Stack spacing={3}>
-              <Text fontSize="sm" color="gray.600">
-                Upload the signed customer agreement. ODCRM will store it, extract defensible commercial fields automatically, update onboarding fields, and tick the relevant progress items without manual re-entry.
-              </Text>
               <Stack spacing={2}>
                 <Input
                   type="file"
@@ -2438,158 +2286,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     </Text>
                   )}
                 </HStack>
-                {agreementExtraction ? (
-                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={3} bg="gray.50">
-                    <Stack spacing={2}>
-                      <HStack spacing={2} flexWrap="wrap">
-                        <Badge
-                          colorScheme={
-                            agreementExtraction.status === 'succeeded'
-                              ? 'green'
-                              : agreementExtraction.status === 'partial'
-                                ? 'orange'
-                                : 'red'
-                          }
-                        >
-                          {agreementExtraction.status === 'succeeded'
-                            ? 'Extraction complete'
-                            : agreementExtraction.status === 'partial'
-                              ? 'Extraction partial'
-                              : 'Extraction needs review'}
-                        </Badge>
-                        {agreementExtraction.extractedAt ? (
-                          <Text fontSize="xs" color="gray.500">
-                            {`Processed ${new Date(agreementExtraction.extractedAt).toLocaleString('en-GB')}`}
-                          </Text>
-                        ) : null}
-                      </HStack>
-                      <Stack spacing={1}>
-                        {typeof agreementExtraction.fields?.agreedMonthlyPrice === 'number' ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Monthly price: £${agreementExtraction.fields.agreedMonthlyPrice.toLocaleString('en-GB')}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.startDateAgreed ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Start date agreed: ${agreementExtraction.fields.startDateAgreed}`}
-                          </Text>
-                        ) : null}
-                        {typeof agreementExtraction.fields?.daysPerWeek === 'number' ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Days a week: ${agreementExtraction.fields.daysPerWeek}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.contractSignedDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Contract signed date: ${agreementExtraction.fields.contractSignedDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.contractStartDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Contract start date: ${agreementExtraction.fields.contractStartDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.serviceStartDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Service start date: ${agreementExtraction.fields.serviceStartDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.billingStartDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Billing start date: ${agreementExtraction.fields.billingStartDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.contractTermMonths ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Contract term: ${agreementExtraction.fields.contractTermMonths} months`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.contractEndDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Contract end date: ${agreementExtraction.fields.contractEndDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.renewalDate ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Renewal date: ${agreementExtraction.fields.renewalDate}`}
-                          </Text>
-                        ) : null}
-                        {agreementExtraction.fields?.agreementSummary ? (
-                          <Text fontSize="sm" color="gray.700">
-                            {`Agreement summary: ${agreementExtraction.fields.agreementSummary}`}
-                          </Text>
-                        ) : null}
-                      </Stack>
-                      {agreementExtraction.warnings.length > 0 ? (
-                        <Stack spacing={1}>
-                          {agreementExtraction.warnings.map((warning) => (
-                            <Text key={warning} fontSize="xs" color="orange.700">
-                              {warning}
-                            </Text>
-                          ))}
-                        </Stack>
-                      ) : null}
-                    </Stack>
-                  </Box>
-                ) : null}
-                <Divider />
-                <Stack spacing={3}>
-                  <FormLabel mb={0}>First Payment Received Evidence</FormLabel>
-                  <Input
-                    type="file"
-                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"
-                    display="none"
-                    id="payment-confirmation-upload"
-                    onChange={(e) => void handlePaymentConfirmationFileChange(e.target.files?.[0] || null)}
-                  />
-                  <HStack spacing={3} align="center" flexWrap="wrap">
-                    <Button
-                      as="label"
-                      htmlFor="payment-confirmation-upload"
-                      leftIcon={<AttachmentIcon />}
-                      variant="outline"
-                      size="sm"
-                      isLoading={uploadingPaymentConfirmation}
-                      isDisabled={uploadingPaymentConfirmation}
-                    >
-                      {paymentConfirmationEvidence?.fileName ? 'Replace Payment Confirmation' : 'Upload Payment Confirmation'}
-                    </Button>
-                    {paymentConfirmationEvidence?.fileName ? (
-                      <HStack spacing={2}>
-                        {paymentConfirmationEvidence.fileUrl ? (
-                          <Button
-                            as={Link}
-                            size="sm"
-                            variant="link"
-                            colorScheme="teal"
-                            fontWeight="medium"
-                            href={paymentConfirmationEvidence.fileUrl}
-                            isExternal
-                            rel="noopener noreferrer"
-                          >
-                            {paymentConfirmationEvidence.fileName}
-                          </Button>
-                        ) : (
-                          <Text fontSize="sm" color="gray.700">
-                            {paymentConfirmationEvidence.fileName}
-                          </Text>
-                        )}
-                        {paymentConfirmationEvidence.uploadedAt ? (
-                          <Text fontSize="xs" color="gray.500">
-                            {`(Uploaded ${new Date(paymentConfirmationEvidence.uploadedAt).toLocaleDateString('en-GB')})`}
-                          </Text>
-                        ) : null}
-                      </HStack>
-                    ) : (
-                      <Text fontSize="sm" color="gray.500">
-                        No payment confirmation uploaded
-                      </Text>
-                    )}
-                  </HStack>
-                  <Text fontSize="xs" color="gray.500">
-                    Uploading payment confirmation evidence will automatically tick “First Payment Received”.
-                  </Text>
-                </Stack>
               </Stack>
             </Stack>
           </FormControl>

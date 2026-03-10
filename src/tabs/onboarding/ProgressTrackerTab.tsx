@@ -49,7 +49,7 @@ const OPS_TEAM_ITEMS = [
   { key: 'ops_populate_ppt', label: 'Populate Onboarding Meeting PPT' },
   { key: 'ops_receive_file', label: 'Receive & File Onboarding Information Received from Client' },
   { key: 'ops_create_emails', label: 'Create/Set Up Emails for Outreach with Agreed Auto Signatures' },
-  { key: 'ops_emails_linked', label: 'Emails (1+ linked)' }, // DB-derived: linkedEmailCount >= 1 (read-only)
+  { key: 'ops_emails_linked', label: 'Emails (5 linked)' }, // DB-derived: linkedEmailCount >= 5 (read-only)
   { key: 'ops_create_ddi', label: 'Create Client DDI & Test' },
   { key: 'ops_lead_tracker', label: 'Add Client to Lead Tracker' },
   { key: 'ops_brief_campaigns', label: 'Brief Campaigns Creator' },
@@ -85,12 +85,9 @@ const AM_ITEMS = [
 
 type ChecklistState = Record<string, boolean>
 
-// Auto-ticked items (from Customer Onboarding actions). ops_emails_linked is DB-derived (linkedEmailCount >= 1), read-only.
+// Auto-ticked items (from Customer Onboarding actions). ops_emails_linked is DB-derived (linkedEmailCount >= 5), read-only.
 const AUTO_TICK_KEY_SET = new Set<string>([
-  'sales.sales_client_agreement',
-  'sales.sales_contract_signed',
   'sales.sales_start_date',
-  'sales.sales_first_payment',
   'sales.sales_assign_am',
   'ops.ops_added_crm',
   'ops.ops_lead_tracker',
@@ -186,7 +183,7 @@ export default function ProgressTrackerTab() {
     if (!selectedCustomerId) return
     if (showCompleted) return
 
-    const opsWithEmails = { ...opsChecklist, ops_emails_linked: (linkedEmailCount ?? 0) >= 1 }
+    const opsWithEmails = { ...opsChecklist, ops_emails_linked: (linkedEmailCount ?? 0) >= 5 }
     const isCompleteNow =
       isGroupComplete(SALES_TEAM_ITEMS, salesChecklist) &&
       isGroupComplete(OPS_TEAM_ITEMS, opsWithEmails) &&
@@ -258,7 +255,7 @@ export default function ProgressTrackerTab() {
     () =>
       isGroupComplete(OPS_TEAM_ITEMS, {
         ...opsChecklist,
-        ops_emails_linked: (linkedEmailCount ?? 0) >= 1,
+        ops_emails_linked: (linkedEmailCount ?? 0) >= 5,
       }),
     [opsChecklist, linkedEmailCount],
   )
@@ -430,7 +427,7 @@ export default function ProgressTrackerTab() {
                     const isEmailsLinked = item.key === 'ops_emails_linked'
                     // DB-derived, read-only: never call saveChecklistState; checked state from linkedEmailCount only
                     const checked = isEmailsLinked
-                      ? (linkedEmailCount ?? 0) >= 1
+                      ? (linkedEmailCount ?? 0) >= 5
                       : (opsChecklist[item.key] || false)
                     return (
                       <Box key={item.key}>

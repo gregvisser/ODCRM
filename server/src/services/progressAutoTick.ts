@@ -28,15 +28,11 @@ export type ProgressTrackerMetaState = Record<string, any> & {
 
 export const AUTO_TICK_ITEMS: ReadonlyArray<{ group: ProgressGroup; itemKey: string }> = [
   // Sales Team
-  { group: 'sales', itemKey: 'sales_client_agreement' },
-  { group: 'sales', itemKey: 'sales_contract_signed' },
   { group: 'sales', itemKey: 'sales_start_date' },
-  { group: 'sales', itemKey: 'sales_first_payment' },
   { group: 'sales', itemKey: 'sales_assign_am' },
   // Operations Team
   { group: 'ops', itemKey: 'ops_added_crm' },
   { group: 'ops', itemKey: 'ops_lead_tracker' },
-  { group: 'ops', itemKey: 'ops_emails_linked' },
   // Account Manager
   { group: 'am', itemKey: 'am_send_dnc' },
 ]
@@ -50,8 +46,6 @@ type ApplyAutoTickParams = {
   hasAgreement: boolean
   /** Lead Google sheet present for this customer */
   hasLeadGoogleSheet: boolean
-  /** Active linked outreach email count from DB truth */
-  linkedEmailCount?: number | null
   /** Best-effort actor identity for meta (email/userId string) */
   actorUserId?: string | null
   /** Timestamp used for completedAt when transitioning false->true */
@@ -101,7 +95,6 @@ export function applyAutoTicksToAccountData(params: ApplyAutoTickParams): {
     accountData,
     hasAgreement,
     hasLeadGoogleSheet,
-    linkedEmailCount = null,
     actorUserId = null,
     nowIso = new Date().toISOString(),
   } = params
@@ -149,22 +142,12 @@ export function applyAutoTicksToAccountData(params: ApplyAutoTickParams): {
   const hasDnc =
     !!coerceTruthyString(getObject((base as any).dncSuppression).attachmentId) ||
     !!coerceTruthyString(getObject((base as any).dncSuppression).fileName)
-  const firstPaymentEvidence = getObject((base as any).firstPaymentEvidence)
-  const attachments = Array.isArray((base as any).attachments) ? (base as any).attachments : []
-  const hasFirstPaymentEvidence =
-    !!coerceTruthyString(firstPaymentEvidence.attachmentId) ||
-    !!coerceTruthyString(firstPaymentEvidence.fileName) ||
-    attachments.some((attachment: any) => attachment && attachment.type === 'payment_confirmation')
 
   // Apply rules (idempotent: mark only, never unmark)
-  if (hasAgreement) markComplete('sales', 'sales_client_agreement')
-  if (hasAgreement) markComplete('sales', 'sales_contract_signed')
   if (startDate) markComplete('sales', 'sales_start_date')
-  if (hasFirstPaymentEvidence) markComplete('sales', 'sales_first_payment')
   if (assignedManagerId) markComplete('sales', 'sales_assign_am')
   if (clientCreatedOnCrm) markComplete('ops', 'ops_added_crm')
   if (hasLeadGoogleSheet) markComplete('ops', 'ops_lead_tracker')
-  if (typeof linkedEmailCount === 'number' && linkedEmailCount >= 1) markComplete('ops', 'ops_emails_linked')
   if (hasDnc) markComplete('am', 'am_send_dnc')
 
   if (applied.length === 0) {
