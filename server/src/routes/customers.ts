@@ -15,7 +15,6 @@ import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
 import { applyAutoTicksToAccountData, applyManualTickToAccountData } from '../services/progressAutoTick.js'
-import { applyAgreementAutomation, extractAgreementFields } from '../services/agreementExtraction.js'
 
 const router = Router()
 
@@ -1084,7 +1083,6 @@ router.put('/:id/onboarding', async (req, res) => {
       const nextLeadsReportingUrl =
         Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl') ? updateData.leadsReportingUrl : existing.leadsReportingUrl
       const hasLeadGoogleSheet = typeof nextLeadsReportingUrl === 'string' ? nextLeadsReportingUrl.trim().length > 0 : false
-      const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
 
       // Keep progressTracker.updatedAt consistent with Customer.updatedAt for this save.
       const nowIso = updateData.updatedAt instanceof Date ? updateData.updatedAt.toISOString() : new Date().toISOString()
@@ -1093,7 +1091,6 @@ router.put('/:id/onboarding', async (req, res) => {
         accountData: mergedAccountDataBase,
         hasAgreement,
         hasLeadGoogleSheet,
-        linkedEmailCount,
         actorUserId: onboardingActorUserId,
         nowIso,
       })
@@ -2856,26 +2853,18 @@ router.post('/:id/agreement', async (req, res) => {
     // Get actor identity from auth context (server-derived only)
     const actorIdentity = getActorIdentity(req)
     const actorEmail = actorIdentity?.email || null
-    const actorUserId = (actorIdentity?.userId || actorIdentity?.email || null) as string | null
     const now = new Date()
-    const extraction = await extractAgreementFields({
-      buffer,
-      mimeType,
-      customerName: customer.name,
-      fileName,
-    })
 
-    // CRITICAL: Update customer record with agreement metadata AND auto-ticks in ONE transaction.
-    // This prevents optimistic concurrency "self-conflicts" where updatedAt changes twice.
+    // Keep agreement upload as a plain blob-backed storage path only.
     console.log(`[agreement] BEFORE UPDATE: customerId=${id}`)
     console.log(`[agreement] Writing: blobName=${blobName}, container=${containerName}, fileName=${fileName}`)
 
-    const agreementUpdateResult = await prisma.$transaction(async (tx) => {
+    const updatedCustomer = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
 
       const existing = await tx.customer.findUnique({
         where: { id },
-        select: { id: true, name: true, isArchived: true, accountData: true, leadsReportingUrl: true },
+        select: { id: true, name: true, isArchived: true },
       })
       if (!existing) {
         const e: any = new Error('not_found')
@@ -2888,27 +2877,6 @@ router.post('/:id/agreement', async (req, res) => {
         throw e
       }
 
-      const hasLeadGoogleSheet = typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim().length > 0 : false
-      const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
-      const currentAccountData =
-        existing.accountData && typeof existing.accountData === 'object' ? (existing.accountData as any) : {}
-      const agreementAutomation = applyAgreementAutomation({
-        accountData: currentAccountData,
-        extraction,
-        actorUserId,
-        nowIso: now.toISOString(),
-      })
-
-      // Auto-tick mapping requirement: agreement upload should tick "Client Agreement and Approval"
-      const autoTicked = applyAutoTicksToAccountData({
-        accountData: agreementAutomation.accountData,
-        hasAgreement: true,
-        hasLeadGoogleSheet,
-        linkedEmailCount,
-        actorUserId,
-        nowIso: now.toISOString(),
-      })
-
       const updateData: Prisma.CustomerUpdateInput = {
         // Store blob reference for SAS generation (REQUIRED)
         agreementBlobName: blobName,
@@ -2920,14 +2888,7 @@ router.post('/:id/agreement', async (req, res) => {
         agreementFileMimeType: mimeType,
         agreementUploadedAt: now,
         agreementUploadedByEmail: actorEmail,
-        // Progress tracker + onboarding extraction state (DB truth)
-        accountData: autoTicked.accountData,
         updatedAt: now,
-      }
-
-      if (typeof agreementAutomation.topLevelUpdates.monthlyRevenueFromCustomer === 'number') {
-        updateData.monthlyRevenueFromCustomer = agreementAutomation.topLevelUpdates.monthlyRevenueFromCustomer
-        updateData.monthlyIntakeGBP = agreementAutomation.topLevelUpdates.monthlyIntakeGBP ?? agreementAutomation.topLevelUpdates.monthlyRevenueFromCustomer
       }
 
       const updated = await tx.customer.update({
@@ -2942,19 +2903,10 @@ router.post('/:id/agreement', async (req, res) => {
           agreementFileMimeType: true,
           agreementUploadedAt: true,
           agreementUploadedByEmail: true,
-          monthlyRevenueFromCustomer: true,
-          monthlyIntakeGBP: true,
-          accountData: true,
         },
       })
-      return {
-        updatedCustomer: updated,
-        autoTickedItems: autoTicked.applied,
-        autoCompletedSteps: agreementAutomation.autoCompletedSteps,
-      }
+      return updated
     })
-
-    const updatedCustomer = agreementUpdateResult.updatedCustomer
 
     // CRITICAL: Verify update succeeded
     if (!updatedCustomer) {
@@ -2980,7 +2932,6 @@ router.post('/:id/agreement', async (req, res) => {
     console.log(`✅ Agreement uploaded for customer ${customer.name} (${id})`)
     console.log(`   File: ${fileName}`)
     console.log(`   Blob: ${containerName}/${blobName}`)
-    console.log(`   Extraction status: ${extraction.status} (${extraction.extractionSource})`)
 
     return res.status(201).json({
       success: true,
@@ -2992,20 +2943,6 @@ router.post('/:id/agreement', async (req, res) => {
         uploadedAt: updatedCustomer.agreementUploadedAt?.toISOString(),
         uploadedByEmail: updatedCustomer.agreementUploadedByEmail
       },
-      agreementExtraction: {
-        status: extraction.status,
-        extractionSource: extraction.extractionSource,
-        extractedAt: extraction.extractedAt,
-        warnings: extraction.warnings,
-        fields: extraction.fields,
-      },
-      progressUpdated:
-        agreementUpdateResult.autoTickedItems.length > 0 || agreementUpdateResult.autoCompletedSteps.length > 0,
-      autoTickedItems: agreementUpdateResult.autoTickedItems,
-      autoCompletedOnboardingSteps: agreementUpdateResult.autoCompletedSteps,
-      progressTracker: (updatedCustomer.accountData as any)?.progressTracker,
-      onboardingProgress: (updatedCustomer.accountData as any)?.onboardingProgress,
-      monthlyRevenueFromCustomer: updatedCustomer.monthlyRevenueFromCustomer ? String(updatedCustomer.monthlyRevenueFromCustomer) : null
     })
   } catch (error: any) {
     console.error('Error uploading agreement:', error)
@@ -3401,41 +3338,14 @@ router.post('/:id/attachments', (req, res) => {
             }
           }
 
-          if (attachmentType === 'payment_confirmation') {
-            nextAccountData.firstPaymentEvidence = {
-              attachmentId: attachment.id,
-              fileName: attachment.fileName,
-              fileUrl: attachment.fileUrl,
-              mimeType: attachment.mimeType,
-              blobName: attachment.blobName,
-              containerName: attachment.containerName,
-              size: attachment.size,
-              uploadedAt: attachment.uploadedAt,
-              uploadedByEmail: attachment.uploadedByEmail,
-            }
-          }
         } catch {
           // ignore profile wiring failures - attachments[] still persists
         }
 
-        const autoTicked =
-          attachmentType === 'payment_confirmation'
-            ? applyAutoTicksToAccountData({
-                accountData: nextAccountData,
-                hasAgreement:
-                  Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl),
-                hasLeadGoogleSheet:
-                  typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim().length > 0 : false,
-                linkedEmailCount: await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id),
-                actorUserId: actorEmail,
-                nowIso: now.toISOString(),
-              })
-            : { accountData: nextAccountData, changed: false, applied: [] as Array<{ group: 'sales' | 'ops' | 'am'; itemKey: string }> }
-
         const next = await tx.customer.update({
           where: { id },
           data: {
-            accountData: autoTicked.accountData,
+            accountData: nextAccountData,
             updatedAt: new Date(),
           },
           select: { id: true },
@@ -3461,13 +3371,10 @@ router.post('/:id/attachments', (req, res) => {
           // ignore audit failures
         }
 
-        return {
-          updatedCustomer: next,
-          autoTickedItems: autoTicked.applied,
-        }
+        return next
       })
 
-      if (!updateResult?.updatedCustomer) {
+      if (!updateResult) {
         return res.status(500).json({
           error: 'database_update_failed',
           message: 'Attachment blob uploaded but database update failed',
@@ -3478,12 +3385,7 @@ router.post('/:id/attachments', (req, res) => {
         `[attachments] ✅ customerId=${id} type=${attachmentType} file=${file.originalname} blob=${uploadResult.containerName}/${uploadResult.blobName}`
       )
 
-      return res.status(201).json({
-        success: true,
-        attachment,
-        progressUpdated: updateResult.autoTickedItems.length > 0,
-        autoTickedItems: updateResult.autoTickedItems,
-      })
+      return res.status(201).json({ success: true, attachment })
     } catch (error) {
       console.error('Error uploading attachment:', error)
       return res.status(500).json({
@@ -3819,12 +3721,10 @@ router.post('/:id/suppression-import', (req, res) => {
         const hasAgreement =
           Boolean(customer.agreementBlobName && customer.agreementContainerName) || Boolean(customer.agreementFileUrl)
         const hasLeadGoogleSheet = typeof customer.leadsReportingUrl === 'string' ? customer.leadsReportingUrl.trim().length > 0 : false
-        const linkedEmailCount = await countLinkedOutreachEmailIdentities(tx as unknown as PrismaClient, id)
         const autoTicked = applyAutoTicksToAccountData({
           accountData: nextAccountData,
           hasAgreement,
           hasLeadGoogleSheet,
-          linkedEmailCount,
           actorUserId,
           nowIso,
         })
