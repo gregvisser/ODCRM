@@ -45,7 +45,7 @@ import {
   ModalFooter,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon, EditIcon } from '@chakra-ui/icons'
-import { on } from '../platform/events'
+import { emit, on } from '../platform/events'
 import { clearCurrentCustomerId, getCurrentCustomerId, setCurrentCustomerId } from '../platform/stores/settings'
 import {
   convertLeadToContact,
@@ -755,6 +755,7 @@ function LeadsTab() {
         notes: '',
       })
       await refetch()
+      emit('leadsUpdated', { customerId: activeCustomerId })
     } catch (e) {
       toast({
         title: 'Failed to add lead',
@@ -782,6 +783,7 @@ function LeadsTab() {
         isClosable: true,
       })
       await refetch()
+      emit('leadsUpdated', { customerId: activeCustomerId })
     } catch (e) {
       toast({
         title: 'Retry failed',
@@ -834,6 +836,7 @@ function LeadsTab() {
       setIsEditLeadOpen(false)
       setEditingLeadId(null)
       await refetch()
+      emit('leadsUpdated', { customerId: activeCustomerId })
     } catch (e) {
       toast({
         title: 'Failed to update lead',
