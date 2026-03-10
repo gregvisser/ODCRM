@@ -929,10 +929,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         const warningSummary = Array.isArray(data.agreementExtraction?.warnings)
           ? data.agreementExtraction?.warnings?.join(' ')
           : ''
+        const extractionStatus = data.agreementExtraction?.status
         toast({
-          title: 'Agreement uploaded',
+          title:
+            extractionStatus === 'failed'
+              ? 'Agreement uploaded with no extractable fields'
+              : extractionStatus === 'partial'
+                ? 'Agreement uploaded with partial extraction'
+                : 'Agreement uploaded',
           description:
-            data.agreementExtraction?.status === 'failed'
+            extractionStatus === 'failed'
               ? warningSummary || 'Agreement stored, but no defensible fields could be extracted automatically.'
               : [
                   data.progressUpdated ? 'Progress Tracker updated automatically.' : 'Agreement stored.',
@@ -942,7 +948,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 ]
                   .filter(Boolean)
                   .join(' '),
-          status: data.agreementExtraction?.status === 'failed' ? 'warning' : 'success',
+          status:
+            extractionStatus === 'succeeded'
+              ? 'success'
+              : extractionStatus === 'partial'
+                ? 'warning'
+                : 'warning',
           duration: 6000,
         })
         
