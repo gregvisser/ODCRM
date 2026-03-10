@@ -126,10 +126,7 @@ export default function CustomersHomePage({
         data-testid="customers-marketing-bridge"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
-          OpenDoors Clients is your CRM and data-health workspace for outreach readiness.
-        </Text>
-        <Text mt={1} fontSize="sm" color="gray.700" data-testid="customers-crm-data-health-framing">
-          Maintain account records, contact quality, and lead prerequisites here so Marketing can run reliably.
+          OpenDoors Clients is the live workspace for accounts, contacts, and leads.
         </Text>
         <HStack mt={2} spacing={2}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">
@@ -138,10 +135,7 @@ export default function CustomersHomePage({
           <Text fontSize="sm" color="gray.700">{readiness.reason}</Text>
         </HStack>
         <Text fontSize="sm" color="gray.700" mt={1} data-testid="customers-readiness-guidance">
-          After updating accounts, contacts, or lead prerequisites, continue in Marketing Readiness to run outreach operations.
-        </Text>
-        <Text fontSize="xs" color="gray.600" mt={2} data-testid="customers-transitional-leads-note">
-          During transition, lead-source updates may still come from linked Google Sheets and are reflected here when synced.
+          Keep client records current here, then continue in Marketing Readiness when outreach setup needs attention.
         </Text>
         <HStack mt={3}>
           <Button size="sm" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="customers-readiness-next-step">

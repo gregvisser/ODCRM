@@ -71,7 +71,6 @@ import { OdcrmStorageKeys } from '../platform/keys'
 import { fetchCompanyData, refreshCompanyData } from '../services/companyDataService'
 import { getItem, getJson, isStorageAvailable, keys, setItem, setJson } from '../platform/storage'
 import { api } from '../utils/api'
-import MigrateAccountsPanel from './MigrateAccountsPanel'
 import { GoogleSheetLink } from './links/GoogleSheetLink'
 
 type Contact = {
@@ -3454,7 +3453,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
   const hasSyncedCustomersRef = useRef(false)
   const hasHydratedFromServerRef = useRef(false)
-  const isServerSourceOfTruth = true
+  const isServerSourceOfTruth = dataSource === 'DB'
   const syncInFlightRef = useRef(false)
   const pendingSyncRef = useRef(false)
   const lastSyncedHashRef = useRef<string | null>(null)
@@ -3890,17 +3889,19 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       
       const hasChanges = updated.some((acc, idx) => acc.contacts !== prevAccounts[idx].contacts)
       if (hasChanges) {
-        saveAccountsToStorage(updated)
+        if (!isServerSourceOfTruth) {
+          saveAccountsToStorage(updated)
+        }
         console.log('✅ Synced contact counts with accounts (excluding deleted contacts)')
         return updated
       }
       return prevAccounts
     })
-  }, [accountsData.length, contactsData]) // Sync whenever contacts change
+  }, [accountsData.length, contactsData, isServerSourceOfTruth]) // Sync whenever contacts change
   const [expandedAbout, setExpandedAbout] = useState<Record<string, boolean>>({})
   const [sectorsMap, setSectorsMap] = useState<Record<string, string>>(() => {
     const stored = loadSectorsFromStorage()
-    const loadedAccounts = loadAccountsFromStorage()
+    const loadedAccounts = isServerSourceOfTruth ? sanitizeAccountsList(dbAccounts) : loadAccountsFromStorage()
     const deletedAccountsSet = loadDeletedAccountsFromStorage()
     // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string> = {}
@@ -3914,7 +3915,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   })
   const [targetLocationsMap, setTargetLocationsMap] = useState<Record<string, string[]>>(() => {
     const stored = loadTargetLocationsFromStorage()
-    const loadedAccounts = loadAccountsFromStorage()
+    const loadedAccounts = isServerSourceOfTruth ? sanitizeAccountsList(dbAccounts) : loadAccountsFromStorage()
     const deletedAccountsSet = loadDeletedAccountsFromStorage()
     // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string[]> = {}
@@ -4499,12 +4500,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // DO NOT re-add this effect.
 
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     saveSectorsToStorage(sectorsMap)
-  }, [sectorsMap])
+  }, [sectorsMap, isServerSourceOfTruth])
 
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     saveTargetLocationsToStorage(targetLocationsMap)
-  }, [targetLocationsMap])
+  }, [targetLocationsMap, isServerSourceOfTruth])
 
   // Export function to get current accounts (for LeadsTab)
   useEffect(() => {
@@ -4888,8 +4891,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         // Only save if something changed
         const hasChanges = updated.some((acc, idx) => acc.contacts !== prevAccounts[idx].contacts)
         if (hasChanges) {
-          // Save updated accounts with new contact counts
-          saveAccountsToStorage(updated)
+          if (!isServerSourceOfTruth) {
+            saveAccountsToStorage(updated)
+          }
           console.log('✅ Updated contact counts in accounts (excluding deleted contacts)')
         }
         
@@ -4897,7 +4901,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       })
     })
     return () => off()
-  }, [])
+  }, [isServerSourceOfTruth])
 
   // Allow parent navigators (top-tab shell) to request focusing an account by name.
   // If it exists, open the drawer for that account.
@@ -5076,6 +5080,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // This component ONLY receives data via props (dbAccounts, dbCustomers)
 
   const hasStoredAccounts = (() => {
+    if (isServerSourceOfTruth) return true
     // Preserve prior behavior: if storage is unavailable, don't show the "defaults" warning.
     if (!isStorageAvailable()) return true
     const accounts = getJson<Account[]>(STORAGE_KEY_ACCOUNTS)
@@ -5121,8 +5126,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         </Alert>
       )}
 
-      {/* Migration Panel - show if no accounts exist */}
-      {!hasStoredAccounts && <MigrateAccountsPanel />}
 
       {!hasStoredAccounts && (
         <Box mb={6} p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">

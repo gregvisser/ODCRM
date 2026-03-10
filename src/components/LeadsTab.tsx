@@ -276,7 +276,7 @@ function LeadsTab() {
       setSequences([])
       return
     }
-    getSequences().then(({ data, error }) => {
+    getSequences(activeCustomerId).then(({ data, error }) => {
       if (data) {
         setSequences(data)
       } else if (error) {
@@ -545,19 +545,19 @@ function LeadsTab() {
       <Stack spacing={4}>
         {customerSelector}
         <Stack spacing={4} py={12}>
-        {liveWarning && (
-          <Alert status="warning" borderRadius="lg" maxW="2xl" mx="auto" data-testid="leads-tab-stale-sheet-warning">
-            <AlertIcon />
-            <Box>
-              <AlertTitle>Using cached Google Sheets data</AlertTitle>
-              <AlertDescription>{liveWarning}</AlertDescription>
-            </Box>
-          </Alert>
-        )}
-        <Box textAlign="center">
-          <Text fontSize="lg" color="gray.600">
-            No leads data available
-          </Text>
+          {liveWarning && (
+            <Alert status="warning" borderRadius="lg" maxW="2xl" mx="auto" data-testid="leads-tab-stale-sheet-warning">
+              <AlertIcon />
+              <Box>
+                <AlertTitle>Google Sheets sync warning</AlertTitle>
+                <AlertDescription>{liveWarning}</AlertDescription>
+              </Box>
+            </Alert>
+          )}
+          <Box textAlign="center">
+            <Text fontSize="lg" color="gray.600">
+              No leads available for this client
+            </Text>
           <Text fontSize="sm" color="gray.600" mt={2} data-testid="leads-acceptance-source-mode">
             {sourceOfTruth === 'db'
               ? 'This client is DB-backed for leads in this view.'
@@ -577,7 +577,7 @@ function LeadsTab() {
           {sheetValidateForEmpty?.hint && !sheetValidateForEmpty.ok && (
             <Text fontSize="sm" color="gray.500" mt={1} fontStyle="italic">{sheetValidateForEmpty.hint}</Text>
           )}
-        </Box>
+          </Box>
         {syncStatusForEmpty && (
           <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg" maxW="2xl" mx="auto">
             <AlertIcon />
@@ -939,7 +939,7 @@ function LeadsTab() {
         <Alert status="warning" borderRadius="lg" data-testid="leads-tab-stale-sheet-warning">
           <AlertIcon />
           <Box>
-            <AlertTitle>Using cached Google Sheets data</AlertTitle>
+            <AlertTitle>Google Sheets sync warning</AlertTitle>
             <AlertDescription>{liveWarning}</AlertDescription>
           </Box>
         </Alert>
