@@ -2,10 +2,8 @@ import { Box, Button, HStack, Icon, Text, VStack, useBreakpointValue } from '@ch
 import {
   AddIcon,
   AtSignIcon,
-  ChatIcon,
   EmailIcon,
   SettingsIcon,
-  ViewIcon,
 } from '@chakra-ui/icons'
 import { type CrmTopTabId } from '../../contracts/nav'
 import { getVisibleCrmTopTabs } from '../../utils/crmTopTabsVisibility'
@@ -14,10 +12,10 @@ import type { ComponentType } from 'react'
 // Icon mapping for each tab
 const getTabIcon = (tabId: CrmTopTabId): ComponentType<any> => {
   const iconMap: Record<CrmTopTabId, ComponentType<any>> = {
-    'dashboards-home': ViewIcon,
     'customers-home': AtSignIcon,
     'marketing-home': EmailIcon,
     'onboarding-home': AddIcon,
+    'settings-home': SettingsIcon,
   }
   return iconMap[tabId] || AtSignIcon
 }

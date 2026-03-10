@@ -14,7 +14,6 @@ import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVisibility'
 import { isClientUI } from './platform/mode'
 import { getMe, type MeResponse } from './platform/me'
-import DashboardsHomePage from './tabs/dashboards/DashboardsHomePage'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
@@ -38,8 +37,7 @@ function isSafeInternalRedirect(value: string): boolean {
 
 function App() {
   const { instance } = useMsal()
-  // Production requirement: first authenticated landing is ALWAYS Dashboard unless a safe deep link overrides it.
-  const [activeTab, setActiveTab] = useState<CrmTopTabId>('dashboards-home')
+  const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
   const isCrmTopTabId = (id: string): id is CrmTopTabId => CRM_TOP_TABS.some((t) => t.id === id)
@@ -104,8 +102,8 @@ function App() {
         if (view) setActiveView(view)
         return
       }
-      // Root or unknown path: default authenticated landing is Dashboard.
-      setActiveTab('dashboards-home')
+      // Root or unknown path: default authenticated landing is Clients.
+      setActiveTab(resolveClientModeTab('customers-home'))
       return
     }
     if (isCrmTopTabId(tab)) {
@@ -205,8 +203,6 @@ function App() {
 
   const page = (() => {
     switch (effectiveTab) {
-      case 'dashboards-home':
-        return <DashboardsHomePage />
       case 'customers-home':
         return (
           <CustomersHomePage
@@ -250,7 +246,16 @@ function App() {
           />
         )
       default:
-        return <DashboardsHomePage />
+        return (
+          <CustomersHomePage
+            view={activeView}
+            focusAccountName={focusAccountName}
+            onNavigate={(v) => {
+              setActiveView(v)
+              if (v !== 'accounts') setFocusAccountName(undefined)
+            }}
+          />
+        )
     }
   })()
 

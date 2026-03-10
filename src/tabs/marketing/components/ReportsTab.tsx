@@ -98,9 +98,9 @@ const ReportsTab: React.FC = () => {
   const [identityData, setIdentityData] = useState<IdentityCapacityResponse | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
-  const goToDashboardTriage = useCallback(() => {
+  const goToMarketingReadiness = useCallback(() => {
     const params = new URLSearchParams(window.location.search)
-    params.set('view', 'dashboards-home')
+    params.set('view', 'readiness')
     window.location.search = params.toString()
   }, [])
 
@@ -191,7 +191,7 @@ const ReportsTab: React.FC = () => {
           <Alert status="info" data-testid="reports-retrospective-role-separation">
             <AlertIcon />
             <AlertDescription>
-              Reports is retrospective: use it to review what happened. For live priorities and next action, return to Dashboard triage.
+              Reports is retrospective: use it to review what happened. For live priorities and next action, return to Marketing Readiness.
             </AlertDescription>
           </Alert>
           <Card id="reports-tab-controls" data-testid="reports-tab-controls">
@@ -207,10 +207,10 @@ const ReportsTab: React.FC = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={goToDashboardTriage}
+                    onClick={goToMarketingReadiness}
                     data-testid="reports-go-dashboard-triage"
                   >
-                    Open Dashboard triage
+                    Open Marketing Readiness
                   </Button>
                   <Select
                     id="reports-tab-window-select"

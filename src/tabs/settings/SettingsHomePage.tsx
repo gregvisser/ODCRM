@@ -79,7 +79,7 @@ export default function SettingsHomePage({
           Settings is an admin/setup area for permissions and system controls.
         </Text>
         <Text mt={1} fontSize="sm" color="gray.700" data-testid="settings-daily-operations-guidance">
-          For daily client work, start in Dashboard triage or Marketing Readiness instead of staying in Settings.
+          For daily client work, start in OpenDoors Clients or Marketing Readiness instead of staying in Settings.
         </Text>
       </Box>
       <SubNavigation
