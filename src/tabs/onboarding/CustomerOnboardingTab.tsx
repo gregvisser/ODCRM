@@ -328,17 +328,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
   const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
-  const [uploadingSuppression, setUploadingSuppression] = useState(false)
-  const [suppressionMeta, setSuppressionMeta] = useState<{
-    fileName?: string | null
-    fileUrl?: string | null
-    attachmentId?: string | null
-    uploadedAt?: string | null
-    uploadedByEmail?: string | null
-    totalImported?: number | null
-    totalSuppressedEmails?: number | null
-    totalSuppressedDomains?: number | null
-  } | null>(null)
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -482,49 +471,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       // ignore
     }
   }, [customerId, fetchCustomer])
-
-  // Load suppression summary (customer-scoped DNC) for UI display
-  useEffect(() => {
-    let cancelled = false
-    const run = async () => {
-      if (!customer?.id) {
-        setSuppressionMeta(null)
-        return
-      }
-      try {
-        const { data } = await api.get<{
-          totalSuppressedEmails: number
-          totalSuppressedDomains?: number
-          scope?: string
-          lastUpload: {
-            fileName: string | null
-            fileUrl?: string | null
-            attachmentId?: string | null
-            uploadedAt: string | null
-            uploadedByEmail: string | null
-            totalImported: number | null
-          } | null
-        }>(`/api/customers/${customer.id}/suppression-summary`)
-        if (cancelled) return
-        setSuppressionMeta({
-          fileName: data?.lastUpload?.fileName ?? null,
-          fileUrl: (data?.lastUpload as any)?.fileUrl ?? null,
-          attachmentId: (data?.lastUpload as any)?.attachmentId ?? null,
-          uploadedAt: data?.lastUpload?.uploadedAt ?? null,
-          uploadedByEmail: data?.lastUpload?.uploadedByEmail ?? null,
-          totalImported: data?.lastUpload?.totalImported ?? null,
-          totalSuppressedEmails: typeof data?.totalSuppressedEmails === 'number' ? data.totalSuppressedEmails : null,
-          totalSuppressedDomains: typeof data?.totalSuppressedDomains === 'number' ? data.totalSuppressedDomains : null,
-        })
-      } catch {
-        if (!cancelled) setSuppressionMeta(null)
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
-  }, [customer?.id])
 
   // Keep assigned users in sync with DB users (single source of truth)
   useEffect(() => {
@@ -912,54 +858,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setUploadingAgreement(false)
     }
     reader.readAsDataURL(file)
-  }
-
-  const handleSuppressionFileChange = async (file: File | null) => {
-    if (!file || !customer?.id) return
-    const proceed = await confirmProceedIfDirty(
-      'You have unsaved onboarding changes. Uploading a legacy suppression file for this customer will refresh this customer from the database.',
-    )
-    if (!proceed) return
-    setUploadingSuppression(true)
-    try {
-      const form = new FormData()
-      form.append('file', file)
-
-      const res = await fetch(`${apiBaseUrl}/api/customers/${customer.id}/suppression-import`, {
-        method: 'POST',
-        body: form,
-      })
-      if (!res.ok) {
-        const text = await res.text()
-        throw new Error(text || `Upload failed (${res.status})`)
-      }
-      const data = (await res.json()) as {
-        totalImported: number
-        totalSkipped: number
-        timestamp: string
-      }
-
-      toast({
-        title: 'Legacy suppression file uploaded',
-        description: `Imported ${data.totalImported} customer-specific email suppressions (${data.totalSkipped} skipped). Other clients are unaffected.`,
-        status: 'success',
-        duration: 5000,
-        isClosable: true,
-      })
-
-      await fetchCustomer()
-      emit('customerUpdated', { customerId: customer.id })
-    } catch (error: any) {
-      toast({
-        title: 'Upload failed',
-        description: error?.message || 'Unable to upload legacy suppression file',
-        status: 'error',
-        duration: 7000,
-        isClosable: true,
-      })
-    } finally {
-      setUploadingSuppression(false)
-    }
   }
 
   const openSuppressionSetup = useCallback(() => {
@@ -1694,71 +1592,16 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           {/* Customer-scoped DNC suppression list */}
           <FormControl>
-            <FormLabel>Suppression List (DNC)</FormLabel>
-            <Stack spacing={3}>
-              <Text fontSize="sm" color="gray.600">
-                Primary setup path: configure suppression email/domain sources in Marketing for this customer only.
-              </Text>
-              <HStack spacing={3} align="center" flexWrap="wrap" data-testid="onboarding-suppression-sheets-guidance">
-                <Button size="sm" variant="solid" colorScheme="blue" onClick={openSuppressionSetup} data-testid="onboarding-go-suppression-setup">
-                  Open Suppression List Setup
-                </Button>
-                <Text fontSize="xs" color="gray.600">
-                  Configure suppression email and domain sources there, then return to onboarding checkpoints. Suppression applies only to this client and does not block other clients automatically.
-                </Text>
-              </HStack>
-              <Input
-                type="file"
-                accept=".csv,.xlsx,.txt"
-                display="none"
-                id="suppression-upload"
-                onChange={(e) => void handleSuppressionFileChange(e.target.files?.[0] || null)}
-              />
-              <Text fontSize="xs" color="gray.500" data-testid="onboarding-suppression-legacy-upload-note">
-                Legacy file import remains available during transition support. Imported suppression entries are stored in the DB for this customer only. Live suppression readiness is based on linked source setup and existing customer-scoped DB entries.
-              </Text>
-              <HStack spacing={3} align="center" flexWrap="wrap">
-                <Button
-                  as="label"
-                  htmlFor="suppression-upload"
-                  leftIcon={<AttachmentIcon />}
-                  variant="outline"
-                  size="sm"
-                  colorScheme="purple"
-                  isLoading={uploadingSuppression}
-                  isDisabled={uploadingSuppression}
-                >
-                  {suppressionMeta?.fileName ? 'Replace Legacy Suppression File' : 'Upload Legacy Suppression File'}
-                </Button>
-                {suppressionMeta?.fileName ? (
-                  <Stack spacing={0}>
-                    <Text fontSize="sm" fontWeight="medium">
-                      {suppressionMeta.fileName}
-                    </Text>
-                    {suppressionMeta.fileUrl ? (
-                      <Link href={suppressionMeta.fileUrl} isExternal fontSize="sm" color="teal.600">
-                        View
-                      </Link>
-                    ) : null}
-                    <Text fontSize="xs" color="gray.500">
-                      {typeof suppressionMeta.totalSuppressedEmails === 'number'
-                        ? `${suppressionMeta.totalSuppressedEmails} suppressed emails`
-                        : 'Suppression list uploaded'}
-                      {typeof suppressionMeta.totalSuppressedDomains === 'number'
-                        ? ` · ${suppressionMeta.totalSuppressedDomains} suppressed domains`
-                        : ''}
-                      {suppressionMeta.uploadedAt
-                        ? ` · Uploaded ${new Date(suppressionMeta.uploadedAt).toLocaleDateString()}`
-                        : ''}
-                    </Text>
-                  </Stack>
-                ) : (
-                  <Text fontSize="sm" color="gray.500">
-                    No legacy suppression file uploaded
-                  </Text>
-                )}
-              </HStack>
-            </Stack>
+            <FormLabel>Connect Suppression List</FormLabel>
+            <Button
+              size="sm"
+              variant="solid"
+              colorScheme="blue"
+              onClick={openSuppressionSetup}
+              data-testid="onboarding-go-suppression-setup"
+            >
+              Open Suppression List
+            </Button>
           </FormControl>
         </Stack>
       </Box>
