@@ -6,6 +6,8 @@ export type AgreementExtractionSource = 'gemini' | 'deterministic-fallback'
 export type AgreementExtractionFields = {
   agreedMonthlyPrice: number | null
   pricingText: string | null
+  startDateAgreed: string | null
+  daysPerWeek: number | null
   contractSignedDate: string | null
   contractStartDate: string | null
   serviceStartDate: string | null
@@ -28,6 +30,8 @@ export type AgreementExtractionResult = {
 const RESPONSE_SCHEMA = z.object({
   agreedMonthlyPrice: z.number().finite().nonnegative().nullable().optional(),
   pricingText: z.string().trim().max(500).nullable().optional(),
+  startDateAgreed: z.string().trim().nullable().optional(),
+  daysPerWeek: z.number().int().min(1).max(7).nullable().optional(),
   contractSignedDate: z.string().trim().nullable().optional(),
   contractStartDate: z.string().trim().nullable().optional(),
   serviceStartDate: z.string().trim().nullable().optional(),
@@ -40,6 +44,8 @@ const RESPONSE_SCHEMA = z.object({
     .object({
       agreedMonthlyPrice: z.string().trim().max(300).optional(),
       pricingText: z.string().trim().max(300).optional(),
+      startDateAgreed: z.string().trim().max(300).optional(),
+      daysPerWeek: z.string().trim().max(300).optional(),
       contractSignedDate: z.string().trim().max(300).optional(),
       contractStartDate: z.string().trim().max(300).optional(),
       serviceStartDate: z.string().trim().max(300).optional(),
@@ -57,6 +63,8 @@ const RESPONSE_SCHEMA = z.object({
 const EMPTY_FIELDS: AgreementExtractionFields = {
   agreedMonthlyPrice: null,
   pricingText: null,
+  startDateAgreed: null,
+  daysPerWeek: null,
   contractSignedDate: null,
   contractStartDate: null,
   serviceStartDate: null,
@@ -100,6 +108,9 @@ function sanitizeFields(input: z.infer<typeof RESPONSE_SCHEMA>): AgreementExtrac
   return {
     agreedMonthlyPrice: monthly,
     pricingText: input.pricingText?.trim() || null,
+    startDateAgreed: sanitizeIsoDate(input.startDateAgreed),
+    daysPerWeek:
+      typeof input.daysPerWeek === 'number' && Number.isFinite(input.daysPerWeek) ? input.daysPerWeek : null,
     contractSignedDate: sanitizeIsoDate(input.contractSignedDate),
     contractStartDate: sanitizeIsoDate(input.contractStartDate),
     serviceStartDate: sanitizeIsoDate(input.serviceStartDate),
@@ -130,6 +141,8 @@ function buildPrompt(customerName: string, fileName: string): string {
     '- Never guess. If a field is not explicit in the document, return null.',
     '- Only set agreedMonthlyPrice when the agreement clearly states a recurring monthly price/value.',
     '- Normalize all dates to YYYY-MM-DD.',
+    '- startDateAgreed is the agreed go-live/start date for the service, including phrasing like w/c 6th January 2025.',
+    '- daysPerWeek is the numeric working days per week agreed in the contract.',
     '- agreementSummary should be a short factual summary of the commercial agreement.',
     '- evidence values must be short verbatim snippets from the document showing why the field was extracted.',
     `Customer: ${customerName}`,
@@ -138,6 +151,8 @@ function buildPrompt(customerName: string, fileName: string): string {
     JSON.stringify({
       agreedMonthlyPrice: null,
       pricingText: null,
+      startDateAgreed: null,
+      daysPerWeek: null,
       contractSignedDate: null,
       contractStartDate: null,
       serviceStartDate: null,
@@ -149,6 +164,8 @@ function buildPrompt(customerName: string, fileName: string): string {
       evidence: {
         agreedMonthlyPrice: '',
         pricingText: '',
+        startDateAgreed: '',
+        daysPerWeek: '',
         contractSignedDate: '',
         contractStartDate: '',
         serviceStartDate: '',
@@ -293,7 +310,11 @@ function captureSnippet(text: string, start: number, end: number): string | null
 }
 
 function parseLooseDate(raw: string): string | null {
-  const trimmed = raw.trim()
+  const trimmed = raw
+    .trim()
+    .replace(/^[Ww]\s*\/?\s*[Cc]\s*/i, '')
+    .replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, '$1')
+    .replace(/,/g, '')
   if (!trimmed) return null
 
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
@@ -370,8 +391,35 @@ function tryDeterministicExtraction(buffer: Buffer): AgreementExtractionResult {
     }
   }
 
+  const startDateAgreedMatch = text.match(
+    /(?:start date agreed|has been agreed from|agreed from|agreed start date|starting from|commencing from|commence from|w\/c)\D{0,20}(w\/c\s*)?(\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2})/i,
+  )
+  if (startDateAgreedMatch) {
+    const parsed = parseLooseDate(startDateAgreedMatch[2] || '')
+    if (parsed) {
+      fields.startDateAgreed = parsed
+      const idx = startDateAgreedMatch.index ?? -1
+      const snippet = captureSnippet(text, idx, idx + startDateAgreedMatch[0].length)
+      if (snippet) evidence.startDateAgreed = snippet
+    }
+  }
+
+  const daysPerWeekMatch = text.match(
+    /(?:a\s+total\s+of\s+)?([1-7])\s*(?:day|day's|days|days')\s*(?:a|per)?\s*week/i,
+  )
+  if (daysPerWeekMatch) {
+    const parsedDays = Number(daysPerWeekMatch[1])
+    if (Number.isInteger(parsedDays) && parsedDays >= 1 && parsedDays <= 7) {
+      fields.daysPerWeek = parsedDays
+      const idx = daysPerWeekMatch.index ?? -1
+      const snippet = captureSnippet(text, idx, idx + daysPerWeekMatch[0].length)
+      if (snippet) evidence.daysPerWeek = snippet
+    }
+  }
+
   const datePatterns: Array<{
     key:
+      | 'startDateAgreed'
       | 'contractSignedDate'
       | 'contractStartDate'
       | 'serviceStartDate'
@@ -380,6 +428,11 @@ function tryDeterministicExtraction(buffer: Buffer): AgreementExtractionResult {
       | 'renewalDate'
     regex: RegExp
   }> = [
+    {
+      key: 'startDateAgreed',
+      regex:
+        /(start date agreed|has been agreed from|agreed from|agreed start date|w\/c)\D{0,20}(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{4})/i,
+    },
     {
       key: 'contractStartDate',
       regex: /(contract start date|start date)\D{0,25}(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}\s+[A-Za-z]+\s+\d{4})/i,
@@ -530,6 +583,7 @@ export function applyAgreementAutomation(params: AgreementAutomationInput): {
   const autoCompletedSteps: string[] = []
 
   const canonicalStartDate =
+    fields.startDateAgreed ||
     fields.contractStartDate ||
     fields.serviceStartDate ||
     fields.billingStartDate ||
@@ -537,6 +591,10 @@ export function applyAgreementAutomation(params: AgreementAutomationInput): {
 
   if (canonicalStartDate) {
     nextAccountDetails.startDateAgreed = canonicalStartDate
+  }
+
+  if (typeof fields.daysPerWeek === 'number' && Number.isFinite(fields.daysPerWeek)) {
+    nextAccountDetails.daysPerWeek = fields.daysPerWeek
   }
 
   if (typeof fields.agreedMonthlyPrice === 'number' && Number.isFinite(fields.agreedMonthlyPrice)) {
@@ -563,8 +621,10 @@ export function applyAgreementAutomation(params: AgreementAutomationInput): {
     extraction.status !== 'failed' &&
     (
       typeof fields.agreedMonthlyPrice === 'number' ||
+      typeof fields.daysPerWeek === 'number' ||
       Boolean(
-        fields.contractSignedDate ||
+        fields.startDateAgreed ||
+          fields.contractSignedDate ||
           fields.contractStartDate ||
           fields.serviceStartDate ||
           fields.billingStartDate ||
