@@ -228,6 +228,62 @@ function extractLooseText(buffer: Buffer): string {
     .trim()
 }
 
+export function isReadableExtractedDocumentText(text: string): { ok: boolean; reason?: string } {
+  const trimmed = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!trimmed || trimmed.length < 80) {
+    return {
+      ok: false,
+      reason: 'Document text could not be extracted in readable form.',
+    }
+  }
+
+  const lower = trimmed.toLowerCase()
+  const pdfStructuralMarkers = [
+    '%pdf-',
+    ' obj ',
+    ' stream ',
+    ' endobj ',
+    ' xref ',
+    ' trailer ',
+    ' startxref ',
+    '/type',
+    '/catalog',
+    '/pages',
+    '/page',
+    '/filter',
+    '/length',
+  ]
+  const structuralHits = pdfStructuralMarkers.reduce((count, marker) => count + (lower.includes(marker) ? 1 : 0), 0)
+  if (lower.includes('%pdf-') || structuralHits >= 4) {
+    return {
+      ok: false,
+      reason: 'Agreement appears image-based or unreadable; no defensible fields were extracted.',
+    }
+  }
+
+  const tokens = trimmed.split(/\s+/).filter(Boolean)
+  const readableWords = trimmed.match(/\b[a-zA-Z][a-zA-Z'’-]{1,}\b/g) || []
+  const commonLanguageSignals =
+    trimmed.match(/\b(the|and|agreement|service|services|client|customer|date|price|monthly|billing|start|term|signed)\b/gi) || []
+  const symbolRuns = trimmed.match(/[<>{}[\]\\/_=|]{2,}/g) || []
+  const readableRatio = readableWords.length / Math.max(tokens.length, 1)
+
+  if (
+    tokens.length < 20 ||
+    readableWords.length < 16 ||
+    readableRatio < 0.4 ||
+    commonLanguageSignals.length < 2 ||
+    symbolRuns.length >= 6
+  ) {
+    return {
+      ok: false,
+      reason: 'Agreement appears image-based or unreadable; no defensible fields were extracted.',
+    }
+  }
+
+  return { ok: true }
+}
+
 function captureSnippet(text: string, start: number, end: number): string | null {
   if (start < 0 || end < 0) return null
   const from = Math.max(0, start - 40)
@@ -283,6 +339,19 @@ function tryDeterministicExtraction(buffer: Buffer): AgreementExtractionResult {
   const warnings: string[] = ['Gemini extraction unavailable; used deterministic fallback.']
   const evidence: Partial<Record<keyof AgreementExtractionFields, string>> = {}
   const fields: AgreementExtractionFields = { ...EMPTY_FIELDS }
+  const readability = isReadableExtractedDocumentText(text)
+
+  if (!readability.ok) {
+    warnings.push(readability.reason || 'Document text could not be extracted in readable form.')
+    return {
+      status: 'failed',
+      extractionSource: 'deterministic-fallback',
+      extractedAt,
+      warnings,
+      fields,
+      evidence,
+    }
+  }
 
   const monthlyPriceMatch = text.match(
     /(?:£|GBP\s?)(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:per month|monthly|pcm)/i,

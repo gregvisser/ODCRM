@@ -930,10 +930,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           ? data.agreementExtraction?.warnings?.join(' ')
           : ''
         const extractionStatus = data.agreementExtraction?.status
+        const unreadableExtractionWarning = /readable form|image-based|unreadable/i.test(warningSummary)
         toast({
           title:
             extractionStatus === 'failed'
-              ? 'Agreement uploaded with no extractable fields'
+              ? unreadableExtractionWarning
+                ? 'Agreement uploaded but text was unreadable'
+                : 'Agreement uploaded with no extractable fields'
               : extractionStatus === 'partial'
                 ? 'Agreement uploaded with partial extraction'
                 : 'Agreement uploaded',
