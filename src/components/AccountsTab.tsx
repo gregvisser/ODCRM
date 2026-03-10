@@ -314,6 +314,8 @@ export type Account = {
   monthlyTarget: number
   monthlyActual: number
   sheetMetricsUnavailable?: boolean
+  sheetMetricsErrorCode?: string
+  sheetMetricsWarning?: string
   weeklyReport: string
   users: AccountUser[]
   clientLeadsSheetUrl?: string
@@ -1113,6 +1115,9 @@ function normalizeAccountDefaults(raw: Partial<Account>): Account {
     weeklyActual: typeof raw.weeklyActual === 'number' ? raw.weeklyActual : 0,
     monthlyTarget: typeof raw.monthlyTarget === 'number' ? raw.monthlyTarget : 0,
     monthlyActual: typeof raw.monthlyActual === 'number' ? raw.monthlyActual : 0,
+    sheetMetricsUnavailable: typeof raw.sheetMetricsUnavailable === 'boolean' ? raw.sheetMetricsUnavailable : false,
+    sheetMetricsErrorCode: typeof raw.sheetMetricsErrorCode === 'string' ? raw.sheetMetricsErrorCode : undefined,
+    sheetMetricsWarning: typeof raw.sheetMetricsWarning === 'string' ? raw.sheetMetricsWarning : undefined,
     weeklyReport: raw.weeklyReport || '',
     users: Array.isArray(raw.users) ? raw.users : [],
     clientLeadsSheetUrl: raw.clientLeadsSheetUrl ?? undefined,
@@ -3707,6 +3712,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
   }, { spend: 0, weeklyLeads: 0, monthlyLeads: 0, weeklyTarget: 0, monthlyTarget: 0 })
   const totalsHaveUnavailableLeadMetrics = filteredAndSortedAccounts.some((account) => Boolean(account.sheetMetricsUnavailable))
+  const unavailableLeadDiagnostics = filteredAndSortedAccounts
+    .filter((account) => Boolean(account.sheetMetricsUnavailable))
+    .map((account) => ({
+      name: account.name,
+      errorCode: account.sheetMetricsErrorCode || 'metrics_unavailable',
+      warning: account.sheetMetricsWarning,
+    }))
   
   const totalPercentToTarget = !totalsHaveUnavailableLeadMetrics && totals.monthlyTarget > 0 
     ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
@@ -4193,9 +4205,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       {accountsData.some((account) => Boolean(account?.sheetMetricsUnavailable)) && (
         <Alert status="warning" borderRadius="md" mb={4}>
           <AlertIcon />
-          <AlertDescription fontSize="sm">
-            Live sheet-backed lead metrics are currently unavailable for one or more accounts. Values are shown as `—` until live sync succeeds.
-          </AlertDescription>
+          <Box>
+            <AlertDescription fontSize="sm">
+              Live sheet-backed lead metrics are currently unavailable for one or more accounts. Values are shown as `—` until live sync succeeds.
+            </AlertDescription>
+            {unavailableLeadDiagnostics.length > 0 && (
+              <Text fontSize="xs" color="orange.800" mt={1}>
+                {unavailableLeadDiagnostics.map((account) => `${account.name} [${account.errorCode}]`).join(' • ')}
+              </Text>
+            )}
+          </Box>
         </Alert>
       )}
 

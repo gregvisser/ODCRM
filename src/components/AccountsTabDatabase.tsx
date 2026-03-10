@@ -21,6 +21,7 @@ type Props = {
 export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const { customers, loading, error, refetch } = useCustomersFromDatabase()
   const [metricsByCustomerId, setMetricsByCustomerId] = useState<Record<string, { week: number; month: number; total: number }>>({})
+  const [metricIssuesByCustomerId, setMetricIssuesByCustomerId] = useState<Record<string, { errorCode?: string; message: string }>>({})
 
   const refreshMetrics = useCallback(async () => {
     if (loading) return
@@ -35,6 +36,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
 
     if (scoped.length === 0) {
       setMetricsByCustomerId({})
+      setMetricIssuesByCustomerId({})
       return
     }
 
@@ -48,9 +50,18 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         }
         return acc
       }, {})
+      const nextIssues = summary.errors.reduce<Record<string, { errorCode?: string; message: string }>>((acc, customer) => {
+        acc[customer.customerId] = {
+          errorCode: customer.errorCode,
+          message: customer.message,
+        }
+        return acc
+      }, {})
       setMetricsByCustomerId(next)
+      setMetricIssuesByCustomerId(nextIssues)
     } catch {
       setMetricsByCustomerId({})
+      setMetricIssuesByCustomerId({})
     }
   }, [customers, loading])
 
@@ -69,6 +80,8 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
           weeklyActual: metrics.week,
           monthlyActual: metrics.month,
           sheetMetricsUnavailable: false,
+          sheetMetricsErrorCode: undefined,
+          sheetMetricsWarning: undefined,
         }
       }
 
@@ -76,8 +89,12 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         return {
           ...account,
           sheetMetricsUnavailable: false,
+          sheetMetricsErrorCode: undefined,
+          sheetMetricsWarning: undefined,
         }
       }
+
+      const issue = metricIssuesByCustomerId[customerId]
 
       return {
         ...account,
@@ -85,9 +102,11 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         weeklyActual: 0,
         monthlyActual: 0,
         sheetMetricsUnavailable: true,
+        sheetMetricsErrorCode: issue?.errorCode,
+        sheetMetricsWarning: issue?.message,
       }
     })
-  }, [customers, metricsByCustomerId])
+  }, [customers, metricIssuesByCustomerId, metricsByCustomerId])
 
   useEffect(() => {
     void refreshMetrics()

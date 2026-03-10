@@ -16,6 +16,13 @@ const METRICS_TIMEZONE = process.env.LEADS_METRICS_TIMEZONE || 'Europe/London'
 
 type TruthSource = 'google_sheets' | 'db'
 type Freshness = 'live' | 'diagnostic_stale'
+type LiveLeadErrorCode =
+  | 'missing_sheet_url'
+  | 'never_synced'
+  | 'stale_sync'
+  | 'sync_failed'
+  | 'zero_rows_imported'
+  | 'unreadable_sheet'
 
 type SyncMeta = {
   mode: 'sheet_backed' | 'db_backed'
@@ -26,6 +33,106 @@ type SyncMeta = {
   lastOutboundSyncAt: string | null
   lastError: string | null
   rowCount: number
+}
+
+const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
+
+function classifySheetSyncError(message: string | null | undefined): LiveLeadErrorCode | null {
+  const text = String(message || '').toLowerCase()
+  if (!text) return null
+  if (
+    text.includes('invalid google sheets url') ||
+    text.includes('sheet is not publicly accessible') ||
+    text.includes('sheet not found') ||
+    text.includes('html instead of csv') ||
+    text.includes('url did not return csv')
+  ) {
+    return 'unreadable_sheet'
+  }
+  if (text.includes('0 rows')) return 'zero_rows_imported'
+  return 'sync_failed'
+}
+
+function buildSheetTruthStatus(params: {
+  sourceOfTruth: TruthSource
+  configuredSheetUrl: string
+  sync: SyncMeta
+  rowCount: number
+  bootstrap: { started: boolean; error: string | null }
+}): {
+  authoritative: boolean
+  dataFreshness: Freshness
+  warning?: string
+  hint?: string
+  errorCode?: LiveLeadErrorCode
+} {
+  const { sourceOfTruth, configuredSheetUrl, sync, rowCount, bootstrap } = params
+
+  if (sourceOfTruth === 'db') {
+    return { authoritative: true, dataFreshness: 'live' }
+  }
+
+  if (!configuredSheetUrl.trim()) {
+    return {
+      authoritative: false,
+      dataFreshness: 'diagnostic_stale',
+      warning: 'This customer has no leads reporting sheet configured.',
+      errorCode: 'missing_sheet_url',
+    }
+  }
+
+  if (bootstrap.error) {
+    const errorCode = classifySheetSyncError(bootstrap.error) ?? 'sync_failed'
+    return {
+      authoritative: false,
+      dataFreshness: 'diagnostic_stale',
+      warning: `Initial sheet sync failed: ${bootstrap.error}`,
+      errorCode,
+    }
+  }
+
+  if (sync.status === 'error') {
+    const errorCode = classifySheetSyncError(sync.lastError) ?? 'sync_failed'
+    return {
+      authoritative: false,
+      dataFreshness: 'diagnostic_stale',
+      warning: sync.lastError || 'The most recent sheet sync failed.',
+      errorCode,
+    }
+  }
+
+  if (!sync.lastSuccessAt) {
+    if (bootstrap.started && rowCount === 0) {
+      return {
+        authoritative: false,
+        dataFreshness: 'diagnostic_stale',
+        warning: 'Initial sheet sync ran but no lead rows were imported.',
+        errorCode: 'zero_rows_imported',
+      }
+    }
+
+    return {
+      authoritative: false,
+      dataFreshness: 'diagnostic_stale',
+      warning: 'This sheet-backed client has not completed a successful lead sync yet.',
+      errorCode: 'never_synced',
+    }
+  }
+
+  const lastSuccessMs = Date.parse(sync.lastSuccessAt)
+  if (!Number.isFinite(lastSuccessMs) || (Date.now() - lastSuccessMs) > SHEET_METRICS_FRESH_MS) {
+    return {
+      authoritative: false,
+      dataFreshness: 'diagnostic_stale',
+      warning: 'Live sheet-backed lead metrics are stale and need a refresh.',
+      errorCode: 'stale_sync',
+    }
+  }
+
+  return {
+    authoritative: true,
+    dataFreshness: 'live',
+  }
 }
 
 type LeadResponse = {
@@ -838,12 +945,13 @@ router.get('/leads', async (req, res) => {
     }
     const displayColumns = deriveDisplayColumns(leads)
 
-    const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
-    const warning = bootstrap.error
-      ? `Initial sheet sync failed: ${bootstrap.error}`
-      : bootstrap.started && leads.length === 0
-        ? 'Initial sheet sync ran but no lead rows were imported.'
-        : undefined
+    const truth = buildSheetTruthStatus({
+      sourceOfTruth,
+      configuredSheetUrl,
+      sync,
+      rowCount: leads.length,
+      bootstrap,
+    })
 
     return res.json({
       customerId,
@@ -854,10 +962,12 @@ router.get('/leads', async (req, res) => {
       queriedAt: new Date().toISOString(),
       sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
       sourceOfTruth,
-      authoritative,
-      dataFreshness: 'live' as Freshness,
+      authoritative: truth.authoritative,
+      dataFreshness: truth.dataFreshness,
       staleFallbackUsed: false,
-      warning,
+      warning: truth.warning,
+      hint: truth.hint,
+      errorCode: truth.errorCode,
       sync,
     })
   } catch (e) {
@@ -978,12 +1088,13 @@ router.get('/leads/metrics', async (req, res) => {
       }
     }
 
-    const authoritative = sourceOfTruth === 'db' ? true : Boolean(sync.lastInboundSyncAt || sync.lastSuccessAt)
-    const warning = bootstrap.error
-      ? `Initial sheet sync failed: ${bootstrap.error}`
-      : bootstrap.started && leads.length === 0
-        ? 'Initial sheet sync ran but no lead rows were imported.'
-        : undefined
+    const truth = buildSheetTruthStatus({
+      sourceOfTruth,
+      configuredSheetUrl,
+      sync,
+      rowCount: leads.length,
+      bootstrap,
+    })
 
     return res.json({
       customerId,
@@ -998,10 +1109,12 @@ router.get('/leads/metrics', async (req, res) => {
       queriedAt: new Date().toISOString(),
       sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
       sourceOfTruth,
-      authoritative,
-      dataFreshness: 'live' as Freshness,
+      authoritative: truth.authoritative,
+      dataFreshness: truth.dataFreshness,
       staleFallbackUsed: false,
-      warning,
+      warning: truth.warning,
+      hint: truth.hint,
+      errorCode: truth.errorCode,
       sync,
     })
   } catch (e) {
