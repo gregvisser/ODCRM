@@ -70,18 +70,68 @@ async function fetchCsvFromUrl(url: string): Promise<string> {
   }
 }
 
-// In-memory cache for GET contacts: key = customerId|sourceType, value = { data, at }
+type ResolvedLeadSourceConfig = NonNullable<Awaited<ReturnType<typeof resolveLeadSourceConfig>>>
+
+// Shared ALL_ACCOUNTS configs store row-seen state once on the owning config customer.
+// Any client inheriting that config reads and writes through the same scope.
+function getLeadSourceDataScope(config: ResolvedLeadSourceConfig): {
+  configCustomerId: string
+  sourceType: LeadSourceType
+  spreadsheetId: string
+  gid: string | null
+} {
+  return {
+    configCustomerId: config.customerId,
+    sourceType: config.sourceType,
+    spreadsheetId: config.spreadsheetId,
+    gid: config.gid ?? null,
+  }
+}
+
+function getContactsCacheKey(scope: {
+  configCustomerId: string
+  sourceType: LeadSourceType
+  spreadsheetId: string
+  gid: string | null
+}): string {
+  return `${scope.configCustomerId}|${scope.sourceType}|${scope.spreadsheetId}|${scope.gid ?? ''}`
+}
+
+// In-memory cache for GET contacts: key = config owner + source + sheet identity, value = { data, at }
 const contactsCache = new Map<string, { columnKeys: string[]; rows: Array<Record<string, string>>; at: number }>()
 
-function getCachedContacts(customerId: string, sourceType: string): { columnKeys: string[]; rows: Array<Record<string, string>> } | null {
-  const key = `${customerId}|${sourceType}`
+function getCachedContacts(scope: {
+  configCustomerId: string
+  sourceType: LeadSourceType
+  spreadsheetId: string
+  gid: string | null
+}): { columnKeys: string[]; rows: Array<Record<string, string>> } | null {
+  const key = getContactsCacheKey(scope)
   const entry = contactsCache.get(key)
   if (!entry || Date.now() - entry.at > CACHE_TTL_MS) return null
   return { columnKeys: entry.columnKeys, rows: entry.rows }
 }
 
-function setCachedContacts(customerId: string, sourceType: string, columnKeys: string[], rows: Array<Record<string, string>>): void {
-  contactsCache.set(`${customerId}|${sourceType}`, { columnKeys, rows, at: Date.now() })
+function setCachedContacts(
+  scope: {
+    configCustomerId: string
+    sourceType: LeadSourceType
+    spreadsheetId: string
+    gid: string | null
+  },
+  columnKeys: string[],
+  rows: Array<Record<string, string>>
+): void {
+  contactsCache.set(getContactsCacheKey(scope), { columnKeys, rows, at: Date.now() })
+}
+
+function deleteCachedContacts(scope: {
+  configCustomerId: string
+  sourceType: LeadSourceType
+  spreadsheetId: string
+  gid: string | null
+}): void {
+  contactsCache.delete(getContactsCacheKey(scope))
 }
 
 /** Resolve sheet config: exact customer first, then any config with appliesTo ALL_ACCOUNTS for this sourceType. */
@@ -161,9 +211,14 @@ router.get('/batches', async (req: Request, res: Response) => {
     for (const sourceType of SOURCE_TYPES) {
       const config = await resolveLeadSourceConfig(customerId, sourceType)
       if (!config?.spreadsheetId) continue
+      const dataScope = getLeadSourceDataScope(config)
       const grouped = await prisma.leadSourceRowSeen.groupBy({
         by: ['batchKey'],
-        where: { customerId, sourceType },
+        where: {
+          customerId: dataScope.configCustomerId,
+          sourceType,
+          spreadsheetId: dataScope.spreadsheetId,
+        },
         _count: { _all: true },
         _max: { firstSeenAt: true },
       })
@@ -201,15 +256,26 @@ router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth,
     const batchKey = (req.params.batchKey ?? '').trim()
     if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
 
-    // Resolve which source type this batch belongs to (batchKey is unique per customer+sourceType in row_seen)
+    const resolvedConfigs = (
+      await Promise.all(SOURCE_TYPES.map(async (sourceType) => await resolveLeadSourceConfig(customerId, sourceType)))
+    ).filter((config): config is ResolvedLeadSourceConfig => Boolean(config?.spreadsheetId))
+    if (resolvedConfigs.length === 0) return res.status(404).json({ error: 'No lead source batches available' })
     const anyRow = await prisma.leadSourceRowSeen.findFirst({
-      where: { customerId, batchKey },
-      select: { sourceType: true, spreadsheetId: true },
+      where: {
+        batchKey,
+        OR: resolvedConfigs.map((config) => ({
+          customerId: config.customerId,
+          sourceType: config.sourceType,
+          spreadsheetId: config.spreadsheetId,
+        })),
+      },
+      select: { sourceType: true, spreadsheetId: true, customerId: true },
     })
     if (!anyRow) return res.status(404).json({ error: 'Batch not found' })
     const sourceType = anyRow.sourceType
     const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config?.spreadsheetId) return res.status(404).json({ error: 'Source not connected' })
+    const dataScope = getLeadSourceDataScope(config)
 
     const listName = `Lead batch: ${sourceType} — ${batchKey.slice(0, 120)}`
     let list = await prisma.contactList.findFirst({
@@ -222,14 +288,19 @@ router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth,
 
     // Get all rows in this batch (fingerprints)
     const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
-      where: { customerId, sourceType, spreadsheetId: config.spreadsheetId, batchKey },
+      where: {
+        customerId: dataScope.configCustomerId,
+        sourceType,
+        spreadsheetId: dataScope.spreadsheetId,
+        batchKey,
+      },
       select: { fingerprint: true },
     })
     const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
     if (fpSet.size === 0) return res.status(400).json({ error: 'Batch has no contacts' })
 
     // Load CSV-derived rows (same as contacts endpoint)
-    let cached = getCachedContacts(customerId, sourceType)
+    let cached = getCachedContacts(dataScope)
     if (!cached) {
       const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
       const csvText = await fetchCsvFromUrl(csvUrl)
@@ -239,7 +310,7 @@ router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth,
         const fingerprint = computeFingerprint(canonical)
         return { ...canonical, ...r.extraFields, __fp: fingerprint }
       })
-      setCachedContacts(customerId, sourceType, columnKeys, flat)
+      setCachedContacts(dataScope, columnKeys, flat)
       cached = { columnKeys, rows: flat }
     }
     const filtered = cached.rows.filter((r: Record<string, string>) => {
@@ -385,6 +456,7 @@ router.post('/:sourceType/connect', requireMarketingMutationAuth, async (req: Re
 
 // POST /api/lead-sources/:sourceType/poll — fetch sheet, normalize, upsert LeadSourceRowSeen
 router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Request, res: Response) => {
+  let configForError: ResolvedLeadSourceConfig | null = null
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
@@ -397,6 +469,8 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
     }
+    configForError = config
+    const dataScope = getLeadSourceDataScope(config)
     const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
     const csvText = await fetchCsvFromUrl(csvUrl)
     const { columnKeys, rows } = csvToMappedRows(csvText)
@@ -412,7 +486,7 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
       const jobTitle = canonical.jobTitle ?? row.extraFields?.jobTitle ?? ''
       const batchKey = buildBatchKey(now, client, jobTitle)
       toCreate.push({
-        customerId,
+        customerId: dataScope.configCustomerId,
         sourceType,
         spreadsheetId: config.spreadsheetId,
         fingerprint,
@@ -428,24 +502,21 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
       where: { id: config.id },
       data: { lastFetchAt: now, lastError: null },
     })
-    contactsCache.delete(`${customerId}|${sourceType}`)
+    deleteCachedContacts(dataScope)
     const flatRows = rows.map((r) => {
       const canonical = { ...r.canonical }
       return { ...canonical, ...r.extraFields, __fp: computeFingerprint(canonical) }
     })
-    setCachedContacts(customerId, sourceType, columnKeys, flatRows)
+    setCachedContacts(dataScope, columnKeys, flatRows)
     res.json({
       totalRows: rows.length,
       newRowsDetected,
       lastFetchAt: now.toISOString(),
     })
   } catch (e) {
-    const customerId = requireCustomerId(req, res)
-    if (!customerId) return
-    const sourceTypeRaw = req.params.sourceType
-    if (isValidSourceType(sourceTypeRaw)) {
+    if (configForError) {
       await prisma.leadSourceSheetConfig.updateMany({
-        where: { customerId, sourceType: sourceTypeRaw },
+        where: { id: configForError.id },
         data: { lastError: (e as Error).message },
       }).catch(() => {})
     }
@@ -474,7 +545,12 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       res.set('x-odcrm-lead-sources-batches', 'groupBy-v1')
       return res.json({ batches: [] })
     }
-    const baseWhere = { customerId, sourceType }
+    const dataScope = getLeadSourceDataScope(config)
+    const baseWhere = {
+      customerId: dataScope.configCustomerId,
+      sourceType,
+      spreadsheetId: dataScope.spreadsheetId,
+    }
     type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
     let grouped: GroupRow[]
     let fallback = false
@@ -604,7 +680,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     }
     const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
       where: {
-        customerId,
+        customerId: config.customerId,
         sourceType,
         spreadsheetId: config.spreadsheetId,
         batchKey,
@@ -613,7 +689,8 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     })
     const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
     const rowSeenCount = fingerprintsInBatch.length
-    let cached = getCachedContacts(customerId, sourceType)
+    const dataScope = getLeadSourceDataScope(config)
+    let cached = getCachedContacts(dataScope)
     if (!cached) {
       const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
       const csvText = await fetchCsvFromUrl(csvUrl)
@@ -647,7 +724,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         const fingerprint = computeFingerprint(canonical)
         return { ...canonical, ...r.extraFields, __fp: fingerprint }
       })
-      setCachedContacts(customerId, sourceType, columnKeys, flat)
+      setCachedContacts(dataScope, columnKeys, flat)
       cached = { columnKeys, rows: flat }
     }
     const filtered = cached.rows.filter((r: Record<string, string>) => {
