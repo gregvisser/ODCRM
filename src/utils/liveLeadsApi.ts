@@ -233,25 +233,18 @@ export type AggregateMetricsResult = {
     breakdownBySource: Record<string, number>
     breakdownByOwner: Record<string, number>
     lastSync: null
+    errorCode?: string
     fetchError?: string
   }>
   lastSyncNewest: string | null
   lastSyncOldest: string | null
-  errors: Array<{ customerId: string; name: string; message: string }>
+  errors: Array<{ customerId: string; name: string; message: string; errorCode?: string }>
 }
 
 const CONCURRENCY = 4
-const SHEET_METRICS_STALE_MS = 15 * 60 * 1000
 
 function isSheetBackedCustomer(customer: { leadsReportingUrl?: string | null }): boolean {
   return Boolean(customer.leadsReportingUrl && customer.leadsReportingUrl.trim())
-}
-
-function getLastSyncTimestamp(sync?: LiveLeadSyncMeta): number | null {
-  const candidate = sync?.lastSuccessAt || sync?.lastInboundSyncAt || sync?.lastSyncAt || null
-  if (!candidate) return null
-  const parsed = Date.parse(candidate)
-  return Number.isFinite(parsed) ? parsed : null
 }
 
 function shouldRefreshSheetMetrics(
@@ -260,9 +253,13 @@ function shouldRefreshSheetMetrics(
 ): boolean {
   if (!isSheetBackedCustomer(customer)) return false
   if (data.sync?.status === 'syncing') return false
-  const lastSyncAt = getLastSyncTimestamp(data.sync)
-  if (lastSyncAt == null) return true
-  return (Date.now() - lastSyncAt) > SHEET_METRICS_STALE_MS
+  if (data.errorCode === 'missing_sheet_url' || data.errorCode === 'unreadable_sheet') return false
+  return (
+    data.errorCode === 'never_synced' ||
+    data.errorCode === 'stale_sync' ||
+    data.errorCode === 'sync_failed' ||
+    data.errorCode === 'zero_rows_imported'
+  )
 }
 
 function runWithConcurrency<T, R>(items: T[], fn: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
@@ -311,6 +308,7 @@ export async function fetchLiveMetricsForCustomers(
             return {
               customerId: c.id,
               name: c.name,
+              errorCode: data.errorCode,
               fetchError: e instanceof Error ? `Lead metrics refresh failed: ${e.message}` : 'Lead metrics refresh failed',
             }
           }
@@ -318,7 +316,8 @@ export async function fetchLiveMetricsForCustomers(
             return {
               customerId: c.id,
               name: c.name,
-              fetchError: 'Lead metrics are still stale after refresh',
+              errorCode: data.errorCode,
+              fetchError: data.warning || data.hint || 'Lead metrics are still unavailable after refresh',
             }
           }
         }
@@ -326,6 +325,7 @@ export async function fetchLiveMetricsForCustomers(
           return {
             customerId: c.id,
             name: c.name,
+            errorCode: data.errorCode,
             fetchError: data.warning || data.hint || 'Metrics are not currently authoritative for this customer',
           }
         }
@@ -354,11 +354,11 @@ export async function fetchLiveMetricsForCustomers(
   const breakdownBySource: Record<string, number> = {}
   const breakdownByOwner: Record<string, number> = {}
   const perCustomer: AggregateMetricsResult['perCustomer'] = []
-  const errors: Array<{ customerId: string; name: string; message: string }> = []
+  const errors: Array<{ customerId: string; name: string; message: string; errorCode?: string }> = []
 
   for (const r of results) {
     if ('fetchError' in r) {
-      errors.push({ customerId: r.customerId, name: r.name, message: r.fetchError })
+      errors.push({ customerId: r.customerId, name: r.name, message: r.fetchError, errorCode: r.errorCode })
       continue
     }
     perCustomer.push(r)

@@ -1159,14 +1159,19 @@ async function syncCustomerLeads(
     await prisma.$transaction(async (tx) => {
       if (leads.length > 0) {
         let existingByExternalId = new Set<string>()
+        let existingExternalIdByStableId = new Map<string, string | null>()
         try {
-          existingByExternalId = new Set(
-            (await tx.leadRecord.findMany({
+          const existingRecords = await tx.leadRecord.findMany({
               where: { customerId: customer.id, externalId: { not: null } },
-              select: { externalId: true },
-            }))
+              select: { id: true, externalId: true },
+            })
+          existingByExternalId = new Set(
+            existingRecords
               .map((r) => r.externalId)
               .filter((id): id is string => id != null)
+          )
+          existingExternalIdByStableId = new Map(
+            existingRecords.map((record) => [record.id, record.externalId ?? null] as const)
           )
         } catch (err) {
           if (isUnknownFieldError(err, 'externalId')) {
@@ -1220,6 +1225,42 @@ async function syncCustomerLeads(
             for (const record of batch) {
               processedExternalIds.add(record.externalId)
               try {
+                const priorExternalId = existingExternalIdByStableId.get(record.id)
+                if (priorExternalId && priorExternalId !== record.externalId) {
+                  await tx.leadRecord.update({
+                    where: { id: record.id },
+                    data: {
+                      data: record.data,
+                      sourceUrl: record.sourceUrl,
+                      sheetGid: record.sheetGid,
+                      externalId: record.externalId,
+                      occurredAt: record.occurredAt,
+                      source: record.source,
+                      owner: record.owner,
+                      normalizedData: record.normalizedData,
+                      externalSourceType: record.externalSourceType,
+                      externalRowFingerprint: record.externalRowFingerprint,
+                      firstName: record.firstName,
+                      lastName: record.lastName,
+                      fullName: record.fullName,
+                      email: record.email,
+                      phone: record.phone,
+                      company: record.company,
+                      jobTitle: record.jobTitle,
+                      location: record.location,
+                      notes: record.notes,
+                      syncStatus: record.syncStatus,
+                      syncError: null,
+                      lastInboundSyncAt: record.lastInboundSyncAt,
+                      updatedAt: new Date(),
+                    },
+                  })
+                  rowsUpdated++
+                  existingByExternalId.add(record.externalId)
+                  existingExternalIdByStableId.set(record.id, record.externalId)
+                  continue
+                }
+
                 await tx.leadRecord.upsert({
                   where: {
                     customerId_externalId: {
@@ -1281,47 +1322,15 @@ async function syncCustomerLeads(
                 })
                 if (existingByExternalId.has(record.externalId)) rowsUpdated++
                 else rowsInserted++
+                existingByExternalId.add(record.externalId)
+                existingExternalIdByStableId.set(record.id, record.externalId)
               } catch (err: any) {
                 if (err?.code === 'P2002') {
-                  try {
-                    await tx.leadRecord.update({
-                      where: { id: record.id },
-                      data: {
-                        data: record.data,
-                        sourceUrl: record.sourceUrl,
-                        sheetGid: record.sheetGid,
-                        externalId: record.externalId,
-                        occurredAt: record.occurredAt,
-                        source: record.source,
-                        owner: record.owner,
-                        normalizedData: record.normalizedData,
-                        externalSourceType: record.externalSourceType,
-                        externalRowFingerprint: record.externalRowFingerprint,
-                        firstName: record.firstName,
-                        lastName: record.lastName,
-                        fullName: record.fullName,
-                        email: record.email,
-                        phone: record.phone,
-                        company: record.company,
-                        jobTitle: record.jobTitle,
-                        location: record.location,
-                        notes: record.notes,
-                        syncStatus: record.syncStatus,
-                        syncError: null,
-                        lastInboundSyncAt: record.lastInboundSyncAt,
-                        updatedAt: new Date(),
-                      },
-                    })
-                    rowsUpdated++
-                    existingByExternalId.add(record.externalId)
-                  } catch (_) {
-                    console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
-                    errorCount++
-                  }
-                } else {
-                  console.warn(`   [leadsSync] customerId=${customer.id} externalId=${record.externalId} error:`, err?.message || err)
-                  errorCount++
+                  throw new Error(
+                    `Lead row identity conflict for customer ${customer.id} and externalId ${record.externalId}: ${err?.message || err}`
+                  )
                 }
+                throw err
               }
             }
 
@@ -1441,8 +1450,7 @@ async function syncCustomerLeads(
                 if (existingIds.has(record.id)) rowsUpdated++
                 else rowsInserted++
               } catch (err: any) {
-                console.warn(`   [leadsSync] customerId=${customer.id} id=${record.id} error:`, err?.message || err)
-                errorCount++
+                throw new Error(`Lead row write failed for customer ${customer.id} and id ${record.id}: ${err?.message || err}`)
               }
             }
 
