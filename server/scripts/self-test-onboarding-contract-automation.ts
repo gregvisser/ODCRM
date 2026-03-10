@@ -1,6 +1,8 @@
 import { applyAutoTicksToAccountData } from '../src/services/progressAutoTick.js'
 import {
   applyAgreementAutomation,
+  extractAgreementFields,
+  isReadableExtractedDocumentText,
   type AgreementExtractionResult,
 } from '../src/services/agreementExtraction.js'
 
@@ -136,5 +138,88 @@ assert(
   failedAutomation.accountData?.accountDetails?.startDateAgreed == null || failedAutomation.accountData?.accountDetails?.startDateAgreed === '',
   'expected failed extraction not to invent a start date',
 )
+
+async function runExtractionGuardTests() {
+  const originalGeminiApiKey = process.env.GEMINI_API_KEY
+  const originalGoogleGeminiApiKey = process.env.GOOGLE_GEMINI_API_KEY
+  const originalEmergentKey = process.env.EMERGENT_LLM_KEY
+
+  delete process.env.GEMINI_API_KEY
+  delete process.env.GOOGLE_GEMINI_API_KEY
+  delete process.env.EMERGENT_LLM_KEY
+
+  try {
+    const readableText = [
+      'Master Services Agreement',
+      'Contract start date: 2026-04-01',
+      'Service start date: 2026-04-15',
+      'Monthly service fee £2,500 per month.',
+      'This agreement is between the client and ODCRM for monthly services.',
+      'Contract term 12 months.',
+    ].join(' ')
+    const readableCheck = isReadableExtractedDocumentText(readableText)
+    assert(readableCheck.ok === true, 'expected readable agreement text to pass readability guard')
+
+    const readableExtraction = await extractAgreementFields({
+      buffer: Buffer.from(readableText, 'utf8'),
+      mimeType: 'application/pdf',
+      customerName: 'Readable Customer',
+      fileName: 'readable.pdf',
+    })
+    assert(readableExtraction.status === 'partial', 'expected deterministic readable extraction to stay partial')
+    assert(readableExtraction.fields.agreementSummary !== null, 'expected readable fallback extraction to keep agreement summary')
+    assert(readableExtraction.fields.agreedMonthlyPrice === 2500, 'expected readable fallback extraction to keep monthly price')
+
+    const rawPdfText = [
+      '%PDF-1.7',
+      '1 0 obj',
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      'stream',
+      'BT /F1 12 Tf 72 712 Td (Unreadable) Tj ET',
+      'endstream',
+      'endobj',
+      'xref',
+      'trailer',
+      'startxref',
+    ].join(' ')
+    const rawPdfCheck = isReadableExtractedDocumentText(rawPdfText)
+    assert(rawPdfCheck.ok === false, 'expected raw PDF syntax to fail readability guard')
+
+    const rawPdfExtraction = await extractAgreementFields({
+      buffer: Buffer.from(rawPdfText, 'utf8'),
+      mimeType: 'application/pdf',
+      customerName: 'Unreadable PDF Customer',
+      fileName: 'raw.pdf',
+    })
+    assert(rawPdfExtraction.status === 'failed', 'expected raw PDF syntax extraction to fail')
+    assert(rawPdfExtraction.fields.agreementSummary === null, 'expected raw PDF syntax not to populate agreement summary')
+    assert(
+      rawPdfExtraction.warnings.some((warning) => /unreadable|readable form/i.test(warning)),
+      'expected raw PDF syntax extraction to return an unreadable warning',
+    )
+
+    const emptyExtraction = await extractAgreementFields({
+      buffer: Buffer.from('', 'utf8'),
+      mimeType: 'application/pdf',
+      customerName: 'Empty Customer',
+      fileName: 'empty.pdf',
+    })
+    assert(emptyExtraction.status === 'failed', 'expected empty extraction to fail')
+    assert(emptyExtraction.fields.agreementSummary === null, 'expected empty extraction not to populate agreement summary')
+    assert(
+      emptyExtraction.warnings.some((warning) => /readable form|unreadable/i.test(warning)),
+      'expected empty extraction to return a readable-form warning',
+    )
+  } finally {
+    if (originalGeminiApiKey === undefined) delete process.env.GEMINI_API_KEY
+    else process.env.GEMINI_API_KEY = originalGeminiApiKey
+    if (originalGoogleGeminiApiKey === undefined) delete process.env.GOOGLE_GEMINI_API_KEY
+    else process.env.GOOGLE_GEMINI_API_KEY = originalGoogleGeminiApiKey
+    if (originalEmergentKey === undefined) delete process.env.EMERGENT_LLM_KEY
+    else process.env.EMERGENT_LLM_KEY = originalEmergentKey
+  }
+}
+
+await runExtractionGuardTests()
 
 console.log('SELF_TEST_OK onboarding contract automation')
