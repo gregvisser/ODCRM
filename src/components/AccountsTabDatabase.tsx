@@ -22,6 +22,12 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const { customers, loading, error, refetch } = useCustomersFromDatabase()
   const [metricsByCustomerId, setMetricsByCustomerId] = useState<Record<string, { week: number; month: number; total: number }>>({})
   const [metricIssuesByCustomerId, setMetricIssuesByCustomerId] = useState<Record<string, { errorCode?: string; message: string }>>({})
+  const [initialMetricsLoaded, setInitialMetricsLoaded] = useState(false)
+
+  const hasSheetBackedCustomers = useMemo(
+    () => customers.some((customer) => Boolean(customer.leadsReportingUrl?.trim())),
+    [customers],
+  )
 
   const refreshMetrics = useCallback(async () => {
     if (loading) return
@@ -37,6 +43,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
     if (scoped.length === 0) {
       setMetricsByCustomerId({})
       setMetricIssuesByCustomerId({})
+      setInitialMetricsLoaded(true)
       return
     }
 
@@ -62,6 +69,8 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
     } catch {
       setMetricsByCustomerId({})
       setMetricIssuesByCustomerId({})
+    } finally {
+      setInitialMetricsLoaded(true)
     }
   }, [customers, loading])
 
@@ -150,6 +159,20 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
           <Text fontSize="lg" fontWeight="bold">Loading customers from database...</Text>
           <Text color="gray.600">
             Fetching fresh data from Azure PostgreSQL
+          </Text>
+        </Box>
+      </VStack>
+    )
+  }
+
+  if (hasSheetBackedCustomers && !initialMetricsLoaded) {
+    return (
+      <VStack py={10} spacing={4}>
+        <Spinner size="lg" color="orange.500" thickness="4px" />
+        <Box textAlign="center">
+          <Text fontSize="md" fontWeight="semibold">Loading live account lead metrics...</Text>
+          <Text color="gray.600" fontSize="sm">
+            Verifying current sheet-backed lead counts before rendering the Accounts workspace.
           </Text>
         </Box>
       </VStack>
