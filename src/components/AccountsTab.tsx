@@ -3706,8 +3706,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       monthlyTarget: acc.monthlyTarget + (account.monthlyTarget || 0),
     }
   }, { spend: 0, weeklyLeads: 0, monthlyLeads: 0, weeklyTarget: 0, monthlyTarget: 0 })
+  const totalsHaveUnavailableLeadMetrics = filteredAndSortedAccounts.some((account) => Boolean(account.sheetMetricsUnavailable))
   
-  const totalPercentToTarget = totals.monthlyTarget > 0 
+  const totalPercentToTarget = !totalsHaveUnavailableLeadMetrics && totals.monthlyTarget > 0 
     ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
     : '0.0'
 
@@ -4685,7 +4686,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 </Td>
                 <Td isNumeric>
                   <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totals.weeklyLeads}
+                    {totalsHaveUnavailableLeadMetrics ? '—' : totals.weeklyLeads}
                   </Text>
                 </Td>
                 <Td isNumeric>
@@ -4695,7 +4696,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 </Td>
                 <Td isNumeric>
                   <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totals.monthlyLeads}
+                    {totalsHaveUnavailableLeadMetrics ? '—' : totals.monthlyLeads}
                   </Text>
                 </Td>
                 <Td isNumeric>
@@ -4705,7 +4706,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 </Td>
                 <Td isNumeric>
                   <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totalPercentToTarget}%
+                    {totalsHaveUnavailableLeadMetrics ? '—' : `${totalPercentToTarget}%`}
                   </Text>
                 </Td>
                 <Td></Td>

@@ -81,6 +81,13 @@ export type LiveLeadMetricsResponse = {
   sync?: LiveLeadSyncMeta
 }
 
+export type ImportLiveLeadsResponse = {
+  customerId: string
+  sourceOfTruth: 'google_sheets'
+  sync: LiveLeadSyncMeta
+  importedAt: string
+}
+
 type ApiErrorResponse = {
   error?: string
   hint?: string
@@ -160,6 +167,19 @@ export async function getLiveLeadMetrics(customerId: string): Promise<LiveLeadMe
   return res.json()
 }
 
+export async function importLiveLeads(customerId: string): Promise<ImportLiveLeadsResponse> {
+  const res = await fetch(`${API_BASE}/api/live/leads/import?customerId=${encodeURIComponent(customerId)}`, {
+    method: 'POST',
+    headers: getCustomerHeaders(customerId),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText })) as ApiErrorResponse
+    const message = [err.error, err.hint].filter(Boolean).join(' ')
+    throw new Error(message || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export async function createLiveLead(customerId: string, payload: CreateLiveLeadInput): Promise<CreateLiveLeadResponse> {
   const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
     method: 'POST',
@@ -221,6 +241,29 @@ export type AggregateMetricsResult = {
 }
 
 const CONCURRENCY = 4
+const SHEET_METRICS_STALE_MS = 15 * 60 * 1000
+
+function isSheetBackedCustomer(customer: { leadsReportingUrl?: string | null }): boolean {
+  return Boolean(customer.leadsReportingUrl && customer.leadsReportingUrl.trim())
+}
+
+function getLastSyncTimestamp(sync?: LiveLeadSyncMeta): number | null {
+  const candidate = sync?.lastSuccessAt || sync?.lastInboundSyncAt || sync?.lastSyncAt || null
+  if (!candidate) return null
+  const parsed = Date.parse(candidate)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function shouldRefreshSheetMetrics(
+  customer: { leadsReportingUrl?: string | null },
+  data: LiveLeadMetricsResponse
+): boolean {
+  if (!isSheetBackedCustomer(customer)) return false
+  if (data.sync?.status === 'syncing') return false
+  const lastSyncAt = getLastSyncTimestamp(data.sync)
+  if (lastSyncAt == null) return true
+  return (Date.now() - lastSyncAt) > SHEET_METRICS_STALE_MS
+}
 
 function runWithConcurrency<T, R>(items: T[], fn: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
   const results: R[] = []
@@ -259,7 +302,26 @@ export async function fetchLiveMetricsForCustomers(
     scopedCustomers,
     async (c) => {
       try {
-        const data = await getLiveLeadMetrics(c.id)
+        let data = await getLiveLeadMetrics(c.id)
+        if (shouldRefreshSheetMetrics(c, data)) {
+          try {
+            await importLiveLeads(c.id)
+            data = await getLiveLeadMetrics(c.id)
+          } catch (e) {
+            return {
+              customerId: c.id,
+              name: c.name,
+              fetchError: e instanceof Error ? `Lead metrics refresh failed: ${e.message}` : 'Lead metrics refresh failed',
+            }
+          }
+          if (shouldRefreshSheetMetrics(c, data)) {
+            return {
+              customerId: c.id,
+              name: c.name,
+              fetchError: 'Lead metrics are still stale after refresh',
+            }
+          }
+        }
         if (data.authoritative === false || data.dataFreshness === 'diagnostic_stale') {
           return {
             customerId: c.id,
