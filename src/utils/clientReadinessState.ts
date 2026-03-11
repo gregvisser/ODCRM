@@ -47,8 +47,8 @@ export function getClientReadinessInterpretation(signal: ClientReadinessSignal):
   if (!signal.hasActiveClient) {
     return {
       state: 'setup-needed',
-      label: 'Setup needed',
-      reason: 'Select an active client before continuing.',
+      label: 'Select client',
+      reason: 'Select an active client.',
       nextStep: { label: 'Open Onboarding', target: 'onboarding' },
     }
   }
@@ -74,8 +74,8 @@ export function getClientReadinessInterpretation(signal: ClientReadinessSignal):
   if (signal.onboardingReady === false) {
     return {
       state: 'setup-needed',
-      label: 'Setup needed',
-      reason: 'Onboarding checks are not complete for this client.',
+      label: 'Continue onboarding',
+      reason: 'Complete the remaining onboarding checks.',
       nextStep: { label: 'Continue Onboarding', target: 'onboarding' },
     }
   }

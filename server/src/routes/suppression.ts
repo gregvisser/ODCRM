@@ -548,7 +548,7 @@ async function importSuppressionFromSheet(
   parsedRows.sheetTitle = sheetData.sheetTitle
   const source = input.sourceLabel?.trim() || `google-sheet:${expectedType}`
   const reason = input.reason?.trim() || null
-  const mode = input.mode || 'append'
+  const mode = input.mode || 'replace'
   let replacedCount = 0
 
   if (mode === 'replace') {
