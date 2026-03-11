@@ -746,6 +746,7 @@ router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: R
               select: {
                 emailAddress: true,
                 displayName: true,
+                signatureHtml: true,
               },
             },
           },
@@ -783,6 +784,7 @@ router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: R
         website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
         senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
         senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+        emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
       }
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)

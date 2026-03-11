@@ -374,6 +374,7 @@ export async function processOne(
               id: true,
               emailAddress: true,
               displayName: true,
+              signatureHtml: true,
               sendWindowTimeZone: true,
               sendWindowHoursStart: true,
               sendWindowHoursEnd: true,
@@ -714,10 +715,12 @@ export async function processOne(
       senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
       senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
       unsubscribeLink: unsubscribeUrl,
+      emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
     }
+    const textVars = { ...vars, emailSignature: '', senderSignature: '' }
     subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
     htmlBody = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
-    textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+    textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, textVars) : undefined
     const enforced = enforceUnsubscribeFooter(htmlBody, textBody, unsubscribeUrl)
     htmlBody = enforced.htmlBody
     textBody = enforced.textBody

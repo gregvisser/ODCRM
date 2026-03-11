@@ -41,6 +41,7 @@ import {
   FormControl,
   FormLabel,
   Spacer,
+  Textarea,
   useToast,
   Alert,
   AlertIcon,
@@ -84,6 +85,7 @@ type EmailIdentity = {
   smtpPort?: number | null
   smtpUsername?: string | null
   smtpSecure?: boolean | null
+  signatureHtml?: string | null
 }
 
 type Customer = {
@@ -278,27 +280,65 @@ const EmailAccountsTab: React.FC = () => {
     window.location.href = `${apiBaseUrl}/api/outlook/auth?customerId=${selectedCustomerId}`
   }
 
-  const handleEditIdentity = (identity: EmailIdentity) => {
-    setEditingIdentity(identity)
+  const handleEditIdentity = async (identity: EmailIdentity) => {
+    setEditingIdentity({ ...identity, signatureHtml: '' })
     onOpen()
+
+    if (!selectedCustomerId) return
+
+    const { data, error: apiError } = await api.get<{ signatureHtml?: string | null }>(
+      `/api/outlook/identities/${identity.id}/signature`,
+      { headers: { 'X-Customer-Id': selectedCustomerId } },
+    )
+
+    if (apiError) {
+      toast({
+        title: 'Failed to load signature',
+        description: apiError,
+        status: 'warning',
+        duration: 4000,
+      })
+      return
+    }
+
+    setEditingIdentity((prev) => (
+      prev && prev.id === identity.id
+        ? { ...prev, signatureHtml: data?.signatureHtml || '' }
+        : prev
+    ))
   }
 
   const handleSaveIdentity = async () => {
     if (!editingIdentity) return
+    if (!selectedCustomerId) {
+      toast({
+        title: 'No client selected',
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
 
-    const { error: apiError } = await api.patch(`/api/outlook/identities/${editingIdentity.id}`, {
-      displayName: editingIdentity.displayName,
-      dailySendLimit: editingIdentity.dailySendLimit,
-      sendWindowHoursStart: editingIdentity.sendWindowHoursStart,
-      sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
-      sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
-      isActive: editingIdentity.isActive,
-    })
+    const [settingsResult, signatureResult] = await Promise.all([
+      api.patch(`/api/outlook/identities/${editingIdentity.id}`, {
+        displayName: editingIdentity.displayName,
+        dailySendLimit: editingIdentity.dailySendLimit,
+        sendWindowHoursStart: editingIdentity.sendWindowHoursStart,
+        sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
+        sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
+        isActive: editingIdentity.isActive,
+      }),
+      api.put(
+        `/api/outlook/identities/${editingIdentity.id}/signature`,
+        { signatureHtml: editingIdentity.signatureHtml || null },
+        { headers: { 'X-Customer-Id': selectedCustomerId } },
+      ),
+    ])
 
-    if (apiError) {
+    if (settingsResult.error || signatureResult.error) {
       toast({
         title: 'Failed to update account',
-        description: apiError,
+        description: settingsResult.error || signatureResult.error || 'Unknown error',
         status: 'error',
         duration: 5000,
       })
@@ -773,7 +813,7 @@ const EmailAccountsTab: React.FC = () => {
       )}
 
       {/* Edit Identity Modal */}
-      <Modal isOpen={isOpen} onClose={onClose} size="md">
+      <Modal isOpen={isOpen} onClose={onClose} size="xl">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Edit Email Account</ModalHeader>
@@ -805,6 +845,21 @@ const EmailAccountsTab: React.FC = () => {
                   </NumberInput>
                   <Text fontSize="xs" color="gray.500" mt={1}>
                     Recommended: 50-150 for new accounts, up to 500 for warmed accounts
+                  </Text>
+                </FormControl>
+
+                <FormControl>
+                  <FormLabel>Signature HTML</FormLabel>
+                  <Textarea
+                    value={editingIdentity.signatureHtml || ''}
+                    onChange={(e) => setEditingIdentity({ ...editingIdentity, signatureHtml: e.target.value })}
+                    minH="180px"
+                    fontFamily="mono"
+                    fontSize="sm"
+                    placeholder="<div><strong>{{sender_name}}</strong><br/><a href=&quot;mailto:{{sender_email}}&quot;>{{sender_email}}</a></div>"
+                  />
+                  <Text fontSize="xs" color="gray.500" mt={1}>
+                    Use {`{{email_signature}}`} in templates to insert this sender signature.
                   </Text>
                 </FormControl>
 

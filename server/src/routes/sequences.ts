@@ -723,6 +723,7 @@ router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
             id: true,
             emailAddress: true,
             displayName: true,
+            signatureHtml: true,
             provider: true,
             isActive: true,
             customerId: true,
@@ -861,6 +862,7 @@ router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
         phone: null,
         senderName: identity.displayName ?? identity.emailAddress,
         senderEmail: identity.emailAddress,
+        emailSignature: identity.signatureHtml ?? '',
       }
 
       let cumulativeDays = 0

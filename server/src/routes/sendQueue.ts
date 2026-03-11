@@ -293,11 +293,12 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
           select: {
             senderIdentity: {
               select: {
-                emailAddress: true,
-                displayName: true,
-              },
+              emailAddress: true,
+              displayName: true,
+              signatureHtml: true,
             },
           },
+        },
         },
       },
     })
@@ -332,6 +333,7 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
         senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
         senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
         unsubscribeLink: unsubscribeUrl,
+        emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
       }
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
