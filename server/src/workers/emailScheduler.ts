@@ -1,10 +1,25 @@
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 
 // Unique instance ID for multi-instance environments (Azure, scaling)
 const SCHEDULER_INSTANCE_ID = `sched-${process.pid}-${Date.now().toString(36)}`
+
+function getTrackingBaseUrl(): string {
+  const raw =
+    process.env.EMAIL_TRACKING_DOMAIN ||
+    process.env.FRONTDOOR_URL ||
+    process.env.FRONTEND_URL ||
+    'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed.replace(/\/$/, '')
+  return `https://${trimmed.replace(/\/$/, '')}`
+}
+
+function buildCampaignUnsubscribeUrl(campaignProspectId: string): string {
+  return `${getTrackingBaseUrl()}/api/email/unsubscribe?cpid=${encodeURIComponent(campaignProspectId)}`
+}
 
 /**
  * Background worker that runs every minute to send scheduled emails
@@ -52,6 +67,13 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     where: { status: 'running' },
     include: {
       senderIdentity: true,
+      customer: {
+        select: {
+          name: true,
+          website: true,
+          domain: true,
+        },
+      },
       templates: {
         orderBy: { stepNumber: 'asc' }
       }
@@ -521,13 +543,27 @@ async function sendCampaignEmail(
     const variables = {
       firstName: prospect.contact.firstName,
       lastName: prospect.contact.lastName,
+      fullName: `${prospect.contact.firstName || ''} ${prospect.contact.lastName || ''}`.trim(),
+      company: prospect.contact.companyName,
       companyName: prospect.contact.companyName,
+      accountName: prospect.contact.companyName || campaign.customer.name,
       email: prospect.contact.email,
+      role: prospect.contact.jobTitle,
       jobTitle: prospect.contact.jobTitle,
+      title: prospect.contact.jobTitle,
+      phone: prospect.contact.phone || '',
+      senderName: campaign.senderIdentity.displayName || campaign.senderIdentity.emailAddress,
+      senderEmail: campaign.senderIdentity.emailAddress,
+      website: campaign.customer.website || campaign.customer.domain || '',
+      unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
     }
     
     const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
     const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
+    const renderedText = template.bodyTemplateText
+      ? applyTemplatePlaceholders(template.bodyTemplateText, variables)
+      : undefined
+    const enforced = enforceUnsubscribeFooter(renderedHtml, renderedText, variables.unsubscribeLink)
 
     // Check for suppression before sending
     const normalizedEmail = prospect.contact.email.toLowerCase().trim()
@@ -601,8 +637,8 @@ async function sendCampaignEmail(
       senderIdentityId: campaign.senderIdentityId,
       toEmail: prospect.contact.email,
       subject: renderedSubject,
-      htmlBody: renderedHtml,
-      textBody: template.bodyTemplateText || renderedHtml,
+      htmlBody: enforced.htmlBody,
+      textBody: enforced.textBody,
       campaignProspectId: prospect.id
     })
 

@@ -279,7 +279,27 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
     }
     const enrollment = await prisma.enrollment.findFirst({
       where: { id: item.enrollmentId, customerId },
-      select: { id: true, sequenceId: true },
+      select: {
+        id: true,
+        sequenceId: true,
+        customer: {
+          select: {
+            name: true,
+            website: true,
+            domain: true,
+          },
+        },
+        sequence: {
+          select: {
+            senderIdentity: {
+              select: {
+                emailAddress: true,
+                displayName: true,
+              },
+            },
+          },
+        },
+      },
     })
     if (!enrollment) {
       res.status(404).json({ error: 'Enrollment not found' })
@@ -296,22 +316,29 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
         where: { enrollmentId: item.enrollmentId, email: recipientEmail },
         select: { firstName: true, lastName: true, company: true, email: true },
       })
+      const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmail.toLowerCase())
       const vars = {
         firstName: recipientRow?.firstName ?? '',
         lastName: recipientRow?.lastName ?? '',
         company: recipientRow?.company ?? '',
         companyName: recipientRow?.company ?? '',
+        accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
         email: recipientEmail,
+        role: '',
         jobTitle: '',
         title: '',
         phone: '',
+        website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
+        senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+        senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+        unsubscribeLink: unsubscribeUrl,
       }
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
       bodyHtml = enforceUnsubscribeFooter(
         renderedHtml,
         undefined,
-        buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmail.toLowerCase())
+        unsubscribeUrl
       ).htmlBody
     }
     res.setHeader('x-odcrm-customer-id', customerId)

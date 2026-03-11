@@ -12,7 +12,7 @@ import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, L
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 
 const router = Router()
 const AUDITS_LIMIT_DEFAULT = 50
@@ -22,6 +22,21 @@ const SUMMARY_SINCE_HOURS_DEFAULT = 24
 const SUMMARY_SINCE_HOURS_MAX = 168
 const LIVE_TICK_LOCK_PREFIX = 'live_tick_'
 const LEAD_SOURCE_TYPES: LeadSourceType[] = ['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK']
+
+function getTrackingBaseUrl(): string {
+  const raw =
+    process.env.EMAIL_TRACKING_DOMAIN ||
+    process.env.FRONTDOOR_URL ||
+    process.env.FRONTEND_URL ||
+    'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed.replace(/\/$/, '')
+  return `https://${trimmed.replace(/\/$/, '')}`
+}
+
+function buildEnrollmentUnsubscribeUrl(enrollmentId: string, recipientEmailNorm: string): string {
+  return `${getTrackingBaseUrl()}/api/email/unsubscribe?enrollmentId=${encodeURIComponent(enrollmentId)}&email=${encodeURIComponent(recipientEmailNorm)}`
+}
 
 const VALID_DECISIONS = new Set<string>(Object.values(OutboundSendAttemptDecision))
 
@@ -915,7 +930,27 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
 
       const enrollment = await prisma.enrollment.findFirst({
         where: { id: item.enrollmentId, customerId },
-        select: { id: true, sequenceId: true },
+        select: {
+          id: true,
+          sequenceId: true,
+          customer: {
+            select: {
+              name: true,
+              website: true,
+              domain: true,
+            },
+          },
+          sequence: {
+            select: {
+              senderIdentity: {
+                select: {
+                  emailAddress: true,
+                  displayName: true,
+                },
+              },
+            },
+          },
+        },
       })
       if (!enrollment) {
         await prisma.outboundSendQueueItem.update({
@@ -953,19 +988,29 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           where: { enrollmentId: item.enrollmentId, email: recipientEmailNormalized },
           select: { firstName: true, lastName: true, company: true, email: true },
         })
+        const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmailNormalized)
         const vars = {
           firstName: recipientRow?.firstName ?? '',
           lastName: recipientRow?.lastName ?? '',
           company: recipientRow?.company ?? '',
           companyName: recipientRow?.company ?? '',
+          accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
           email: recipientEmail,
+          role: '',
           jobTitle: '',
           title: '',
           phone: '',
+          website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
+          senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+          senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+          unsubscribeLink: unsubscribeUrl,
         }
         subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
-        htmlBody = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
-        textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+        const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+        const renderedText = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+        const enforced = enforceUnsubscribeFooter(renderedHtml, renderedText, unsubscribeUrl)
+        htmlBody = enforced.htmlBody
+        textBody = enforced.textBody
       } else {
         subject = `[ODCRM] Step ${item.stepIndex + 1}`
         htmlBody = `<p>Email from sequence. Recipient: ${recipientEmail}</p>`

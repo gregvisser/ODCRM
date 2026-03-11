@@ -11,11 +11,26 @@
  */
 
 import { PrismaClient } from '@prisma/client'
-import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { sendEmail as sendEmailViaOutlook } from '../services/outlookEmailService.js'
 
 // Instance ID for logging - unique per process
 const INSTANCE_ID = `sender-${process.pid}-${Date.now().toString(36)}`
+
+function getTrackingBaseUrl(): string {
+  const raw =
+    process.env.EMAIL_TRACKING_DOMAIN ||
+    process.env.FRONTDOOR_URL ||
+    process.env.FRONTEND_URL ||
+    'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
+  const trimmed = String(raw).trim()
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed.replace(/\/$/, '')
+  return `https://${trimmed.replace(/\/$/, '')}`
+}
+
+function buildCampaignUnsubscribeUrl(campaignProspectId: string): string {
+  return `${getTrackingBaseUrl()}/api/email/unsubscribe?cpid=${encodeURIComponent(campaignProspectId)}`
+}
 
 export interface SenderConfig {
   batchSize?: number
@@ -178,6 +193,13 @@ export async function processSequenceBasedCampaigns(
       senderIdentityId: true,
       sendWindowHoursStart: true,
       sendWindowHoursEnd: true,
+      customer: {
+        select: {
+          name: true,
+          website: true,
+          domain: true,
+        },
+      },
     },
   })
 
@@ -340,45 +362,67 @@ export async function processSequenceBasedCampaigns(
         const subject = applyTemplatePlaceholders(step.subjectTemplate, {
           firstName: contact.firstName,
           lastName: contact.lastName,
+          fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           company: contact.companyName,
           companyName: contact.companyName,
+          accountName: contact.companyName || campaign.customer?.name || '',
           email: contact.email,
+          role: contact.jobTitle || '',
           jobTitle: contact.jobTitle || '',
           title: contact.jobTitle || '',
           phone: contact.phone || '',
+          website: campaign.customer?.website || campaign.customer?.domain || '',
+          senderName: identity.displayName || identity.emailAddress,
+          senderEmail: identity.emailAddress,
+          unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
         })
 
         const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
           firstName: contact.firstName,
           lastName: contact.lastName,
+          fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
           company: contact.companyName,
           companyName: contact.companyName,
+          accountName: contact.companyName || campaign.customer?.name || '',
           email: contact.email,
+          role: contact.jobTitle || '',
           jobTitle: contact.jobTitle || '',
           title: contact.jobTitle || '',
           phone: contact.phone || '',
+          website: campaign.customer?.website || campaign.customer?.domain || '',
+          senderName: identity.displayName || identity.emailAddress,
+          senderEmail: identity.emailAddress,
+          unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
         })
 
         const bodyText = step.bodyTemplateText
           ? applyTemplatePlaceholders(step.bodyTemplateText, {
               firstName: contact.firstName,
               lastName: contact.lastName,
+              fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
               company: contact.companyName,
               companyName: contact.companyName,
+              accountName: contact.companyName || campaign.customer?.name || '',
               email: contact.email,
+              role: contact.jobTitle || '',
               jobTitle: contact.jobTitle || '',
               title: contact.jobTitle || '',
               phone: contact.phone || '',
+              website: campaign.customer?.website || campaign.customer?.domain || '',
+              senderName: identity.displayName || identity.emailAddress,
+              senderEmail: identity.emailAddress,
+              unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
             })
           : undefined
+        const enforced = enforceUnsubscribeFooter(bodyHtml, bodyText, buildCampaignUnsubscribeUrl(prospect.id))
 
         // Send email via Outlook
         const result = await sendEmailViaOutlook(prisma, {
           senderIdentityId: identity.id,
           toEmail: contact.email,
           subject,
-          htmlBody: bodyHtml,
-          textBody: bodyText,
+          htmlBody: enforced.htmlBody,
+          textBody: enforced.textBody,
           campaignProspectId: prospect.id,
         })
 
