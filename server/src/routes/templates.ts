@@ -10,7 +10,12 @@ import { randomUUID } from 'crypto';
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
-import { applyTemplatePlaceholders, applyTemplatePlaceholdersSafe, previewTemplate } from '../services/templateRenderer.js';
+import {
+  applyTemplatePlaceholdersSafe,
+  buildPreviewTemplateVariables,
+  previewTemplate,
+  type TemplateVariables,
+} from '../services/templateRenderer.js';
 import { tweakEmailWithAI, analyzeEmailTemplate, generateEmailVariations } from '../services/aiEmailService.js';
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js';
 
@@ -145,14 +150,136 @@ router.post('/preview', async (req, res) => {
     const customerId =
       (req.headers['x-customer-id'] as string) || (req.query.customerId as string) || null
 
-    const { subject, body, variables } = req.body
+    const { subject, body, variables } = req.body as {
+      subject?: string
+      body?: string
+      variables?: TemplateVariables
+    }
 
-    const previewedSubject = variables
-      ? applyTemplatePlaceholdersSafe(subject || '', variables)
+    let previewVariables: TemplateVariables | null = null
+
+    if (variables || customerId) {
+      const requestedVariables =
+        variables && typeof variables === 'object' && !Array.isArray(variables)
+          ? variables
+          : {}
+
+      const [customer, identities] = await Promise.all([
+        customerId
+          ? prisma.customer.findUnique({
+              where: { id: customerId },
+              select: { name: true, website: true, domain: true },
+            })
+          : Promise.resolve(null),
+        customerId
+          ? prisma.emailIdentity.findMany({
+              where: { customerId, isActive: true },
+              select: {
+                emailAddress: true,
+                displayName: true,
+                signatureHtml: true,
+              },
+              orderBy: [{ createdAt: 'desc' }],
+              take: 10,
+            })
+          : Promise.resolve([]),
+      ])
+
+      const previewIdentity =
+        identities.find((identity) => String(identity.signatureHtml || '').trim()) ||
+        identities[0] ||
+        null
+
+      const customerName = customer?.name || undefined
+      const customerWebsite = customer?.website || customer?.domain || undefined
+      const senderName = previewIdentity
+        ? previewIdentity.displayName || previewIdentity.emailAddress
+        : undefined
+      const senderEmail = previewIdentity?.emailAddress || undefined
+      const signatureHtml = previewIdentity?.signatureHtml?.trim() || undefined
+
+      previewVariables = buildPreviewTemplateVariables({
+        ...requestedVariables,
+        first_name:
+          requestedVariables.first_name ||
+          requestedVariables.firstName ||
+          requestedVariables.full_name ||
+          requestedVariables.fullName ||
+          undefined,
+        last_name:
+          requestedVariables.last_name ||
+          requestedVariables.lastName ||
+          undefined,
+        full_name:
+          requestedVariables.full_name ||
+          requestedVariables.fullName ||
+          undefined,
+        company_name:
+          requestedVariables.company_name ||
+          requestedVariables.companyName ||
+          requestedVariables.company ||
+          requestedVariables.accountName ||
+          customerName,
+        companyName:
+          requestedVariables.companyName ||
+          requestedVariables.company_name ||
+          requestedVariables.company ||
+          requestedVariables.accountName ||
+          customerName,
+        company:
+          requestedVariables.company ||
+          requestedVariables.companyName ||
+          requestedVariables.company_name ||
+          requestedVariables.accountName ||
+          customerName,
+        accountName:
+          requestedVariables.accountName ||
+          requestedVariables.company ||
+          requestedVariables.companyName ||
+          requestedVariables.company_name ||
+          customerName,
+        website: requestedVariables.website || customerWebsite,
+        sender_name: senderName || requestedVariables.sender_name || requestedVariables.senderName || undefined,
+        senderName: senderName || requestedVariables.senderName || requestedVariables.sender_name || undefined,
+        sender_email: senderEmail || requestedVariables.sender_email || requestedVariables.senderEmail || undefined,
+        senderEmail: senderEmail || requestedVariables.senderEmail || requestedVariables.sender_email || undefined,
+        email_signature:
+          signatureHtml ||
+          requestedVariables.email_signature ||
+          requestedVariables.emailSignature ||
+          requestedVariables.sender_signature ||
+          requestedVariables.senderSignature ||
+          undefined,
+        emailSignature:
+          signatureHtml ||
+          requestedVariables.emailSignature ||
+          requestedVariables.email_signature ||
+          requestedVariables.senderSignature ||
+          requestedVariables.sender_signature ||
+          undefined,
+        sender_signature:
+          signatureHtml ||
+          requestedVariables.sender_signature ||
+          requestedVariables.senderSignature ||
+          requestedVariables.email_signature ||
+          requestedVariables.emailSignature ||
+          undefined,
+        senderSignature:
+          signatureHtml ||
+          requestedVariables.senderSignature ||
+          requestedVariables.sender_signature ||
+          requestedVariables.emailSignature ||
+          requestedVariables.email_signature ||
+          undefined,
+      })
+    }
+
+    const previewedSubject = previewVariables
+      ? applyTemplatePlaceholdersSafe(subject || '', previewVariables)
       : previewTemplate(subject || '')
 
-    const previewedBody = variables
-      ? applyTemplatePlaceholdersSafe(body || '', variables)
+    const previewedBody = previewVariables
+      ? applyTemplatePlaceholdersSafe(body || '', previewVariables)
       : previewTemplate(body || '')
 
     return res.json({
@@ -233,7 +360,7 @@ router.post('/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
     if (error.message?.includes('not configured')) {
       return res.status(503).json({ 
         success: false, 
-        error: 'AI service not configured. Please set EMERGENT_LLM_KEY environment variable.' 
+        error: 'AI service not configured. Please set EMERGENT_LLM_KEY, GEMINI_API_KEY, or GOOGLE_GEMINI_API_KEY.' 
       })
     }
     
