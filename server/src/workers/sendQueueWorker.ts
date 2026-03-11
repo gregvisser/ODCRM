@@ -373,12 +373,20 @@ export async function processOne(
             select: {
               id: true,
               emailAddress: true,
+              displayName: true,
               sendWindowTimeZone: true,
               sendWindowHoursStart: true,
               sendWindowHoursEnd: true,
               dailySendLimit: true,
             },
           },
+        },
+      },
+      customer: {
+        select: {
+          name: true,
+          website: true,
+          domain: true,
         },
       },
     },
@@ -690,19 +698,29 @@ export async function processOne(
       where: { enrollmentId, email: recipientEmail },
       select: { firstName: true, lastName: true, company: true, email: true },
     })
+    const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(enrollmentId, recipientEmailNorm)
     const vars = {
       firstName: recipientRow?.firstName ?? '',
       lastName: recipientRow?.lastName ?? '',
       companyName: recipientRow?.company ?? '',
       company: recipientRow?.company ?? '',
+      accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
       email: recipientEmail,
+      role: '',
       jobTitle: '',
       title: '',
       phone: '',
+      website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
+      senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+      senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+      unsubscribeLink: unsubscribeUrl,
     }
     subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
     htmlBody = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
     textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+    const enforced = enforceUnsubscribeFooter(htmlBody, textBody, unsubscribeUrl)
+    htmlBody = enforced.htmlBody
+    textBody = enforced.textBody
   } else {
     subject = `[Canary] Stage 2B test — ${enrollmentId} step ${stepIndex}`
     htmlBody = `<p>Canary test email. Enrollment: ${enrollmentId}, step: ${stepIndex}, recipient: ${recipientEmail}.</p>`
@@ -723,14 +741,8 @@ export async function processOne(
     senderIdentityId: identity.id,
     toEmail: recipientEmail,
     subject,
-    ...(() => {
-      const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(enrollmentId, recipientEmailNorm)
-      const enforced = enforceUnsubscribeFooter(htmlBody, textBody, unsubscribeUrl)
-      return {
-        htmlBody: enforced.htmlBody,
-        textBody: enforced.textBody,
-      }
-    })(),
+    htmlBody,
+    textBody,
   })
 
   if (result.success) {

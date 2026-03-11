@@ -5,38 +5,170 @@
 
 export type TemplateVariables = {
   firstName?: string | null;
+  first_name?: string | null;
   lastName?: string | null;
+  last_name?: string | null;
+  fullName?: string | null;
+  full_name?: string | null;
+  contactName?: string | null;
+  contact_name?: string | null;
   company?: string | null;
   companyName?: string | null;
+  company_name?: string | null;
+  accountName?: string | null;
+  account_name?: string | null;
   email?: string | null;
   title?: string | null;
   jobTitle?: string | null;
+  role?: string | null;
   phone?: string | null;
+  website?: string | null;
+  senderName?: string | null;
+  sender_name?: string | null;
+  senderEmail?: string | null;
+  sender_email?: string | null;
+  unsubscribeLink?: string | null;
+  unsubscribe_link?: string | null;
 };
 
-const PLACEHOLDER_KEYS: Array<keyof TemplateVariables> = [
+const PLACEHOLDER_PATTERN = /\{\{\s*([\w]+)\s*\}\}/g;
+
+const SUPPORTED_PLACEHOLDER_KEYS = [
+  'first_name',
+  'last_name',
+  'full_name',
+  'company_name',
+  'role',
+  'website',
+  'sender_name',
+  'sender_email',
+  'unsubscribe_link',
+  'email',
+  'phone',
   'firstName',
   'lastName',
+  'fullName',
+  'contactName',
   'company',
   'companyName',
-  'email',
+  'accountName',
   'title',
   'jobTitle',
-  'phone',
-];
+  'senderName',
+  'senderEmail',
+  'unsubscribeLink',
+] as const;
+
+type SupportedPlaceholderKey = (typeof SUPPORTED_PLACEHOLDER_KEYS)[number];
+
+function normalizeValue(value: string | null | undefined): string {
+  return value == null ? '' : String(value).trim();
+}
+
+function normalizePlaceholderKey(rawKey: string): string {
+  return String(rawKey || '').trim().replace(/[\s_]+/g, '').toLowerCase();
+}
+
+function getFirstNonEmpty(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    const normalized = normalizeValue(value);
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function buildFullName(vars: TemplateVariables): string {
+  const explicit = getFirstNonEmpty(vars.full_name, vars.fullName, vars.contact_name, vars.contactName);
+  if (explicit) return explicit;
+  return [normalizeValue(vars.first_name ?? vars.firstName), normalizeValue(vars.last_name ?? vars.lastName)]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function getCanonicalPlaceholderValue(key: SupportedPlaceholderKey, vars: TemplateVariables): string {
+  const firstName = getFirstNonEmpty(vars.first_name, vars.firstName);
+  const lastName = getFirstNonEmpty(vars.last_name, vars.lastName);
+  const fullName = buildFullName(vars);
+  const companyName = getFirstNonEmpty(
+    vars.company_name,
+    vars.companyName,
+    vars.company,
+    vars.account_name,
+    vars.accountName
+  );
+  const role = getFirstNonEmpty(vars.role, vars.jobTitle, vars.title);
+  const senderEmail = getFirstNonEmpty(vars.sender_email, vars.senderEmail);
+  const senderName = getFirstNonEmpty(vars.sender_name, vars.senderName, senderEmail);
+  const unsubscribeLink = getFirstNonEmpty(vars.unsubscribe_link, vars.unsubscribeLink);
+
+  switch (key) {
+    case 'first_name':
+    case 'firstName':
+      return firstName;
+    case 'last_name':
+    case 'lastName':
+      return lastName;
+    case 'full_name':
+    case 'fullName':
+    case 'contactName':
+      return fullName;
+    case 'company_name':
+    case 'companyName':
+    case 'company':
+    case 'accountName':
+      return companyName;
+    case 'role':
+    case 'title':
+    case 'jobTitle':
+      return role;
+    case 'website':
+      return normalizeValue(vars.website);
+    case 'sender_name':
+    case 'senderName':
+      return senderName;
+    case 'sender_email':
+    case 'senderEmail':
+      return senderEmail;
+    case 'unsubscribe_link':
+    case 'unsubscribeLink':
+      return unsubscribeLink;
+    case 'email':
+      return normalizeValue(vars.email);
+    case 'phone':
+      return normalizeValue(vars.phone);
+    default:
+      return '';
+  }
+}
+
+const NORMALIZED_PLACEHOLDER_ALIASES: Record<string, SupportedPlaceholderKey> = {
+  firstname: 'first_name',
+  lastname: 'last_name',
+  fullname: 'full_name',
+  contactname: 'full_name',
+  company: 'company_name',
+  companyname: 'company_name',
+  accountname: 'company_name',
+  role: 'role',
+  title: 'role',
+  jobtitle: 'role',
+  website: 'website',
+  sendername: 'sender_name',
+  senderemail: 'sender_email',
+  unsubscribelink: 'unsubscribe_link',
+  email: 'email',
+  phone: 'phone',
+};
 
 /**
  * Resolve effective value for a placeholder key, applying alias fallbacks
  * (company <-> companyName, title <-> jobTitle) so both names get the same value.
  */
-function getValueForPlaceholder(key: keyof TemplateVariables, vars: TemplateVariables): string {
-  const v = vars[key];
-  if (v != null) return String(v);
-  if (key === 'company') return vars.companyName != null ? String(vars.companyName) : '';
-  if (key === 'companyName') return vars.company != null ? String(vars.company) : '';
-  if (key === 'title') return vars.jobTitle != null ? String(vars.jobTitle) : '';
-  if (key === 'jobTitle') return vars.title != null ? String(vars.title) : '';
-  return '';
+function getValueForPlaceholder(rawKey: string, vars: TemplateVariables): string | null {
+  const canonicalKey = NORMALIZED_PLACEHOLDER_ALIASES[normalizePlaceholderKey(rawKey)];
+  if (!canonicalKey) return null;
+  return getCanonicalPlaceholderValue(canonicalKey, vars);
 }
 
 /**
@@ -49,14 +181,10 @@ export function applyTemplatePlaceholders(
   template: string,
   vars: TemplateVariables
 ): string {
-  let out = template;
-
-  for (const key of PLACEHOLDER_KEYS) {
-    const value = getValueForPlaceholder(key, vars);
-    out = out.replaceAll(`{{${key}}}`, value);
-  }
-
-  return out;
+  return String(template || '').replace(PLACEHOLDER_PATTERN, (match, rawKey: string) => {
+    const value = getValueForPlaceholder(rawKey, vars);
+    return value == null ? match : value;
+  });
 }
 
 /**
@@ -64,14 +192,17 @@ export function applyTemplatePlaceholders(
  */
 export function previewTemplate(template: string): string {
   return applyTemplatePlaceholders(template, {
-    firstName: 'John',
-    lastName: 'Doe',
-    company: 'Acme Corp',
-    companyName: 'Acme Corp',
-    email: 'john.doe@acme.com',
-    title: 'CEO',
-    jobTitle: 'CEO',
+    first_name: 'Alex',
+    last_name: 'Taylor',
+    full_name: 'Alex Taylor',
+    company_name: 'Acme Ltd',
+    email: 'alex.taylor@acme.example',
+    role: 'Operations Director',
     phone: '+1-555-0100',
+    website: 'https://acme.example',
+    sender_name: 'Jordan Reed',
+    sender_email: 'jordan@opendoors.example',
+    unsubscribe_link: 'https://example.com/unsubscribe',
   });
 }
 
@@ -79,8 +210,8 @@ export function previewTemplate(template: string): string {
  * Get all placeholders used in a template
  */
 export function extractPlaceholders(template: string): string[] {
-  const matches = template.match(/\{\{(\w+)\}\}/g) || [];
-  return [...new Set(matches.map((m) => m.slice(2, -2)))];
+  const matches = Array.from(String(template || '').matchAll(PLACEHOLDER_PATTERN));
+  return [...new Set(matches.map((match) => (match[1] || '').trim()).filter(Boolean))];
 }
 
 /**
@@ -113,9 +244,8 @@ export function applyTemplatePlaceholdersSafe(
   vars: TemplateVariables
 ): string {
   const escaped: Partial<TemplateVariables> = {};
-  for (const key of PLACEHOLDER_KEYS) {
-    const raw = getValueForPlaceholder(key, vars);
-    escaped[key as keyof TemplateVariables] = escapeForHtml(raw);
+  for (const key of SUPPORTED_PLACEHOLDER_KEYS) {
+    escaped[key as keyof TemplateVariables] = escapeForHtml(getCanonicalPlaceholderValue(key, vars));
   }
   return applyTemplatePlaceholders(template, escaped as TemplateVariables);
 }

@@ -730,7 +730,27 @@ router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: R
     }
     const enrollment = await prisma.enrollment.findFirst({
       where: { id: enrollmentId, customerId },
-      select: { id: true, sequenceId: true },
+      select: {
+        id: true,
+        sequenceId: true,
+        customer: {
+          select: {
+            name: true,
+            website: true,
+            domain: true,
+          },
+        },
+        sequence: {
+          select: {
+            senderIdentity: {
+              select: {
+                emailAddress: true,
+                displayName: true,
+              },
+            },
+          },
+        },
+      },
     })
     if (!enrollment) {
       res.status(404).json({ error: 'Enrollment not found' })
@@ -754,10 +774,15 @@ router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: R
         lastName: recipientRow?.lastName ?? '',
         company: recipientRow?.company ?? '',
         companyName: recipientRow?.company ?? '',
+        accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
         email: recipientEmail,
+        role: '',
         jobTitle: '',
         title: '',
         phone: '',
+        website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
+        senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+        senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
       }
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)

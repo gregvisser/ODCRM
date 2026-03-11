@@ -10,6 +10,7 @@
  */
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { extractPlaceholders } from './templateRenderer.js'
 
 export interface AITweakRequest {
   templateBody: string
@@ -42,6 +43,40 @@ Guidelines:
 8. Focus on the recipient's potential pain points and how you can help
 
 Output ONLY the improved email content. Do not include explanations, notes, or commentary.`
+
+type ProtectedPlaceholderContent = {
+  text: string
+  original: string
+  placeholders: string[]
+}
+
+function protectPlaceholders(input: string | undefined): ProtectedPlaceholderContent | null {
+  if (!input) return null
+  const placeholders = extractPlaceholders(input)
+  if (placeholders.length === 0) {
+    return { text: input, original: input, placeholders: [] }
+  }
+
+  let protectedText = input
+  placeholders.forEach((placeholder, index) => {
+    const marker = `[[ODCRM_TOKEN_${index}]]`
+    const pattern = new RegExp(`\\{\\{\\s*${placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\}\\}`, 'g')
+    protectedText = protectedText.replace(pattern, marker)
+  })
+
+  return { text: protectedText, original: input, placeholders }
+}
+
+function restorePlaceholders(input: string, placeholders: string[]): string {
+  return placeholders.reduce((output, placeholder, index) => {
+    const marker = new RegExp(`\\[\\[ODCRM_TOKEN_${index}\\]\\]`, 'g')
+    return output.replace(marker, `{{${placeholder}}}`)
+  }, input)
+}
+
+function preservedPlaceholdersMatch(restored: string, expected: string[]): boolean {
+  return expected.every((placeholder) => restored.includes(`{{${placeholder}}}`))
+}
 
 /**
  * Get configured Gemini client
@@ -96,28 +131,36 @@ export async function tweakEmailWithAI(request: AITweakRequest): Promise<AITweak
     : ''
 
   const placeholderNote = preservePlaceholders
-    ? '\n\nIMPORTANT: Preserve any placeholders like {{firstName}}, {{company}}, {{title}} exactly as they appear.'
+    ? '\n\nIMPORTANT: Preserve any placeholder markers like [[ODCRM_TOKEN_0]] exactly as they appear.'
+    : ''
+
+  const bodyProtection = preservePlaceholders ? protectPlaceholders(templateBody) : null
+  const subjectProtection = preservePlaceholders ? protectPlaceholders(templateSubject) : null
+  const protectedBody = bodyProtection?.text ?? templateBody
+  const protectedSubject = subjectProtection?.text ?? templateSubject
+  const htmlStructureNote = /<[^>]+>/.test(`${templateBody || ''}${templateSubject || ''}`)
+    ? '\n\nIMPORTANT: Preserve any existing HTML tags and structure.'
     : ''
 
   // Prepare the user message
-  let userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}
+  let userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
 
 ---
 ORIGINAL EMAIL BODY:
-${templateBody}
+${protectedBody}
 ---
 
 Provide the improved email body:`
 
   // If subject is provided, include it
   if (templateSubject) {
-    userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}
+    userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
 
 ---
-ORIGINAL SUBJECT: ${templateSubject}
+ORIGINAL SUBJECT: ${protectedSubject}
 
 ORIGINAL EMAIL BODY:
-${templateBody}
+${protectedBody}
 ---
 
 Provide the improved subject line first, then the improved email body. Format:
@@ -135,15 +178,40 @@ BODY:
       // Extract subject and body from formatted response
       const subjectMatch = response.match(/SUBJECT:\s*(.+?)(?:\n|BODY:)/is)
       const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i)
+      let tweakedSubject = subjectMatch ? subjectMatch[1].trim() : (protectedSubject || '')
+      let tweakedBody = bodyMatch ? bodyMatch[1].trim() : response.trim()
+
+      if (preservePlaceholders) {
+        if (subjectProtection) {
+          tweakedSubject = restorePlaceholders(tweakedSubject, subjectProtection.placeholders)
+          if (!preservedPlaceholdersMatch(tweakedSubject, subjectProtection.placeholders)) {
+            tweakedSubject = subjectProtection.original
+          }
+        }
+        if (bodyProtection) {
+          tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
+          if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
+            tweakedBody = bodyProtection.original
+          }
+        }
+      }
 
       return {
-        tweakedSubject: subjectMatch ? subjectMatch[1].trim() : templateSubject,
-        tweakedBody: bodyMatch ? bodyMatch[1].trim() : response.trim()
+        tweakedSubject: tweakedSubject || templateSubject,
+        tweakedBody
+      }
+    }
+
+    let tweakedBody = response.trim()
+    if (preservePlaceholders && bodyProtection) {
+      tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
+      if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
+        tweakedBody = bodyProtection.original
       }
     }
 
     return {
-      tweakedBody: response.trim()
+      tweakedBody
     }
   } catch (error) {
     console.error('[AI Service] Gemini API error:', error)

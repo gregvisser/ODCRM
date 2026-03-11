@@ -853,10 +853,14 @@ router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
         lastName: contact.lastName,
         company: contact.companyName,
         companyName: contact.companyName,
+        accountName: contact.companyName,
         email: contact.email,
+        role: contact.jobTitle,
         jobTitle: contact.jobTitle,
         title: contact.jobTitle,
         phone: null,
+        senderName: identity.displayName ?? identity.emailAddress,
+        senderEmail: identity.emailAddress,
       }
 
       let cumulativeDays = 0

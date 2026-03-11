@@ -10,8 +10,6 @@ import {
   CardBody,
   CardHeader,
   Flex,
-  Grid,
-  GridItem,
   Heading,
   HStack,
   Icon,
@@ -29,7 +27,6 @@ import {
   Text,
   VStack,
   Badge,
-  Avatar,
   useDisclosure,
   Modal,
   ModalOverlay,
@@ -54,9 +51,9 @@ import {
   DeleteIcon,
   CopyIcon,
   StarIcon,
-  EmailIcon,
   ViewIcon,
 } from '@chakra-ui/icons'
+import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId } from '../../../platform/stores/settings'
@@ -87,6 +84,20 @@ type Customer = {
   name: string
 }
 
+const TEMPLATE_PLACEHOLDER_HELP = [
+  'first_name',
+  'last_name',
+  'full_name',
+  'company_name',
+  'role',
+  'website',
+  'sender_name',
+  'sender_email',
+  'unsubscribe_link',
+] as const
+
+type AITone = 'professional' | 'friendly' | 'casual'
+
 const escapeHtml = (value: string) => {
   return value
     .replace(/&/g, '&amp;')
@@ -116,7 +127,16 @@ const TemplatesTab: React.FC = () => {
   const [previewRendered, setPreviewRendered] = useState<{ subject: string; body: string } | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  const [aiTone, setAiTone] = useState<AITone>('professional')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiSuggestion, setAiSuggestion] = useState<{ subject: string; content: string } | null>(null)
   const toast = useToast()
+
+  const selectedCustomer = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId) ?? null,
+    [customers, selectedCustomerId],
+  )
 
   const loadCustomers = useCallback(async () => {
     const { data, error: apiError } = await api.get('/api/customers')
@@ -222,7 +242,15 @@ const TemplatesTab: React.FC = () => {
     return templates.filter(t => t.isFavorite)
   }, [templates])
 
+  const resetAiAssist = () => {
+    setAiLoading(false)
+    setAiError(null)
+    setAiSuggestion(null)
+    setAiTone('professional')
+  }
+
   const handleCreateTemplate = () => {
+    resetAiAssist()
     setEditingTemplate({
       id: '',
       name: '',
@@ -245,6 +273,7 @@ const TemplatesTab: React.FC = () => {
   }
 
   const handleEditTemplate = (template: EmailTemplate) => {
+    resetAiAssist()
     setEditingTemplate(template)
     onOpen()
   }
@@ -262,9 +291,15 @@ const TemplatesTab: React.FC = () => {
         subject: template.subject,
         body: template.content,
         variables: {
-          firstName: 'Alex',
-          companyName: 'Acme Ltd',
-          unsubscribeLink: 'https://example.com/unsubscribe',
+          first_name: 'Alex',
+          last_name: 'Taylor',
+          full_name: 'Alex Taylor',
+          company_name: selectedCustomer?.name || 'Acme Ltd',
+          role: 'Operations Manager',
+          website: 'https://acme.example',
+          sender_name: 'Jordan Reed',
+          sender_email: 'jordan@opendoors.example',
+          unsubscribe_link: 'https://example.com/unsubscribe',
         },
       },
       { headers },
@@ -278,6 +313,59 @@ const TemplatesTab: React.FC = () => {
         })
       }
     }).finally(() => setPreviewLoading(false))
+  }
+
+  const handleRewriteWithAI = async () => {
+    if (!editingTemplate) return
+    if (!editingTemplate.content.trim()) {
+      setAiError('Enter template content before using AI.')
+      return
+    }
+
+    setAiLoading(true)
+    setAiError(null)
+    setAiSuggestion(null)
+
+    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : undefined
+    const response = await api.post<{ tweakedBody?: string; tweakedSubject?: string }>(
+      '/api/templates/ai/tweak',
+      {
+        templateBody: editingTemplate.content,
+        templateSubject: editingTemplate.subject || undefined,
+        contactCompany: selectedCustomer?.name || undefined,
+        tone: aiTone,
+        instruction: 'Improve the wording for production outreach. Keep placeholders and unsubscribe tokens exactly as written.',
+        preservePlaceholders: true,
+      },
+      { headers },
+    )
+
+    setAiLoading(false)
+
+    if (response.error) {
+      setAiError(response.error)
+      return
+    }
+
+    setAiSuggestion({
+      subject: response.data?.tweakedSubject || editingTemplate.subject,
+      content: response.data?.tweakedBody || editingTemplate.content,
+    })
+  }
+
+  const applyAiSuggestion = () => {
+    if (!editingTemplate || !aiSuggestion) return
+    setEditingTemplate({
+      ...editingTemplate,
+      subject: aiSuggestion.subject,
+      content: aiSuggestion.content,
+    })
+    setAiSuggestion(null)
+  }
+
+  const handleCloseEditor = () => {
+    resetAiAssist()
+    onClose()
   }
 
   const handleSaveTemplate = async () => {
@@ -324,7 +412,7 @@ const TemplatesTab: React.FC = () => {
         setEditingTemplate({ ...editingTemplate, id: (res.data as any).id })
       }
       await loadData()
-      onClose()
+      handleCloseEditor()
       toast({
         title: `Template ${editingTemplate.id ? 'updated' : 'created'}`,
         status: 'success',
@@ -494,7 +582,7 @@ const TemplatesTab: React.FC = () => {
       <Alert id="templates-tab-compliance-banner" data-testid="templates-tab-compliance-banner" status="info" mb={4}>
         <AlertIcon />
         <AlertDescription>
-          Template rendering uses backend truth via <strong>/api/templates/preview</strong>. Keep unsubscribe/footer placeholders present to align with sending compliance enforcement.
+          Preview and send use the same placeholder rendering contract. Unsubscribe links remain enforced at send time.
         </AlertDescription>
       </Alert>
 
@@ -638,8 +726,8 @@ const TemplatesTab: React.FC = () => {
                   <Text fontSize="sm" fontWeight="semibold" color="gray.700">
                     Subject: {template.subject}
                   </Text>
-                  {!/\{\{\s*unsubscribeLink\s*\}\}|unsubscribe/i.test(template.content) && (
-                    <Badge mt={1} colorScheme="orange">No unsubscribe marker detected</Badge>
+                  {!/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}|unsubscribe/i.test(template.content) && (
+                    <Badge mt={1} colorScheme="blue">Unsubscribe footer added automatically</Badge>
                   )}
                   {template.previewText && (
                     <Text fontSize="sm" color="gray.600" noOfLines={2}>
@@ -678,7 +766,7 @@ const TemplatesTab: React.FC = () => {
       </SimpleGrid>
 
       {/* Create/Edit Template Modal */}
-      <Modal isOpen={isOpen} onClose={onClose} size="4xl">
+      <Modal isOpen={isOpen} onClose={handleCloseEditor} size="4xl">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>{editingTemplate?.id ? 'Edit Template' : 'Create Template'}</ModalHeader>
@@ -735,7 +823,44 @@ const TemplatesTab: React.FC = () => {
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>Email Content</FormLabel>
+                  <Flex justify="space-between" align="center" mb={2} gap={3}>
+                    <FormLabel mb={0}>Email Content</FormLabel>
+                    <HStack spacing={2}>
+                      <Select
+                        size="sm"
+                        value={aiTone}
+                        onChange={(e) => setAiTone(e.target.value as AITone)}
+                        w="160px"
+                      >
+                        <option value="professional">Professional</option>
+                        <option value="friendly">Friendly</option>
+                        <option value="casual">Conversational</option>
+                      </Select>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        leftIcon={<Icon as={RiSparkling2Line} />}
+                        onClick={handleRewriteWithAI}
+                        isLoading={aiLoading}
+                        loadingText="Rewriting"
+                      >
+                        Improve with AI
+                      </Button>
+                    </HStack>
+                  </Flex>
+                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="gray.50" p={3} mb={3}>
+                    <Text fontSize="sm" fontWeight="semibold">Supported placeholders</Text>
+                    <Flex mt={2} gap={2} wrap="wrap">
+                      {TEMPLATE_PLACEHOLDER_HELP.map((token) => (
+                        <Tag key={token} size="sm" variant="subtle" colorScheme="blue">
+                          <TagLabel>{`{{${token}}}`}</TagLabel>
+                        </Tag>
+                      ))}
+                    </Flex>
+                    <Text mt={2} fontSize="xs" color="gray.600">
+                      Existing camelCase placeholders still work. Preview and sending use the same merge contract.
+                    </Text>
+                  </Box>
                   <Textarea
                     value={editingTemplate.content}
                     onChange={(e) => setEditingTemplate({...editingTemplate, content: e.target.value})}
@@ -743,6 +868,45 @@ const TemplatesTab: React.FC = () => {
                     minH="200px"
                   />
                 </FormControl>
+
+                {aiError ? (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    <AlertDescription>{aiError}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                {aiSuggestion ? (
+                  <Box border="1px solid" borderColor="blue.200" borderRadius="md" bg="blue.50" p={4}>
+                    <HStack justify="space-between" align="start" mb={3}>
+                      <VStack align="start" spacing={0}>
+                        <HStack spacing={2}>
+                          <Icon as={RiSparkling2Line} color="blue.500" />
+                          <Text fontWeight="semibold">AI suggestion</Text>
+                        </HStack>
+                        <Text fontSize="sm" color="gray.600">Review before applying.</Text>
+                      </VStack>
+                      <HStack spacing={2}>
+                        <Button size="sm" colorScheme="blue" onClick={applyAiSuggestion}>
+                          Apply suggestion
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => setAiSuggestion(null)}>
+                          Dismiss
+                        </Button>
+                      </HStack>
+                    </HStack>
+                    <VStack align="stretch" spacing={3}>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="semibold">Suggested subject</Text>
+                        <Text mt={1} whiteSpace="pre-wrap">{aiSuggestion.subject}</Text>
+                      </Box>
+                      <Box>
+                        <Text fontSize="sm" fontWeight="semibold">Suggested content</Text>
+                        <Box mt={1} whiteSpace="pre-wrap">{aiSuggestion.content}</Box>
+                      </Box>
+                    </VStack>
+                  </Box>
+                ) : null}
 
                 <FormControl>
                   <FormLabel>Tags</FormLabel>
@@ -781,7 +945,7 @@ const TemplatesTab: React.FC = () => {
             )}
           </ModalBody>
           <Flex justify="flex-end" p={6} pt={0}>
-            <Button variant="ghost" mr={3} onClick={onClose}>
+            <Button variant="ghost" mr={3} onClick={handleCloseEditor}>
               Cancel
             </Button>
             <Button colorScheme="blue" onClick={handleSaveTemplate}>
