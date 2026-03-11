@@ -1677,6 +1677,23 @@ export async function syncAllCustomerLeads(prisma: PrismaClient) {
   console.log(`   Total leads in DB:`, await prisma.leadRecord.count())
 }
 
+let batchSyncInFlight = false
+
+async function runBatchSyncCycle(prisma: PrismaClient, trigger: 'startup' | 'cron'): Promise<void> {
+  if (batchSyncInFlight) {
+    console.log(`⏭️ Leads sync ${trigger} cycle skipped: previous batch sync still running`)
+    return
+  }
+
+  batchSyncInFlight = true
+  try {
+    console.log(`🚀 Leads sync ${trigger} cycle starting`)
+    await syncAllCustomerLeads(prisma)
+  } finally {
+    batchSyncInFlight = false
+  }
+}
+
 /**
  * Manual sync trigger for a specific customer.
  * Always upserts LeadSyncState (lastSyncAt) so metrics show lastSync even when 0 rows or no sheet.
@@ -1744,10 +1761,14 @@ export function startLeadsSyncWorker(prisma: PrismaClient) {
 
   cron.schedule(cronExpression, async () => {
     try {
-      await syncAllCustomerLeads(prisma)
+      await runBatchSyncCycle(prisma, 'cron')
     } catch (error) {
       console.error('Error in leads sync worker:', error)
     }
+  })
+
+  void runBatchSyncCycle(prisma, 'startup').catch((error) => {
+    console.error('Error in initial leads sync worker catch-up:', error)
   })
 
   console.log(`✅ Leads sync worker started (${cronExpression})`)
