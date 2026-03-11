@@ -1548,6 +1548,7 @@ const SequencesTab: React.FC = () => {
 
   const openAuditPanelForQueueItem = (queueItemId: string) => {
     setAuditQueueItemIdFilter(queueItemId)
+    if (!isDiagnosticsOpen) onDiagnosticsOpen()
     if (!isAuditPanelOpen) onAuditPanelOpen()
     if (selectedCustomerId?.startsWith('cust_')) {
       loadAudits()
@@ -3267,13 +3268,28 @@ const SequencesTab: React.FC = () => {
             Choose a sequence, verify readiness, then run only the next safe action.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Start with readiness and launch preview. Use diagnostics only when investigating issues.
+            Operator view keeps readiness and next-send preview in focus. Open advanced diagnostics only when investigating issues.
           </Text>
           {activeFocusPanel ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
               Focused panel: {activeFocusPanel}
             </Text>
           ) : null}
+          <HStack spacing={2} mt={1} data-testid="sequences-tab-view-toggle">
+            <Badge colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}>
+              {isDiagnosticsOpen ? 'Advanced diagnostics' : 'Operator view'}
+            </Badge>
+            <Button
+              id="sequences-tab-toggle-diagnostics"
+              data-testid="sequences-tab-toggle-diagnostics"
+              size="xs"
+              variant={isDiagnosticsOpen ? 'outline' : 'solid'}
+              colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}
+              onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
+            >
+              {isDiagnosticsOpen ? 'Return to operator view' : 'Open advanced diagnostics'}
+            </Button>
+          </HStack>
           <HStack spacing={2} mt={1} data-testid="sequences-tab-cross-nav">
             <Button
               size="xs"
@@ -3456,7 +3472,7 @@ const SequencesTab: React.FC = () => {
                   </Select>
                 </FormControl>
                 <Text fontSize="xs" color="gray.500">
-                  Shared-state console. Actions always refresh from backend truth.
+                  Operator view refreshes from backend truth.
                 </Text>
                 <Text id="sending-console-last-updated" data-testid="sending-console-last-updated" fontSize="xs" color="gray.500">
                   Last updated: {operatorConsoleLastUpdatedAt ? new Date(operatorConsoleLastUpdatedAt).toLocaleString() : '—'}
@@ -3476,138 +3492,142 @@ const SequencesTab: React.FC = () => {
 
               {operatorConsoleData && (
                 <>
-                  <Card>
-                    <CardBody>
-                      <VStack align="stretch" spacing={3}>
-                        <Flex gap={3} flexWrap="wrap" align="center">
-                          <FormControl maxW="340px">
-                            <FormLabel fontSize="xs" mb={1}>Admin secret (local)</FormLabel>
-                            <Input
-                              type="password"
-                              size="sm"
-                              placeholder="Required for dry-run/live tick actions"
-                              value={adminSecret}
-                              onChange={(e) => {
-                                const v = e.target.value
-                                setAdminSecret(v)
-                                try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
-                              }}
-                            />
-                          </FormControl>
-                          <Button
-                            id="sending-console-run-dry-run-btn"
-                            data-testid="sending-console-run-dry-run-btn"
-                            size="sm"
-                            colorScheme="teal"
-                            onClick={handleRunDryRunWorker}
-                            isLoading={dryRunWorkerLoading}
-                            isDisabled={Boolean(dryRunActionDisabledReason)}
-                          >
-                            Run Dry-Run Tick
-                          </Button>
-                          <Button
-                            id="sending-console-run-live-canary-btn"
-                            data-testid="sending-console-run-live-canary-btn"
-                            size="sm"
-                            colorScheme="purple"
-                            onClick={handleRunLiveCanaryTick}
-                            isLoading={liveCanaryTickLoading}
-                            isDisabled={Boolean(liveCanaryActionDisabledReason)}
-                          >
-                            Run Live Canary Tick
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={<ViewIcon />}
-                            onClick={() => onAuditPanelOpen()}
-                            isDisabled={!selectedCustomerId?.startsWith('cust_')}
-                          >
-                            Open Audits
-                          </Button>
-                        </Flex>
-                        <VStack align="stretch" spacing={1}>
-                          {dryRunActionDisabledReason && (
-                            <Text id="sending-console-dryrun-disabled-reason" data-testid="sending-console-dryrun-disabled-reason" fontSize="xs" color="gray.600">
-                              Dry-run action unavailable: {dryRunActionDisabledReason}
-                            </Text>
-                          )}
-                          {liveCanaryActionDisabledReason && (
-                            <Text id="sending-console-live-disabled-reason" data-testid="sending-console-live-disabled-reason" fontSize="xs" color="orange.600">
-                              Live canary action unavailable: {liveCanaryActionDisabledReason}
-                            </Text>
-                          )}
-                          {Array.isArray(operatorConsoleData.status.liveGateReasons) && operatorConsoleData.status.liveGateReasons.length > 0 && (
-                            <Text fontSize="xs" color="gray.500">
-                              Current gate blockers: {operatorConsoleData.status.liveGateReasons.join(' | ')}
-                            </Text>
-                          )}
-                          <Text id="sending-console-action-status" data-testid="sending-console-action-status" fontSize="xs" color="blue.600">
-                            {operatorActionStatus || 'Idle. Use actions, then refresh/inspect samples to verify shared state.'}
-                          </Text>
-                        </VStack>
-                        <Card id="sending-console-action-readiness" data-testid="sending-console-action-readiness" variant="outline">
-                          <CardBody py={3}>
-                            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
-                              <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
-                                <Text fontSize="xs" color="gray.600">Dry-run tick</Text>
-                                <Badge colorScheme={dryRunActionDisabledReason ? 'orange' : 'green'}>
-                                  {dryRunActionDisabledReason ? 'Blocked' : 'Ready'}
-                                </Badge>
-                              </HStack>
-                              <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
-                                <Text fontSize="xs" color="gray.600">Live canary tick</Text>
-                                <Badge colorScheme={liveCanaryActionDisabledReason ? 'orange' : 'green'}>
-                                  {liveCanaryActionDisabledReason ? 'Blocked' : 'Ready'}
-                                </Badge>
-                              </HStack>
-                            </SimpleGrid>
-                            <Text fontSize="xs" color="gray.500" mt={2}>
-                              Routes: {operatorConsoleData.status.dryRunTickRoute || '/api/send-worker/dry-run'} · {operatorConsoleData.status.liveCanaryTickRoute || '/api/send-worker/live-tick'}
-                            </Text>
-                          </CardBody>
-                        </Card>
-                        <Card id="sending-console-last-action-result" data-testid="sending-console-last-action-result" variant="outline">
-                          <CardBody py={3}>
-                            {!operatorLastActionResult ? (
-                              <Text fontSize="xs" color="gray.500">No action run yet in this session.</Text>
-                            ) : (
-                              <VStack align="stretch" spacing={1}>
-                                <HStack justify="space-between">
-                                  <Text fontSize="xs" color="gray.600">Last action</Text>
-                                  <Badge colorScheme={operatorLastActionResult.success ? 'green' : 'red'}>
-                                    {operatorLastActionResult.action}
-                                  </Badge>
-                                </HStack>
-                                <Text fontSize="xs">{operatorLastActionResult.summary}</Text>
+                  <Collapse in={isDiagnosticsOpen} animateOpacity>
+                    <VStack align="stretch" spacing={4} mb={4}>
+                      <Card>
+                        <CardBody>
+                          <VStack align="stretch" spacing={3}>
+                            <Flex gap={3} flexWrap="wrap" align="center">
+                              <FormControl maxW="340px">
+                                <FormLabel fontSize="xs" mb={1}>Admin secret (local)</FormLabel>
+                                <Input
+                                  type="password"
+                                  size="sm"
+                                  placeholder="Required for dry-run/live tick actions"
+                                  value={adminSecret}
+                                  onChange={(e) => {
+                                    const v = e.target.value
+                                    setAdminSecret(v)
+                                    try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
+                                  }}
+                                />
+                              </FormControl>
+                              <Button
+                                id="sending-console-run-dry-run-btn"
+                                data-testid="sending-console-run-dry-run-btn"
+                                size="sm"
+                                colorScheme="teal"
+                                onClick={handleRunDryRunWorker}
+                                isLoading={dryRunWorkerLoading}
+                                isDisabled={Boolean(dryRunActionDisabledReason)}
+                              >
+                                Run Dry-Run Tick
+                              </Button>
+                              <Button
+                                id="sending-console-run-live-canary-btn"
+                                data-testid="sending-console-run-live-canary-btn"
+                                size="sm"
+                                colorScheme="purple"
+                                onClick={handleRunLiveCanaryTick}
+                                isLoading={liveCanaryTickLoading}
+                                isDisabled={Boolean(liveCanaryActionDisabledReason)}
+                              >
+                                Run Live Canary Tick
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                leftIcon={<ViewIcon />}
+                                onClick={() => onAuditPanelOpen()}
+                                isDisabled={!selectedCustomerId?.startsWith('cust_')}
+                              >
+                                Open Audits
+                              </Button>
+                            </Flex>
+                            <VStack align="stretch" spacing={1}>
+                              {dryRunActionDisabledReason && (
+                                <Text id="sending-console-dryrun-disabled-reason" data-testid="sending-console-dryrun-disabled-reason" fontSize="xs" color="gray.600">
+                                  Dry-run action unavailable: {dryRunActionDisabledReason}
+                                </Text>
+                              )}
+                              {liveCanaryActionDisabledReason && (
+                                <Text id="sending-console-live-disabled-reason" data-testid="sending-console-live-disabled-reason" fontSize="xs" color="orange.600">
+                                  Live canary action unavailable: {liveCanaryActionDisabledReason}
+                                </Text>
+                              )}
+                              {Array.isArray(operatorConsoleData.status.liveGateReasons) && operatorConsoleData.status.liveGateReasons.length > 0 && (
                                 <Text fontSize="xs" color="gray.500">
-                                  Started {new Date(operatorLastActionResult.startedAt).toLocaleString()} · Finished {new Date(operatorLastActionResult.finishedAt).toLocaleString()}
+                                  Current gate blockers: {operatorConsoleData.status.liveGateReasons.join(' | ')}
                                 </Text>
-                                <Text id="sending-console-backend-truth-refresh" data-testid="sending-console-backend-truth-refresh" fontSize="xs" color="gray.500">
-                                  Backend truth refresh: {operatorLastActionResult.refreshedAt ? new Date(operatorLastActionResult.refreshedAt).toLocaleString() : 'not completed'}
+                              )}
+                              <Text id="sending-console-action-status" data-testid="sending-console-action-status" fontSize="xs" color="blue.600">
+                                {operatorActionStatus || 'Idle. Use actions, then refresh/inspect samples to verify shared state.'}
+                              </Text>
+                            </VStack>
+                            <Card id="sending-console-action-readiness" data-testid="sending-console-action-readiness" variant="outline">
+                              <CardBody py={3}>
+                                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
+                                  <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                    <Text fontSize="xs" color="gray.600">Dry-run tick</Text>
+                                    <Badge colorScheme={dryRunActionDisabledReason ? 'orange' : 'green'}>
+                                      {dryRunActionDisabledReason ? 'Blocked' : 'Ready'}
+                                    </Badge>
+                                  </HStack>
+                                  <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
+                                    <Text fontSize="xs" color="gray.600">Live canary tick</Text>
+                                    <Badge colorScheme={liveCanaryActionDisabledReason ? 'orange' : 'green'}>
+                                      {liveCanaryActionDisabledReason ? 'Blocked' : 'Ready'}
+                                    </Badge>
+                                  </HStack>
+                                </SimpleGrid>
+                                <Text fontSize="xs" color="gray.500" mt={2}>
+                                  Routes: {operatorConsoleData.status.dryRunTickRoute || '/api/send-worker/dry-run'} · {operatorConsoleData.status.liveCanaryTickRoute || '/api/send-worker/live-tick'}
                                 </Text>
-                              </VStack>
-                            )}
-                          </CardBody>
-                        </Card>
-                      </VStack>
-                    </CardBody>
-                  </Card>
+                              </CardBody>
+                            </Card>
+                            <Card id="sending-console-last-action-result" data-testid="sending-console-last-action-result" variant="outline">
+                              <CardBody py={3}>
+                                {!operatorLastActionResult ? (
+                                  <Text fontSize="xs" color="gray.500">No action run yet in this session.</Text>
+                                ) : (
+                                  <VStack align="stretch" spacing={1}>
+                                    <HStack justify="space-between">
+                                      <Text fontSize="xs" color="gray.600">Last action</Text>
+                                      <Badge colorScheme={operatorLastActionResult.success ? 'green' : 'red'}>
+                                        {operatorLastActionResult.action}
+                                      </Badge>
+                                    </HStack>
+                                    <Text fontSize="xs">{operatorLastActionResult.summary}</Text>
+                                    <Text fontSize="xs" color="gray.500">
+                                      Started {new Date(operatorLastActionResult.startedAt).toLocaleString()} · Finished {new Date(operatorLastActionResult.finishedAt).toLocaleString()}
+                                    </Text>
+                                    <Text id="sending-console-backend-truth-refresh" data-testid="sending-console-backend-truth-refresh" fontSize="xs" color="gray.500">
+                                      Backend truth refresh: {operatorLastActionResult.refreshedAt ? new Date(operatorLastActionResult.refreshedAt).toLocaleString() : 'not completed'}
+                                    </Text>
+                                  </VStack>
+                                )}
+                              </CardBody>
+                            </Card>
+                          </VStack>
+                        </CardBody>
+                      </Card>
 
-                  <SimpleGrid columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
-                    <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Scheduled</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEnabled ? 'On' : 'Off'}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Live Allowed</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledLiveAllowed ? 'Yes' : 'No'}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Cron</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.cron}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Canary</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.canaryCustomerIdPresent ? 'Set' : 'Missing'}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Live Cap</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.liveSendCap}</StatNumber></Stat></CardBody></Card>
-                  </SimpleGrid>
-                  <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
-                    <Card><CardBody py={3}><Stat><StatLabel>Due now</StatLabel><StatNumber>{operatorConsoleData.status.dueNowCount ?? 0}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Active identities</StatLabel><StatNumber>{operatorConsoleData.status.activeIdentityCount ?? 0}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Manual live tick</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualLiveTickAllowed ? 'Allowed' : 'Blocked'}</StatNumber></Stat></CardBody></Card>
-                    <Card><CardBody py={3}><Stat><StatLabel>Manual reason</StatLabel><StatNumber fontSize="xs">{operatorConsoleData.status.manualLiveTickReason ?? '—'}</StatNumber></Stat></CardBody></Card>
-                  </SimpleGrid>
+                      <SimpleGrid columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
+                        <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Scheduled</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEnabled ? 'On' : 'Off'}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Live Allowed</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledLiveAllowed ? 'Yes' : 'No'}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Cron</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.cron}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Canary</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.canaryCustomerIdPresent ? 'Set' : 'Missing'}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Live Cap</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.liveSendCap}</StatNumber></Stat></CardBody></Card>
+                      </SimpleGrid>
+                      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                        <Card><CardBody py={3}><Stat><StatLabel>Due now</StatLabel><StatNumber>{operatorConsoleData.status.dueNowCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Active identities</StatLabel><StatNumber>{operatorConsoleData.status.activeIdentityCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Manual live tick</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualLiveTickAllowed ? 'Allowed' : 'Blocked'}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Manual reason</StatLabel><StatNumber fontSize="xs">{operatorConsoleData.status.manualLiveTickReason ?? '—'}</StatNumber></Stat></CardBody></Card>
+                      </SimpleGrid>
+                    </VStack>
+                  </Collapse>
 
                   <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
                     <Card><CardBody py={3}><Stat><StatLabel>Total queued</StatLabel><StatNumber>{operatorConsoleData.queue.totalQueued}</StatNumber></Stat></CardBody></Card>
@@ -3713,17 +3733,19 @@ const SequencesTab: React.FC = () => {
                                     Dry-run: {sequencePreflightData.actions?.canDryRun ? 'ready' : 'blocked'} · Live canary: {sequencePreflightData.actions?.canLiveCanary ? 'ready' : 'blocked'}
                                     {sequencePreflightData.actions?.liveCanaryReason ? ` (${sequencePreflightData.actions.liveCanaryReason})` : ''}
                                   </Text>
-                                  <Text
-                                    id="sequence-preflight-identity-guardrail"
-                                    data-testid="sequence-preflight-identity-guardrail"
-                                    fontSize="xs"
-                                    color="gray.500"
-                                  >
-                                    Identity guardrails: usable={sequencePreflightData.dependencies?.identityCapacity?.summary?.usable ?? 0}
-                                    {' '}risky={sequencePreflightData.dependencies?.identityCapacity?.summary?.risky ?? 0}
-                                    {' '}unavailable={sequencePreflightData.dependencies?.identityCapacity?.summary?.unavailable ?? 0}
-                                    {' '}preferredState={sequencePreflightData.dependencies?.identityCapacity?.summary?.preferredIdentityState ?? 'n/a'}
-                                  </Text>
+                                  {isDiagnosticsOpen ? (
+                                    <Text
+                                      id="sequence-preflight-identity-guardrail"
+                                      data-testid="sequence-preflight-identity-guardrail"
+                                      fontSize="xs"
+                                      color="gray.500"
+                                    >
+                                      Identity guardrails: usable={sequencePreflightData.dependencies?.identityCapacity?.summary?.usable ?? 0}
+                                      {' '}risky={sequencePreflightData.dependencies?.identityCapacity?.summary?.risky ?? 0}
+                                      {' '}unavailable={sequencePreflightData.dependencies?.identityCapacity?.summary?.unavailable ?? 0}
+                                      {' '}preferredState={sequencePreflightData.dependencies?.identityCapacity?.summary?.preferredIdentityState ?? 'n/a'}
+                                    </Text>
+                                  ) : null}
                                   <HStack spacing={2}>
                                     <Button
                                       size="xs"
@@ -3740,7 +3762,10 @@ const SequencesTab: React.FC = () => {
                                       variant="ghost"
                                       id="sequence-preflight-drilldown-workbench"
                                       data-testid="sequence-preflight-drilldown-workbench"
-                                      onClick={() => setQueueWorkbenchState('blocked')}
+                                      onClick={() => {
+                                        if (!isDiagnosticsOpen) onDiagnosticsOpen()
+                                        setQueueWorkbenchState('blocked')
+                                      }}
                                     >
                                       Open blocked queue
                                     </Button>
@@ -3749,7 +3774,10 @@ const SequencesTab: React.FC = () => {
                                       variant="ghost"
                                       id="sequence-preflight-drilldown-reporting"
                                       data-testid="sequence-preflight-drilldown-reporting"
-                                      onClick={() => loadOpsReporting()}
+                                      onClick={() => {
+                                        if (!isDiagnosticsOpen) onDiagnosticsOpen()
+                                        loadOpsReporting()
+                                      }}
                                     >
                                       Open reporting
                                     </Button>
@@ -3766,113 +3794,115 @@ const SequencesTab: React.FC = () => {
                     </CardBody>
                   </Card>
 
-                  <Card id="identity-capacity-panel" data-testid="identity-capacity-panel">
-                    <CardBody>
-                      <VStack align="stretch" spacing={3}>
-                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                          <Text fontSize="sm" fontWeight="semibold">Identity Capacity & Sending Guardrails</Text>
-                          <Button
-                            id="identity-capacity-refresh-btn"
-                            data-testid="identity-capacity-refresh-btn"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => loadIdentityCapacity()}
-                            isLoading={identityCapacityLoading}
-                          >
-                            Refresh Identity Capacity
-                          </Button>
-                        </Flex>
+                  <Collapse in={isDiagnosticsOpen} animateOpacity>
+                    <Card id="identity-capacity-panel" data-testid="identity-capacity-panel" mb={4}>
+                      <CardBody>
+                        <VStack align="stretch" spacing={3}>
+                          <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                            <Text fontSize="sm" fontWeight="semibold">Identity Capacity & Sending Guardrails</Text>
+                            <Button
+                              id="identity-capacity-refresh-btn"
+                              data-testid="identity-capacity-refresh-btn"
+                              size="sm"
+                              variant="outline"
+                              onClick={() => loadIdentityCapacity()}
+                              isLoading={identityCapacityLoading}
+                            >
+                              Refresh Identity Capacity
+                            </Button>
+                          </Flex>
 
-                        {identityCapacityError && (
-                          <Alert status="error" size="sm">
-                            <AlertIcon />
-                            <AlertDescription>{identityCapacityError}</AlertDescription>
-                          </Alert>
-                        )}
+                          {identityCapacityError && (
+                            <Alert status="error" size="sm">
+                              <AlertIcon />
+                              <AlertDescription>{identityCapacityError}</AlertDescription>
+                            </Alert>
+                          )}
 
-                        {!identityCapacityError && identityCapacityData && (
-                          <>
-                            <SimpleGrid id="identity-capacity-summary" data-testid="identity-capacity-summary" columns={{ base: 2, md: 5 }} spacing={2}>
-                              <Card><CardBody py={2}><Stat><StatLabel>Total identities</StatLabel><StatNumber>{identityCapacityData.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
-                              <Card><CardBody py={2}><Stat><StatLabel>Usable</StatLabel><StatNumber color="green.600">{identityCapacityData.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
-                              <Card><CardBody py={2}><Stat><StatLabel>Unavailable</StatLabel><StatNumber color="gray.600">{identityCapacityData.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
-                              <Card><CardBody py={2}><Stat><StatLabel>Risky</StatLabel><StatNumber color="orange.600">{identityCapacityData.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
-                              <Card><CardBody py={2}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="sm">{identityCapacityData.summary.recommendedIdentityId ? '1' : '0'}</StatNumber><StatHelpText>{identityCapacityData.summary.recommendedIdentityId || 'none'}</StatHelpText></Stat></CardBody></Card>
-                            </SimpleGrid>
+                          {!identityCapacityError && identityCapacityData && (
+                            <>
+                              <SimpleGrid id="identity-capacity-summary" data-testid="identity-capacity-summary" columns={{ base: 2, md: 5 }} spacing={2}>
+                                <Card><CardBody py={2}><Stat><StatLabel>Total identities</StatLabel><StatNumber>{identityCapacityData.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
+                                <Card><CardBody py={2}><Stat><StatLabel>Usable</StatLabel><StatNumber color="green.600">{identityCapacityData.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
+                                <Card><CardBody py={2}><Stat><StatLabel>Unavailable</StatLabel><StatNumber color="gray.600">{identityCapacityData.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
+                                <Card><CardBody py={2}><Stat><StatLabel>Risky</StatLabel><StatNumber color="orange.600">{identityCapacityData.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
+                                <Card><CardBody py={2}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="sm">{identityCapacityData.summary.recommendedIdentityId ? '1' : '0'}</StatNumber><StatHelpText>{identityCapacityData.summary.recommendedIdentityId || 'none'}</StatHelpText></Stat></CardBody></Card>
+                              </SimpleGrid>
 
-                            {(identityCapacityData.guardrails?.warnings || []).length > 0 && (
-                              <Alert id="identity-capacity-guardrails" data-testid="identity-capacity-guardrails" status="warning" size="sm">
-                                <AlertIcon />
-                                <AlertDescription>
-                                  {(identityCapacityData.guardrails?.warnings || []).join(' | ')}
-                                </AlertDescription>
-                              </Alert>
-                            )}
+                              {(identityCapacityData.guardrails?.warnings || []).length > 0 && (
+                                <Alert id="identity-capacity-guardrails" data-testid="identity-capacity-guardrails" status="warning" size="sm">
+                                  <AlertIcon />
+                                  <AlertDescription>
+                                    {(identityCapacityData.guardrails?.warnings || []).join(' | ')}
+                                  </AlertDescription>
+                                </Alert>
+                              )}
 
-                            <Box id="identity-capacity-rows" data-testid="identity-capacity-rows" overflowX="auto">
-                              <Table size="sm">
-                                <Thead>
-                                  <Tr>
-                                    <Th>Identity</Th>
-                                    <Th>Provider</Th>
-                                    <Th>State</Th>
-                                    <Th>Recent outcomes</Th>
-                                    <Th>Queue pressure</Th>
-                                    <Th>Guardrails</Th>
-                                  </Tr>
-                                </Thead>
-                                <Tbody>
-                                  {(identityCapacityData.rows || []).length === 0 ? (
+                              <Box id="identity-capacity-rows" data-testid="identity-capacity-rows" overflowX="auto">
+                                <Table size="sm">
+                                  <Thead>
                                     <Tr>
-                                      <Td colSpan={6} color="gray.500">No identities found for this client.</Td>
+                                      <Th>Identity</Th>
+                                      <Th>Provider</Th>
+                                      <Th>State</Th>
+                                      <Th>Recent outcomes</Th>
+                                      <Th>Queue pressure</Th>
+                                      <Th>Guardrails</Th>
                                     </Tr>
-                                  ) : (identityCapacityData.rows || []).map((row) => (
-                                    <Tr key={row.identityId}>
-                                      <Td fontSize="xs">
-                                        <Text>{row.label || row.email}</Text>
-                                        <Text color="gray.500">{row.email}</Text>
-                                        {row.identityId === identityCapacityData.summary.preferredIdentityId ? (
-                                          <Badge size="sm" colorScheme="blue" mt={1}>Preferred for selected sequence</Badge>
-                                        ) : null}
-                                        {row.identityId === identityCapacityData.summary.recommendedIdentityId ? (
-                                          <Badge size="sm" colorScheme="green" mt={1} ml={1}>Recommended now</Badge>
-                                        ) : null}
-                                      </Td>
-                                      <Td fontSize="xs">{row.provider}</Td>
-                                      <Td>
-                                        <Badge
-                                          id="identity-capacity-state-badge"
-                                          data-testid="identity-capacity-state-badge"
-                                          colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'gray'}
-                                        >
-                                          {row.state}
-                                        </Badge>
-                                        {!row.isActive ? <Text fontSize="xs" color="gray.500">inactive</Text> : null}
-                                        {(row.reasons || []).length > 0 ? <Text fontSize="xs" color="gray.500">{row.reasons.join(', ')}</Text> : null}
-                                      </Td>
-                                      <Td fontSize="xs">
-                                        sent={row.recent?.sent ?? 0} failed={row.recent?.sendFailed ?? 0} would_send={row.recent?.wouldSend ?? 0}
-                                      </Td>
-                                      <Td fontSize="xs">queuedNow={row.queuePressure?.queuedNow ?? 0}</Td>
-                                      <Td fontSize="xs">
-                                        {row.guardrails?.dailySendLimit ? `dailyCap=${row.guardrails.dailySendLimit}` : 'dailyCap=—'}
-                                        <br />
-                                        {row.guardrails?.sendWindowTimeZone ? `${row.guardrails.sendWindowTimeZone} ${row.guardrails.sendWindowHoursStart ?? '—'}-${row.guardrails.sendWindowHoursEnd ?? '—'}` : 'window=—'}
-                                      </Td>
-                                    </Tr>
-                                  ))}
-                                </Tbody>
-                              </Table>
-                            </Box>
+                                  </Thead>
+                                  <Tbody>
+                                    {(identityCapacityData.rows || []).length === 0 ? (
+                                      <Tr>
+                                        <Td colSpan={6} color="gray.500">No identities found for this client.</Td>
+                                      </Tr>
+                                    ) : (identityCapacityData.rows || []).map((row) => (
+                                      <Tr key={row.identityId}>
+                                        <Td fontSize="xs">
+                                          <Text>{row.label || row.email}</Text>
+                                          <Text color="gray.500">{row.email}</Text>
+                                          {row.identityId === identityCapacityData.summary.preferredIdentityId ? (
+                                            <Badge size="sm" colorScheme="blue" mt={1}>Preferred for selected sequence</Badge>
+                                          ) : null}
+                                          {row.identityId === identityCapacityData.summary.recommendedIdentityId ? (
+                                            <Badge size="sm" colorScheme="green" mt={1} ml={1}>Recommended now</Badge>
+                                          ) : null}
+                                        </Td>
+                                        <Td fontSize="xs">{row.provider}</Td>
+                                        <Td>
+                                          <Badge
+                                            id="identity-capacity-state-badge"
+                                            data-testid="identity-capacity-state-badge"
+                                            colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'gray'}
+                                          >
+                                            {row.state}
+                                          </Badge>
+                                          {!row.isActive ? <Text fontSize="xs" color="gray.500">inactive</Text> : null}
+                                          {(row.reasons || []).length > 0 ? <Text fontSize="xs" color="gray.500">{row.reasons.join(', ')}</Text> : null}
+                                        </Td>
+                                        <Td fontSize="xs">
+                                          sent={row.recent?.sent ?? 0} failed={row.recent?.sendFailed ?? 0} would_send={row.recent?.wouldSend ?? 0}
+                                        </Td>
+                                        <Td fontSize="xs">queuedNow={row.queuePressure?.queuedNow ?? 0}</Td>
+                                        <Td fontSize="xs">
+                                          {row.guardrails?.dailySendLimit ? `dailyCap=${row.guardrails.dailySendLimit}` : 'dailyCap=—'}
+                                          <br />
+                                          {row.guardrails?.sendWindowTimeZone ? `${row.guardrails.sendWindowTimeZone} ${row.guardrails.sendWindowHoursStart ?? '—'}-${row.guardrails.sendWindowHoursEnd ?? '—'}` : 'window=—'}
+                                        </Td>
+                                      </Tr>
+                                    ))}
+                                  </Tbody>
+                                </Table>
+                              </Box>
 
-                            <Text id="identity-capacity-last-updated" data-testid="identity-capacity-last-updated" fontSize="xs" color="gray.500">
-                              Last updated: {identityCapacityData.lastUpdatedAt ? new Date(identityCapacityData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/identity-capacity
-                            </Text>
-                          </>
-                        )}
-                      </VStack>
-                    </CardBody>
-                  </Card>
+                              <Text id="identity-capacity-last-updated" data-testid="identity-capacity-last-updated" fontSize="xs" color="gray.500">
+                                Last updated: {identityCapacityData.lastUpdatedAt ? new Date(identityCapacityData.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/identity-capacity
+                              </Text>
+                            </>
+                          )}
+                        </VStack>
+                      </CardBody>
+                    </Card>
+                  </Collapse>
 
                   <Card id="sequence-readiness-panel" data-testid="sequence-readiness-panel">
                     <CardBody>
@@ -3930,10 +3960,10 @@ const SequencesTab: React.FC = () => {
                             isLoading={sequenceReadinessLoading || sequencePreflightLoading || launchPreviewLoading || runHistoryLoading || previewVsOutcomeLoading || exceptionCenterLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
-                            Refresh Launch Data
+                            Refresh readiness
                           </Button>
                           <Text fontSize="xs" color="gray.500">
-                            Uses current queue and rule outcomes to show who is sendable now.
+                            Shows who is ready, blocked, or excluded right now.
                           </Text>
                         </Flex>
 
@@ -4022,7 +4052,7 @@ const SequencesTab: React.FC = () => {
                     <CardBody>
                       <VStack align="stretch" spacing={3}>
                         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
-                          <Text fontSize="sm" fontWeight="semibold">Launch Preview (First Batch Inspection)</Text>
+                          <Text fontSize="sm" fontWeight="semibold">Preview Next Send</Text>
                           <Button
                             id="launch-preview-refresh-btn"
                             data-testid="launch-preview-refresh-btn"
@@ -4032,7 +4062,7 @@ const SequencesTab: React.FC = () => {
                             isLoading={launchPreviewLoading}
                             isDisabled={!sequenceReadinessSequenceId}
                           >
-                            Refresh Launch Preview
+                            Refresh Preview
                           </Button>
                         </Flex>
                         {launchPreviewError && (
@@ -4171,26 +4201,6 @@ const SequencesTab: React.FC = () => {
                           </>
                         )}
                       </VStack>
-                    </CardBody>
-                  </Card>
-
-                  <Card id="sequences-tab-advanced-review" data-testid="sequences-tab-advanced-review" variant="outline">
-                    <CardBody py={3}>
-                      <HStack justify="space-between" align="center">
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="sm" fontWeight="semibold">Advanced Review & Diagnostics</Text>
-                          <Text fontSize="xs" color="gray.500">Open this when you need deeper troubleshooting after preflight and launch preview.</Text>
-                        </VStack>
-                        <Button
-                          id="sequences-tab-toggle-diagnostics"
-                          data-testid="sequences-tab-toggle-diagnostics"
-                          size="xs"
-                          variant="ghost"
-                          onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
-                        >
-                          {isDiagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
-                        </Button>
-                      </HStack>
                     </CardBody>
                   </Card>
 
@@ -5067,13 +5077,14 @@ const SequencesTab: React.FC = () => {
         </CardBody>
       </Card>
 
-      <Card mb={6}>
-        <CardBody>
-          <Heading size="sm" mb={3} cursor="pointer" onClick={isQueuePreviewPanelOpen ? onQueuePreviewPanelClose : onQueuePreviewPanelOpen}>
-            Send Queue Preview (Dry Run) {isQueuePreviewPanelOpen ? '▼' : '▶'}
-          </Heading>
-          <Collapse in={isQueuePreviewPanelOpen}>
-            <Box>
+      <Collapse in={isDiagnosticsOpen} animateOpacity>
+        <Card mb={6}>
+          <CardBody>
+            <Heading size="sm" mb={3} cursor="pointer" onClick={isQueuePreviewPanelOpen ? onQueuePreviewPanelClose : onQueuePreviewPanelOpen}>
+              Send Queue Preview (Dry Run) {isQueuePreviewPanelOpen ? '▼' : '▶'}
+            </Heading>
+            <Collapse in={isQueuePreviewPanelOpen}>
+              <Box>
           <Flex gap={3} mb={3} flexWrap="wrap" align="center">
             <Button size="sm" onClick={loadSendQueuePreview} isLoading={queuePreviewLoading} isDisabled={!selectedCustomerId}>
               Refresh
@@ -5187,8 +5198,8 @@ const SequencesTab: React.FC = () => {
               </Table>
             </Box>
           )}
-            </Box>
-          </Collapse>
+              </Box>
+            </Collapse>
 
           <Modal isOpen={queueDrillOpen} onClose={() => { setQueueDrillOpen(false); setRenderLoading(false); setRenderError(null); setRenderData(null); setRenderViewMode('code'); setQueueItemDetail(null); setDetailLoading(false); setDetailError(null) }} size="xl">
             <ModalOverlay />
@@ -5425,16 +5436,18 @@ const SequencesTab: React.FC = () => {
               </ModalBody>
             </ModalContent>
           </Modal>
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      </Collapse>
 
-      <Card mb={6}>
-        <CardBody>
-          <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
-            Dry-run Audit {isAuditPanelOpen ? '▼' : '▶'}
-          </Heading>
-          <Collapse in={isAuditPanelOpen}>
-            <Box>
+      <Collapse in={isDiagnosticsOpen} animateOpacity>
+        <Card mb={6}>
+          <CardBody>
+            <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
+              Dry-run Audit {isAuditPanelOpen ? '▼' : '▶'}
+            </Heading>
+            <Collapse in={isAuditPanelOpen}>
+              <Box>
               {selectedCustomerId?.startsWith('cust_') && (
                 <>
                   <Flex gap={3} mb={3} flexWrap="wrap" align="center">
@@ -5533,10 +5546,11 @@ const SequencesTab: React.FC = () => {
               {!selectedCustomerId?.startsWith('cust_') && (
                 <Text fontSize="sm" color="gray.500">Select a client to view dry-run audit.</Text>
               )}
-            </Box>
-          </Collapse>
-        </CardBody>
-      </Card>
+              </Box>
+            </Collapse>
+          </CardBody>
+        </Card>
+      </Collapse>
 
       <Flex gap={4} mb={6} align="center">
         <InputGroup maxW="300px">
