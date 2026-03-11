@@ -375,6 +375,7 @@ export async function processSequenceBasedCampaigns(
           senderName: identity.displayName || identity.emailAddress,
           senderEmail: identity.emailAddress,
           unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
+          emailSignature: identity.signatureHtml || '',
         })
 
         const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
@@ -393,6 +394,7 @@ export async function processSequenceBasedCampaigns(
           senderName: identity.displayName || identity.emailAddress,
           senderEmail: identity.emailAddress,
           unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
+          emailSignature: identity.signatureHtml || '',
         })
 
         const bodyText = step.bodyTemplateText
@@ -412,6 +414,7 @@ export async function processSequenceBasedCampaigns(
               senderName: identity.displayName || identity.emailAddress,
               senderEmail: identity.emailAddress,
               unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
+              emailSignature: '',
             })
           : undefined
         const enforced = enforceUnsubscribeFooter(bodyHtml, bodyText, buildCampaignUnsubscribeUrl(prospect.id))

@@ -85,6 +85,7 @@ type Customer = {
 }
 
 const TEMPLATE_PLACEHOLDER_HELP = [
+  'email_signature',
   'first_name',
   'last_name',
   'full_name',
@@ -291,6 +292,7 @@ const TemplatesTab: React.FC = () => {
         subject: template.subject,
         body: template.content,
         variables: {
+          email_signature: '<div><strong>{{sender_name}}</strong><br/><a href="mailto:{{sender_email}}">{{sender_email}}</a><br/><a href="{{unsubscribe_link}}">Unsubscribe</a></div>',
           first_name: 'Alex',
           last_name: 'Taylor',
           full_name: 'Alex Taylor',
@@ -858,7 +860,7 @@ const TemplatesTab: React.FC = () => {
                       ))}
                     </Flex>
                     <Text mt={2} fontSize="xs" color="gray.600">
-                      Existing camelCase placeholders still work. Preview and sending use the same merge contract.
+                      Use {`{{email_signature}}`} to insert the sending signature. Existing camelCase placeholders still work.
                     </Text>
                   </Box>
                   <Textarea
@@ -986,8 +988,14 @@ const TemplatesTab: React.FC = () => {
                     borderRadius="md"
                     minH="300px"
                     whiteSpace="pre-wrap"
+                    dangerouslySetInnerHTML={{
+                      __html: previewLoading
+                        ? '<p>Rendering preview...</p>'
+                        : ((previewRendered?.body || previewingTemplate.content).trim()
+                            ? (previewRendered?.body || previewingTemplate.content)
+                            : '<p></p>'),
+                    }}
                   >
-                    {previewLoading ? 'Rendering preview...' : (previewRendered?.body || previewingTemplate.content)}
                   </Box>
                   {previewError ? (
                     <Alert status="warning" mt={2}>

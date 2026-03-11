@@ -556,12 +556,14 @@ async function sendCampaignEmail(
       senderEmail: campaign.senderIdentity.emailAddress,
       website: campaign.customer.website || campaign.customer.domain || '',
       unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
+      emailSignature: campaign.senderIdentity.signatureHtml || '',
     }
+    const textVariables = { ...variables, emailSignature: '', senderSignature: '' }
     
     const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
     const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
     const renderedText = template.bodyTemplateText
-      ? applyTemplatePlaceholders(template.bodyTemplateText, variables)
+      ? applyTemplatePlaceholders(template.bodyTemplateText, textVariables)
       : undefined
     const enforced = enforceUnsubscribeFooter(renderedHtml, renderedText, variables.unsubscribeLink)
 

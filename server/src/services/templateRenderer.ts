@@ -29,6 +29,10 @@ export type TemplateVariables = {
   sender_email?: string | null;
   unsubscribeLink?: string | null;
   unsubscribe_link?: string | null;
+  emailSignature?: string | null;
+  email_signature?: string | null;
+  senderSignature?: string | null;
+  sender_signature?: string | null;
 };
 
 const PLACEHOLDER_PATTERN = /\{\{\s*([\w]+)\s*\}\}/g;
@@ -43,6 +47,7 @@ const SUPPORTED_PLACEHOLDER_KEYS = [
   'sender_name',
   'sender_email',
   'unsubscribe_link',
+  'email_signature',
   'email',
   'phone',
   'firstName',
@@ -57,6 +62,8 @@ const SUPPORTED_PLACEHOLDER_KEYS = [
   'senderName',
   'senderEmail',
   'unsubscribeLink',
+  'emailSignature',
+  'senderSignature',
 ] as const;
 
 type SupportedPlaceholderKey = (typeof SUPPORTED_PLACEHOLDER_KEYS)[number];
@@ -101,6 +108,7 @@ function getCanonicalPlaceholderValue(key: SupportedPlaceholderKey, vars: Templa
   const senderEmail = getFirstNonEmpty(vars.sender_email, vars.senderEmail);
   const senderName = getFirstNonEmpty(vars.sender_name, vars.senderName, senderEmail);
   const unsubscribeLink = getFirstNonEmpty(vars.unsubscribe_link, vars.unsubscribeLink);
+  const emailSignature = renderSignatureHtml(vars);
 
   switch (key) {
     case 'first_name':
@@ -133,6 +141,10 @@ function getCanonicalPlaceholderValue(key: SupportedPlaceholderKey, vars: Templa
     case 'unsubscribe_link':
     case 'unsubscribeLink':
       return unsubscribeLink;
+    case 'email_signature':
+    case 'emailSignature':
+    case 'senderSignature':
+      return emailSignature;
     case 'email':
       return normalizeValue(vars.email);
     case 'phone':
@@ -157,9 +169,29 @@ const NORMALIZED_PLACEHOLDER_ALIASES: Record<string, SupportedPlaceholderKey> = 
   sendername: 'sender_name',
   senderemail: 'sender_email',
   unsubscribelink: 'unsubscribe_link',
+  emailsignature: 'email_signature',
+  sendersignature: 'email_signature',
   email: 'email',
   phone: 'phone',
 };
+
+function renderSignatureHtml(vars: TemplateVariables): string {
+  const signatureTemplate = getFirstNonEmpty(
+    vars.email_signature,
+    vars.emailSignature,
+    vars.sender_signature,
+    vars.senderSignature
+  );
+  if (!signatureTemplate) return '';
+
+  return applyTemplatePlaceholders(signatureTemplate, {
+    ...vars,
+    email_signature: '',
+    emailSignature: '',
+    sender_signature: '',
+    senderSignature: '',
+  });
+}
 
 /**
  * Resolve effective value for a placeholder key, applying alias fallbacks
@@ -203,6 +235,8 @@ export function previewTemplate(template: string): string {
     sender_name: 'Jordan Reed',
     sender_email: 'jordan@opendoors.example',
     unsubscribe_link: 'https://example.com/unsubscribe',
+    email_signature:
+      '<div><strong>{{sender_name}}</strong><br/><a href="mailto:{{sender_email}}">{{sender_email}}</a><br/><a href="{{unsubscribe_link}}">Unsubscribe</a></div>',
   });
 }
 
@@ -245,7 +279,9 @@ export function applyTemplatePlaceholdersSafe(
 ): string {
   const escaped: Partial<TemplateVariables> = {};
   for (const key of SUPPORTED_PLACEHOLDER_KEYS) {
-    escaped[key as keyof TemplateVariables] = escapeForHtml(getCanonicalPlaceholderValue(key, vars));
+    const value = getCanonicalPlaceholderValue(key, vars);
+    const shouldPreserveHtml = key === 'email_signature' || key === 'emailSignature' || key === 'senderSignature';
+    escaped[key as keyof TemplateVariables] = shouldPreserveHtml ? value : escapeForHtml(value);
   }
   return applyTemplatePlaceholders(template, escaped as TemplateVariables);
 }

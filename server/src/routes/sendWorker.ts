@@ -946,6 +946,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
                 select: {
                   emailAddress: true,
                   displayName: true,
+                  signatureHtml: true,
                 },
               },
             },
@@ -1004,10 +1005,12 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
           senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
           unsubscribeLink: unsubscribeUrl,
+          emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
         }
+        const textVars = { ...vars, emailSignature: '', senderSignature: '' }
         subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
         const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
-        const renderedText = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, vars) : undefined
+        const renderedText = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, textVars) : undefined
         const enforced = enforceUnsubscribeFooter(renderedHtml, renderedText, unsubscribeUrl)
         htmlBody = enforced.htmlBody
         textBody = enforced.textBody
