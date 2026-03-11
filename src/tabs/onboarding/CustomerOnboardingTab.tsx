@@ -87,11 +87,6 @@ type JobTaxonomyItem = {
   label: string
 }
 
-type ContactRoleItem = {
-  id: string
-  label: string
-}
-
 type AccountDetails = {
   primaryContact: PrimaryContact
   headOfficeAddress: string
@@ -310,13 +305,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [accountDetails, setAccountDetails] = useState<AccountDetails>(EMPTY_ACCOUNT_DETAILS)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'dirty' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [jobSectors, setJobSectors] = useState<JobTaxonomyItem[]>([])
   const [jobRoles, setJobRoles] = useState<JobTaxonomyItem[]>([])
-  const [contactRoles, setContactRoles] = useState<ContactRoleItem[]>([])
   const [jobSectorInput, setJobSectorInput] = useState('')
   const [jobRoleInput, setJobRoleInput] = useState('')
-  const [contactRoleInput, setContactRoleInput] = useState('')
   const [geoQuery, setGeoQuery] = useState('')
   const [geoOptions, setGeoOptions] = useState<TargetGeographicalArea[]>([])
   const [geoLoading, setGeoLoading] = useState(false)
@@ -335,6 +331,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [weeklyLeadTarget, setWeeklyLeadTarget] = useState<string>('')
   const [monthlyLeadTarget, setMonthlyLeadTarget] = useState<string>('')
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
+  const editVersionRef = useRef(0)
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -390,6 +387,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       // Fresh DB hydrate: local form state is no longer dirty.
       setIsDirty(false)
+      setSaveStatus('saved')
+      setSaveErrorMessage(null)
+      setLastSavedAt(typeof (data as any).updatedAt === 'string' ? ((data as any).updatedAt as string) : null)
     }
     setIsLoading(false)
   }, [customerId])
@@ -574,6 +574,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
   }, [customer])
 
+  const markDirty = useCallback(() => {
+    editVersionRef.current += 1
+    setIsDirty(true)
+    setSaveErrorMessage(null)
+    setSaveStatus((prev) => (prev === 'saving' ? prev : 'dirty'))
+  }, [])
+
   // Geographic area search
   useEffect(() => {
     if (!geoQuery || geoQuery.trim().length < 2) {
@@ -625,13 +632,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   const updateProfile = useCallback((updates: Partial<ClientProfile>) => {
     setClientProfile((prev) => ({ ...prev, ...updates }))
-    setIsDirty(true)
-  }, [])
+    markDirty()
+  }, [markDirty])
 
   const updateAccountDetails = useCallback((updates: Partial<AccountDetails>) => {
     setAccountDetails((prev) => ({ ...prev, ...updates }))
-    setIsDirty(true)
-  }, [])
+    markDirty()
+  }, [markDirty])
 
   const updatePrimaryContact = useCallback((updates: Partial<PrimaryContact>) => {
     setAccountDetails((prev) => ({
@@ -640,8 +647,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         ...ensurePrimaryContactId({ ...prev.primaryContact, ...updates } as any),
       },
     }))
-    setIsDirty(true)
-  }, [])
+    markDirty()
+  }, [markDirty])
+
+  const updateCustomerFields = useCallback((updates: Partial<CustomerApi>) => {
+    setCustomer((prev) => (prev ? { ...prev, ...updates } : prev))
+    markDirty()
+  }, [markDirty])
 
   const updateSocial = useCallback(
     (updates: Partial<SocialMediaPresence>) => {
@@ -861,8 +873,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   const openSuppressionSetup = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'suppression' } }))
-  }, [])
+    void (async () => {
+      const proceed = await confirmProceedIfDirty(
+        'You have unsaved onboarding changes. Opening the suppression list will leave this page.',
+      )
+      if (!proceed) return
+      window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'compliance' } }))
+    })()
+  }, [confirmProceedIfDirty])
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
     items.find((item) => item.id === id)?.label || id
@@ -905,20 +923,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     return data
   }
 
-  const createContactRole = (label: string): ContactRoleItem | null => {
-    const trimmed = label.trim()
-    if (!trimmed) return null
-    const existing = contactRoles.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
-    if (existing) return existing
-    const next: ContactRoleItem = {
-      id: `role_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      label: trimmed,
-    }
-    const updated = [...contactRoles, next].sort((a, b) => a.label.localeCompare(b.label))
-    setContactRoles(updated)
-    return next
-  }
-
   const addJobSector = async (label: string) => {
     const item = await createJobSector(label)
     if (!item) return
@@ -941,15 +945,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     setJobRoleInput('')
   }
 
-  const addContactRole = (label: string) => {
-    const item = createContactRole(label)
-    if (!item) return
-    // Keep roles in-memory only (DB remains source of truth for selected value in accountDetails.primaryContact).
-    setContactRoles((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]))
-    updatePrimaryContact({ roleId: item.id, roleLabel: item.label })
-    setContactRoleInput('')
-  }
-
   const removeJobSector = (id: string) => {
     updateProfile({
       targetJobSectorIds: clientProfile.targetJobSectorIds.filter((itemId) => itemId !== id),
@@ -962,42 +957,49 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
   }
 
-  const handleSave = async (): Promise<boolean> => {
+  const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual'): Promise<boolean> => {
     if (!customer) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customer, skipping save')
       return false
     }
+
+    const isManualSave = mode === 'manual'
+    const saveVersion = editVersionRef.current
+    const failSave = (message: string, title = 'Save failed') => {
+      setSaveStatus('error')
+      setSaveErrorMessage(message)
+      if (isManualSave) {
+        toast({
+          title,
+          description: message,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      }
+    }
+
     if (!customer.name || !customer.name.trim()) {
-      toast({
-        title: 'Customer name is required',
-        description: 'Enter a customer name before saving onboarding.',
-        status: 'error',
-        duration: 4000,
-        isClosable: true,
-      })
+      failSave('Enter a customer name before saving onboarding.', 'Customer name is required')
       return false
     }
+
     onboardingDebug('💾 CustomerOnboardingTab: Saving onboarding data for customerId:', customerId)
     setIsSaving(true)
+    setSaveStatus('saving')
+    setSaveErrorMessage(null)
 
     if (!customerUpdatedAt) {
-      toast({
-        title: 'Cannot save yet',
-        description: 'Please reload the customer data and try again (missing updatedAt).',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      })
+      failSave('Please reload the customer data and try again.', 'Cannot save yet')
       setIsSaving(false)
       return false
     }
-    
+
     const currentAccountData =
       customer.accountData && typeof customer.accountData === 'object'
         ? customer.accountData
         : {}
-    
-    // Generate contact ID locally (no localStorage dependency)
+
     const nextPrimary = ensurePrimaryContactId(accountDetails.primaryContact)
     const nextAccountDetails = {
       ...accountDetails,
@@ -1006,22 +1008,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       },
     }
 
-    // Ensure UI stays stable while save→refetch happens (prevents "blink to empty" if any rehydrate path drops fields).
     setAccountDetails(nextAccountDetails)
-    
-    // SAFE MERGE: Preserve other accountData fields (e.g., progressTracker)
-    // Only update clientProfile and accountDetails sections
+
     const normalizedTargetAreas = dedupeAreas(targetGeographicalAreas).map((a) => ({
       id: String(a.placeId || a.label).trim(),
       label: String(a.label || '').trim(),
     }))
 
     const nextAccountData = safeAccountDataMerge(currentAccountData, {
-      // Clear legacy single-select field going forward (persist multi-select array only)
       clientProfile: { ...(clientProfile as any), targetGeographicalArea: null },
       accountDetails: nextAccountDetails,
       targetGeographicalAreas: normalizedTargetAreas,
-      // Also update top-level convenience fields for backward compatibility
       contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
       contactEmail: accountDetails.primaryContact.email,
       contactNumber: accountDetails.primaryContact.phone,
@@ -1041,11 +1038,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     })
 
     const outgoingAccountData = stripUndefinedDeep(nextAccountData)
-    
-    // Prepare top-level customer fields (including monthly revenue and Google Sheet)
-    const revenueNumber = monthlyRevenueFromCustomer.trim() 
-      ? parseFloat(monthlyRevenueFromCustomer)
-      : undefined
+    const revenueNumber = monthlyRevenueFromCustomer.trim() ? parseFloat(monthlyRevenueFromCustomer) : undefined
 
     const parseIntOrNull = (raw: string): number | null | undefined => {
       const trimmed = String(raw || '').trim()
@@ -1055,39 +1048,23 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       if (n < 0 || n > 1_000_000) return undefined
       return n
     }
+
     const weeklyTargetNumber = parseIntOrNull(weeklyLeadTarget)
     const monthlyTargetNumber = parseIntOrNull(monthlyLeadTarget)
     if (weeklyTargetNumber === undefined || monthlyTargetNumber === undefined) {
-      toast({
-        title: 'Invalid targets',
-        description: 'Weekly/monthly targets must be whole numbers between 0 and 1,000,000.',
-        status: 'error',
-        duration: 6000,
-        isClosable: true,
-      })
+      failSave('Weekly and monthly targets must be whole numbers between 0 and 1,000,000.', 'Invalid targets')
       setIsSaving(false)
       return false
     }
-    
-    // Google Sheet URL and label (validate URL format lightly)
+
     const sheetUrl = leadsGoogleSheetUrl.trim() || undefined
     const sheetLabel = leadsGoogleSheetLabel.trim() || undefined
-
     if (sheetUrl && !sheetLabel) {
-      toast({
-        title: 'Google Sheet label required',
-        description: 'Please enter a label for the Google Sheet (we show labels, not raw URLs).',
-        status: 'error',
-        duration: 6000,
-        isClosable: true,
-      })
+      failSave('Enter a Google Sheet label before saving the sheet URL.', 'Google Sheet label required')
       setIsSaving(false)
       return false
     }
-    
-    // Additional contacts are saved as part of onboarding payload.
-    // IMPORTANT: Do not block saving partial progress for the rest of the form.
-    // If a contact is incomplete, omit it from the payload and warn.
+
     const normalizedPrimaryId = nextAccountDetails.primaryContact.id
     const rawAdditional = Array.isArray(additionalContacts) ? additionalContacts : []
     const contactsToSave = rawAdditional
@@ -1105,7 +1082,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const invalidContacts = contactsToSave.filter((c) => !c.name || (!c.email && !c.phone))
     const validContacts = contactsToSave.filter((c) => c.name && (c.email || c.phone))
 
-    if (invalidContacts.length > 0) {
+    if (invalidContacts.length > 0 && isManualSave) {
       toast({
         title: 'Some contacts are incomplete',
         description: 'Incomplete additional contacts were not saved. Add email or phone to save them.',
@@ -1115,7 +1092,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       })
     }
 
-    // Save onboarding payload (single transaction backend route)
     const { data: saveResult, error, errorDetails } = await api.put<{
       success: boolean
       requestId: string
@@ -1132,8 +1108,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           sector: customer.sector && customer.sector.trim() ? customer.sector.trim() : null,
           accountData: outgoingAccountData,
           monthlyRevenueFromCustomer: revenueNumber,
-          // Keep legacy/Account Card compatibility: AccountsTab currently maps "monthlySpendGBP" to monthlyIntakeGBP.
-          // Until the UI is fully refactored, store the same number in monthlyIntakeGBP so it displays consistently.
           monthlyIntakeGBP: revenueNumber,
           leadsReportingUrl: sheetUrl,
           leadsGoogleSheetLabel: sheetLabel,
@@ -1148,51 +1122,83 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         },
       },
     )
-    
+
     if (error) {
       if (errorDetails?.status === 409) {
         const current = (errorDetails.details as any)?.currentUpdatedAt || null
         setConflictCurrentUpdatedAt(typeof current === 'string' ? current : null)
-        conflictDisclosure.onOpen()
+        failSave('This customer changed elsewhere. Reload the latest data to continue saving.')
+        if (isManualSave) conflictDisclosure.onOpen()
         setIsSaving(false)
         return false
       }
-      // Show error toast with detailed information
+
       onboardingError('❌ Customer Onboarding save failed:', {
         customerId,
         error,
-        payload: { name: customer.name, accountData: nextAccountData }
+        payload: { name: customer.name, accountData: nextAccountData },
       })
-      toast({ 
-        title: 'Save failed', 
-        description: error, 
-        status: 'error', 
-        duration: 5000,
-        isClosable: true,
-      })
+      failSave(error)
       setIsSaving(false)
       return false
     }
-    
+
     onboardingDebug('✅ Customer Onboarding saved successfully:', customerId)
 
-    // DB rehydration is mandatory: always refetch after save BEFORE showing success.
-    await fetchCustomer()
+    if (typeof saveResult?.updatedAt === 'string') {
+      setCustomerUpdatedAt(saveResult.updatedAt)
+      setLastSavedAt(saveResult.updatedAt)
+    }
 
-    // Notify listeners (DB is source of truth; this is a signal only)
     emit('customerUpdated', { id: customerId })
 
-    toast({
-      title: 'Onboarding details saved',
-      description: 'Saved to database.',
-      status: 'success',
-      duration: 2500,
-    })
+    if (editVersionRef.current === saveVersion && saveResult?.customer) {
+      setCustomer(saveResult.customer)
+      const rows = Array.isArray((saveResult.customer as any).customerContacts)
+        ? (saveResult.customer as any).customerContacts
+        : []
+      setAdditionalContacts(rows.filter((c: any) => !c?.isPrimary))
+      setIsDirty(false)
+      setSaveStatus('saved')
+      setSaveErrorMessage(null)
+      if (isManualSave) {
+        toast({
+          title: 'Onboarding details saved',
+          description: 'Saved to database.',
+          status: 'success',
+          duration: 2500,
+        })
+      }
+    } else {
+      setSaveStatus('dirty')
+    }
 
     setIsSaving(false)
-    setIsDirty(false)
     return true
-  }
+  }, [
+    accountDetails,
+    additionalContacts,
+    clientProfile,
+    conflictDisclosure,
+    customer,
+    customerId,
+    customerUpdatedAt,
+    leadsGoogleSheetLabel,
+    leadsGoogleSheetUrl,
+    monthlyLeadTarget,
+    monthlyRevenueFromCustomer,
+    targetGeographicalAreas,
+    toast,
+    weeklyLeadTarget,
+  ])
+
+  useEffect(() => {
+    if (!customer || isLoading || isSaving || !isDirty) return
+    const handle = window.setTimeout(() => {
+      void handleSave('auto')
+    }, 900)
+    return () => window.clearTimeout(handle)
+  }, [customer, handleSave, isDirty, isLoading, isSaving])
 
   if (isLoading) {
     return (
@@ -1227,35 +1233,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   return (
     <Stack spacing={6}>
-      {/* Completion action surfaced in the live onboarding flow (previously only in legacy Overview). */}
-      <Box border="1px solid" borderColor="blue.200" borderRadius="xl" p={6} bg="blue.50">
-        <Stack spacing={3}>
-          <HStack justify="space-between" align="center" flexWrap="wrap">
-            <Text fontSize="lg" fontWeight="semibold">Onboarding Completion</Text>
-            <Badge colorScheme={customer.clientStatus === 'active' ? 'green' : 'orange'}>
-              {customer.clientStatus === 'active' ? 'Active' : 'Onboarding'}
-            </Badge>
-          </HStack>
-          <Text fontSize="sm" color="gray.700">
-            When onboarding checkpoints are complete, mark this customer as active to finalize onboarding.
-          </Text>
-          {isDirty ? (
-            <Text fontSize="xs" color="orange.700">
-              You have unsaved changes. Save onboarding first, then complete onboarding.
-            </Text>
-          ) : null}
-          <CompleteOnboardingButton
-            customerId={customer.id}
-            customerName={customer.name}
-            currentStatus={customer.clientStatus || 'onboarding'}
-            isDisabled={isDirty || isSaving}
-            onStatusUpdated={() => {
-              void fetchCustomer()
-            }}
-          />
-        </Stack>
-      </Box>
-
       {/* Account Details Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
@@ -1297,38 +1274,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             </FormControl>
             <FormControl>
               <FormLabel>Role at Company</FormLabel>
-              <Stack spacing={2}>
-                <HStack>
-                  <Input
-                    list="contact-role-options"
-                    value={contactRoleInput}
-                    onChange={(e) => setContactRoleInput(e.target.value)}
-                    placeholder="Add or select a role"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        addContactRole(contactRoleInput)
-                      }
-                    }}
-                  />
-                  <IconButton
-                    aria-label="Add role"
-                    icon={<AddIcon />}
-                    onClick={() => addContactRole(contactRoleInput)}
-                  />
-                </HStack>
-                <datalist id="contact-role-options">
-                  {contactRoles.map((role) => (
-                    <option key={role.id} value={role.label} />
-                  ))}
-                </datalist>
-                {accountDetails.primaryContact.roleLabel ? (
-                  <Tag size="sm" colorScheme="blue" borderRadius="full">
-                    <TagLabel>{accountDetails.primaryContact.roleLabel}</TagLabel>
-                    <TagCloseButton onClick={() => updatePrimaryContact({ roleId: '', roleLabel: '' })} />
-                  </Tag>
-                ) : null}
-              </Stack>
+              <Input
+                value={accountDetails.primaryContact.roleLabel || ''}
+                onChange={(e) => updatePrimaryContact({ roleId: '', roleLabel: e.target.value })}
+                placeholder="e.g. Marketing Manager"
+              />
             </FormControl>
             <FormControl>
               <FormLabel>Contact Status</FormLabel>
@@ -1352,11 +1302,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <Input
                 type="url"
                 value={customer.website || ''}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setCustomer((prev) => (prev ? { ...prev, website: next } : prev))
-                  setIsDirty(true)
-                }}
+                onChange={(e) => updateCustomerFields({ website: e.target.value })}
                 placeholder="https://example.com"
               />
             </FormControl>
@@ -1364,11 +1310,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <FormLabel>Sector</FormLabel>
               <Input
                 value={customer.sector || ''}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setCustomer((prev) => (prev ? { ...prev, sector: next } : prev))
-                  setIsDirty(true)
-                }}
+                onChange={(e) => updateCustomerFields({ sector: e.target.value })}
                 placeholder="e.g. Facilities Management"
               />
             </FormControl>
@@ -1462,7 +1404,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 min="0"
                 step="0.01"
                 value={monthlyRevenueFromCustomer}
-                onChange={(e) => setMonthlyRevenueFromCustomer(e.target.value)}
+                onChange={(e) => {
+                  setMonthlyRevenueFromCustomer(e.target.value)
+                  markDirty()
+                }}
                 placeholder="e.g. 5000.00"
               />
             </FormControl>
@@ -1475,7 +1420,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 value={weeklyLeadTarget}
                 onChange={(e) => {
                   setWeeklyLeadTarget(e.target.value)
-                  setIsDirty(true)
+                  markDirty()
                 }}
                 placeholder="Manual weekly target (e.g. 25)"
               />
@@ -1489,7 +1434,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 value={monthlyLeadTarget}
                 onChange={(e) => {
                   setMonthlyLeadTarget(e.target.value)
-                  setIsDirty(true)
+                  markDirty()
                 }}
                 placeholder="Manual monthly target (e.g. 100)"
               />
@@ -1520,7 +1465,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <Input
                 type="url"
                 value={leadsGoogleSheetUrl}
-                onChange={(e) => setLeadsGoogleSheetUrl(e.target.value)}
+                onChange={(e) => {
+                  setLeadsGoogleSheetUrl(e.target.value)
+                  markDirty()
+                }}
                 placeholder="https://docs.google.com/spreadsheets/d/..."
               />
             </FormControl>
@@ -1528,7 +1476,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <FormLabel>Leads Google Sheet Label</FormLabel>
               <Input
                 value={leadsGoogleSheetLabel}
-                onChange={(e) => setLeadsGoogleSheetLabel(e.target.value)}
+                onChange={(e) => {
+                  setLeadsGoogleSheetLabel(e.target.value)
+                  markDirty()
+                }}
                 placeholder="e.g. Customer Lead Sheet"
               />
             </FormControl>
@@ -1610,7 +1561,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <CustomerContactsSection
           contacts={additionalContacts as any}
-          onChange={(next) => setAdditionalContacts(next as any)}
+          onChange={(next) => {
+            setAdditionalContacts(next as any)
+            markDirty()
+          }}
         />
       </Box>
 
@@ -1645,10 +1599,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>What they do</FormLabel>
             <Textarea
               value={customer?.whatTheyDo || ''}
-              onChange={(e) => {
-                setIsDirty(true)
-                setCustomer((prev) => (prev ? { ...prev, whatTheyDo: e.target.value } : prev))
-              }}
+              onChange={(e) => updateCustomerFields({ whatTheyDo: e.target.value })}
               minH="90px"
               placeholder="Short description of what the company does…"
             />
@@ -1658,10 +1609,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             <FormLabel>Company profile</FormLabel>
             <Textarea
               value={customer?.companyProfile || ''}
-              onChange={(e) => {
-                setIsDirty(true)
-                setCustomer((prev) => (prev ? { ...prev, companyProfile: e.target.value } : prev))
-              }}
+              onChange={(e) => updateCustomerFields({ companyProfile: e.target.value })}
               minH="140px"
               placeholder="Longer profile / overview…"
             />
@@ -1787,6 +1735,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                             setTargetGeographicalAreas((prev) =>
                               dedupeAreas(prev).filter((a) => areaKey({ id: a.placeId, label: a.label }) !== removeKey),
                             )
+                            markDirty()
                           }}
                         />
                       </Tag>
@@ -1825,6 +1774,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                           setTargetGeographicalAreas(next)
                           setGeoQuery('')
                           setGeoOptions([])
+                          markDirty()
                         }}
                       >
                         {option.label}
@@ -2138,10 +2088,42 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       {/* Single bottom save action (unified form) */}
       <Box pt={2} pb={2}>
         <Divider mb={4} />
-        <HStack justify="flex-end">
-          <Button colorScheme="teal" onClick={() => void handleSave()} isLoading={isSaving}>
-            Save Onboarding
-          </Button>
+        <HStack justify="space-between" align="center" flexWrap="wrap" spacing={3}>
+          <Box>
+            <HStack spacing={2} flexWrap="wrap">
+              <Badge colorScheme={customer.clientStatus === 'active' ? 'green' : 'orange'}>
+                {customer.clientStatus === 'active' ? 'Active' : 'Onboarding'}
+              </Badge>
+              <Text fontSize="sm" color={saveStatus === 'error' ? 'red.600' : saveStatus === 'saved' ? 'green.600' : 'gray.600'}>
+                {saveStatus === 'saving'
+                  ? 'Saving changes...'
+                  : saveStatus === 'saved'
+                    ? `All changes saved${lastSavedAt ? ` at ${new Date(lastSavedAt).toLocaleTimeString()}` : ''}.`
+                    : saveStatus === 'error'
+                      ? saveErrorMessage || 'Changes could not be saved.'
+                      : 'Changes save automatically.'}
+              </Text>
+            </HStack>
+            {isDirty && saveStatus !== 'saving' ? (
+              <Text fontSize="xs" color="orange.700" mt={1}>
+                Pending changes will save automatically.
+              </Text>
+            ) : null}
+          </Box>
+          <HStack spacing={3}>
+            <Button colorScheme="teal" variant="outline" onClick={() => void handleSave('manual')} isLoading={isSaving}>
+              Save now
+            </Button>
+            <CompleteOnboardingButton
+              customerId={customer.id}
+              customerName={customer.name}
+              currentStatus={customer.clientStatus || 'onboarding'}
+              isDisabled={isDirty || isSaving}
+              onStatusUpdated={() => {
+                void fetchCustomer()
+              }}
+            />
+          </HStack>
         </HStack>
       </Box>
 

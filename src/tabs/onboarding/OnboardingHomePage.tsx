@@ -116,8 +116,8 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     })
     return [
       mapCheck('Email identities connected', signal.checks.emailIdentitiesConnected),
-      mapCheck('Suppression setup configured (transitional: sheet-linked or DB)', signal.checks.suppressionConfigured),
-      mapCheck('Lead source configured (transitional: sheet-linked or DB)', signal.checks.leadSourceConfigured),
+      mapCheck('Suppression list connected', signal.checks.suppressionConfigured),
+      mapCheck('Lead source connected', signal.checks.leadSourceConfigured),
       mapCheck('Template and sequence basics ready', signal.checks.templateAndSequenceReady),
     ]
   }, [signal.checks])
@@ -144,55 +144,12 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           borderColor="blue.100"
           data-testid="onboarding-marketing-bridge"
         >
-          <Text fontSize="sm" color="blue.900" fontWeight="semibold" data-testid="onboarding-role-framing">
-            Onboarding is for setup progression and activation checkpoints before daily outreach operations.
-          </Text>
-          <Text mt={1} fontSize="sm" color="blue.900" data-testid="onboarding-activation-framing">
-            Complete core onboarding checkpoints here, then continue into Marketing once this client is ready enough to operate.
-          </Text>
           <HStack mt={2} spacing={2}>
             <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="onboarding-client-readiness-state">
               {readiness.label}
             </Badge>
             <Text fontSize="sm" color="blue.900">{readiness.reason}</Text>
           </HStack>
-          <Text fontSize="sm" color="blue.900" mt={1} data-testid="onboarding-readiness-guidance">
-            After setup tasks are complete for this client, continue in Marketing Readiness for daily outreach operations.
-          </Text>
-          <Text fontSize="xs" color="blue.800" mt={1} data-testid="onboarding-module-continuity-guidance">
-            Use Onboarding for activation checkpoints, OpenDoors Clients for data fixes, then return to Marketing for daily operations.
-          </Text>
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2} mt={3} data-testid="onboarding-checkpoint-guidance">
-            <VStack
-              align="start"
-              spacing={0}
-              p={2}
-              borderRadius="md"
-              border="1px solid"
-              borderColor="blue.200"
-              bg="white"
-              data-testid="onboarding-clients-vs-onboarding-guidance"
-            >
-              <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="blue.700">Fix in OpenDoors Clients</Text>
-              <Text fontSize="sm" color="blue.900">
-                Account/company details, contact quality, and upstream data gaps that affect outreach readiness.
-              </Text>
-            </VStack>
-            <VStack
-              align="start"
-              spacing={0}
-              p={2}
-              borderRadius="md"
-              border="1px solid"
-              borderColor="blue.200"
-              bg="white"
-            >
-              <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="blue.700">Complete in Onboarding</Text>
-              <Text fontSize="sm" color="blue.900">
-                Activation checklist steps, ownership sign-offs, and setup progress tracking before operations.
-              </Text>
-            </VStack>
-          </SimpleGrid>
           <VStack
             align="start"
             spacing={1}
@@ -209,11 +166,6 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               <Badge colorScheme={canProceedToOperations ? 'green' : 'orange'} data-testid="onboarding-activation-state">
                 {canProceedToOperations ? 'Done enough to proceed' : `${blockersCount} checkpoint(s) still blocking`}
               </Badge>
-              <Text fontSize="xs" color="blue.800">
-                {canProceedToOperations
-                  ? 'Setup is sufficient for operations handoff. Continue in Marketing Readiness.'
-                  : 'Complete missing checkpoints first, then proceed to Marketing Readiness.'}
-              </Text>
             </HStack>
             <SimpleGrid columns={{ base: 1, md: 2 }} spacing={1} width="100%">
               {activationChecks.map((item) => (
@@ -226,12 +178,6 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               ))}
             </SimpleGrid>
           </VStack>
-          <Text fontSize="xs" color="blue.800" mt={2} data-testid="onboarding-transitional-leads-note">
-            Transitional readiness signals can include linked Google Sheets and DB-backed data, so this checkpoint reflects integrated setup status.
-          </Text>
-          <Text fontSize="xs" color="blue.800" mt={2} data-testid="onboarding-operations-handoff">
-            When this client is done enough to proceed, move to Marketing Readiness for send planning, sequencing, inbox handling, and reporting.
-          </Text>
           <HStack mt={3}>
             <Button
               size="sm"

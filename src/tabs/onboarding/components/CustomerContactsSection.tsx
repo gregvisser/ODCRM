@@ -63,6 +63,16 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
       return
     }
 
+    if (!newContact.email.trim() && !newContact.phone.trim()) {
+      toast({
+        title: 'Email or phone required',
+        description: 'Add an email address or phone number before saving this contact.',
+        status: 'warning',
+        duration: 2500,
+      })
+      return
+    }
+
     setIsAdding(true)
     try {
       const next: CustomerContact = {
@@ -104,7 +114,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
         Contacts
       </Heading>
       <Text fontSize="sm" color="gray.600" mb={4}>
-        Additional contacts are saved when you click “Save Onboarding”.
+        Additional contacts save automatically.
       </Text>
 
       {/* Existing contacts list */}
@@ -217,7 +227,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
               isLoading={isAdding}
               isDisabled={!newContact.name.trim()}
             >
-              Save Contact
+              Add Contact
             </Button>
             <Button
               size="sm"
