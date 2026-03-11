@@ -35,6 +35,22 @@ export type TemplateVariables = {
   sender_signature?: string | null;
 };
 
+const PREVIEW_TEMPLATE_DEFAULTS: TemplateVariables = {
+  first_name: 'Alex',
+  last_name: 'Taylor',
+  full_name: 'Alex Taylor',
+  company_name: 'Acme Ltd',
+  email: 'alex.taylor@acme.example',
+  role: 'Operations Director',
+  phone: '+1-555-0100',
+  website: 'https://acme.example',
+  sender_name: 'Jordan Reed',
+  sender_email: 'jordan@opendoors.example',
+  unsubscribe_link: 'https://example.com/unsubscribe',
+  email_signature:
+    '<div><strong>{{sender_name}}</strong><br/><a href="mailto:{{sender_email}}">{{sender_email}}</a><br/><a href="{{unsubscribe_link}}">Unsubscribe</a></div>',
+};
+
 const PLACEHOLDER_PATTERN = /\{\{\s*([\w]+)\s*\}\}/g;
 
 const SUPPORTED_PLACEHOLDER_KEYS = [
@@ -223,21 +239,16 @@ export function applyTemplatePlaceholders(
  * Preview template with sample data
  */
 export function previewTemplate(template: string): string {
-  return applyTemplatePlaceholders(template, {
-    first_name: 'Alex',
-    last_name: 'Taylor',
-    full_name: 'Alex Taylor',
-    company_name: 'Acme Ltd',
-    email: 'alex.taylor@acme.example',
-    role: 'Operations Director',
-    phone: '+1-555-0100',
-    website: 'https://acme.example',
-    sender_name: 'Jordan Reed',
-    sender_email: 'jordan@opendoors.example',
-    unsubscribe_link: 'https://example.com/unsubscribe',
-    email_signature:
-      '<div><strong>{{sender_name}}</strong><br/><a href="mailto:{{sender_email}}">{{sender_email}}</a><br/><a href="{{unsubscribe_link}}">Unsubscribe</a></div>',
-  });
+  return applyTemplatePlaceholders(template, buildPreviewTemplateVariables());
+}
+
+export function buildPreviewTemplateVariables(
+  overrides: Partial<TemplateVariables> = {}
+): TemplateVariables {
+  return {
+    ...PREVIEW_TEMPLATE_DEFAULTS,
+    ...overrides,
+  };
 }
 
 /**

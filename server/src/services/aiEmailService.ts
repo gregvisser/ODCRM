@@ -1,15 +1,10 @@
 /**
  * Gemini AI Service for Email Template Tweaking
- * Uses Google Gemini 3 Flash model via Google Generative AI SDK
- * 
- * Features:
- * - Personalize email templates based on recipient context
- * - Adjust tone (professional, friendly, casual, formal, persuasive)
- * - Make generic templates feel more human and engaging
- * - Preserve core message while improving readability
+ *
+ * Uses the same direct Gemini API contract as the rest of the repo so
+ * production AI features share one env/model path.
  */
 
-import { GoogleGenerativeAI } from '@google/generative-ai'
 import { extractPlaceholders } from './templateRenderer.js'
 
 export interface AITweakRequest {
@@ -29,6 +24,13 @@ export interface AITweakResponse {
   tweakedSubject?: string
   changes?: string[]
 }
+
+type GeminiRequestOptions = {
+  responseMimeType?: string
+}
+
+const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash'] as const
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 const SYSTEM_PROMPT = `You are an expert email copywriter specializing in B2B outreach and sales emails. Your task is to personalize and improve email templates to make them more engaging, human, and effective.
 
@@ -78,29 +80,76 @@ function preservedPlaceholdersMatch(restored: string, expected: string[]): boole
   return expected.every((placeholder) => restored.includes(`{{${placeholder}}}`))
 }
 
-/**
- * Get configured Gemini client
- */
-function getGeminiClient(): GoogleGenerativeAI {
-  const apiKey = process.env.EMERGENT_LLM_KEY || process.env.GEMINI_API_KEY
-  
+function getGeminiApiKey(): string | null {
+  const raw =
+    process.env.EMERGENT_LLM_KEY ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    ''
+
+  const value = String(raw).trim()
+  return value || null
+}
+
+async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}): Promise<string> {
+  const apiKey = getGeminiApiKey()
   if (!apiKey) {
-    throw new Error('AI service not configured. Set EMERGENT_LLM_KEY or GEMINI_API_KEY environment variable.')
+    throw new Error('AI service not configured. Set EMERGENT_LLM_KEY, GEMINI_API_KEY, or GOOGLE_GEMINI_API_KEY environment variable.')
   }
-  
-  return new GoogleGenerativeAI(apiKey)
+
+  const failures: string[] = []
+
+  for (const model of GEMINI_MODELS) {
+    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 4096,
+            ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
+          },
+        }),
+      })
+
+      if (!response.ok) {
+        const body = await response.text()
+        failures.push(`${model}: ${response.status} ${body.slice(0, 300)}`)
+        continue
+      }
+
+      const payload = (await response.json()) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+      }
+
+      const text = payload?.candidates?.[0]?.content?.parts
+        ?.map((part) => part?.text || '')
+        .join('')
+        .trim()
+
+      if (!text) {
+        failures.push(`${model}: empty text response`)
+        continue
+      }
+
+      return text
+    } catch (error) {
+      failures.push(`${model}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  console.error('[AI Service] Gemini API error:', failures)
+  throw new Error('Failed to generate AI response. Please try again.')
 }
 
 /**
  * Tweak an email template using Gemini AI
  */
 export async function tweakEmailWithAI(request: AITweakRequest): Promise<AITweakResponse> {
-  const genAI = getGeminiClient()
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.0-flash',
-    systemInstruction: SYSTEM_PROMPT
-  })
-
   const {
     templateBody,
     templateSubject,
@@ -110,26 +159,21 @@ export async function tweakEmailWithAI(request: AITweakRequest): Promise<AITweak
     contactIndustry,
     tone = 'professional',
     instruction,
-    preservePlaceholders = true
+    preservePlaceholders = true,
   } = request
 
-  // Build context for personalization
   const contextParts: string[] = []
   if (contactName) contextParts.push(`Recipient Name: ${contactName}`)
   if (contactCompany) contextParts.push(`Company: ${contactCompany}`)
   if (contactTitle) contextParts.push(`Title/Role: ${contactTitle}`)
   if (contactIndustry) contextParts.push(`Industry: ${contactIndustry}`)
 
-  const contextSection = contextParts.length > 0 
+  const contextSection = contextParts.length > 0
     ? `\n\nRecipient Context:\n${contextParts.join('\n')}`
     : ''
 
   const toneInstruction = `\nDesired Tone: ${tone}`
-  
-  const customInstruction = instruction 
-    ? `\n\nSpecial Instructions: ${instruction}`
-    : ''
-
+  const customInstruction = instruction ? `\n\nSpecial Instructions: ${instruction}` : ''
   const placeholderNote = preservePlaceholders
     ? '\n\nIMPORTANT: Preserve any placeholder markers like [[ODCRM_TOKEN_0]] exactly as they appear.'
     : ''
@@ -142,8 +186,9 @@ export async function tweakEmailWithAI(request: AITweakRequest): Promise<AITweak
     ? '\n\nIMPORTANT: Preserve any existing HTML tags and structure.'
     : ''
 
-  // Prepare the user message
-  let userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
+  let userMessage = `${SYSTEM_PROMPT}
+
+Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
 
 ---
 ORIGINAL EMAIL BODY:
@@ -152,9 +197,10 @@ ${protectedBody}
 
 Provide the improved email body:`
 
-  // If subject is provided, include it
   if (templateSubject) {
-    userMessage = `Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
+    userMessage = `${SYSTEM_PROMPT}
+
+Please improve this email template:${contextSection}${toneInstruction}${customInstruction}${placeholderNote}${htmlStructureNote}
 
 ---
 ORIGINAL SUBJECT: ${protectedSubject}
@@ -169,53 +215,45 @@ BODY:
 [improved body]`
   }
 
-  try {
-    const result = await model.generateContent(userMessage)
-    const response = result.response.text()
+  const response = await callGeminiText(userMessage)
 
-    // Parse response
-    if (templateSubject) {
-      // Extract subject and body from formatted response
-      const subjectMatch = response.match(/SUBJECT:\s*(.+?)(?:\n|BODY:)/is)
-      const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i)
-      let tweakedSubject = subjectMatch ? subjectMatch[1].trim() : (protectedSubject || '')
-      let tweakedBody = bodyMatch ? bodyMatch[1].trim() : response.trim()
+  if (templateSubject) {
+    const subjectMatch = response.match(/SUBJECT:\s*(.+?)(?:\n|BODY:)/is)
+    const bodyMatch = response.match(/BODY:\s*([\s\S]+)/i)
+    let tweakedSubject = subjectMatch ? subjectMatch[1].trim() : (protectedSubject || '')
+    let tweakedBody = bodyMatch ? bodyMatch[1].trim() : response.trim()
 
-      if (preservePlaceholders) {
-        if (subjectProtection) {
-          tweakedSubject = restorePlaceholders(tweakedSubject, subjectProtection.placeholders)
-          if (!preservedPlaceholdersMatch(tweakedSubject, subjectProtection.placeholders)) {
-            tweakedSubject = subjectProtection.original
-          }
-        }
-        if (bodyProtection) {
-          tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
-          if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
-            tweakedBody = bodyProtection.original
-          }
+    if (preservePlaceholders) {
+      if (subjectProtection) {
+        tweakedSubject = restorePlaceholders(tweakedSubject, subjectProtection.placeholders)
+        if (!preservedPlaceholdersMatch(tweakedSubject, subjectProtection.placeholders)) {
+          tweakedSubject = subjectProtection.original
         }
       }
-
-      return {
-        tweakedSubject: tweakedSubject || templateSubject,
-        tweakedBody
-      }
-    }
-
-    let tweakedBody = response.trim()
-    if (preservePlaceholders && bodyProtection) {
-      tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
-      if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
-        tweakedBody = bodyProtection.original
+      if (bodyProtection) {
+        tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
+        if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
+          tweakedBody = bodyProtection.original
+        }
       }
     }
 
     return {
-      tweakedBody
+      tweakedSubject: tweakedSubject || templateSubject,
+      tweakedBody,
     }
-  } catch (error) {
-    console.error('[AI Service] Gemini API error:', error)
-    throw new Error('Failed to generate AI response. Please try again.')
+  }
+
+  let tweakedBody = response.trim()
+  if (preservePlaceholders && bodyProtection) {
+    tweakedBody = restorePlaceholders(tweakedBody, bodyProtection.placeholders)
+    if (!preservedPlaceholdersMatch(tweakedBody, bodyProtection.placeholders)) {
+      tweakedBody = bodyProtection.original
+    }
+  }
+
+  return {
+    tweakedBody,
   }
 }
 
@@ -227,22 +265,22 @@ export async function generateEmailVariations(
   templateSubject: string,
   count: number = 3
 ): Promise<Array<{ subject: string; body: string; variant: string }>> {
-  const tones: Array<'professional' | 'friendly' | 'casual' | 'formal' | 'persuasive'> = 
+  const tones: Array<'professional' | 'friendly' | 'casual' | 'formal' | 'persuasive'> =
     ['professional', 'friendly', 'persuasive']
-  
+
   const variations = await Promise.all(
     tones.slice(0, count).map(async (tone, index) => {
       const result = await tweakEmailWithAI({
         templateBody,
         templateSubject,
         tone,
-        instruction: `Create variation ${index + 1} with a ${tone} approach`
+        instruction: `Create variation ${index + 1} with a ${tone} approach`,
       })
-      
+
       return {
         subject: result.tweakedSubject || templateSubject,
         body: result.tweakedBody,
-        variant: `${tone.charAt(0).toUpperCase()}${tone.slice(1)} Variant`
+        variant: `${tone.charAt(0).toUpperCase()}${tone.slice(1)} Variant`,
       }
     })
   )
@@ -257,12 +295,6 @@ export async function analyzeEmailTemplate(
   templateBody: string,
   templateSubject?: string
 ): Promise<{ score: number; suggestions: string[]; strengths: string[] }> {
-  const genAI = getGeminiClient()
-  const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.0-flash',
-    systemInstruction: 'You are an email marketing expert. Analyze emails and provide actionable feedback in JSON format only.'
-  })
-
   const analysisPrompt = `Analyze this email template and provide:
 1. A score from 1-10 for effectiveness
 2. 3-5 specific suggestions for improvement
@@ -280,20 +312,16 @@ Respond in JSON format only:
 }`
 
   try {
-    const result = await model.generateContent(analysisPrompt)
-    const response = result.response.text()
-    
-    // Parse JSON response
+    const response = await callGeminiText(analysisPrompt, { responseMimeType: 'application/json' })
     const jsonMatch = response.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       return JSON.parse(jsonMatch[0])
     }
-    
-    // Fallback if JSON parsing fails
+
     return {
       score: 5,
       suggestions: ['Unable to parse AI response'],
-      strengths: ['Template received for analysis']
+      strengths: ['Template received for analysis'],
     }
   } catch (error) {
     console.error('[AI Service] Analysis error:', error)
