@@ -175,6 +175,15 @@ type EnrollmentListItem = {
   createdAt: string
   updatedAt: string
   recipientCount: number
+  recipientSource?: 'manual' | 'snapshot' | null
+  sourceListId?: string | null
+  sourceListName?: string | null
+}
+
+type LinkedListSummary = {
+  id: string
+  name: string
+  contactCount: number
 }
 
 type StartPreview = {
@@ -243,6 +252,9 @@ const SequencesTab: React.FC = () => {
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false)
   const [enrollmentsError, setEnrollmentsError] = useState<string | null>(null)
   const [enrollmentActionId, setEnrollmentActionId] = useState<string | null>(null)
+  const [linkedListSummary, setLinkedListSummary] = useState<LinkedListSummary | null>(null)
+  const [linkedListSummaryLoading, setLinkedListSummaryLoading] = useState(false)
+  const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
@@ -1420,6 +1432,44 @@ const SequencesTab: React.FC = () => {
     }
   }
 
+  function humanizeSequenceStatus(status: string | null | undefined): string {
+    switch ((status || '').trim().toLowerCase()) {
+      case 'draft':
+        return 'Draft'
+      case 'scheduled':
+        return 'Scheduled'
+      case 'sending':
+      case 'running':
+        return 'Sending'
+      case 'paused':
+        return 'Paused'
+      case 'sent':
+      case 'completed':
+        return 'Completed'
+      default:
+        return status ? status.replace(/_/g, ' ') : 'Draft'
+    }
+  }
+
+  function formatDateTimeLabel(value: string | null | undefined): string {
+    if (!value) return '—'
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return '—'
+    return parsed.toLocaleString()
+  }
+
+  function describeEnrollmentAudience(enrollment: EnrollmentListItem): string {
+    if (enrollment.recipientSource === 'snapshot') {
+      return enrollment.sourceListName
+        ? `Lead batch: ${enrollment.sourceListName}`
+        : 'Lead batch recipients'
+    }
+    if (enrollment.recipientSource === 'manual') {
+      return 'Manual test recipients'
+    }
+    return 'Recipients source not recorded'
+  }
+
   const loadEnrollmentQueue = async (enrollmentId: string) => {
     if (!selectedCustomerId?.startsWith('cust_') || !enrollmentId) return
     setQueueItemDetail(null)
@@ -1689,7 +1739,7 @@ const SequencesTab: React.FC = () => {
         const enrollmentId = data?.data?.id || data?.data?.enrollmentId
         const count = data?.data?.recipientCount ?? 0
         if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: count })
-        toast({ title: 'Enrollment created', description: count ? `${count} recipients from snapshot.` : undefined, status: 'success' })
+        toast({ title: 'Test recipients saved', description: count ? `${count} recipients from the linked lead batch.` : undefined, status: 'success' })
         onCreateEnrollmentClose()
         setCreateEnrollmentName('')
         setCreateEnrollmentRecipients('')
@@ -1717,7 +1767,7 @@ const SequencesTab: React.FC = () => {
       }
       const enrollmentId = data?.data?.id || data?.data?.enrollmentId
       if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: data?.data?.recipientCount ?? emails.length })
-      toast({ title: 'Enrollment created', description: `${emails.length} recipients queued for enrollment processing.`, status: 'success' })
+      toast({ title: 'Test recipients saved', description: `${emails.length} manual test recipient${emails.length === 1 ? '' : 's'} queued.`, status: 'success' })
       onCreateEnrollmentClose()
       setCreateEnrollmentName('')
       setCreateEnrollmentRecipients('')
@@ -1758,6 +1808,57 @@ const SequencesTab: React.FC = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- load only when modal/sequence/customer change
   }, [isOpen, editingSequence?.id, selectedCustomerId])
+
+  useEffect(() => {
+    if (!isOpen) {
+      setIsSequenceLaunchAdvancedOpen(false)
+      setLinkedListSummary(null)
+      setLinkedListSummaryLoading(false)
+      return
+    }
+    if (!editingSequence?.listId || !selectedCustomerId?.startsWith('cust_')) {
+      setLinkedListSummary(null)
+      setLinkedListSummaryLoading(false)
+      return
+    }
+    let cancelled = false
+    setLinkedListSummaryLoading(true)
+    void api
+      .get<{ id: string; name?: string; contacts?: Array<{ id: string }> }>(`/api/lists/${editingSequence.listId}`, {
+        headers: { 'X-Customer-Id': selectedCustomerId },
+      })
+      .then((res) => {
+        if (cancelled) return
+        if (res.error || !res.data) {
+          setLinkedListSummary(null)
+          return
+        }
+        setLinkedListSummary({
+          id: res.data.id,
+          name: res.data.name || 'Linked lead batch',
+          contactCount: Array.isArray(res.data.contacts) ? res.data.contacts.length : 0,
+        })
+      })
+      .finally(() => {
+        if (!cancelled) setLinkedListSummaryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [isOpen, editingSequence?.listId, selectedCustomerId])
+
+  useEffect(() => {
+    if (!isOpen || !editingSequence?.sequenceId || !selectedCustomerId?.startsWith('cust_')) return
+    const sequenceId = editingSequence.sequenceId
+    setSequenceReadinessSequenceId(sequenceId)
+    void Promise.all([
+      loadSequenceReadiness(sequenceId, { silent: true }),
+      loadSequencePreflight(sequenceId, { silent: true }),
+      loadLaunchPreview(sequenceId, { silent: true }),
+      loadRunHistory(sequenceId, { silent: true }),
+    ])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh operator truth when a sequence is opened for editing
+  }, [isOpen, editingSequence?.sequenceId, selectedCustomerId])
 
   useEffect(() => {
     if (isCreateEnrollmentOpen && editingSequence) {
@@ -2163,8 +2264,9 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  const handleOperatorTestSend = async () => {
-    if (!selectedCustomerId?.startsWith('cust_') || !sequenceReadinessSequenceId.trim()) return
+  const handleOperatorTestSend = async (sequenceIdOverride?: string) => {
+    const chosenSequenceId = (sequenceIdOverride ?? sequenceReadinessSequenceId).trim()
+    if (!selectedCustomerId?.startsWith('cust_') || !chosenSequenceId) return
     const startedAt = new Date().toISOString()
     setOperatorTestSendLoading(true)
     setOperatorActionStatus('Sending a live test batch now...')
@@ -2181,7 +2283,7 @@ const SequencesTab: React.FC = () => {
       }>(
         '/api/send-worker/sequence-test-send',
         {
-          sequenceId: sequenceReadinessSequenceId.trim(),
+          sequenceId: chosenSequenceId,
           limit: 3,
           ignoreWindow: operatorTestSendIgnoreWindow,
         },
@@ -2634,6 +2736,192 @@ const SequencesTab: React.FC = () => {
       totalReplies: sequences.reduce((sum, c) => sum + getRepliedCount(c), 0),
     }
   }, [sequences])
+
+  const activeEnrollments = useMemo(
+    () =>
+      [...enrollments]
+        .filter((enrollment) => enrollment.status === 'ACTIVE')
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()),
+    [enrollments]
+  )
+
+  const currentTestRecipientsCount = useMemo(
+    () => activeEnrollments.reduce((sum, enrollment) => sum + (enrollment.recipientCount || 0), 0),
+    [activeEnrollments]
+  )
+
+  const liveAudienceSummary = useMemo(() => {
+    if (!editingSequence?.listId) {
+      return {
+        label: 'No lead batch linked',
+        detail: 'Start Sequence is blocked until a linked lead batch is selected.',
+      }
+    }
+    if (linkedListSummaryLoading) {
+      return {
+        label: 'Loading linked lead batch…',
+        detail: 'Fetching the current linked audience from backend truth.',
+      }
+    }
+    if (linkedListSummary) {
+      return {
+        label: `Using lead batch: ${linkedListSummary.name}`,
+        detail: `${linkedListSummary.contactCount} recipients are currently linked for Start Sequence.`,
+      }
+    }
+    return {
+      label: 'Using linked lead batch',
+      detail: 'Start Sequence uses the linked lead batch campaign audience.',
+    }
+  }, [editingSequence?.listId, linkedListSummary, linkedListSummaryLoading])
+
+  const testAudienceSummary = useMemo(() => {
+    if (activeEnrollments.length === 0) {
+      return {
+        label: 'No active test recipients',
+        detail: 'Create an enrollment to test with a manual recipient or the linked lead batch.',
+      }
+    }
+    if (activeEnrollments.length === 1) {
+      const enrollment = activeEnrollments[0]
+      return {
+        label:
+          enrollment.recipientSource === 'snapshot'
+            ? `Current recipients: ${enrollment.recipientCount} from ${enrollment.sourceListName || 'the linked lead batch'}`
+            : `Current recipients: ${enrollment.recipientCount} manual test recipient${enrollment.recipientCount === 1 ? '' : 's'}`,
+        detail: `${describeEnrollmentAudience(enrollment)} · Active now`,
+      }
+    }
+    return {
+      label: `Current test recipients: ${currentTestRecipientsCount} across ${activeEnrollments.length} active enrollments`,
+      detail: 'Test now only uses recipients from active enrollments.',
+    }
+  }, [activeEnrollments, currentTestRecipientsCount])
+
+  const nextTestSendSummary = useMemo(() => {
+    const firstBatchRow = launchPreviewData?.firstBatch?.[0]
+    if (firstBatchRow) {
+      return {
+        label: firstBatchRow.scheduledFor ? formatDateTimeLabel(firstBatchRow.scheduledFor) : 'Ready to send now',
+        detail: `${maskEmail(firstBatchRow.recipientEmail)} via ${firstBatchRow.identityEmail || 'assigned mailbox'}`,
+      }
+    }
+    if ((launchPreviewData?.summary.eligibleCandidatesTotal ?? 0) > 0) {
+      return {
+        label: 'Queued after the first batch',
+        detail: 'Eligible recipients exist, but none are in the first due test batch right now.',
+      }
+    }
+    if ((sequenceReadinessData?.summary.blockedCount ?? 0) > 0) {
+      return {
+        label: 'Waiting for an allowed send window',
+        detail: 'Queued recipients exist, but current send rules are blocking the next test send.',
+      }
+    }
+    return {
+      label: 'No queued test send ready yet',
+      detail: 'Create or refresh an active enrollment, then refresh preview.',
+    }
+  }, [launchPreviewData, sequenceReadinessData])
+
+  const lastSequenceOutcomeSummary = useMemo(() => {
+    const lastRow = operatorOutcomeRows[0]
+    if (!lastRow) {
+      return {
+        label: 'No send result yet',
+        detail: 'Recent results will appear here after a test send or live send attempt.',
+      }
+    }
+    return {
+      label: `${humanizeOutcome(lastRow.outcome)}${lastRow.recipientEmail ? ` to ${maskEmail(lastRow.recipientEmail)}` : ''}`,
+      detail: lastRow.identityEmail
+        ? `${lastRow.identityEmail} · ${humanizeRunReason(lastRow.reason || lastRow.lastError)}`
+        : humanizeRunReason(lastRow.reason || lastRow.lastError),
+    }
+  }, [operatorOutcomeRows])
+
+  const sequenceStartBlockedReason = editingSequence ? validateStartRequirements(editingSequence) : 'Select a sequence.'
+  const sequenceModalTestGateReason =
+    sequencePreflightData && !sequencePreflightData.actions?.canLiveCanary
+      ? sequencePreflightData.actions?.liveCanaryReason || 'Immediate test send is blocked by current launch gates.'
+      : operatorConsoleData && !operatorConsoleData.status.manualLiveTickAllowed
+        ? operatorConsoleData.status.manualLiveTickReason || operatorConsoleData.status.scheduledLiveReason || 'Immediate test send is blocked by current launch gates.'
+        : null
+  const sequenceModalTestDisabledReason =
+    !selectedCustomerId?.startsWith('cust_')
+      ? 'Select a client.'
+      : !editingSequence?.sequenceId
+        ? 'Save the sequence first.'
+        : activeEnrollments.length < 1
+          ? 'Create an active enrollment first.'
+          : sequenceModalTestGateReason
+            ? sequenceModalTestGateReason
+            : null
+
+  const launchStatusSummary = useMemo(() => {
+    if (sequenceStartBlockedReason) {
+      return {
+        tone: 'error' as const,
+        title: 'Blocked',
+        detail: sequenceStartBlockedReason,
+      }
+    }
+    if (editingSequence?.status === 'paused') {
+      return {
+        tone: 'warning' as const,
+        title: 'Paused',
+        detail: 'This sequence is paused. Resume it before expecting any live sending.',
+      }
+    }
+    if (editingSequence?.status === 'sending' || editingSequence?.status === 'running') {
+      return {
+        tone: 'success' as const,
+        title: 'Sending',
+        detail: 'The linked lead batch campaign is already active.',
+      }
+    }
+    if (editingSequence?.status === 'scheduled') {
+      return {
+        tone: 'info' as const,
+        title: 'Scheduled',
+        detail: 'The linked lead batch campaign is active and will send in its allowed window.',
+      }
+    }
+    if (editingSequence?.status === 'sent') {
+      return {
+        tone: 'success' as const,
+        title: 'Completed',
+        detail: 'This linked lead batch campaign has completed its sends.',
+      }
+    }
+    return {
+      tone: 'info' as const,
+      title: 'Ready to start',
+      detail: 'Start Sequence launches the linked lead batch campaign. Manual test enrollments are not used by this action.',
+    }
+  }, [editingSequence?.status, sequenceStartBlockedReason])
+
+  const testLaunchSummary = useMemo(() => {
+    if (sequenceModalTestDisabledReason) {
+      return {
+        tone: 'warning' as const,
+        title: 'Test send unavailable',
+        detail: humanizeGateReason(sequenceModalTestDisabledReason),
+      }
+    }
+    if ((launchPreviewData?.summary.firstBatchCount ?? 0) > 0) {
+      return {
+        tone: 'success' as const,
+        title: 'Test send available now',
+        detail: 'Send test batch now uses up to 3 due recipients from active enrollments only.',
+      }
+    }
+    return {
+      tone: 'info' as const,
+      title: 'Waiting for next queued test send',
+      detail: nextTestSendSummary.detail,
+    }
+  }, [launchPreviewData?.summary.firstBatchCount, nextTestSendSummary.detail, sequenceModalTestDisabledReason])
 
   const handleCreateSequence = useCallback(() => {
     // Check if templates exist
@@ -6206,32 +6494,135 @@ const SequencesTab: React.FC = () => {
 
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
-                  <Alert status="info" size="sm" mb={4} borderRadius="md">
-                    <AlertIcon />
+                  <VStack align="stretch" spacing={4} mb={6}>
+                    <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={3}>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Sender</StatLabel>
+                            <StatNumber fontSize="sm">
+                              {editingSequence.senderIdentityId
+                                ? senderIdentities.find((sender) => sender.id === editingSequence.senderIdentityId)?.emailAddress || editingSequence.senderIdentity?.emailAddress || 'Selected mailbox'
+                                : 'No mailbox selected'}
+                            </StatNumber>
+                            <StatHelpText>{editingSequence.senderIdentityId ? 'Used for Start Sequence and test sends.' : 'Choose a mailbox before sending.'}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Live audience</StatLabel>
+                            <StatNumber fontSize="sm">{liveAudienceSummary.label}</StatNumber>
+                            <StatHelpText>{liveAudienceSummary.detail}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Test audience</StatLabel>
+                            <StatNumber fontSize="sm">{testAudienceSummary.label}</StatNumber>
+                            <StatHelpText>{testAudienceSummary.detail}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Current state</StatLabel>
+                            <StatNumber fontSize="sm">{humanizeSequenceStatus(editingSequence.status)}</StatNumber>
+                            <StatHelpText>{launchStatusSummary.title}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Next test send</StatLabel>
+                            <StatNumber fontSize="sm">{nextTestSendSummary.label}</StatNumber>
+                            <StatHelpText>{nextTestSendSummary.detail}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Last result</StatLabel>
+                            <StatNumber fontSize="sm">{lastSequenceOutcomeSummary.label}</StatNumber>
+                            <StatHelpText>{lastSequenceOutcomeSummary.detail}</StatHelpText>
+                          </Stat>
+                        </CardBody>
+                      </Card>
+                    </SimpleGrid>
+
+                    <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={3}>
+                      <Alert status={launchStatusSummary.tone} borderRadius="md" alignItems="flex-start">
+                        <AlertIcon mt={1} />
+                        <Box>
+                          <AlertTitle fontSize="sm">Start Sequence</AlertTitle>
+                          <AlertDescription fontSize="sm">{launchStatusSummary.detail}</AlertDescription>
+                        </Box>
+                      </Alert>
+                      <Alert status={testLaunchSummary.tone} borderRadius="md" alignItems="flex-start">
+                        <AlertIcon mt={1} />
+                        <Box>
+                          <AlertTitle fontSize="sm">Send test batch now</AlertTitle>
+                          <AlertDescription fontSize="sm">{testLaunchSummary.detail}</AlertDescription>
+                        </Box>
+                      </Alert>
+                    </SimpleGrid>
+
+                    <Flex gap={3} flexWrap="wrap" align="center">
+                      <Button
+                        colorScheme="blue"
+                        leftIcon={<EmailIcon />}
+                        onClick={() => handleOperatorTestSend(editingSequence.sequenceId || undefined)}
+                        isLoading={operatorTestSendLoading}
+                        isDisabled={Boolean(sequenceModalTestDisabledReason)}
+                      >
+                        Send test batch now
+                      </Button>
+                      <Button
+                        colorScheme="blue"
+                        variant="outline"
+                        onClick={() => editingSequence && handleRequestStart(editingSequence)}
+                        isDisabled={!!sequenceStartBlockedReason}
+                      >
+                        Start Sequence
+                      </Button>
+                      <Text fontSize="xs" color="gray.600">
+                        Test now uses active enrollments only. Start Sequence launches the linked lead batch campaign and may wait for its allowed send window.
+                      </Text>
+                    </Flex>
+                  </VStack>
+                  <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
                     <Box>
-                      <AlertTitle fontSize="sm">How this works</AlertTitle>
-                      <AlertDescription fontSize="xs">
-                        1. Pick a Leads Snapshot in Configuration · 2. Create an Enrollment (a batch run of this sequence) · 3. Use &quot;Preview email&quot; and &quot;Details&quot; in the queue to review what would send
-                      </AlertDescription>
+                      <Heading size="sm">Test recipients</Heading>
+                      <Text fontSize="sm" color="gray.600">
+                        Queue-backed enrollments are for private testing. They do not change the linked lead batch used by Start Sequence.
+                      </Text>
                     </Box>
-                  </Alert>
-                  <Flex justify="space-between" align="center" mb={4}>
-                    <Heading size="sm">Enrollments</Heading>
-                    <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
-                      Create enrollment
-                    </Button>
+                    <HStack spacing={2}>
+                      <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
+                        {isSequenceLaunchAdvancedOpen ? 'Hide advanced tools' : 'Show advanced tools'}
+                      </Button>
+                      <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
+                        Add test recipients
+                      </Button>
+                    </HStack>
                   </Flex>
                   {lastCreatedEnrollment?.id && (
                     <Alert status="success" mb={4} borderRadius="md">
                       <AlertIcon />
                       <Box flex="1">
-                        <AlertTitle fontSize="sm">Enrollment created</AlertTitle>
+                        <AlertTitle fontSize="sm">Test recipients ready</AlertTitle>
                         <AlertDescription fontSize="xs">
-                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} recipients. ` : ''}Open queue items to verify generated sends.
+                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} recipients queued for testing. ` : ''}Use View results to confirm what sent, failed, or was blocked.
                         </AlertDescription>
                       </Box>
                       <Button size="xs" variant="outline" ml={3} onClick={() => openQueueModal(lastCreatedEnrollment.id)}>
-                        View Queue Items
+                        View results
                       </Button>
                     </Alert>
                   )}
@@ -6251,6 +6642,7 @@ const SequencesTab: React.FC = () => {
                         <Thead>
                           <Tr>
                             <Th>Name</Th>
+                            <Th>Audience</Th>
                             <Th>Status</Th>
                             <Th>Recipients</Th>
                             <Th>Created</Th>
@@ -6260,10 +6652,25 @@ const SequencesTab: React.FC = () => {
                         <Tbody>
                           {enrollments.map((e) => (
                             <Tr key={e.id}>
-                              <Td>{e.name || e.id}</Td>
+                              <Td>
+                                <Text fontSize="sm" fontWeight="medium">{e.name || e.id}</Text>
+                                <Text fontSize="xs" color="gray.500">
+                                  Updated {formatDateTimeLabel(e.updatedAt || e.createdAt)}
+                                </Text>
+                              </Td>
+                              <Td>
+                                <Text fontSize="sm">{describeEnrollmentAudience(e)}</Text>
+                                <Text fontSize="xs" color="gray.500">
+                                  {e.recipientSource === 'snapshot'
+                                    ? 'Uses the linked lead batch for queued test sends.'
+                                    : e.recipientSource === 'manual'
+                                      ? 'Uses manual private test recipients only.'
+                                      : 'Source not recorded on older enrollment data.'}
+                                </Text>
+                              </Td>
                               <Td>
                                 <Badge colorScheme={e.status === 'ACTIVE' ? 'green' : e.status === 'PAUSED' ? 'yellow' : 'gray'} size="sm">
-                                  {e.status}
+                                  {humanizeSequenceStatus(e.status)}
                                 </Badge>
                               </Td>
                               <Td>{e.recipientCount}</Td>
@@ -6283,35 +6690,10 @@ const SequencesTab: React.FC = () => {
                                   <Button
                                     size="xs"
                                     variant="ghost"
-                                    leftIcon={<RepeatIcon />}
-                                    onClick={() => openDryRunModal(e.id)}
-                                  >
-                                    Dry run
-                                  </Button>
-                                  <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    leftIcon={<InfoIcon />}
-                                    onClick={() => openAuditModal(e.id)}
-                                  >
-                                    Audit
-                                  </Button>
-                                  <Button
-                                    size="xs"
-                                    variant="ghost"
-                                    leftIcon={<TimeIcon />}
-                                    onClick={() => handleEnqueue(e.id)}
-                                    isLoading={queueActionId === e.id}
-                                  >
-                                    Queue
-                                  </Button>
-                                  <Button
-                                    size="xs"
-                                    variant="ghost"
                                     leftIcon={<ViewIcon />}
                                     onClick={() => openQueueModal(e.id)}
                                   >
-                                    View queue
+                                    View results
                                   </Button>
                                   <Button
                                     size="xs"
@@ -6343,6 +6725,35 @@ const SequencesTab: React.FC = () => {
                                   >
                                     Cancel
                                   </Button>
+                                  <Collapse in={isSequenceLaunchAdvancedOpen} animateOpacity>
+                                    <HStack gap={2} wrap="wrap">
+                                      <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        leftIcon={<RepeatIcon />}
+                                        onClick={() => openDryRunModal(e.id)}
+                                      >
+                                        Dry run
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        leftIcon={<InfoIcon />}
+                                        onClick={() => openAuditModal(e.id)}
+                                      >
+                                        Audit
+                                      </Button>
+                                      <Button
+                                        size="xs"
+                                        variant="ghost"
+                                        leftIcon={<TimeIcon />}
+                                        onClick={() => handleEnqueue(e.id)}
+                                        isLoading={queueActionId === e.id}
+                                      >
+                                        Refresh queue
+                                      </Button>
+                                    </HStack>
+                                  </Collapse>
                                 </HStack>
                               </Td>
                             </Tr>
@@ -6368,21 +6779,10 @@ const SequencesTab: React.FC = () => {
             borderColor="gray.200"
           >
             <Button variant="ghost" onClick={onClose}>
-              Cancel
+              Close
             </Button>
             <Button variant="outline" onClick={handleSaveDraft} isDisabled={!canSaveDraft}>
               Save Draft
-            </Button>
-            <Button
-              colorScheme="blue"
-              onClick={() => editingSequence && handleRequestStart(editingSequence)}
-              isDisabled={
-                !editingSequence ||
-                !editingSequence.id ||
-                !!validateStartRequirements(editingSequence)
-              }
-            >
-              Start Sequence
             </Button>
           </Flex>
         </ModalContent>
@@ -6391,15 +6791,15 @@ const SequencesTab: React.FC = () => {
       <Modal isOpen={isCreateEnrollmentOpen} onClose={onCreateEnrollmentClose} size="md">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Create enrollment</ModalHeader>
+          <ModalHeader>Add test recipients</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
             <Alert status="info" mb={4} borderRadius="md">
               <AlertIcon />
               <Box>
-                <AlertTitle fontSize="sm">Enrollment flow</AlertTitle>
+                <AlertTitle fontSize="sm">Choose the test audience</AlertTitle>
                 <AlertDescription fontSize="xs">
-                  Step 1: choose source. Step 2: preview recipients. Step 3: create enrollment. Step 4: open queue items.
+                  Test enrollments are queue-backed. They help you verify who would receive a send now without changing the linked lead batch used by Start Sequence.
                 </AlertDescription>
               </Box>
             </Alert>
@@ -6408,18 +6808,18 @@ const SequencesTab: React.FC = () => {
               <Input
                 value={createEnrollmentName}
                 onChange={(e) => setCreateEnrollmentName(e.target.value)}
-                placeholder="e.g. Q1 batch"
+                placeholder="e.g. Internal test batch"
               />
             </FormControl>
             <FormControl mb={4} isRequired>
-              <FormLabel>Recipients source</FormLabel>
+              <FormLabel>Test audience source</FormLabel>
               <RadioGroup
                 value={createEnrollmentRecipientSource}
                 onChange={(val: 'snapshot' | 'manual') => setCreateEnrollmentRecipientSource(val)}
               >
                 <VStack align="stretch" spacing={2}>
-                  <Radio value="snapshot">Use Leads Snapshot (recommended)</Radio>
-                  <Radio value="manual">Paste emails manually (advanced)</Radio>
+                  <Radio value="snapshot">Use linked lead batch recipients</Radio>
+                  <Radio value="manual">Use manual test recipients</Radio>
                 </VStack>
               </RadioGroup>
             </FormControl>
@@ -6428,9 +6828,9 @@ const SequencesTab: React.FC = () => {
                 <Alert status="info" borderRadius="md">
                   <AlertIcon />
                   <Box>
-                    <AlertTitle fontSize="sm">From Leads Snapshot</AlertTitle>
+                    <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
                     <AlertDescription fontSize="xs">
-                      Recipients will be pulled from the selected Leads Snapshot for this sequence.
+                      Creates a queue-backed test enrollment from the linked lead batch. Start Sequence still uses the linked lead batch campaign directly.
                     </AlertDescription>
                   </Box>
                 </Alert>
@@ -6438,17 +6838,17 @@ const SequencesTab: React.FC = () => {
                   <Alert status="error" mt={2} borderRadius="md">
                     <AlertIcon />
                     <AlertDescription fontSize="sm">
-                      No Leads Snapshot selected for this sequence. Select one in Configuration first, or switch to manual paste.
+                      No linked lead batch is selected for this sequence. Select one in Configuration first, or switch to manual test recipients.
                     </AlertDescription>
                   </Alert>
                 )}
                 <FormHelperText mt={2}>
-                  Recipient preview: {leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0} recipients from the selected snapshot.
+                  Recipient preview: {linkedListSummary?.contactCount ?? leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0} recipients from the linked lead batch.
                 </FormHelperText>
               </Box>
             ) : (
               <FormControl mb={4} isRequired>
-                <FormLabel>Recipients</FormLabel>
+                <FormLabel>Manual test recipients</FormLabel>
                 <Textarea
                   value={createEnrollmentRecipients}
                   onChange={(e) => setCreateEnrollmentRecipients(e.target.value)}
@@ -6456,7 +6856,7 @@ const SequencesTab: React.FC = () => {
                   rows={6}
                 />
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  Paste emails separated by new lines or commas.
+                  Paste one or more private test recipients, separated by new lines or commas.
                 </Text>
                 <FormHelperText mt={1}>
                   Recipient preview: {parseRecipientEmails(createEnrollmentRecipients).length} valid recipients.
@@ -6477,7 +6877,7 @@ const SequencesTab: React.FC = () => {
                     : parseRecipientEmails(createEnrollmentRecipients).length === 0
                 }
               >
-                Create
+                Save test recipients
               </Button>
             </Flex>
           </ModalBody>
@@ -6668,47 +7068,54 @@ const SequencesTab: React.FC = () => {
           <DrawerCloseButton />
           <DrawerHeader>
             <VStack align="stretch" spacing={3}>
-              <Text>Send Queue</Text>
-              <Flex align="center" gap={2}>
-                <Text fontSize="sm" color="gray.600" fontFamily="mono">
-                  {queueEnrollmentId ?? '—'}
-                </Text>
-                {queueEnrollmentId && selectedCustomerId && (
-                  <Tooltip label="Copy enrollment ID">
-                    <IconButton
-                      aria-label="Copy enrollment ID"
-                      size="xs"
-                      variant="ghost"
-                      icon={<CopyIcon />}
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(queueEnrollmentId)
-                          toast({ title: 'Copied enrollment ID', status: 'success', duration: 2000 })
-                        } catch {
-                          toast({ title: 'Copy failed', status: 'error' })
-                        }
+              <Text>Results and queued recipients</Text>
+              <Text fontSize="sm" color="gray.600">
+                Use this view to confirm what sent, what failed, what is queued next, and why.
+              </Text>
+              <Collapse in={isDiagnosticsOpen} animateOpacity>
+                <VStack align="stretch" spacing={3}>
+                  <Flex align="center" gap={2}>
+                    <Text fontSize="sm" color="gray.600" fontFamily="mono">
+                      {queueEnrollmentId ?? '—'}
+                    </Text>
+                    {queueEnrollmentId && selectedCustomerId && (
+                      <Tooltip label="Copy enrollment ID">
+                        <IconButton
+                          aria-label="Copy enrollment ID"
+                          size="xs"
+                          variant="ghost"
+                          icon={<CopyIcon />}
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(queueEnrollmentId)
+                              toast({ title: 'Copied enrollment ID', status: 'success', duration: 2000 })
+                            } catch {
+                              toast({ title: 'Copy failed', status: 'error' })
+                            }
+                          }}
+                        />
+                      </Tooltip>
+                    )}
+                  </Flex>
+                  <FormControl>
+                    <FormLabel fontSize="sm">Admin secret (local)</FormLabel>
+                    <Input
+                      type="password"
+                      size="sm"
+                      placeholder="Enter to enable Tick and Run dry-run worker"
+                      value={adminSecret}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        setAdminSecret(v)
+                        try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
                       }}
                     />
-                  </Tooltip>
-                )}
-              </Flex>
-              <FormControl>
-                <FormLabel fontSize="sm">Admin secret (local)</FormLabel>
-                <Input
-                  type="password"
-                  size="sm"
-                  placeholder="Enter to enable Tick and Run dry-run worker"
-                  value={adminSecret}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setAdminSecret(v)
-                    try { sessionStorage.setItem('odcrm_admin_secret', v) } catch { /* ignore */ }
-                  }}
-                />
-                {!adminSecret && (
-                  <FormHelperText fontSize="xs">Admin secret required for Tick and Run dry-run worker.</FormHelperText>
-                )}
-              </FormControl>
+                    {!adminSecret && (
+                      <FormHelperText fontSize="xs">Admin secret required for Tick and Run dry-run worker.</FormHelperText>
+                    )}
+                  </FormControl>
+                </VStack>
+              </Collapse>
             </VStack>
           </DrawerHeader>
           <DrawerBody pb={6}>
@@ -6739,7 +7146,7 @@ const SequencesTab: React.FC = () => {
                   >
                     Reload
                   </Button>
-                  {isAgencyUI() && (
+                  {isAgencyUI() && isDiagnosticsOpen && (
                     <>
                       <Button
                         size="sm"
@@ -6762,9 +7169,7 @@ const SequencesTab: React.FC = () => {
                       >
                         Run dry-run worker
                       </Button>
-                      {!adminSecret && (
-                        <Text fontSize="xs" color="gray.500">Admin secret required.</Text>
-                      )}
+                      {!adminSecret && <Text fontSize="xs" color="gray.500">Admin secret required.</Text>}
                     </>
                   )}
                 </Flex>
@@ -6794,14 +7199,14 @@ const SequencesTab: React.FC = () => {
                               <Th>Recipient</Th>
                               <Th>SentAt</Th>
                               <Th>Error</Th>
-                              <Th w="80px">Details</Th>
-                              <Th w="230px">Operator Actions</Th>
+                              {isDiagnosticsOpen ? <Th w="80px">Details</Th> : null}
+                              {isDiagnosticsOpen ? <Th w="230px">Operator Actions</Th> : null}
                             </Tr>
                           </Thead>
                           <Tbody>
                             {items.length === 0 ? (
                               <Tr>
-                                <Td colSpan={8} color="gray.500">No items yet. Queue empty: awaiting generation / schedule.</Td>
+                                <Td colSpan={isDiagnosticsOpen ? 8 : 6} color="gray.500">No items yet. Queue empty: awaiting generation / schedule.</Td>
                               </Tr>
                             ) : (
                               items.map((it: { id?: string; scheduledFor?: string | null; status?: string; stepIndex?: number; recipientEmail?: string; sentAt?: string | null; lastError?: string | null }, i: number) => (
@@ -6820,92 +7225,96 @@ const SequencesTab: React.FC = () => {
                                   <Td fontSize="xs" maxW="140px" isTruncated title={it.lastError ?? undefined}>
                                     {it.lastError ?? '—'}
                                   </Td>
-                                  <Td>
-                                    <Button
-                                      size="xs"
-                                      variant="ghost"
-                                      isDisabled={!selectedCustomerId?.startsWith('cust_') || !it.id || queueDrawerDetailLoading}
-                                      onClick={async () => {
-                                        if (!selectedCustomerId?.startsWith('cust_') || !it.id) return
-                                        setQueueDrawerDetailLoading(true)
-                                        setQueueDrawerDetailError(null)
-                                        setQueueDrawerDetail(null)
-                                        const res = await api.get<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null }>(`/api/send-queue/items/${it.id}`, { headers: { 'X-Customer-Id': selectedCustomerId } })
-                                        setQueueDrawerDetailLoading(false)
-                                        if (res.error) {
-                                          if (res.errorDetails?.status === 404) {
-                                            toast({ title: 'Queue item not found', status: 'warning' })
-                                            return
-                                          }
-                                          setQueueDrawerDetailError(res.error + (res.errorDetails?.status ? ` (${res.errorDetails.status})` : ''))
-                                          return
-                                        }
-                                        if (res.data) setQueueDrawerDetail(res.data)
-                                      }}
-                                    >
-                                      Details
-                                    </Button>
-                                  </Td>
-                                  <Td>
-                                    <HStack spacing={1}>
-                                      <Button
-                                        size="xs"
-                                        variant="outline"
-                                        colorScheme="green"
-                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
-                                        isLoading={queueOperatorActionId === it.id}
-                                        onClick={() => {
-                                          if (!it.id) return
-                                          void applyQueueOperatorAction(it.id, { status: 'QUEUED', operatorNote: 'approved_by_operator' }, 'Queue item approved')
-                                        }}
-                                      >
-                                        Approve
-                                      </Button>
-                                      <Button
-                                        size="xs"
-                                        variant="outline"
-                                        colorScheme="red"
-                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
-                                        isLoading={queueOperatorActionId === it.id}
-                                        onClick={() => {
-                                          if (!it.id) return
-                                          const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'manual_skip'
-                                          void applyQueueOperatorAction(it.id, { status: 'SKIPPED', skipReason: reason }, 'Queue item skipped')
-                                        }}
-                                      >
-                                        Skip
-                                      </Button>
+                                  {isDiagnosticsOpen ? (
+                                    <Td>
                                       <Button
                                         size="xs"
                                         variant="ghost"
-                                        isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
-                                        isLoading={queueOperatorActionId === it.id}
-                                        onClick={() => {
-                                          if (!it.id) return
-                                          const sendAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
-                                          void applyQueueOperatorAction(it.id, { status: 'QUEUED', sendAt, operatorNote: 'rescheduled_by_operator' }, 'Queue send time updated')
+                                        isDisabled={!selectedCustomerId?.startsWith('cust_') || !it.id || queueDrawerDetailLoading}
+                                        onClick={async () => {
+                                          if (!selectedCustomerId?.startsWith('cust_') || !it.id) return
+                                          setQueueDrawerDetailLoading(true)
+                                          setQueueDrawerDetailError(null)
+                                          setQueueDrawerDetail(null)
+                                          const res = await api.get<{ id: string; status: string; scheduledFor: string | null; sentAt: string | null; attemptCount: number; lastError: string | null }>(`/api/send-queue/items/${it.id}`, { headers: { 'X-Customer-Id': selectedCustomerId } })
+                                          setQueueDrawerDetailLoading(false)
+                                          if (res.error) {
+                                            if (res.errorDetails?.status === 404) {
+                                              toast({ title: 'Queue item not found', status: 'warning' })
+                                              return
+                                            }
+                                            setQueueDrawerDetailError(res.error + (res.errorDetails?.status ? ` (${res.errorDetails.status})` : ''))
+                                            return
+                                          }
+                                          if (res.data) setQueueDrawerDetail(res.data)
                                         }}
                                       >
-                                        Send +15m
+                                        Details
                                       </Button>
-                                    </HStack>
-                                  </Td>
+                                    </Td>
+                                  ) : null}
+                                  {isDiagnosticsOpen ? (
+                                    <Td>
+                                      <HStack spacing={1}>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          colorScheme="green"
+                                          isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                          isLoading={queueOperatorActionId === it.id}
+                                          onClick={() => {
+                                            if (!it.id) return
+                                            void applyQueueOperatorAction(it.id, { status: 'QUEUED', operatorNote: 'approved_by_operator' }, 'Queue item approved')
+                                          }}
+                                        >
+                                          Approve
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          colorScheme="red"
+                                          isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                          isLoading={queueOperatorActionId === it.id}
+                                          onClick={() => {
+                                            if (!it.id) return
+                                            const reason = (typeof window !== 'undefined' && window.prompt?.('Skip reason (optional):'))?.trim().slice(0, 200) || 'manual_skip'
+                                            void applyQueueOperatorAction(it.id, { status: 'SKIPPED', skipReason: reason }, 'Queue item skipped')
+                                          }}
+                                        >
+                                          Skip
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          isDisabled={!it.id || it.status === 'SENT' || queueOperatorActionId === it.id}
+                                          isLoading={queueOperatorActionId === it.id}
+                                          onClick={() => {
+                                            if (!it.id) return
+                                            const sendAt = new Date(Date.now() + 15 * 60 * 1000).toISOString()
+                                            void applyQueueOperatorAction(it.id, { status: 'QUEUED', sendAt, operatorNote: 'rescheduled_by_operator' }, 'Queue send time updated')
+                                          }}
+                                        >
+                                          Send +15m
+                                        </Button>
+                                      </HStack>
+                                    </Td>
+                                  ) : null}
                                 </Tr>
                               ))
                             )}
                           </Tbody>
                         </Table>
                       </Box>
-                      {queueDrawerDetailLoading && (
+                      {isDiagnosticsOpen && queueDrawerDetailLoading && (
                         <Text fontSize="sm" color="gray.500">Loading detail…</Text>
                       )}
-                      {queueDrawerDetailError && (
+                      {isDiagnosticsOpen && queueDrawerDetailError && (
                         <Alert status="error" size="sm">
                           <AlertIcon />
                           <AlertDescription>{queueDrawerDetailError}</AlertDescription>
                         </Alert>
                       )}
-                      {queueDrawerDetail && !queueDrawerDetailLoading && (
+                      {isDiagnosticsOpen && queueDrawerDetail && !queueDrawerDetailLoading && (
                         <Box borderWidth="1px" borderRadius="md" p={3} bg="gray.50" _dark={{ bg: 'gray.800' }}>
                           <Text fontSize="sm" fontWeight="semibold" mb={2}>Queue item detail</Text>
                           <VStack align="stretch" spacing={1} fontSize="sm">
@@ -6918,7 +7327,7 @@ const SequencesTab: React.FC = () => {
                           <Button size="xs" mt={2} variant="ghost" onClick={() => { setQueueDrawerDetail(null); setQueueDrawerDetailError(null) }}>Close</Button>
                         </Box>
                       )}
-                      {queueEnrollmentId && selectedCustomerId && (
+                      {isDiagnosticsOpen && queueEnrollmentId && selectedCustomerId && (
                         <Box>
                           <Text fontSize="xs" fontWeight="semibold" mb={2}>Copyable curl</Text>
                           <Code display="block" whiteSpace="pre" fontSize="xs" p={2} borderRadius="md" overflowX="auto">
@@ -6990,7 +7399,7 @@ const SequencesTab: React.FC = () => {
             ) : (
               <VStack align="start" spacing={3}>
                 <Text>
-                  This will enroll the selected snapshot and start sending immediately.
+                  This starts the linked lead batch campaign for this sequence. Manual test enrollments are not used by this action, and live sends may wait for the allowed send window after start.
                 </Text>
                 <Box>
                   <Text fontWeight="semibold">Sender</Text>
@@ -6999,7 +7408,7 @@ const SequencesTab: React.FC = () => {
                   </Text>
                 </Box>
                 <Box>
-                  <Text fontWeight="semibold">Leads Snapshot</Text>
+                  <Text fontWeight="semibold">Live audience</Text>
                   <Text fontSize="sm" color="gray.600">
                     {startPreview?.snapshot?.name || '—'}
                     {typeof startPreview?.snapshot?.memberCount === 'number'
@@ -7007,6 +7416,12 @@ const SequencesTab: React.FC = () => {
                       : ''}
                   </Text>
                 </Box>
+                <Alert status="info" size="sm">
+                  <AlertIcon />
+                  <AlertDescription>
+                    Start Sequence uses the linked lead batch. Use &quot;Send test batch now&quot; in the sequence view when you want to send only to active test enrollments.
+                  </AlertDescription>
+                </Alert>
                 <Box>
                   <Text fontWeight="semibold">Sequence Steps</Text>
                   {startPreviewCampaign?.steps && startPreviewCampaign.steps.length > 0 ? (
