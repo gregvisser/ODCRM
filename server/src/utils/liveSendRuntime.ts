@@ -12,6 +12,8 @@ function readRuntimeEnv(): RuntimeEnvPayload | null {
   const candidates = [
     path.join(serverDir, 'runtimeEnv.generated.json'),
     path.join(serverDir, 'dist', 'runtimeEnv.generated.json'),
+    path.join(serverDir, 'buildInfo.generated.json'),
+    path.join(serverDir, 'dist', 'buildInfo.generated.json'),
   ]
 
   for (const candidate of candidates) {

@@ -166,13 +166,21 @@ jobs:
           const fs = require('fs');
           const sha = process.env.BUILD_SHA || process.env.GIT_SHA || 'unknown';
           const t = process.env.BUILD_TIME || 'unknown';
-          const payload = JSON.stringify({ GIT_SHA: sha, BUILD_SHA: sha, BUILD_TIME: t });
+          const payload = JSON.stringify({
+            GIT_SHA: sha,
+            BUILD_SHA: sha,
+            BUILD_TIME: t,
+            ENABLE_SEND_QUEUE_SENDING: process.env.ENABLE_SEND_QUEUE_SENDING_APPSETTING || '',
+            ENABLE_LIVE_SENDING: process.env.ENABLE_LIVE_SENDING_APPSETTING || '',
+          });
           fs.writeFileSync('buildInfo.generated.json', payload);
           "
         env:
           BUILD_SHA: ${{ github.sha }}
           GIT_SHA: ${{ github.sha }}
           BUILD_TIME: ${{ env.BUILD_TIME }}
+          ENABLE_SEND_QUEUE_SENDING_APPSETTING: ${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
+          ENABLE_LIVE_SENDING_APPSETTING: ${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
 
       - name: Write runtime live-send overrides
         run: |
