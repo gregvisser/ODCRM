@@ -174,15 +174,17 @@ jobs:
           GIT_SHA: ${{ github.sha }}
           BUILD_TIME: ${{ env.BUILD_TIME }}
 
-      - name: Write deploy .env live-send overrides
+      - name: Write runtime live-send overrides
         run: |
           cd server
-          cat > .env <<EOF
-          ENABLE_SEND_QUEUE_SENDING=${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
-          ENABLE_LIVE_SENDING=${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
+          cat > runtimeEnv.generated.json <<EOF
+          {
+            "ENABLE_SEND_QUEUE_SENDING": "${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}",
+            "ENABLE_LIVE_SENDING": "${{ env.ENABLE_LIVE_SENDING_APPSETTING }}"
+          }
           EOF
-          echo "Wrote server/.env for deploy runtime:"
-          cat .env
+          echo "Wrote server/runtimeEnv.generated.json for deploy runtime:"
+          cat runtimeEnv.generated.json
 
       - name: Build application
         run: cd server && npm run build
@@ -191,7 +193,8 @@ jobs:
         run: |
           cd server
           cp buildInfo.generated.json dist/buildInfo.generated.json
-          echo "buildInfo.generated.json in server/ and server/dist/ for artifact"
+          cp runtimeEnv.generated.json dist/runtimeEnv.generated.json
+          echo "buildInfo.generated.json and runtimeEnv.generated.json copied into server/ and server/dist/ for artifact"
 
       - name: Log deploy target (no secrets)
         run: |
