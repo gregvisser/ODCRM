@@ -264,7 +264,11 @@ jobs:
             -H "Content-Type: application/json" \
             -X POST \
             "$KUDU_BASE_URL/api/settings" \
-            --data "$payload" >/tmp/kudu-settings.json
+            --data "$payload" >/tmp/kudu-settings-post.txt
+
+          curl -fsS \
+            -u "$KUDU_USERNAME:$KUDU_PASSWORD" \
+            "$KUDU_BASE_URL/api/settings" >/tmp/kudu-settings.json
 
           python <<'PY'
           import json
