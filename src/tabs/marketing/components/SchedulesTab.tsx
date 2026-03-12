@@ -136,6 +136,8 @@ type ScheduleStats = {
   } | null
 }
 
+const MAX_DAILY_SEND_LIMIT = 30
+
 const SchedulesTab: React.FC = () => {
   const [schedules, setSchedules] = useState<DeliverySchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
@@ -161,7 +163,7 @@ const SchedulesTab: React.FC = () => {
   const toDeliverySchedule = (schedule: CampaignSchedule): DeliverySchedule => {
     const startHour = schedule.senderIdentity?.sendWindowHoursStart ?? 9
     const endHour = schedule.senderIdentity?.sendWindowHoursEnd ?? 17
-    const maxDaily = schedule.senderIdentity?.dailySendLimit ?? 200
+    const maxDaily = Math.min(MAX_DAILY_SEND_LIMIT, schedule.senderIdentity?.dailySendLimit ?? MAX_DAILY_SEND_LIMIT)
     return {
       ...schedule,
       description: '',
@@ -176,7 +178,7 @@ const SchedulesTab: React.FC = () => {
         },
       ],
       maxEmailsPerDay: maxDaily,
-      maxEmailsPerHour: Math.max(1, Math.floor(maxDaily / 10)),
+      maxEmailsPerHour: Math.max(1, Math.floor(maxDaily / 6)),
       respectRecipientTimezone: true,
     }
   }
@@ -325,9 +327,9 @@ const SchedulesTab: React.FC = () => {
       isActive: true,
       timezone: 'Europe/London',
       daysOfWeek: [1, 2, 3, 4, 5],
-      timeWindows: [{ startTime: '09:00', endTime: '17:00', maxEmails: 50 }],
-      maxEmailsPerDay: 200,
-      maxEmailsPerHour: 10,
+      timeWindows: [{ startTime: '09:00', endTime: '17:00', maxEmails: MAX_DAILY_SEND_LIMIT }],
+      maxEmailsPerDay: MAX_DAILY_SEND_LIMIT,
+      maxEmailsPerHour: Math.max(1, Math.floor(MAX_DAILY_SEND_LIMIT / 6)),
       respectRecipientTimezone: true,
     })
     onOpen()
@@ -407,7 +409,7 @@ const SchedulesTab: React.FC = () => {
       ...editingSchedule,
       timeWindows: [
         ...editingSchedule.timeWindows,
-        { startTime: '09:00', endTime: '17:00', maxEmails: 50 }
+        { startTime: '09:00', endTime: '17:00', maxEmails: MAX_DAILY_SEND_LIMIT },
       ]
     })
   }
@@ -462,7 +464,7 @@ const SchedulesTab: React.FC = () => {
       <Card mb={4}>
         <CardBody py={3}>
           <Text fontSize="sm" color="gray.600">
-            Route truth: <strong>/api/schedules</strong> and <strong>/api/schedules/emails</strong>. Schedules represent campaign timing + sender-window applicability for this tenant.
+            Schedules show when active campaign emails will go out and which mailbox/day limit applies.
           </Text>
         </CardBody>
       </Card>
@@ -806,13 +808,14 @@ const SchedulesTab: React.FC = () => {
                           size="sm"
                           w="120px"
                         />
-                        <NumberInput
-                          value={window.maxEmails}
-                          onChange={(_, value) => handleUpdateTimeWindow(index, 'maxEmails', value)}
-                          size="sm"
-                          w="120px"
-                          min={1}
-                        >
+                    <NumberInput
+                      value={window.maxEmails}
+                      onChange={(_, value) => handleUpdateTimeWindow(index, 'maxEmails', Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, value)))}
+                      size="sm"
+                      w="120px"
+                      min={1}
+                      max={MAX_DAILY_SEND_LIMIT}
+                    >
                           <NumberInputField />
                           <NumberInputStepper>
                             <NumberIncrementStepper />
@@ -839,8 +842,9 @@ const SchedulesTab: React.FC = () => {
                     <FormLabel>Max Emails Per Day</FormLabel>
                     <NumberInput
                       value={editingSchedule.maxEmailsPerDay}
-                      onChange={(_, value) => setEditingSchedule({...editingSchedule, maxEmailsPerDay: value})}
+                      onChange={(_, value) => setEditingSchedule({...editingSchedule, maxEmailsPerDay: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, value))})}
                       min={1}
+                      max={MAX_DAILY_SEND_LIMIT}
                     >
                       <NumberInputField />
                       <NumberInputStepper>
@@ -848,6 +852,9 @@ const SchedulesTab: React.FC = () => {
                         <NumberDecrementStepper />
                       </NumberInputStepper>
                     </NumberInput>
+                    <Text fontSize="xs" color="gray.500" mt={1}>
+                      Strict maximum: {MAX_DAILY_SEND_LIMIT} emails per mailbox each day.
+                    </Text>
                   </FormControl>
                   <FormControl>
                     <FormLabel>Max Emails Per Hour</FormLabel>

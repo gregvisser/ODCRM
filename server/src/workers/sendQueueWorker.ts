@@ -13,6 +13,7 @@ import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { assertLiveSendAllowed } from '../utils/liveSendGate.js'
+import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
@@ -630,9 +631,9 @@ export async function processOne(
   }
 
   // Respect mailbox throughput guardrails before attempting a live send.
-  const dailyLimit = (enrollment.sequence?.senderIdentity as any)?.dailySendLimit as number | null | undefined
+  const dailyLimit = clampDailySendLimit((enrollment.sequence?.senderIdentity as any)?.dailySendLimit)
   const nowUtc = now
-  if (dailyLimit != null && dailyLimit > 0) {
+  if (dailyLimit > 0) {
     const startOfUtcDay = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate(), 0, 0, 0, 0))
     const sentToday = await prisma.emailMessageMetadata.count({
       where: {

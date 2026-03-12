@@ -2,6 +2,7 @@ import express from 'express'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
 
 const router = express.Router()
 
@@ -504,7 +505,7 @@ router.get('/callback', async (req, res) => {
           refreshToken: tokenData.refresh_token,
           tokenExpiresAt: new Date(Date.now() + (tokenData.expires_in * 1000)),
           isActive: true,
-          dailySendLimit: 150
+          dailySendLimit: MAX_DAILY_SEND_LIMIT_PER_IDENTITY
         }
       })
 
@@ -626,7 +627,7 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
         smtpUsername,
         smtpPassword,
         smtpSecure: smtpSecure ?? false,
-        dailySendLimit: dailySendLimit ?? 150,
+        dailySendLimit: clampDailySendLimit(dailySendLimit),
         isActive: isActive ?? true
       },
       create: {
@@ -640,7 +641,7 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
         smtpUsername,
         smtpPassword,
         smtpSecure: smtpSecure ?? false,
-        dailySendLimit: dailySendLimit ?? 150,
+        dailySendLimit: clampDailySendLimit(dailySendLimit),
         isActive: isActive ?? true
       }
     })
@@ -715,6 +716,7 @@ router.get('/identities', async (req, res, next) => {
       return {
         ...i,
         email,
+        dailySendLimit: clampDailySendLimit(i.dailySendLimit),
         delegatedReady,
         tokenExpired,
       }
@@ -745,6 +747,9 @@ router.patch('/identities/:id', requireMarketingMutationAuth, async (req, res, n
     const data: Record<string, unknown> = {}
     for (const key of PATCH_IDENTITY_WHITELIST) {
       if (body[key] !== undefined) data[key] = body[key]
+    }
+    if (data.dailySendLimit !== undefined) {
+      data.dailySendLimit = clampDailySendLimit(data.dailySendLimit)
     }
 
     const identity = await prisma.emailIdentity.findFirst({

@@ -2,6 +2,7 @@ import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { z } from 'zod'
+import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
 
 const router = express.Router()
 const CampaignStatusValues = ['draft', 'running', 'paused', 'completed'] as const
@@ -17,9 +18,9 @@ const createScheduleSchema = z.object({
   timeWindows: z.array(z.object({
     startTime: z.string().regex(/^\d{2}:\d{2}$/),
     endTime: z.string().regex(/^\d{2}:\d{2}$/),
-    maxEmails: z.number().int().min(1).max(5000).optional(),
+    maxEmails: z.number().int().min(1).max(MAX_DAILY_SEND_LIMIT_PER_IDENTITY).optional(),
   })).optional(),
-  maxEmailsPerDay: z.number().int().min(1).max(5000).optional(),
+  maxEmailsPerDay: z.number().int().min(1).max(MAX_DAILY_SEND_LIMIT_PER_IDENTITY).optional(),
 })
 
 const updateScheduleSchema = createScheduleSchema.partial().extend({
@@ -81,7 +82,12 @@ router.get('/', async (req, res, next) => {
       customerId: campaign.customerId,
       name: campaign.name,
       status: campaign.status,
-      senderIdentity: campaign.senderIdentity,
+      senderIdentity: campaign.senderIdentity
+        ? {
+            ...campaign.senderIdentity,
+            dailySendLimit: clampDailySendLimit(campaign.senderIdentity.dailySendLimit),
+          }
+        : null,
       totalProspects: campaign._count.prospects,
       createdAt: campaign.createdAt.toISOString(),
       updatedAt: campaign.updatedAt.toISOString(),
@@ -279,7 +285,7 @@ router.get('/:id/stats', async (req, res, next) => {
       upcomingSends: upcomingCount,
       sentSends: sentCount,
       todaySent: todaySentCount,
-      dailyLimit: campaign.senderIdentity?.dailySendLimit || 150,
+      dailyLimit: clampDailySendLimit(campaign.senderIdentity?.dailySendLimit),
       senderIdentity: campaign.senderIdentity,
     })
   } catch (error) {
@@ -324,7 +330,7 @@ router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
     if (senderIdentityId && data.maxEmailsPerDay != null) {
       await prisma.emailIdentity.updateMany({
         where: { id: senderIdentityId, customerId },
-        data: { dailySendLimit: data.maxEmailsPerDay },
+        data: { dailySendLimit: clampDailySendLimit(data.maxEmailsPerDay) },
       })
     }
 
@@ -376,7 +382,7 @@ router.put('/:id', requireMarketingMutationAuth, async (req, res, next) => {
     if (senderIdentityId && data.maxEmailsPerDay != null) {
       await prisma.emailIdentity.updateMany({
         where: { id: senderIdentityId, customerId },
-        data: { dailySendLimit: data.maxEmailsPerDay },
+        data: { dailySendLimit: clampDailySendLimit(data.maxEmailsPerDay) },
       })
     }
 
