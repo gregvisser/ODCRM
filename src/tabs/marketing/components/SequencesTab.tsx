@@ -255,6 +255,7 @@ const SequencesTab: React.FC = () => {
   const [linkedListSummary, setLinkedListSummary] = useState<LinkedListSummary | null>(null)
   const [linkedListSummaryLoading, setLinkedListSummaryLoading] = useState(false)
   const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
+  const [isSequenceSetupOpen, setIsSequenceSetupOpen] = useState(false)
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
@@ -1596,6 +1597,15 @@ const SequencesTab: React.FC = () => {
   }, [isAuditPanelOpen, selectedCustomerId, auditQueueItemIdFilter, auditDecisionFilter, loadAuditSummary])
 
   useEffect(() => {
+    if (!selectedCustomerId?.startsWith('cust_')) {
+      setOperatorConsoleData(null)
+      return
+    }
+    void loadOperatorConsole({ silent: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load a lightweight operator summary when the client changes
+  }, [selectedCustomerId, operatorConsoleSinceHours])
+
+  useEffect(() => {
     if (!isQueuePreviewPanelOpen) return
     if (!selectedCustomerId?.startsWith('cust_')) return
     loadSendQueuePreview()
@@ -2743,6 +2753,23 @@ const SequencesTab: React.FC = () => {
     }
   }, [sequences])
 
+  const selectedCustomerName = useMemo(
+    () => customers.find((customer) => customer.id === selectedCustomerId)?.name || 'No client selected',
+    [customers, selectedCustomerId]
+  )
+
+  const totalOptOuts = useMemo(
+    () => sequences.reduce((sum, sequence) => sum + Number(sequence.metrics?.unsubscribed || 0), 0),
+    [sequences]
+  )
+
+  const activeMailboxCount = useMemo(
+    () => senderIdentities.filter((sender) => sender.isActive !== false).length,
+    [senderIdentities]
+  )
+
+  const sequenceRecentSentCount = operatorConsoleData?.queue.sentRecently ?? null
+
   const activeEnrollments = useMemo(
     () =>
       [...enrollments]
@@ -2929,6 +2956,181 @@ const SequencesTab: React.FC = () => {
     }
   }, [launchPreviewData?.summary.firstBatchCount, nextTestSendSummary.detail, sequenceModalTestDisabledReason])
 
+  const nextActionSummary = useMemo(() => {
+    if (sequenceModalTestDisabledReason && sequenceStartBlockedReason) {
+      return {
+        label: 'Needs setup first',
+        detail: launchStatusSummary.detail,
+      }
+    }
+    if (!sequenceModalTestDisabledReason && (launchPreviewData?.summary.firstBatchCount ?? 0) > 0) {
+      return {
+        label: 'Send test batch now',
+        detail: 'This sends only to active test recipients, not the live audience.',
+      }
+    }
+    if (!sequenceStartBlockedReason) {
+      if (editingSequence?.status === 'scheduled') {
+        return {
+          label: 'Waiting for send window',
+          detail: 'The live audience is active and will send in the next allowed window.',
+        }
+      }
+      if (editingSequence?.status === 'sending' || editingSequence?.status === 'running') {
+        return {
+          label: 'Sequence is sending',
+          detail: 'The live audience is already active.',
+        }
+      }
+      if (editingSequence?.status === 'paused') {
+        return {
+          label: 'Resume when ready',
+          detail: 'Resume the sequence before expecting more live sends.',
+        }
+      }
+      return {
+        label: 'Start sequence',
+        detail: 'This uses the linked live audience and may wait for the next allowed send window.',
+      }
+    }
+    return {
+      label: 'Review live audience',
+      detail: launchStatusSummary.detail,
+    }
+  }, [
+    editingSequence?.status,
+    launchPreviewData?.summary.firstBatchCount,
+    launchStatusSummary.detail,
+    sequenceModalTestDisabledReason,
+    sequenceStartBlockedReason,
+  ])
+
+  const getSequenceLiveAudienceSummary = (sequence: SequenceCampaign) => {
+    if (!sequence.listId) {
+      return {
+        label: 'No live audience linked',
+        detail: 'Start sequence is blocked until a live audience is linked.',
+      }
+    }
+    const snapshot = snapshots.find((row) => row.id === sequence.listId)
+    const recipientCount = getRecipientCount(sequence)
+    if (snapshot) {
+      return {
+        label: snapshot.name,
+        detail: `${recipientCount.toLocaleString()} live recipient${recipientCount === 1 ? '' : 's'}.`,
+      }
+    }
+    if (recipientCount > 0) {
+      return {
+        label: 'Linked live audience',
+        detail: `${recipientCount.toLocaleString()} recipient${recipientCount === 1 ? '' : 's'} linked for Start Sequence.`,
+      }
+    }
+    return {
+      label: 'Linked live audience',
+      detail: 'Open the sequence to review the current live audience.',
+    }
+  }
+
+  const getSequenceTestAudienceSummary = (sequence: SequenceCampaign) => {
+    if (editingSequence?.id === sequence.id) {
+      return testAudienceSummary
+    }
+    return {
+      label: 'Review test recipients',
+      detail: 'Open the sequence to see active test recipients.',
+    }
+  }
+
+  const getSequenceRowStateSummary = (sequence: SequenceCampaign) => {
+    const blockedReason = validateStartRequirements(sequence)
+    if (blockedReason) {
+      return {
+        label: 'Blocked',
+        detail: blockedReason,
+      }
+    }
+    if (sequence.status === 'paused') {
+      return {
+        label: 'Paused',
+        detail: 'Resume it before expecting more live sending.',
+      }
+    }
+    if (sequence.status === 'sending' || sequence.status === 'running') {
+      return {
+        label: 'Sending',
+        detail: 'The live audience is already active.',
+      }
+    }
+    if (sequence.status === 'scheduled') {
+      return {
+        label: 'Waiting',
+        detail: 'It will send in the next allowed window.',
+      }
+    }
+    if (sequence.status === 'sent') {
+      return {
+        label: 'Completed',
+        detail: 'This sequence has finished its live sends.',
+      }
+    }
+    return {
+      label: 'Ready to start',
+      detail: 'Start sequence will use the linked live audience.',
+    }
+  }
+
+  const getSequenceLastResultSummary = (sequence: SequenceCampaign) => {
+    if (editingSequence?.id === sequence.id) {
+      return lastSequenceOutcomeSummary
+    }
+    if (sequence.status === 'paused') {
+      return {
+        label: 'Paused',
+        detail: 'No live sending happens while paused.',
+      }
+    }
+    if (sequence.status === 'scheduled') {
+      return {
+        label: 'Waiting',
+        detail: 'No live send has happened in the current window yet.',
+      }
+    }
+    if (sequence.status === 'sending' || sequence.status === 'running') {
+      return {
+        label: 'Sending',
+        detail: 'Live send activity is in progress.',
+      }
+    }
+    const sentCount = getSentCount(sequence)
+    if (sentCount > 0) {
+      return {
+        label: 'Sent',
+        detail: `${sentCount.toLocaleString()} email${sentCount === 1 ? '' : 's'} sent so far.`,
+      }
+    }
+    return {
+      label: 'No recent activity',
+      detail: 'Open the sequence to review the latest send results.',
+    }
+  }
+
+  const getSequenceNextAction = (sequence: SequenceCampaign) => {
+    if (sequence.status === 'paused') {
+      return 'Review and resume'
+    }
+    if (sequence.status === 'draft') {
+      return 'Review and start'
+    }
+    if (sequence.status === 'scheduled') {
+      return 'View status'
+    }
+    if (sequence.status === 'sending' || sequence.status === 'running') {
+      return 'View results'
+    }
+    return 'Open sequence'
+  }
+
   const handleCreateSequence = useCallback(() => {
     // Check if templates exist
     if (templates.length === 0) {
@@ -2943,6 +3145,7 @@ const SequencesTab: React.FC = () => {
     }
 
     setMaterializedBatchKey(null)
+    setIsSequenceSetupOpen(true)
     setEditingSequence({
       id: '',
       name: '',
@@ -3059,6 +3262,7 @@ const SequencesTab: React.FC = () => {
 
   const handleEditSequence = async (sequence: SequenceCampaign) => {
     setMaterializedBatchKey(null)
+    setIsSequenceSetupOpen(false)
     setEditingSequence({
       ...sequence,
       listId: sequence.listId || '',
@@ -3708,10 +3912,10 @@ const SequencesTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Sequences</Heading>
           <Text color="gray.600">
-            Choose a sequence, verify readiness, then run only the next safe action.
+            Choose a sequence, confirm who it will send to, then test or start it.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Operator view keeps sender, audience, next action, and recent results in focus.
+            Operator view keeps live recipients, test recipients, current state, and the next action in focus.
           </Text>
           {activeFocusPanel && isDiagnosticsOpen ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
@@ -3800,11 +4004,20 @@ const SequencesTab: React.FC = () => {
         </Button>
       </Flex>
 
-      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
+      <SimpleGrid columns={{ base: 2, md: 3, xl: 6 }} spacing={4} mb={6}>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Total Sequences</StatLabel>
+              <StatLabel>Client</StatLabel>
+              <StatNumber fontSize="md">{selectedCustomerName}</StatNumber>
+              <StatHelpText>{selectedCustomerId?.startsWith('cust_') ? 'Current outreach client' : 'Choose a client to continue'}</StatHelpText>
+            </Stat>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <Stat>
+              <StatLabel>Total sequences</StatLabel>
               <StatNumber>{stats.total}</StatNumber>
             </Stat>
           </CardBody>
@@ -3812,69 +4025,46 @@ const SequencesTab: React.FC = () => {
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Sent</StatLabel>
-              <StatNumber>{stats.sent}</StatNumber>
+              <StatLabel>Sent recently</StatLabel>
+              <StatNumber>{sequenceRecentSentCount == null ? '—' : sequenceRecentSentCount.toLocaleString()}</StatNumber>
+              <StatHelpText>{sequenceRecentSentCount == null ? 'Loads from recent send history' : 'Recent send attempts across this client'}</StatHelpText>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Scheduled</StatLabel>
-              <StatNumber>{stats.scheduled}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Drafts</StatLabel>
-              <StatNumber>{stats.drafts}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-      </SimpleGrid>
-
-      <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4} mb={6}>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Total Sent</StatLabel>
-              <StatNumber>{stats.totalSent.toLocaleString()}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Total Opens</StatLabel>
-              <StatNumber>{stats.totalOpens.toLocaleString()}</StatNumber>
-              <StatHelpText>
-                {stats.totalSent > 0 ? ((stats.totalOpens / stats.totalSent) * 100).toFixed(1) : '0.0'}% avg rate
-              </StatHelpText>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Total Replies</StatLabel>
+              <StatLabel>Replies</StatLabel>
               <StatNumber>{stats.totalReplies.toLocaleString()}</StatNumber>
-              <StatHelpText>
-                {stats.totalSent > 0 ? ((stats.totalReplies / stats.totalSent) * 100).toFixed(1) : '0.0'}% avg rate
-              </StatHelpText>
+            </Stat>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <Stat>
+              <StatLabel>Opt-outs</StatLabel>
+              <StatNumber>{totalOptOuts.toLocaleString()}</StatNumber>
+            </Stat>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <Stat>
+              <StatLabel>Active mailboxes</StatLabel>
+              <StatNumber>{activeMailboxCount.toLocaleString()}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
       </SimpleGrid>
 
+      <Collapse in={isDiagnosticsOpen} animateOpacity>
       <Card mb={6}>
         <CardBody>
           <HStack mb={3} align="start" spacing={3} id="sequences-tab-core-workflow" data-testid="sequences-tab-core-workflow">
             <InfoIcon color="blue.500" mt={1} />
             <VStack align="start" spacing={0}>
-              <Text fontSize="sm" fontWeight="semibold">Daily workflow</Text>
-              <Text fontSize="xs" color="gray.600">1) Choose a sequence 2) Confirm mailbox and audience 3) Send a test batch or start the sequence</Text>
+              <Text fontSize="sm" fontWeight="semibold">Advanced details</Text>
+              <Text fontSize="xs" color="gray.600">Refresh backend launch data, inspect recent queue health, and open deeper diagnostics only when needed.</Text>
             </VStack>
           </HStack>
           <Heading
@@ -3885,7 +4075,7 @@ const SequencesTab: React.FC = () => {
             cursor="pointer"
             onClick={isOperatorConsolePanelOpen ? onOperatorConsolePanelClose : onOperatorConsolePanelOpen}
           >
-            Launch summary {isOperatorConsolePanelOpen ? '▼' : '▶'}
+            Advanced launch details {isOperatorConsolePanelOpen ? '▼' : '▶'}
           </Heading>
           <Collapse in={isOperatorConsolePanelOpen}>
             <VStack align="stretch" spacing={4}>
@@ -5644,6 +5834,7 @@ const SequencesTab: React.FC = () => {
           </Collapse>
         </CardBody>
       </Card>
+      </Collapse>
 
       <Collapse in={isDiagnosticsOpen} animateOpacity>
         <Card mb={6}>
@@ -6156,86 +6347,103 @@ const SequencesTab: React.FC = () => {
                 <Tr>
                   <Th>Sequence</Th>
                   <Th>Status</Th>
-                  <Th isNumeric>Recipients</Th>
-                  <Th isNumeric>Sent</Th>
-                  <Th isNumeric>Opens</Th>
-                  <Th isNumeric>Replies</Th>
-                  <Th w="50px"></Th>
+                  <Th>Live audience</Th>
+                  <Th>Test audience</Th>
+                  <Th>Last result</Th>
+                  <Th w="220px">Next action</Th>
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredSequences.map((sequence) => (
-                  <Tr key={sequence.id}>
-                    <Td>
-                      <VStack align="start" spacing={1}>
-                        <Text fontWeight="semibold">{sequence.name}</Text>
-                        <Text fontSize="sm" color="gray.600">
-                          {sequence.description || 'No description'}
-                        </Text>
-                      </VStack>
-                    </Td>
-                    <Td>
-                      <HStack>
-                        <Icon as={getStatusIcon(sequence.status)} color={`${getStatusColor(sequence.status)}.500`} boxSize={4} />
-                        <Badge colorScheme={getStatusColor(sequence.status)} size="sm">
-                          {sequence.status}
-                        </Badge>
-                      </HStack>
-                    </Td>
-                    <Td isNumeric>{getRecipientCount(sequence).toLocaleString()}</Td>
-                    <Td isNumeric>{getSentCount(sequence).toLocaleString()}</Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text>{getOpenedCount(sequence).toLocaleString()}</Text>
-                        <Text fontSize="xs" color="gray.600">
-                          {getSentCount(sequence) > 0 ? ((getOpenedCount(sequence) / getSentCount(sequence)) * 100).toFixed(1) : '0.0'}%
-                        </Text>
-                      </VStack>
-                    </Td>
-                    <Td isNumeric>
-                      <VStack align="end" spacing={0}>
-                        <Text>{getRepliedCount(sequence).toLocaleString()}</Text>
-                        <Text fontSize="xs" color="gray.600">
-                          {getSentCount(sequence) > 0 ? ((getRepliedCount(sequence) / getSentCount(sequence)) * 100).toFixed(1) : '0.0'}%
-                        </Text>
-                      </VStack>
-                    </Td>
-                    <Td>
-                      <Menu>
-                        <MenuButton
-                          as={IconButton}
-                          icon={<SettingsIcon />}
-                          size="sm"
-                          variant="ghost"
-                        />
-                        <MenuList>
-                          <MenuItem icon={<EditIcon />} onClick={() => handleEditSequence(sequence)}>
-                            Edit
-                          </MenuItem>
-                          {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.campaignId && sequence.listId && (
-                            <MenuItem icon={<EmailIcon />} onClick={() => handleEditSequence(sequence)}>
-                              Start Sequence
-                            </MenuItem>
-                          )}
-                          {sequence.status === 'sending' && sequence.campaignId && (
-                            <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSequence(sequence.campaignId!)}>
-                              Pause Sequence
-                            </MenuItem>
-                          )}
-                          <MenuDivider />
-                          <MenuItem
-                            icon={<DeleteIcon />}
-                            color="red.500"
-                            isDisabled={Boolean(deletingSequenceId)}
-                            onClick={() => handleDeleteSequence(sequence.id)}
-                          >
-                            {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
-                          </MenuItem>
-                        </MenuList>
-                      </Menu>
-                    </Td>
-                  </Tr>
-                ))}
+                {filteredSequences.map((sequence) => {
+                  const rowStateSummary = getSequenceRowStateSummary(sequence)
+                  const rowLiveAudienceSummary = getSequenceLiveAudienceSummary(sequence)
+                  const rowTestAudienceSummary = getSequenceTestAudienceSummary(sequence)
+                  const rowLastResultSummary = getSequenceLastResultSummary(sequence)
+                  const nextActionLabel = getSequenceNextAction(sequence)
+                  return (
+                    <Tr key={sequence.id}>
+                      <Td>
+                        <VStack align="start" spacing={1}>
+                          <Text fontWeight="semibold">{sequence.name}</Text>
+                          <Text fontSize="sm" color="gray.600">
+                            {sequence.description || 'No description'}
+                          </Text>
+                        </VStack>
+                      </Td>
+                      <Td>
+                        <VStack align="start" spacing={1}>
+                          <HStack>
+                            <Icon as={getStatusIcon(sequence.status)} color={`${getStatusColor(sequence.status)}.500`} boxSize={4} />
+                            <Badge colorScheme={getStatusColor(sequence.status)} size="sm">
+                              {rowStateSummary.label}
+                            </Badge>
+                          </HStack>
+                          <Text fontSize="xs" color="gray.600">
+                            {rowStateSummary.detail}
+                          </Text>
+                        </VStack>
+                      </Td>
+                      <Td>
+                        <VStack align="start" spacing={1}>
+                          <Text fontSize="sm" fontWeight="medium">{rowLiveAudienceSummary.label}</Text>
+                          <Text fontSize="xs" color="gray.600">{rowLiveAudienceSummary.detail}</Text>
+                        </VStack>
+                      </Td>
+                      <Td>
+                        <VStack align="start" spacing={1}>
+                          <Text fontSize="sm" fontWeight="medium">{rowTestAudienceSummary.label}</Text>
+                          <Text fontSize="xs" color="gray.600">{rowTestAudienceSummary.detail}</Text>
+                        </VStack>
+                      </Td>
+                      <Td>
+                        <VStack align="start" spacing={1}>
+                          <Text fontSize="sm" fontWeight="medium">{rowLastResultSummary.label}</Text>
+                          <Text fontSize="xs" color="gray.600">{rowLastResultSummary.detail}</Text>
+                        </VStack>
+                      </Td>
+                      <Td>
+                        <HStack justify="space-between" spacing={2}>
+                          <Button size="sm" colorScheme="blue" variant="outline" onClick={() => handleEditSequence(sequence)}>
+                            {nextActionLabel}
+                          </Button>
+                          <Menu>
+                            <MenuButton
+                              as={IconButton}
+                              icon={<SettingsIcon />}
+                              size="sm"
+                              variant="ghost"
+                              aria-label={`Sequence actions for ${sequence.name}`}
+                            />
+                            <MenuList>
+                              <MenuItem icon={<EditIcon />} onClick={() => handleEditSequence(sequence)}>
+                                Open sequence
+                              </MenuItem>
+                              {(sequence.status === 'draft' || sequence.status === 'paused') && sequence.campaignId && sequence.listId && (
+                                <MenuItem icon={<EmailIcon />} onClick={() => handleEditSequence(sequence)}>
+                                  Review before start
+                                </MenuItem>
+                              )}
+                              {sequence.status === 'sending' && sequence.campaignId && (
+                                <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSequence(sequence.campaignId!)}>
+                                  Pause sequence
+                                </MenuItem>
+                              )}
+                              <MenuDivider />
+                              <MenuItem
+                                icon={<DeleteIcon />}
+                                color="red.500"
+                                isDisabled={Boolean(deletingSequenceId)}
+                                onClick={() => handleDeleteSequence(sequence.id)}
+                              >
+                                {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
+                              </MenuItem>
+                            </MenuList>
+                          </Menu>
+                        </HStack>
+                      </Td>
+                    </Tr>
+                  )
+                })}
               </Tbody>
             </Table>
           </Box>
@@ -6244,14 +6452,26 @@ const SequencesTab: React.FC = () => {
 
       <Modal isOpen={isOpen} onClose={onClose} size="6xl" scrollBehavior="inside">
         <ModalOverlay />
-        <ModalContent maxH="90vh">
-          <ModalHeader borderBottom="1px solid" borderColor="gray.200" pb={4}>
-            {editingSequence?.id ? 'Edit Sequence' : 'Create Sequence'}
-          </ModalHeader>
+          <ModalContent maxH="90vh">
+            <ModalHeader borderBottom="1px solid" borderColor="gray.200" pb={4}>
+            {editingSequence?.id ? 'Sequence details' : 'Create sequence'}
+            </ModalHeader>
           <ModalCloseButton />
           <ModalBody p={0}>
             {editingSequence && (
               <>
+              {editingSequence.id ? (
+                <Flex justify="flex-end" px={6} pt={6}>
+                  <Button
+                    size="sm"
+                    variant={isSequenceSetupOpen ? 'outline' : 'ghost'}
+                    onClick={() => setIsSequenceSetupOpen((current) => !current)}
+                  >
+                    {isSequenceSetupOpen ? 'Hide sequence setup' : 'Edit sequence setup'}
+                  </Button>
+                </Flex>
+              ) : null}
+              <Collapse in={!editingSequence.id || isSequenceSetupOpen} animateOpacity>
               <SimpleGrid columns={{ base: 1, lg: 2 }} minH="0" h="full">
                 {/* LEFT COLUMN — Sequence steps */}
                 <Box
@@ -6497,6 +6717,7 @@ const SequencesTab: React.FC = () => {
                   </VStack>
                 </Box>
               </SimpleGrid>
+              </Collapse>
 
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
@@ -6545,9 +6766,9 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Next test send</StatLabel>
-                            <StatNumber fontSize="sm">{nextTestSendSummary.label}</StatNumber>
-                            <StatHelpText>{nextTestSendSummary.detail}</StatHelpText>
+                            <StatLabel>Next action</StatLabel>
+                            <StatNumber fontSize="sm">{nextActionSummary.label}</StatNumber>
+                            <StatHelpText>{nextActionSummary.detail}</StatHelpText>
                           </Stat>
                         </CardBody>
                       </Card>
@@ -6602,13 +6823,13 @@ const SequencesTab: React.FC = () => {
                       </Text>
                     </Flex>
                   </VStack>
-                  <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
-                    <Box>
-                      <Heading size="sm">Test audience</Heading>
-                      <Text fontSize="sm" color="gray.600">
-                        Queue-backed enrollments are for private testing. They do not change the linked lead batch used by Start Sequence.
-                      </Text>
-                    </Box>
+                    <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
+                      <Box>
+                        <Heading size="sm">Test audience</Heading>
+                        <Text fontSize="sm" color="gray.600">
+                          Test recipients are only used by Send test batch now. They do not change the live audience used by Start Sequence.
+                        </Text>
+                      </Box>
                     <HStack spacing={2}>
                       {isDiagnosticsOpen ? (
                         <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
@@ -6643,16 +6864,16 @@ const SequencesTab: React.FC = () => {
                   {enrollmentsLoading ? (
                     <Text color="gray.500" fontSize="sm">Loading enrollments…</Text>
                   ) : enrollments.length === 0 && !enrollmentsError ? (
-                    <Text color="gray.500" fontSize="sm">No enrollments yet.</Text>
+                    <Text color="gray.500" fontSize="sm">No test recipients yet. Add a private test recipient before sending to the live audience.</Text>
                   ) : (
                     <Box overflowX="auto">
                       <Table size="sm">
                         <Thead>
                           <Tr>
-                            <Th>Name</Th>
-                            <Th>Audience</Th>
+                            <Th>Test group</Th>
+                            <Th>Who will receive this</Th>
                             <Th>Status</Th>
-                            <Th>Recipients</Th>
+                            <Th>Count</Th>
                             <Th>Created</Th>
                             <Th>Actions</Th>
                           </Tr>
@@ -6670,10 +6891,10 @@ const SequencesTab: React.FC = () => {
                                 <Text fontSize="sm">{describeEnrollmentAudience(e)}</Text>
                                 <Text fontSize="xs" color="gray.500">
                                   {e.recipientSource === 'snapshot'
-                                    ? 'Uses the linked lead batch for queued test sends.'
+                                    ? 'Uses the linked live audience for a test send only.'
                                     : e.recipientSource === 'manual'
                                       ? 'Uses manual private test recipients only.'
-                                      : 'Source not recorded on older enrollment data.'}
+                                      : 'Recipient source is not recorded on older data.'}
                                 </Text>
                               </Td>
                               <Td>
@@ -6790,7 +7011,7 @@ const SequencesTab: React.FC = () => {
               Close
             </Button>
             <Button variant="outline" onClick={handleSaveDraft} isDisabled={!canSaveDraft}>
-              Save Draft
+              {editingSequence?.id ? 'Save changes' : 'Save draft'}
             </Button>
           </Flex>
         </ModalContent>
@@ -6807,12 +7028,12 @@ const SequencesTab: React.FC = () => {
               <Box>
                 <AlertTitle fontSize="sm">Choose the test audience</AlertTitle>
                 <AlertDescription fontSize="xs">
-                  Test enrollments are queue-backed. They help you verify who would receive a send now without changing the linked lead batch used by Start Sequence.
+                  Test recipients help you verify a send now without changing the live audience used by Start Sequence.
                 </AlertDescription>
               </Box>
             </Alert>
             <FormControl mb={4}>
-              <FormLabel>Enrollment name (optional)</FormLabel>
+              <FormLabel>Test group name (optional)</FormLabel>
               <Input
                 value={createEnrollmentName}
                 onChange={(e) => setCreateEnrollmentName(e.target.value)}
@@ -6834,14 +7055,14 @@ const SequencesTab: React.FC = () => {
             {createEnrollmentRecipientSource === 'snapshot' ? (
               <Box mb={4}>
                 <Alert status="info" borderRadius="md">
-                  <AlertIcon />
-                  <Box>
-                    <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
-                    <AlertDescription fontSize="xs">
-                      Creates a queue-backed test enrollment from the linked lead batch. Start Sequence still uses the linked lead batch campaign directly.
-                    </AlertDescription>
-                  </Box>
-                </Alert>
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
+                      <AlertDescription fontSize="xs">
+                        Creates a test group from the linked live audience. Start Sequence still uses the live audience directly.
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
                 {!editingSequence?.listId && (
                   <Alert status="error" mt={2} borderRadius="md">
                     <AlertIcon />
