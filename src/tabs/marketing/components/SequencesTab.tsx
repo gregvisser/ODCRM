@@ -132,6 +132,16 @@ type SequenceCampaign = {
   steps?: SequenceStep[]
 }
 
+type SequenceDeleteErrorDetails = {
+  code?: string
+  totalCampaigns?: number
+  campaigns?: Array<{
+    id: string
+    name: string
+    status?: string | null
+  }>
+}
+
 type EmailTemplate = {
   id: string
   name: string
@@ -2804,7 +2814,7 @@ const SequencesTab: React.FC = () => {
     }
     return {
       label: 'Using linked lead batch',
-      detail: 'Start Sequence uses the linked lead batch campaign audience.',
+      detail: 'Start Sequence uses the linked live recipients.',
     }
   }, [editingSequence?.listId, linkedListSummary, linkedListSummaryLoading])
 
@@ -2861,7 +2871,7 @@ const SequencesTab: React.FC = () => {
     const lastRow = operatorOutcomeRows[0]
     if (!lastRow) {
       return {
-        label: 'No send result yet',
+        label: 'No recent activity',
         detail: 'Recent results will appear here after a test send or live send attempt.',
       }
     }
@@ -2910,27 +2920,27 @@ const SequencesTab: React.FC = () => {
       return {
         tone: 'success' as const,
         title: 'Sending',
-        detail: 'The linked lead batch campaign is already active.',
+        detail: 'The live recipients are already active.',
       }
     }
     if (editingSequence?.status === 'scheduled') {
       return {
         tone: 'info' as const,
         title: 'Scheduled',
-        detail: 'The linked lead batch campaign is active and will send in its allowed window.',
+        detail: 'The live recipients are active and will send in the allowed window.',
       }
     }
     if (editingSequence?.status === 'sent') {
       return {
         tone: 'success' as const,
         title: 'Completed',
-        detail: 'This linked lead batch campaign has completed its sends.',
+        detail: 'This sequence has completed its live sends.',
       }
     }
     return {
       tone: 'info' as const,
       title: 'Ready to start',
-      detail: 'Start Sequence launches the linked lead batch campaign. Manual test enrollments are not used by this action.',
+      detail: 'Start Sequence uses the linked live recipients. Test recipients are not used by this action.',
     }
   }, [editingSequence?.status, sequenceStartBlockedReason])
 
@@ -2966,20 +2976,20 @@ const SequencesTab: React.FC = () => {
     if (!sequenceModalTestDisabledReason && (launchPreviewData?.summary.firstBatchCount ?? 0) > 0) {
       return {
         label: 'Send test batch now',
-        detail: 'This sends only to active test recipients, not the live audience.',
+        detail: 'This sends only to active test recipients, not the live recipients.',
       }
     }
     if (!sequenceStartBlockedReason) {
       if (editingSequence?.status === 'scheduled') {
         return {
           label: 'Waiting for send window',
-          detail: 'The live audience is active and will send in the next allowed window.',
+          detail: 'The live recipients are active and will send in the next allowed window.',
         }
       }
       if (editingSequence?.status === 'sending' || editingSequence?.status === 'running') {
         return {
           label: 'Sequence is sending',
-          detail: 'The live audience is already active.',
+          detail: 'The live recipients are already active.',
         }
       }
       if (editingSequence?.status === 'paused') {
@@ -2990,11 +3000,11 @@ const SequencesTab: React.FC = () => {
       }
       return {
         label: 'Start sequence',
-        detail: 'This uses the linked live audience and may wait for the next allowed send window.',
+        detail: 'This uses the linked live recipients and may wait for the next allowed send window.',
       }
     }
     return {
-      label: 'Review live audience',
+      label: 'Review live recipients',
       detail: launchStatusSummary.detail,
     }
   }, [
@@ -3008,8 +3018,8 @@ const SequencesTab: React.FC = () => {
   const getSequenceLiveAudienceSummary = (sequence: SequenceCampaign) => {
     if (!sequence.listId) {
       return {
-        label: 'No live audience linked',
-        detail: 'Start sequence is blocked until a live audience is linked.',
+        label: 'No live recipients linked',
+        detail: 'Start Sequence is blocked until live recipients are linked.',
       }
     }
     const snapshot = snapshots.find((row) => row.id === sequence.listId)
@@ -3022,13 +3032,13 @@ const SequencesTab: React.FC = () => {
     }
     if (recipientCount > 0) {
       return {
-        label: 'Linked live audience',
+        label: 'Linked live recipients',
         detail: `${recipientCount.toLocaleString()} recipient${recipientCount === 1 ? '' : 's'} linked for Start Sequence.`,
       }
     }
     return {
-      label: 'Linked live audience',
-      detail: 'Open the sequence to review the current live audience.',
+      label: 'Linked live recipients',
+      detail: 'Open the sequence to review the current live recipients.',
     }
   }
 
@@ -3059,7 +3069,7 @@ const SequencesTab: React.FC = () => {
     if (sequence.status === 'sending' || sequence.status === 'running') {
       return {
         label: 'Sending',
-        detail: 'The live audience is already active.',
+        detail: 'The live recipients are already active.',
       }
     }
     if (sequence.status === 'scheduled') {
@@ -3076,7 +3086,7 @@ const SequencesTab: React.FC = () => {
     }
     return {
       label: 'Ready to start',
-      detail: 'Start sequence will use the linked live audience.',
+      detail: 'Start Sequence will use the linked live recipients.',
     }
   }
 
@@ -3512,15 +3522,43 @@ const SequencesTab: React.FC = () => {
   }
 
   const validateStartRequirements = (sequence: SequenceCampaign) => {
-    if (!sequence.name.trim()) return 'Sequence name is required.'
-    if (!sequence.listId) return leadBatches.length === 0 ? 'No lead batches yet. Go to Lead Sources and click Sync.' : 'Select a lead batch.'
-    if (templates.length === 0) return 'No templates available.'
-    if (senderIdentities.length === 0) return 'No senders available.'
-    if (!sequence.senderIdentityId) return 'Select a sender.'
-    if (!sequence.sequenceId) return 'Save draft first to generate sequence.'
-    if (!sequence.campaignId) return 'Save draft first to create campaign.'
-    if (snapshotsError || templatesError || sendersError) return 'Fix the data loading errors first.'
+    if (!sequence.name.trim()) return 'Name this sequence before starting.'
+    if (!sequence.listId) return leadBatches.length === 0 ? 'No live recipients are ready yet. Go to Lead Sources and sync a batch first.' : 'Choose the live recipients for Start Sequence.'
+    if (templates.length === 0) return 'Add at least one template before starting.'
+    if (senderIdentities.length === 0) return 'No sending mailbox is available yet.'
+    if (!sequence.senderIdentityId) return 'Choose the mailbox that will send this sequence.'
+    if (!sequence.sequenceId) return 'Save this sequence first.'
+    if (!sequence.campaignId) return 'Save this sequence first.'
+    if (snapshotsError || templatesError || sendersError) return 'Fix the loading errors before starting.'
     return null
+  }
+
+  const humanizeCampaignStatus = (status: string | null | undefined) => {
+    switch ((status || '').trim().toLowerCase()) {
+      case 'running':
+        return 'sending'
+      case 'paused':
+        return 'paused'
+      case 'completed':
+        return 'completed'
+      case 'draft':
+        return 'draft'
+      default:
+        return status ? status.replace(/_/g, ' ') : 'saved'
+    }
+  }
+
+  const buildSequenceDeleteMessage = (details: SequenceDeleteErrorDetails | undefined, fallback: string) => {
+    if (details?.code !== 'sequence_linked_campaign') return fallback
+    const linkedCampaign = details.campaigns?.[0]
+    if (linkedCampaign) {
+      const extraCount = Math.max((details.totalCampaigns || 0) - 1, 0)
+      return `This sequence is still linked to the campaign "${linkedCampaign.name}" (${humanizeCampaignStatus(linkedCampaign.status)}). Delete or unlink that campaign first${extraCount > 0 ? `, plus ${extraCount} other linked campaign${extraCount === 1 ? '' : 's'}` : ''}.`
+    }
+    if ((details.totalCampaigns || 0) > 0) {
+      return `This sequence is still linked to ${details.totalCampaigns} campaign${details.totalCampaigns === 1 ? '' : 's'}. Delete or unlink the linked campaign first.`
+    }
+    return fallback
   }
 
   const getSequenceDraftValidationErrors = (sequence: SequenceCampaign): string[] => {
@@ -3755,9 +3793,9 @@ const SequencesTab: React.FC = () => {
       if (deleteRes.error) {
         toast({
           title: 'Failed to delete sequence',
-          description: deleteRes.error,
+          description: buildSequenceDeleteMessage(deleteRes.errorDetails?.details as SequenceDeleteErrorDetails | undefined, deleteRes.error),
           status: 'error',
-          duration: 5000,
+          duration: 7000,
         })
         return
       }
@@ -3937,41 +3975,43 @@ const SequencesTab: React.FC = () => {
               {isDiagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
             </Button>
           </HStack>
-          <HStack spacing={2} mt={1} data-testid="sequences-tab-cross-nav">
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => {
-                const params = new URLSearchParams(window.location.search)
-                params.set('view', 'readiness')
-                window.location.search = params.toString()
-              }}
-            >
-              Open Readiness
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => {
-                const params = new URLSearchParams(window.location.search)
-                params.set('view', 'reports')
-                window.location.search = params.toString()
-              }}
-            >
-              Open Reports
-            </Button>
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => {
-                const params = new URLSearchParams(window.location.search)
-                params.set('view', 'inbox')
-                window.location.search = params.toString()
-              }}
-            >
-              Open Inbox
-            </Button>
-          </HStack>
+          {isDiagnosticsOpen ? (
+            <HStack spacing={2} mt={1} data-testid="sequences-tab-cross-nav">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search)
+                  params.set('view', 'readiness')
+                  window.location.search = params.toString()
+                }}
+              >
+                Open Readiness
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search)
+                  params.set('view', 'reports')
+                  window.location.search = params.toString()
+                }}
+              >
+                Open Reports
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search)
+                  params.set('view', 'inbox')
+                  window.location.search = params.toString()
+                }}
+              >
+                Open Inbox
+              </Button>
+            </HStack>
+          ) : null}
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
               <FormLabel fontSize="sm">Client</FormLabel>
@@ -6347,8 +6387,8 @@ const SequencesTab: React.FC = () => {
                 <Tr>
                   <Th>Sequence</Th>
                   <Th>Status</Th>
-                  <Th>Live audience</Th>
-                  <Th>Test audience</Th>
+                  <Th>Live recipients</Th>
+                  <Th>Test recipients</Th>
                   <Th>Last result</Th>
                   <Th w="220px">Next action</Th>
                 </Tr>
@@ -6739,7 +6779,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Live audience</StatLabel>
+                            <StatLabel>Live recipients</StatLabel>
                             <StatNumber fontSize="sm">{liveAudienceSummary.label}</StatNumber>
                             <StatHelpText>{liveAudienceSummary.detail}</StatHelpText>
                           </Stat>
@@ -6748,7 +6788,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Test audience</StatLabel>
+                            <StatLabel>Test recipients</StatLabel>
                             <StatNumber fontSize="sm">{testAudienceSummary.label}</StatNumber>
                             <StatHelpText>{testAudienceSummary.detail}</StatHelpText>
                           </Stat>
@@ -6819,15 +6859,15 @@ const SequencesTab: React.FC = () => {
                         Start Sequence
                       </Button>
                       <Text fontSize="xs" color="gray.600">
-                        Test now uses active enrollments only. Start Sequence launches the linked lead batch campaign and may wait for its allowed send window.
+                        Send test batch now uses active test recipients only. Start Sequence uses the linked live recipients and may wait for the next allowed send window.
                       </Text>
                     </Flex>
                   </VStack>
                     <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
                       <Box>
-                        <Heading size="sm">Test audience</Heading>
+                        <Heading size="sm">Test recipients</Heading>
                         <Text fontSize="sm" color="gray.600">
-                          Test recipients are only used by Send test batch now. They do not change the live audience used by Start Sequence.
+                          Send test batch now uses test recipients only. It does not send to the live recipients used by Start Sequence.
                         </Text>
                       </Box>
                     <HStack spacing={2}>
@@ -6847,7 +6887,7 @@ const SequencesTab: React.FC = () => {
                       <Box flex="1">
                         <AlertTitle fontSize="sm">Test recipients ready</AlertTitle>
                         <AlertDescription fontSize="xs">
-                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} recipients queued for testing. ` : ''}Use View results to confirm what sent, failed, or was blocked.
+                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} test recipient${lastCreatedEnrollment.recipientCount === 1 ? '' : 's'} ready. ` : ''}Use View results to confirm what sent, failed, or was blocked.
                         </AlertDescription>
                       </Box>
                       <Button size="xs" variant="outline" ml={3} onClick={() => openQueueModal(lastCreatedEnrollment.id)}>
@@ -6864,7 +6904,7 @@ const SequencesTab: React.FC = () => {
                   {enrollmentsLoading ? (
                     <Text color="gray.500" fontSize="sm">Loading enrollments…</Text>
                   ) : enrollments.length === 0 && !enrollmentsError ? (
-                    <Text color="gray.500" fontSize="sm">No test recipients yet. Add a private test recipient before sending to the live audience.</Text>
+                    <Text color="gray.500" fontSize="sm">No test recipients yet. Add a private test recipient before sending to the live recipients.</Text>
                   ) : (
                     <Box overflowX="auto">
                       <Table size="sm">
@@ -6891,7 +6931,7 @@ const SequencesTab: React.FC = () => {
                                 <Text fontSize="sm">{describeEnrollmentAudience(e)}</Text>
                                 <Text fontSize="xs" color="gray.500">
                                   {e.recipientSource === 'snapshot'
-                                    ? 'Uses the linked live audience for a test send only.'
+                                    ? 'Uses the linked live recipients for a test send only.'
                                     : e.recipientSource === 'manual'
                                       ? 'Uses manual private test recipients only.'
                                       : 'Recipient source is not recorded on older data.'}
@@ -7026,9 +7066,9 @@ const SequencesTab: React.FC = () => {
             <Alert status="info" mb={4} borderRadius="md">
               <AlertIcon />
               <Box>
-                <AlertTitle fontSize="sm">Choose the test audience</AlertTitle>
+                <AlertTitle fontSize="sm">Choose test recipients</AlertTitle>
                 <AlertDescription fontSize="xs">
-                  Test recipients help you verify a send now without changing the live audience used by Start Sequence.
+                  Test recipients help you verify a send now without changing the live recipients used by Start Sequence.
                 </AlertDescription>
               </Box>
             </Alert>
@@ -7041,7 +7081,7 @@ const SequencesTab: React.FC = () => {
               />
             </FormControl>
             <FormControl mb={4} isRequired>
-              <FormLabel>Test audience source</FormLabel>
+              <FormLabel>Test recipient source</FormLabel>
               <RadioGroup
                 value={createEnrollmentRecipientSource}
                 onChange={(val: 'snapshot' | 'manual') => setCreateEnrollmentRecipientSource(val)}
@@ -7059,7 +7099,7 @@ const SequencesTab: React.FC = () => {
                     <Box>
                       <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
                       <AlertDescription fontSize="xs">
-                        Creates a test group from the linked live audience. Start Sequence still uses the live audience directly.
+                        Creates a test group from the linked live recipients. Start Sequence still uses the live recipients directly.
                       </AlertDescription>
                     </Box>
                   </Alert>
@@ -7628,7 +7668,7 @@ const SequencesTab: React.FC = () => {
             ) : (
               <VStack align="start" spacing={3}>
                 <Text>
-                  This starts the linked lead batch campaign for this sequence. Manual test enrollments are not used by this action, and live sends may wait for the allowed send window after start.
+                  This starts the live sequence for the linked live recipients. Manual test enrollments are not used by this action, and live sends may wait for the allowed send window after start.
                 </Text>
                 <Box>
                   <Text fontWeight="semibold">Sender</Text>
@@ -7637,7 +7677,7 @@ const SequencesTab: React.FC = () => {
                   </Text>
                 </Box>
                 <Box>
-                  <Text fontWeight="semibold">Live audience</Text>
+                  <Text fontWeight="semibold">Live recipients</Text>
                   <Text fontSize="sm" color="gray.600">
                     {startPreview?.snapshot?.name || '—'}
                     {typeof startPreview?.snapshot?.memberCount === 'number'

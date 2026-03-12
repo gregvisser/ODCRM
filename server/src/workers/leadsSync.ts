@@ -1066,8 +1066,11 @@ async function syncCustomerLeads(
       where: { customerId: customer.id },
       data: {
         isRunning: false,
+        syncStatus: 'error',
         lastError: 'No sheet URL configured',
         lastSyncAt: syncStartedAt,
+        progressPercent: 100,
+        progressMessage: 'No sheet URL configured',
       },
     })
     return
@@ -1108,8 +1111,11 @@ async function syncCustomerLeads(
         where: { customerId: customer.id },
         data: {
           isRunning: false,
+          syncStatus: 'error',
           lastError: zeroRowError,
           lastSyncAt: syncStartedAt,
+          progressPercent: 100,
+          progressMessage: zeroRowError,
         },
       })
       const usedKeys = diagnostics.usedKeys ?? {}

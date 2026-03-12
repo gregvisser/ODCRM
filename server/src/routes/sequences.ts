@@ -349,11 +349,26 @@ router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
     }
 
     const campaignsUsingSequence = await prisma.emailCampaign.count({
-      where: { sequenceId: id },
+      where: { customerId, sequenceId: id },
     })
     if (campaignsUsingSequence > 0) {
-      return res.status(400).json({
-        error: `Cannot delete sequence. It is used by ${campaignsUsingSequence} campaign(s).`,
+      const linkedCampaigns = await prisma.emailCampaign.findMany({
+        where: { customerId, sequenceId: id },
+        orderBy: { updatedAt: 'desc' },
+        take: 3,
+        select: {
+          id: true,
+          name: true,
+          status: true,
+        },
+      })
+      return res.status(409).json({
+        error: 'This sequence is still linked to one or more campaigns.',
+        details: {
+          code: 'sequence_linked_campaign',
+          totalCampaigns: campaignsUsingSequence,
+          campaigns: linkedCampaigns,
+        },
       })
     }
 
