@@ -1657,6 +1657,12 @@ const SequencesTab: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- polling should track panel + tenant only
   }, [isOperatorConsolePanelOpen, selectedCustomerId])
 
+  useEffect(() => {
+    if (!isDiagnosticsOpen) {
+      setIsSequenceLaunchAdvancedOpen(false)
+    }
+  }, [isDiagnosticsOpen])
+
   const openQueueDrill = (enrollmentId: string) => {
     setQueueDrillEnrollmentId(enrollmentId)
     setQueueDrillOpen(true)
@@ -3705,9 +3711,9 @@ const SequencesTab: React.FC = () => {
             Choose a sequence, verify readiness, then run only the next safe action.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Operator view keeps readiness and next-send preview in focus. Open advanced diagnostics only when investigating issues.
+            Operator view keeps sender, audience, next action, and recent results in focus.
           </Text>
-          {activeFocusPanel ? (
+          {activeFocusPanel && isDiagnosticsOpen ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
               Focused panel: {activeFocusPanel}
             </Text>
@@ -3724,7 +3730,7 @@ const SequencesTab: React.FC = () => {
               colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}
               onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
             >
-              {isDiagnosticsOpen ? 'Return to operator view' : 'Open advanced diagnostics'}
+              {isDiagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
             </Button>
           </HStack>
           <HStack spacing={2} mt={1} data-testid="sequences-tab-cross-nav">
@@ -3868,7 +3874,7 @@ const SequencesTab: React.FC = () => {
             <InfoIcon color="blue.500" mt={1} />
             <VStack align="start" spacing={0}>
               <Text fontSize="sm" fontWeight="semibold">Daily workflow</Text>
-              <Text fontSize="xs" color="gray.600">1) Choose a sequence 2) Confirm readiness/preflight 3) Run dry-run or live canary only when ready</Text>
+              <Text fontSize="xs" color="gray.600">1) Choose a sequence 2) Confirm mailbox and audience 3) Send a test batch or start the sequence</Text>
             </VStack>
           </HStack>
           <Heading
@@ -3879,7 +3885,7 @@ const SequencesTab: React.FC = () => {
             cursor="pointer"
             onClick={isOperatorConsolePanelOpen ? onOperatorConsolePanelClose : onOperatorConsolePanelOpen}
           >
-            Sending Console {isOperatorConsolePanelOpen ? '▼' : '▶'}
+            Launch summary {isOperatorConsolePanelOpen ? '▼' : '▶'}
           </Heading>
           <Collapse in={isOperatorConsolePanelOpen}>
             <VStack align="stretch" spacing={4}>
@@ -3989,12 +3995,12 @@ const SequencesTab: React.FC = () => {
                               )}
                               {liveCanaryActionDisabledReason && (
                                 <Text id="sending-console-live-disabled-reason" data-testid="sending-console-live-disabled-reason" fontSize="xs" color="orange.600">
-                                  Live canary action unavailable: {liveCanaryActionDisabledReason}
+                                  Live canary action unavailable: {humanizeGateReason(liveCanaryActionDisabledReason)}
                                 </Text>
                               )}
                               {Array.isArray(operatorConsoleData.status.liveGateReasons) && operatorConsoleData.status.liveGateReasons.length > 0 && (
                                 <Text fontSize="xs" color="gray.500">
-                                  Current gate blockers: {operatorConsoleData.status.liveGateReasons.join(' | ')}
+                                  Current gate blockers: {operatorConsoleData.status.liveGateReasons.map((reason) => humanizeGateReason(reason)).join(' | ')}
                                 </Text>
                               )}
                               <Text id="sending-console-action-status" data-testid="sending-console-action-status" fontSize="xs" color="blue.600">
@@ -6598,15 +6604,17 @@ const SequencesTab: React.FC = () => {
                   </VStack>
                   <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
                     <Box>
-                      <Heading size="sm">Test recipients</Heading>
+                      <Heading size="sm">Test audience</Heading>
                       <Text fontSize="sm" color="gray.600">
                         Queue-backed enrollments are for private testing. They do not change the linked lead batch used by Start Sequence.
                       </Text>
                     </Box>
                     <HStack spacing={2}>
-                      <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
-                        {isSequenceLaunchAdvancedOpen ? 'Hide advanced tools' : 'Show advanced tools'}
-                      </Button>
+                      {isDiagnosticsOpen ? (
+                        <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
+                          {isSequenceLaunchAdvancedOpen ? 'Hide diagnostics' : 'Show diagnostics'}
+                        </Button>
+                      ) : null}
                       <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
                         Add test recipients
                       </Button>
@@ -6725,7 +6733,7 @@ const SequencesTab: React.FC = () => {
                                   >
                                     Cancel
                                   </Button>
-                                  <Collapse in={isSequenceLaunchAdvancedOpen} animateOpacity>
+                                  <Collapse in={isDiagnosticsOpen && isSequenceLaunchAdvancedOpen} animateOpacity>
                                     <HStack gap={2} wrap="wrap">
                                       <Button
                                         size="xs"
