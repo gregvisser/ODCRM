@@ -18,6 +18,8 @@ env:
   # Must match frontend VITE_API_URL / staticwebapp proxy — same App Service
   BACKEND_DEPLOY_URL: https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net
   APP_NAME_DISPLAY: odcrm-api-hkbsfbdzdvezedg8
+  ENABLE_SEND_QUEUE_SENDING_APPSETTING: 'true'
+  ENABLE_LIVE_SENDING_APPSETTING: 'true'
 
 jobs:
   check:
@@ -193,6 +195,81 @@ jobs:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: ./server
+
+      - name: Sync live-send app settings for canary testing
+        shell: bash
+        env:
+          PUBLISH_PROFILE_XML: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          ENABLE_SEND_QUEUE_SENDING_APPSETTING: ${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
+          ENABLE_LIVE_SENDING_APPSETTING: ${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
+        run: |
+          python <<'PY' >/tmp/kudu-profile.sh
+          import os
+          import shlex
+          import xml.etree.ElementTree as ET
+
+          raw = os.environ.get('PUBLISH_PROFILE_XML', '').strip()
+          if not raw:
+            raise SystemExit('Missing AZURE_WEBAPP_PUBLISH_PROFILE secret.')
+
+          root = ET.fromstring(raw)
+          chosen = None
+          for profile in root.iter('publishProfile'):
+            publish_url = profile.attrib.get('publishUrl', '')
+            if '.scm.azurewebsites.net' in publish_url:
+              chosen = profile
+              break
+          if chosen is None:
+            raise SystemExit('Could not find SCM publish profile in AZURE_WEBAPP_PUBLISH_PROFILE.')
+
+          publish_url = chosen.attrib.get('publishUrl', '').split(':')[0].strip()
+          username = chosen.attrib.get('userName', '').strip()
+          password = chosen.attrib.get('userPWD', '').strip()
+          if not publish_url or not username or not password:
+            raise SystemExit('Publish profile is missing SCM credentials.')
+
+          print(f"export KUDU_BASE_URL={shlex.quote('https://' + publish_url)}")
+          print(f"export KUDU_USERNAME={shlex.quote(username)}")
+          print(f"export KUDU_PASSWORD={shlex.quote(password)}")
+          PY
+          source /tmp/kudu-profile.sh
+
+          payload=$(python <<'PY'
+          import json
+          import os
+
+          print(json.dumps({
+            'ENABLE_SEND_QUEUE_SENDING': os.environ['ENABLE_SEND_QUEUE_SENDING_APPSETTING'],
+            'ENABLE_LIVE_SENDING': os.environ['ENABLE_LIVE_SENDING_APPSETTING'],
+          }))
+          PY
+          )
+
+          echo "Applying canary live-send app settings to $KUDU_BASE_URL"
+          curl -fsS \
+            -u "$KUDU_USERNAME:$KUDU_PASSWORD" \
+            -H "Content-Type: application/json" \
+            -X POST \
+            "$KUDU_BASE_URL/api/settings" \
+            --data "$payload" >/tmp/kudu-settings.json
+
+          python <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path('/tmp/kudu-settings.json').read_text())
+          expected = {
+            'ENABLE_SEND_QUEUE_SENDING': 'true',
+            'ENABLE_LIVE_SENDING': 'true',
+          }
+          for key, expected_value in expected.items():
+            actual = str(data.get(key, ''))
+            if actual != expected_value:
+              raise SystemExit(f'{key} did not persist correctly (got {actual!r})')
+          print('Confirmed live-send app settings:')
+          for key, expected_value in expected.items():
+            print(f'  {key}={expected_value}')
+          PY
 
       - name: Post-deploy smoke — verify same app frontend uses
         run: |
