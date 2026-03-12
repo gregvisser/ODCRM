@@ -16,6 +16,7 @@ import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 
 const router = Router()
 const AUDITS_LIMIT_DEFAULT = 50
@@ -258,8 +259,8 @@ function classifyRunOutcome(decision: string, reason: string | null): string {
 
 async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
   const cap = getLiveSendCap()
-  const queueGateEnabled = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
-  const liveGateEnabled = process.env.ENABLE_LIVE_SENDING === 'true'
+  const queueGateEnabled = isSendQueueSendingEnabled()
+  const liveGateEnabled = isLiveSendingEnabled()
   const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
   const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
   const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'

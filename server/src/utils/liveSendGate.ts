@@ -1,3 +1,5 @@
+import { isLiveSendingEnabled, isSendQueueSendingEnabled } from './liveSendRuntime.js'
+
 /**
  * Stage 4-min: single gate for all live-sending entrypoints.
  * Returns { allowed, reason? }. No logging of secrets. Reason strings are safe for logs.
@@ -12,10 +14,10 @@ export interface AssertLiveSendAllowedOpts {
 export function assertLiveSendAllowed(opts: AssertLiveSendAllowedOpts): { allowed: boolean; reason?: string } {
   const { customerId, identityId, trigger: _trigger } = opts
 
-  if (process.env.ENABLE_SEND_QUEUE_SENDING !== 'true') {
+  if (!isSendQueueSendingEnabled()) {
     return { allowed: false, reason: 'live_send_disabled_env' }
   }
-  if (process.env.ENABLE_LIVE_SENDING !== 'true') {
+  if (!isLiveSendingEnabled()) {
     return { allowed: false, reason: 'live_send_disabled_env' }
   }
 

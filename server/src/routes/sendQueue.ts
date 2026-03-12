@@ -13,6 +13,7 @@ import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
+import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 
 const router = Router()
@@ -45,10 +46,10 @@ function liveTickAllowed(customerId: string): { allowed: boolean; reason?: strin
   if (process.env.ODCRM_ALLOW_LIVE_TICK !== 'true') {
     return { allowed: false, reason: 'ODCRM_ALLOW_LIVE_TICK must be true for live tick' }
   }
-  if (process.env.ENABLE_SEND_QUEUE_SENDING !== 'true') {
+  if (!isSendQueueSendingEnabled()) {
     return { allowed: false, reason: 'ENABLE_SEND_QUEUE_SENDING must be true' }
   }
-  if (process.env.ENABLE_LIVE_SENDING !== 'true') {
+  if (!isLiveSendingEnabled()) {
     return { allowed: false, reason: 'ENABLE_LIVE_SENDING must be true' }
   }
   const canaryCustomer = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null

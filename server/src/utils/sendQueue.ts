@@ -4,6 +4,7 @@
  */
 import type { PrismaClient } from '@prisma/client'
 import { OutboundSendQueueStatus } from '@prisma/client'
+import { isLiveSendingEnabled, isSendQueueSendingEnabled } from './liveSendRuntime.js'
 
 const DRY_RUN_REASON_MAX = 500
 const SEND_FAILED_PREFIX = 'SEND_FAILED: '
@@ -62,8 +63,8 @@ export async function requeueAfterSendFailure(
  * SEND_CANARY_CUSTOMER_ID set and equals customerId; if SEND_CANARY_IDENTITY_ID set, identityId must match.
  */
 export function canaryGatesAllowLiveSend(customerId: string, identityId?: string | null): boolean {
-  if (process.env.ENABLE_SEND_QUEUE_SENDING !== 'true') return false
-  if (process.env.ENABLE_LIVE_SENDING !== 'true') return false
+  if (!isSendQueueSendingEnabled()) return false
+  if (!isLiveSendingEnabled()) return false
   const canaryCustomer = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
   if (canaryCustomer == null || customerId !== canaryCustomer) return false
   const canaryIdentity = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null

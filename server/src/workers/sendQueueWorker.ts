@@ -14,15 +14,16 @@ import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SE
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { assertLiveSendAllowed } from '../utils/liveSendGate.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
 const LEASE_MS = Number(process.env.SEND_QUEUE_LEASE_MS) || 5 * 60 * 1000 // 5 min
 const BATCH_SIZE = Math.min(Math.max(1, Number(process.env.SEND_QUEUE_BATCH_SIZE) || 10), 50)
 const SCHEDULED_SENDING_CRON = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * *'
 
-const ENABLE_LIVE_SENDING = process.env.ENABLE_LIVE_SENDING === 'true'
+const ENABLE_LIVE_SENDING = isLiveSendingEnabled()
 // Stage 1B/1D: explicit sending gate; default false = dry-run (non-destructive: leave QUEUED, no FAILED)
-const ENABLE_SEND_QUEUE_SENDING = process.env.ENABLE_SEND_QUEUE_SENDING === 'true'
+const ENABLE_SEND_QUEUE_SENDING = isSendQueueSendingEnabled()
 const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
 const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
 const SEND_QUEUE_PER_MINUTE_CAP = Number(process.env.SEND_QUEUE_PER_MINUTE_CAP) || 0
