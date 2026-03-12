@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 // Unique instance ID for multi-instance environments (Azure, scaling)
 const SCHEDULER_INSTANCE_ID = `sched-${process.pid}-${Date.now().toString(36)}`
@@ -147,7 +148,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       },
     })
 
-    const dailyLimit = senderIdentity.dailySendLimit || 150
+    const dailyLimit = clampDailySendLimit(senderIdentity.dailySendLimit)
     if (emailsSentToday >= dailyLimit) {
       console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Daily limit reached for ${senderIdentity.emailAddress}: ${emailsSentToday}/${dailyLimit}`)
       continue
@@ -245,7 +246,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
 
         usedNewStepScheduling = true
         for (const row of allowedRows) {
-          if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+          if (emailsSentToday >= dailyLimit) break
 
           // Re-check customer cap as we send in batches
           const customerSent = await prisma.emailEvent.count({
@@ -366,7 +367,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     }
 
     for (const prospect of step1Ready.filter((p: any) => !isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))) {
-      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+      if (emailsSentToday >= dailyLimit) break
       
       // ATOMIC CLAIM: Change status from 'pending' to 'sending'
       const claimResult = await prisma.emailCampaignProspect.updateMany({
@@ -427,7 +428,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
     }
 
     for (const prospect of step2Ready.filter((p: any) => !isSuppressedInSets(suppressionSets, String(p?.contact?.email || '')))) {
-      if (emailsSentToday >= campaign.senderIdentity.dailySendLimit) break
+      if (emailsSentToday >= dailyLimit) break
       
       // ATOMIC CLAIM: Change status from 'step1_sent' to 'sending'
       const claimResult = await prisma.emailCampaignProspect.updateMany({

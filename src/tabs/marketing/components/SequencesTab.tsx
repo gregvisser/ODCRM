@@ -353,6 +353,7 @@ const SequencesTab: React.FC = () => {
       liveGateReasons?: string[]
       manualLiveTickAllowed?: boolean
       manualLiveTickReason?: string | null
+      manualWindowBypassAllowed?: boolean
       activeIdentityCount?: number
       dueNowCount?: number
       cron: string
@@ -729,8 +730,10 @@ const SequencesTab: React.FC = () => {
   const [operatorConsoleSinceHours, setOperatorConsoleSinceHours] = useState<number>(24)
   const [operatorConsoleLastUpdatedAt, setOperatorConsoleLastUpdatedAt] = useState<string | null>(null)
   const [operatorActionStatus, setOperatorActionStatus] = useState<string | null>(null)
+  const [operatorTestSendLoading, setOperatorTestSendLoading] = useState(false)
+  const [operatorTestSendIgnoreWindow, setOperatorTestSendIgnoreWindow] = useState(false)
   const [operatorLastActionResult, setOperatorLastActionResult] = useState<{
-    action: 'DRY_RUN' | 'LIVE_CANARY'
+    action: 'DRY_RUN' | 'LIVE_CANARY' | 'TEST_SEND'
     success: boolean
     startedAt: string
     finishedAt: string
@@ -1150,6 +1153,7 @@ const SequencesTab: React.FC = () => {
     if (runHistoryOutcomeFilter === 'all') return rows
     return rows.filter((row) => row.outcome === runHistoryOutcomeFilter || row.decision === runHistoryOutcomeFilter)
   }, [runHistoryData, runHistoryOutcomeFilter])
+  const operatorOutcomeRows = useMemo(() => (runHistoryData?.rows ?? []).slice(0, 8), [runHistoryData])
   const launchPreviewFirstBatchIds = useMemo(() => {
     return new Set((launchPreviewData?.firstBatch ?? []).map((row) => row.queueItemId))
   }, [launchPreviewData])
@@ -1343,6 +1347,78 @@ const SequencesTab: React.FC = () => {
         : !operatorConsoleData?.status.manualLiveTickAllowed
           ? operatorConsoleData?.status.manualLiveTickReason || operatorConsoleData?.status.scheduledLiveReason || 'Live canary tick is blocked by current gates.'
           : null
+
+  const operatorTestSendDisabledReason =
+    !selectedCustomerId?.startsWith('cust_')
+      ? 'Select a client.'
+      : !sequenceReadinessSequenceId.trim()
+        ? 'Choose a sequence first.'
+        : !operatorConsoleData?.status.manualLiveTickAllowed
+          ? operatorConsoleData?.status.manualLiveTickReason || operatorConsoleData?.status.scheduledLiveReason || 'Immediate test send is blocked by current gates.'
+          : null
+
+  function humanizeGateReason(reason: string | null | undefined): string {
+    switch ((reason || '').trim()) {
+      case 'live_send_disabled_env':
+        return 'Live sending is disabled in the current environment.'
+      case 'customer_not_in_canary':
+        return 'This client is not approved for live sending yet.'
+      case 'identity_not_in_canary':
+        return 'The selected sending mailbox is not approved for live sending.'
+      case 'canary_customer_not_configured':
+        return 'Live sending is not configured for any client yet.'
+      case 'canary_identity_required_but_missing':
+        return 'No approved sending mailbox is available for live sending.'
+      case 'manual_live_tick_not_allowed':
+        return 'Immediate live testing is blocked by current launch gates.'
+      case 'ignore_window_not_enabled':
+        return 'Send-window bypass is not enabled in this environment.'
+      default:
+        return reason || 'This action is blocked by current launch gates.'
+    }
+  }
+
+  function humanizeRunReason(reason: string | null | undefined): string {
+    switch ((reason || '').trim()) {
+      case 'daily_cap_reached':
+        return 'Mailbox daily limit reached'
+      case 'per_minute_cap_reached':
+        return 'Mailbox send rate limit reached'
+      case 'outside_window':
+        return 'Outside the sending window'
+      case 'replied_stop':
+      case 'SKIP_REPLIED_STOP':
+        return 'Stopped because the contact replied'
+      case 'suppressed':
+      case 'unsubscribe':
+        return 'Suppressed / opted out'
+      case 'hard_bounce_invalid_recipient':
+        return 'Invalid recipient or hard bounce'
+      case 'missing_recipient_email':
+        return 'Recipient email missing'
+      default:
+        return reason || '—'
+    }
+  }
+
+  function humanizeOutcome(outcome: string): string {
+    switch (outcome) {
+      case 'SENT':
+        return 'Sent'
+      case 'SEND_FAILED':
+        return 'Failed'
+      case 'WOULD_SEND':
+        return 'Dry-run only'
+      case 'SKIP_SUPPRESSED':
+        return 'Suppressed'
+      case 'SKIP_REPLIED_STOP':
+        return 'Reply stopped'
+      case 'SKIP_INVALID':
+        return 'Invalid recipient'
+      default:
+        return outcome.replace(/_/g, ' ').toLowerCase()
+    }
+  }
 
   const loadEnrollmentQueue = async (enrollmentId: string) => {
     if (!selectedCustomerId?.startsWith('cust_') || !enrollmentId) return
@@ -2084,6 +2160,79 @@ const SequencesTab: React.FC = () => {
       })
     } finally {
       setLiveCanaryTickLoading(false)
+    }
+  }
+
+  const handleOperatorTestSend = async () => {
+    if (!selectedCustomerId?.startsWith('cust_') || !sequenceReadinessSequenceId.trim()) return
+    const startedAt = new Date().toISOString()
+    setOperatorTestSendLoading(true)
+    setOperatorActionStatus('Sending a live test batch now...')
+    try {
+      const res = await api.post<{
+        success?: boolean
+        data?: {
+          processed?: number
+          sent?: number
+          requeued?: number
+          failed?: number
+          message?: string
+        }
+      }>(
+        '/api/send-worker/sequence-test-send',
+        {
+          sequenceId: sequenceReadinessSequenceId.trim(),
+          limit: 3,
+          ignoreWindow: operatorTestSendIgnoreWindow,
+        },
+        { headers: { 'X-Customer-Id': selectedCustomerId } },
+      )
+      if (res.error) {
+        const msg = humanizeGateReason(res.error)
+        toast({ title: 'Immediate test send failed', description: msg, status: 'error', duration: 5000 })
+        setOperatorActionStatus(`Immediate test send failed: ${msg}`)
+        setOperatorLastActionResult({
+          action: 'TEST_SEND',
+          success: false,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          summary: `Immediate test send failed: ${msg}`,
+          refreshedAt: null,
+        })
+        return
+      }
+      const d = res.data?.data
+      const summary = d?.message || `processed=${d?.processed ?? 0} sent=${d?.sent ?? 0} requeued=${d?.requeued ?? 0} failed=${d?.failed ?? 0}`
+      toast({
+        title: (d?.sent ?? 0) > 0 ? 'Live test batch sent' : 'Test batch checked',
+        description: summary,
+        status: (d?.sent ?? 0) > 0 ? 'success' : 'info',
+        duration: 5000,
+      })
+      await refreshControlLoopTruth()
+      setOperatorLastActionResult({
+        action: 'TEST_SEND',
+        success: (d?.sent ?? 0) > 0,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary,
+        refreshedAt: new Date().toISOString(),
+      })
+      setOperatorActionStatus(summary)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
+      toast({ title: 'Immediate test send failed', description: msg, status: 'error', duration: 5000 })
+      setOperatorActionStatus(`Immediate test send failed: ${msg}`)
+      setOperatorLastActionResult({
+        action: 'TEST_SEND',
+        success: false,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        summary: `Immediate test send failed: ${msg}`,
+        refreshedAt: null,
+      })
+    } finally {
+      setOperatorTestSendLoading(false)
     }
   }
 
@@ -3594,7 +3743,9 @@ const SequencesTab: React.FC = () => {
                                     <HStack justify="space-between">
                                       <Text fontSize="xs" color="gray.600">Last action</Text>
                                       <Badge colorScheme={operatorLastActionResult.success ? 'green' : 'red'}>
-                                        {operatorLastActionResult.action}
+                                        {operatorLastActionResult.action === 'TEST_SEND'
+                                          ? 'TEST SEND'
+                                          : operatorLastActionResult.action.replace(/_/g, ' ')}
                                       </Badge>
                                     </HStack>
                                     <Text fontSize="xs">{operatorLastActionResult.summary}</Text>
@@ -3639,6 +3790,59 @@ const SequencesTab: React.FC = () => {
                     <Card><CardBody py={3}><Stat><StatLabel>Failed recent</StatLabel><StatNumber>{operatorConsoleData.queue.failedRecently}</StatNumber></Stat></CardBody></Card>
                     <Card><CardBody py={3}><Stat><StatLabel>Sent recent</StatLabel><StatNumber>{operatorConsoleData.queue.sentRecently}</StatNumber></Stat></CardBody></Card>
                   </SimpleGrid>
+
+                  <Card id="operator-test-send-panel" data-testid="operator-test-send-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Immediate test send</Text>
+                          <Badge colorScheme={operatorTestSendDisabledReason ? 'orange' : 'green'}>
+                            {operatorTestSendDisabledReason ? 'Blocked' : 'Ready'}
+                          </Badge>
+                        </Flex>
+                        <Text fontSize="sm" color="gray.600">
+                          Send up to 3 queued recipients from the selected sequence now so staff can verify real delivery and outcome visibility without waiting for the next cycle.
+                        </Text>
+                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+                          <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Selected sequence</StatLabel><StatNumber fontSize="sm">{sequencePreflightData?.sequenceName || sequences.find((row) => row.id === sequenceReadinessSequenceId)?.name || 'Choose a sequence'}</StatNumber></Stat></CardBody></Card>
+                          <Card variant="outline"><CardBody py={3}><Stat><StatLabel>First batch ready</StatLabel><StatNumber>{launchPreviewData?.summary.firstBatchCount ?? 0}</StatNumber></Stat></CardBody></Card>
+                          <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Send window bypass</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualWindowBypassAllowed ? 'Available' : 'Not available'}</StatNumber></Stat></CardBody></Card>
+                        </SimpleGrid>
+                        {operatorConsoleData.status.manualWindowBypassAllowed ? (
+                          <Checkbox
+                            isChecked={operatorTestSendIgnoreWindow}
+                            onChange={(e) => setOperatorTestSendIgnoreWindow(e.target.checked)}
+                          >
+                            Bypass the send window for this one test batch
+                          </Checkbox>
+                        ) : null}
+                        {operatorTestSendDisabledReason ? (
+                          <Alert status="warning" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{humanizeGateReason(operatorTestSendDisabledReason)}</AlertDescription>
+                          </Alert>
+                        ) : null}
+                        <HStack spacing={2}>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleOperatorTestSend}
+                            isLoading={operatorTestSendLoading}
+                            isDisabled={Boolean(operatorTestSendDisabledReason)}
+                          >
+                            Send test batch now
+                          </Button>
+                          <Button
+                            variant="outline"
+                            onClick={() => loadLaunchPreview()}
+                            isLoading={launchPreviewLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh next send
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    </CardBody>
+                  </Card>
 
                   <Card id="sequence-preflight-panel" data-testid="sequence-preflight-panel">
                     <CardBody>
@@ -4200,6 +4404,76 @@ const SequencesTab: React.FC = () => {
                             </Text>
                           </>
                         )}
+                      </VStack>
+                    </CardBody>
+                  </Card>
+
+                  <Card id="operator-outcomes-panel" data-testid="operator-outcomes-panel">
+                    <CardBody>
+                      <VStack align="stretch" spacing={3}>
+                        <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
+                          <Text fontSize="sm" fontWeight="semibold">Recent send outcomes</Text>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => loadRunHistory()}
+                            isLoading={runHistoryLoading}
+                            isDisabled={!sequenceReadinessSequenceId}
+                          >
+                            Refresh outcomes
+                          </Button>
+                        </Flex>
+                        <Text fontSize="sm" color="gray.600">
+                          Shows what actually happened recently for this sequence, including mailbox, result, and the plain-language reason when something did not send.
+                        </Text>
+                        {runHistoryError ? (
+                          <Alert status="error" size="sm">
+                            <AlertIcon />
+                            <AlertDescription>{runHistoryError}</AlertDescription>
+                          </Alert>
+                        ) : null}
+                        {!runHistoryError && runHistoryData ? (
+                          <>
+                            <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+                              <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Sent</StatLabel><StatNumber>{runHistoryData.summary?.byOutcome?.SENT ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Failed</StatLabel><StatNumber>{runHistoryData.summary?.byOutcome?.SEND_FAILED ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Suppressed</StatLabel><StatNumber>{runHistoryData.summary?.byOutcome?.SKIP_SUPPRESSED ?? 0}</StatNumber></Stat></CardBody></Card>
+                              <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Reply stopped</StatLabel><StatNumber>{runHistoryData.summary?.byOutcome?.SKIP_REPLIED_STOP ?? 0}</StatNumber></Stat></CardBody></Card>
+                            </SimpleGrid>
+                            <Box overflowX="auto">
+                              <Table size="sm">
+                                <Thead>
+                                  <Tr>
+                                    <Th>When</Th>
+                                    <Th>Outcome</Th>
+                                    <Th>Recipient</Th>
+                                    <Th>Mailbox</Th>
+                                    <Th>Reason</Th>
+                                  </Tr>
+                                </Thead>
+                                <Tbody>
+                                  {operatorOutcomeRows.length === 0 ? (
+                                    <Tr>
+                                      <Td colSpan={5} color="gray.500">No recent outcome rows for this sequence yet.</Td>
+                                    </Tr>
+                                  ) : operatorOutcomeRows.map((row) => (
+                                    <Tr key={row.auditId}>
+                                      <Td fontSize="xs">{row.occurredAt ? new Date(row.occurredAt).toLocaleString() : '—'}</Td>
+                                      <Td>
+                                        <Badge colorScheme={row.outcome === 'SENT' ? 'green' : row.outcome === 'SEND_FAILED' ? 'red' : 'orange'}>
+                                          {humanizeOutcome(row.outcome)}
+                                        </Badge>
+                                      </Td>
+                                      <Td fontSize="xs">{row.recipientEmail ? maskEmail(row.recipientEmail) : '—'}</Td>
+                                      <Td fontSize="xs">{row.identityEmail || '—'}</Td>
+                                      <Td fontSize="xs">{humanizeRunReason(row.reason || row.lastError)}</Td>
+                                    </Tr>
+                                  ))}
+                                </Tbody>
+                              </Table>
+                            </Box>
+                          </>
+                        ) : null}
                       </VStack>
                     </CardBody>
                   </Card>

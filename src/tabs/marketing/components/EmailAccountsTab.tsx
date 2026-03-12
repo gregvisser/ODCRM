@@ -124,6 +124,8 @@ type IdentityCapacityData = {
   lastUpdatedAt: string
 }
 
+const MAX_DAILY_SEND_LIMIT = 30
+
 const EmailAccountsTab: React.FC = () => {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
@@ -556,6 +558,16 @@ const EmailAccountsTab: React.FC = () => {
         </HStack>
       </Flex>
 
+      <Alert status="info" mb={4}>
+        <AlertIcon />
+        <Box>
+          <AlertTitle>Mailbox safety cap</AlertTitle>
+          <AlertDescription>
+            Every sending address is strictly capped at {MAX_DAILY_SEND_LIMIT} emails per day. Higher values are reduced automatically in backend truth.
+          </AlertDescription>
+        </Box>
+      </Alert>
+
       {/* Stats */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
         <Card>
@@ -837,14 +849,14 @@ const EmailAccountsTab: React.FC = () => {
                   <FormLabel>Daily Send Limit</FormLabel>
                   <NumberInput
                     value={editingIdentity.dailySendLimit}
-                    onChange={(_, val) => setEditingIdentity({...editingIdentity, dailySendLimit: val || 50})}
+                    onChange={(_, val) => setEditingIdentity({...editingIdentity, dailySendLimit: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, val || MAX_DAILY_SEND_LIMIT))})}
                     min={1}
-                    max={500}
+                    max={MAX_DAILY_SEND_LIMIT}
                   >
                     <NumberInputField />
                   </NumberInput>
                   <Text fontSize="xs" color="gray.500" mt={1}>
-                    Recommended: 50-150 for new accounts, up to 500 for warmed accounts
+                    Strict maximum: {MAX_DAILY_SEND_LIMIT} emails per day for each sending address.
                   </Text>
                 </FormControl>
 

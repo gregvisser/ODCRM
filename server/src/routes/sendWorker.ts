@@ -13,6 +13,9 @@ import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { processOne } from '../workers/sendQueueWorker.js'
+import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 const router = Router()
 const AUDITS_LIMIT_DEFAULT = 50
@@ -21,6 +24,8 @@ const AUDITS_CSV_MAX = 2000
 const SUMMARY_SINCE_HOURS_DEFAULT = 24
 const SUMMARY_SINCE_HOURS_MAX = 168
 const LIVE_TICK_LOCK_PREFIX = 'live_tick_'
+const OPERATOR_TEST_LOCK_PREFIX = 'operator_test_'
+const OPERATOR_TEST_BATCH_CAP = 3
 const LEAD_SOURCE_TYPES: LeadSourceType[] = ['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK']
 
 function getTrackingBaseUrl(): string {
@@ -553,7 +558,8 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
       state = state === 'unavailable' ? state : 'risky'
       reasons.push('recent_send_failures_detected')
     }
-    if ((identity.dailySendLimit ?? 0) > 0 && stats.sent >= (identity.dailySendLimit ?? 0)) {
+    const enforcedDailyLimit = clampDailySendLimit(identity.dailySendLimit)
+    if (enforcedDailyLimit > 0 && stats.sent >= enforcedDailyLimit) {
       state = state === 'unavailable' ? state : 'risky'
       reasons.push('daily_limit_reached_in_window')
     }
@@ -577,7 +583,7 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
         queuedNow,
       },
       guardrails: {
-        dailySendLimit: identity.dailySendLimit ?? null,
+        dailySendLimit: enforcedDailyLimit,
         sendWindowTimeZone: identity.sendWindowTimeZone ?? null,
         sendWindowHoursStart: identity.sendWindowHoursStart ?? null,
         sendWindowHoursEnd: identity.sendWindowHoursEnd ?? null,
@@ -1090,6 +1096,202 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
 })
 
 /**
+ * POST /api/send-worker/sequence-test-send — operator-facing constrained live send for one sequence.
+ * Tenant + marketing-auth scoped. Uses the same live-send gates as manual canary send and only sends
+ * a tiny first test batch so operators can verify real delivery without waiting for the next cron cycle.
+ */
+router.post('/sequence-test-send', requireMarketingMutationAuth, async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+
+  try {
+    const sequenceId = typeof req.body?.sequenceId === 'string' ? req.body.sequenceId.trim() : ''
+    if (!sequenceId) {
+      res.status(400).json({ success: false, error: 'sequenceId is required' })
+      return
+    }
+
+    const ignoreWindow = req.body?.ignoreWindow === true
+    if (ignoreWindow && process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW !== 'true') {
+      res.status(400).json({ success: false, error: 'ignore_window_not_enabled' })
+      return
+    }
+
+    const maxAllowed = Math.min(getLiveSendCap(), OPERATOR_TEST_BATCH_CAP)
+    const rawLimit = typeof req.body?.limit === 'number' ? req.body.limit : 1
+    let limit = Number.isFinite(rawLimit) ? Math.trunc(rawLimit) : 1
+    if (limit < 1) limit = 1
+    if (limit > maxAllowed) limit = maxAllowed
+
+    const sequence = await prisma.emailSequence.findFirst({
+      where: { id: sequenceId, customerId },
+      select: { id: true, name: true, senderIdentityId: true },
+    })
+    if (!sequence) {
+      res.status(404).json({ success: false, error: 'sequence_not_found' })
+      return
+    }
+    if (!sequence.senderIdentityId) {
+      res.status(400).json({ success: false, error: 'sequence_has_no_sender_identity' })
+      return
+    }
+
+    const gate = assertLiveSendAllowed({ customerId, identityId: sequence.senderIdentityId, trigger: 'manual' })
+    if (!gate.allowed) {
+      res.status(403).json({ success: false, error: gate.reason ?? 'live_send_not_allowed' })
+      return
+    }
+
+    const enrollmentRows = await prisma.enrollment.findMany({
+      where: { customerId, sequenceId },
+      select: { id: true },
+    })
+    const enrollmentIds = enrollmentRows.map((row) => row.id)
+    if (enrollmentIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          sequenceId: sequence.id,
+          sequenceName: sequence.name ?? null,
+          requestedLimit: limit,
+          processed: 0,
+          sent: 0,
+          requeued: 0,
+          failed: 0,
+          locked: 0,
+          queueItemIds: [],
+          ignoreWindowApplied: ignoreWindow,
+          message: 'No enrollments found for this sequence.',
+        },
+      })
+      return
+    }
+
+    const now = new Date()
+    const candidateItems = await prisma.outboundSendQueueItem.findMany({
+      where: {
+        customerId,
+        enrollmentId: { in: enrollmentIds },
+        status: OutboundSendQueueStatus.QUEUED,
+        OR: [{ scheduledFor: null }, { scheduledFor: { lte: now } }],
+      },
+      orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+      take: limit,
+      select: {
+        id: true,
+        customerId: true,
+        enrollmentId: true,
+        stepIndex: true,
+        recipientEmail: true,
+        status: true,
+        scheduledFor: true,
+        lockedAt: true,
+        lockedBy: true,
+        attemptCount: true,
+      },
+    })
+
+    if (candidateItems.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          sequenceId: sequence.id,
+          sequenceName: sequence.name ?? null,
+          requestedLimit: limit,
+          processed: 0,
+          sent: 0,
+          requeued: 0,
+          failed: 0,
+          locked: 0,
+          queueItemIds: [],
+          ignoreWindowApplied: ignoreWindow,
+          message: 'No queued recipients are due now for this sequence.',
+        },
+      })
+      return
+    }
+
+    const lockId = `${OPERATOR_TEST_LOCK_PREFIX}${randomUUID()}`
+    const lockAt = new Date()
+    const lockedIds: string[] = []
+    for (const item of candidateItems) {
+      const updated = await prisma.outboundSendQueueItem.updateMany({
+        where: {
+          id: item.id,
+          customerId,
+          status: OutboundSendQueueStatus.QUEUED,
+          OR: [{ scheduledFor: null }, { scheduledFor: { lte: lockAt } }],
+        },
+        data: {
+          status: OutboundSendQueueStatus.LOCKED,
+          lockedAt: lockAt,
+          lockedBy: lockId,
+          attemptCount: { increment: 1 },
+        },
+      })
+      if (updated.count > 0) lockedIds.push(item.id)
+    }
+
+    const lockedItems = lockedIds.length
+      ? await prisma.outboundSendQueueItem.findMany({
+          where: { id: { in: lockedIds }, customerId, status: OutboundSendQueueStatus.LOCKED, lockedBy: lockId },
+          orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
+        })
+      : []
+
+    let sent = 0
+    let requeued = 0
+    let failed = 0
+    const processOptions = ignoreWindow ? { ignoreWindow: true as const } : undefined
+
+    for (const item of lockedItems) {
+      try {
+        const outcome = await processOne(prisma, item, now, processOptions)
+        if (outcome === 'sent') sent += 1
+        else if (outcome === 'requeued') requeued += 1
+        else if (outcome === 'failed_terminal') failed += 1
+      } catch (err) {
+        failed += 1
+        await prisma.outboundSendQueueItem.update({
+          where: { id: item.id },
+          data: {
+            status: OutboundSendQueueStatus.QUEUED,
+            lockedAt: null,
+            lockedBy: null,
+            lastError: err instanceof Error ? err.message.slice(0, 500) : 'operator_test_send_failed',
+          },
+        })
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        sequenceId: sequence.id,
+        sequenceName: sequence.name ?? null,
+        requestedLimit: limit,
+        processed: lockedItems.length,
+        sent,
+        requeued,
+        failed,
+        locked: lockedItems.length,
+        queueItemIds: lockedItems.map((item) => item.id),
+        ignoreWindowApplied: ignoreWindow,
+        message:
+          sent > 0
+            ? `Sent ${sent} live test email${sent === 1 ? '' : 's'}.`
+            : requeued > 0
+              ? 'No emails were sent. Current queue rules or send windows re-queued the test batch.'
+              : 'No emails were sent from this test batch.',
+      },
+    })
+  } catch (err) {
+    console.error('[send-worker/sequence-test-send] error:', err)
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Sequence test send failed' })
+  }
+})
+
+/**
  * GET /api/send-worker/live-gates — read-only tenant-scoped live-send gate status.
  * Requires X-Customer-Id. No mutations, no sending.
  */
@@ -1214,6 +1416,7 @@ router.get('/console', async (req: Request, res: Response) => {
           liveGateReasons: Array.isArray(gateData.reasons) ? gateData.reasons : [],
           manualLiveTickAllowed: manualLiveGate.allowed,
           manualLiveTickReason: manualLiveGate.allowed ? null : manualLiveGate.reason ?? 'manual_live_tick_not_allowed',
+          manualWindowBypassAllowed: gateData.flags.odcrmAllowLiveTickIgnoreWindow,
           activeIdentityCount: gateData.currentCount.activeIdentities,
           dueNowCount: gateData.currentCount.queuedDueNow,
           cron: gateData.caps.scheduledEngineCron,
