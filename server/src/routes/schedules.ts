@@ -68,6 +68,21 @@ router.get('/', async (req, res, next) => {
             sendWindowTimeZone: true,
           },
         },
+        sequence: {
+          select: {
+            id: true,
+            name: true,
+            senderIdentityId: true,
+            senderIdentity: {
+              select: {
+                id: true,
+                emailAddress: true,
+                displayName: true,
+                dailySendLimit: true,
+              },
+            },
+          },
+        },
         _count: {
           select: {
             prospects: true,
@@ -77,17 +92,59 @@ router.get('/', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     })
 
+    const campaignIds = campaigns.map((campaign) => campaign.id)
+    const nextScheduledAtByCampaign = new Map<string, string>()
+    if (campaignIds.length > 0) {
+      try {
+        const upcomingRows = await (prisma as any).emailCampaignProspectStep.findMany({
+          where: {
+            campaignId: { in: campaignIds },
+            sentAt: null,
+            scheduledAt: { gte: new Date() },
+          },
+          select: {
+            campaignId: true,
+            scheduledAt: true,
+          },
+          orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+        })
+        for (const row of Array.isArray(upcomingRows) ? upcomingRows : []) {
+          if (!row?.campaignId || !row?.scheduledAt || nextScheduledAtByCampaign.has(row.campaignId)) continue
+          nextScheduledAtByCampaign.set(row.campaignId, row.scheduledAt.toISOString())
+        }
+      } catch (queryError) {
+        console.error('[schedules:/] next scheduled send query failed', {
+          customerId,
+          message: queryError instanceof Error ? queryError.message : String(queryError),
+        })
+      }
+    }
+
     const schedules = campaigns.map((campaign) => ({
       id: campaign.id,
       customerId: campaign.customerId,
       name: campaign.name,
+      description: campaign.description ?? null,
       status: campaign.status,
+      sequenceId: campaign.sequenceId ?? null,
+      sequenceName: campaign.sequence?.name ?? null,
       senderIdentity: campaign.senderIdentity
         ? {
             ...campaign.senderIdentity,
             dailySendLimit: clampDailySendLimit(campaign.senderIdentity.dailySendLimit),
           }
         : null,
+      sequenceSenderIdentity: campaign.sequence?.senderIdentity
+        ? {
+            ...campaign.sequence.senderIdentity,
+            dailySendLimit: clampDailySendLimit(campaign.sequence.senderIdentity.dailySendLimit),
+          }
+        : null,
+      mailboxMismatch:
+        Boolean(campaign.senderIdentityId) &&
+        Boolean(campaign.sequence?.senderIdentityId) &&
+        campaign.senderIdentityId !== campaign.sequence?.senderIdentityId,
+      nextScheduledAt: nextScheduledAtByCampaign.get(campaign.id) ?? null,
       totalProspects: campaign._count.prospects,
       createdAt: campaign.createdAt.toISOString(),
       updatedAt: campaign.updatedAt.toISOString(),
@@ -231,6 +288,12 @@ router.get('/:id/stats', async (req, res, next) => {
     const campaign = await prisma.emailCampaign.findFirst({
       where: { id, customerId },
       include: {
+        sequence: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         senderIdentity: {
           select: {
             id: true,
@@ -247,6 +310,7 @@ router.get('/:id/stats', async (req, res, next) => {
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' })
 
     let upcomingCount = 0
+    let nextScheduledAt: string | null = null
     try {
       upcomingCount = await (prisma as any).emailCampaignProspectStep.count({
         where: {
@@ -255,6 +319,18 @@ router.get('/:id/stats', async (req, res, next) => {
           sentAt: null,
         },
       })
+      const nextStep = await (prisma as any).emailCampaignProspectStep.findFirst({
+        where: {
+          campaignId: id,
+          scheduledAt: { gte: new Date() },
+          sentAt: null,
+        },
+        select: {
+          scheduledAt: true,
+        },
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+      })
+      nextScheduledAt = nextStep?.scheduledAt ? nextStep.scheduledAt.toISOString() : null
     } catch {
       // ignore if table not migrated
     }
@@ -281,8 +357,11 @@ router.get('/:id/stats', async (req, res, next) => {
     res.json({
       campaignId: id,
       status: campaign.status,
+      sequenceId: campaign.sequence?.id ?? campaign.sequenceId ?? null,
+      sequenceName: campaign.sequence?.name ?? null,
       totalProspects: campaign._count.prospects,
       upcomingSends: upcomingCount,
+      nextScheduledAt,
       sentSends: sentCount,
       todaySent: todaySentCount,
       dailyLimit: clampDailySendLimit(campaign.senderIdentity?.dailySendLimit),

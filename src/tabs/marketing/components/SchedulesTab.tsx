@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  Badge,
   Box,
   Button,
   Card,
@@ -7,102 +11,53 @@ import {
   CardHeader,
   Flex,
   Grid,
-  GridItem,
   Heading,
   HStack,
-  Icon,
-  IconButton,
-  Input,
-  Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
-  MenuDivider,
-  Select,
   SimpleGrid,
+  Spinner,
+  Stack,
   Stat,
   StatLabel,
   StatNumber,
-  Text,
-  VStack,
-  Badge,
-  useDisclosure,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-  ModalCloseButton,
-  FormControl,
-  FormLabel,
-  Textarea,
-  Spacer,
-  Divider,
-  useToast,
-  Tag,
-  TagLabel,
-  Switch,
-  NumberInput,
-  NumberInputField,
-  NumberInputStepper,
-  NumberIncrementStepper,
-  NumberDecrementStepper,
-  Checkbox,
   Table,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
   Tr,
+  VStack,
+  useToast,
 } from '@chakra-ui/react'
-import {
-  AddIcon,
-  EditIcon,
-  DeleteIcon,
-  TimeIcon,
-  CalendarIcon,
-  SettingsIcon,
-  CheckIcon,
-} from '@chakra-ui/icons'
+import { RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import RequireActiveClient from '../../../components/RequireActiveClient'
+
+type SenderIdentity = {
+  id: string
+  emailAddress: string
+  displayName?: string | null
+  dailySendLimit: number
+  sendWindowHoursStart?: number | null
+  sendWindowHoursEnd?: number | null
+  sendWindowTimeZone?: string | null
+}
 
 type CampaignSchedule = {
   id: string
   customerId: string
   name: string
-  status: 'draft' | 'scheduled' | 'running' | 'paused' | 'sent'
-  senderIdentity: {
-    id: string
-    emailAddress: string
-    displayName?: string | null
-    dailySendLimit: number
-    sendWindowHoursStart: number
-    sendWindowHoursEnd: number
-    sendWindowTimeZone: string
-  } | null
+  description?: string | null
+  status: 'draft' | 'running' | 'paused' | 'completed'
+  sequenceId: string | null
+  sequenceName: string | null
+  senderIdentity: SenderIdentity | null
+  sequenceSenderIdentity: SenderIdentity | null
+  mailboxMismatch: boolean
+  nextScheduledAt: string | null
   totalProspects: number
   createdAt: string
   updatedAt: string
-}
-
-type TimeWindow = {
-  startTime: string
-  endTime: string
-  maxEmails: number
-}
-
-// DeliverySchedule extends CampaignSchedule with UI-only scheduling fields
-// (these fields are stored in the sender identity / not yet in DB, so they default gracefully)
-type DeliverySchedule = CampaignSchedule & {
-  description?: string
-  isActive: boolean
-  timezone: string
-  daysOfWeek: number[]
-  timeWindows: TimeWindow[]
-  maxEmailsPerDay?: number
-  maxEmailsPerHour?: number
-  respectRecipientTimezone?: boolean
 }
 
 type ScheduledEmail = {
@@ -111,7 +66,7 @@ type ScheduledEmail = {
   campaignName: string
   prospectEmail: string
   prospectName: string
-  scheduledFor: string
+  scheduledFor: string | null
   status: 'scheduled' | 'sent' | 'failed'
   senderIdentity?: {
     id: string
@@ -124,8 +79,11 @@ type ScheduledEmail = {
 type ScheduleStats = {
   campaignId: string
   status: string
+  sequenceId: string | null
+  sequenceName: string | null
   totalProspects: number
   upcomingSends: number
+  nextScheduledAt: string | null
   sentSends: number
   todaySent: number
   dailyLimit: number
@@ -136,85 +94,302 @@ type ScheduleStats = {
   } | null
 }
 
+type SequencePreflightData = {
+  overallStatus: 'GO' | 'WARNING' | 'NO_GO'
+  blockers: string[]
+  warnings: string[]
+  counts: {
+    eligible: number
+    blocked: number
+    suppressed: number
+    replyStopped: number
+    failedRecently: number
+    sentRecently: number
+  }
+  lastUpdatedAt?: string
+}
+
+type RunHistoryRow = {
+  auditId: string
+  recipientEmail: string | null
+  outcome: string
+  reason: string | null
+  occurredAt: string
+  identityEmail: string | null
+  lastError: string | null
+}
+
+type RunHistoryData = {
+  summary?: {
+    byOutcome?: Record<string, number>
+  }
+  rows: RunHistoryRow[]
+}
+
 const MAX_DAILY_SEND_LIMIT = 30
+const DETAIL_SINCE_HOURS = 72
 
-const SchedulesTab: React.FC = () => {
-  const [schedules, setSchedules] = useState<DeliverySchedule[]>([])
-  const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
-  const { isOpen, onOpen, onClose } = useDisclosure()
-  const [editingSchedule, setEditingSchedule] = useState<DeliverySchedule | null>(null)
-  const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null)
-  const toast = useToast()
+function statusColor(status: CampaignSchedule['status']): string {
+  switch (status) {
+    case 'running':
+      return 'green'
+    case 'paused':
+      return 'yellow'
+    case 'completed':
+      return 'gray'
+    default:
+      return 'purple'
+  }
+}
 
-  const daysOfWeek = [
-    { value: 0, label: 'Sunday' },
-    { value: 1, label: 'Monday' },
-    { value: 2, label: 'Tuesday' },
-    { value: 3, label: 'Wednesday' },
-    { value: 4, label: 'Thursday' },
-    { value: 5, label: 'Friday' },
-    { value: 6, label: 'Saturday' },
-  ]
+function humanizeStatus(status: CampaignSchedule['status']): string {
+  switch (status) {
+    case 'running':
+      return 'Active'
+    case 'paused':
+      return 'Paused'
+    case 'completed':
+      return 'Stopped'
+    default:
+      return 'Draft'
+  }
+}
 
-  const toDeliverySchedule = (schedule: CampaignSchedule): DeliverySchedule => {
-    const startHour = schedule.senderIdentity?.sendWindowHoursStart ?? 9
-    const endHour = schedule.senderIdentity?.sendWindowHoursEnd ?? 17
-    const maxDaily = Math.min(MAX_DAILY_SEND_LIMIT, schedule.senderIdentity?.dailySendLimit ?? MAX_DAILY_SEND_LIMIT)
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return 'Not scheduled'
+  return new Date(value).toLocaleString()
+}
+
+function formatHour(value: number | null | undefined): string {
+  const hour = typeof value === 'number' ? value : 0
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
+function formatSendWindow(identity: SenderIdentity | null | undefined): string {
+  if (!identity) return 'No sending mailbox connected'
+  const start = formatHour(identity.sendWindowHoursStart ?? 9)
+  const end = formatHour(identity.sendWindowHoursEnd ?? 17)
+  const zone = identity.sendWindowTimeZone || 'Europe/London'
+  return `${start} to ${end} (${zone})`
+}
+
+function displayMailbox(identity: SenderIdentity | null | undefined): string {
+  if (!identity) return 'No mailbox connected'
+  return identity.displayName ? `${identity.displayName} <${identity.emailAddress}>` : identity.emailAddress
+}
+
+function humanizeGateReason(reason: string | null | undefined): string {
+  switch ((reason || '').trim()) {
+    case 'manual_live_tick_not_allowed':
+    case 'live_send_not_allowed':
+      return 'Immediate live sending is not allowed for this client right now.'
+    case 'customer_not_in_canary':
+      return 'This client is not approved for live sending yet.'
+    case 'identity_not_in_canary':
+      return 'The sending mailbox is not approved for live sending yet.'
+    case 'live_send_disabled':
+    case 'ENABLE_LIVE_SENDING is not true':
+      return 'Live sending is disabled right now.'
+    case 'ENABLE_SEND_QUEUE_SENDING is not true':
+      return 'The sending engine is currently disabled.'
+    case 'ignore_window_not_enabled':
+      return 'Immediate window bypass is not enabled in this environment.'
+    case 'sequence_has_no_sender_identity':
+      return 'This linked sequence does not have a sending mailbox yet.'
+    case 'sequence_not_found':
+      return 'The linked sequence was not found for this client.'
+    default:
+      return reason || 'This action is currently blocked.'
+  }
+}
+
+function humanizeRunOutcome(outcome: string): string {
+  switch (outcome) {
+    case 'SENT':
+      return 'Sent'
+    case 'SEND_FAILED':
+      return 'Failed'
+    case 'SKIP_SUPPRESSED':
+      return 'Suppressed'
+    case 'SKIP_REPLIED_STOP':
+      return 'Reply stopped'
+    case 'SKIP_INVALID_RECIPIENT':
+      return 'Invalid recipient'
+    default:
+      return outcome.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase())
+  }
+}
+
+function humanizeRunReason(reason: string | null | undefined): string {
+  switch ((reason || '').trim()) {
+    case 'outside_send_window':
+    case 'outside_window':
+      return 'Blocked by the mailbox send window.'
+    case 'daily_cap_reached':
+      return 'Blocked because the mailbox reached its daily limit.'
+    case 'per_minute_cap_reached':
+      return 'Blocked because the mailbox hit its short-term send cap.'
+    case 'suppressed':
+      return 'Blocked by the client suppression list.'
+    case 'SKIP_REPLIED_STOP':
+      return 'Stopped because the contact already replied.'
+    case 'hard_bounce_invalid_recipient':
+    case 'invalid_recipient':
+      return 'Blocked because the recipient address is invalid.'
+    case 'no_sender_identity':
+      return 'Blocked because no active sending mailbox is available.'
+    case 'canary_required_when_live_sending':
+    case 'customer_not_in_canary':
+      return 'Blocked because live sending is not enabled for this client.'
+    default:
+      return reason || 'No extra detail available.'
+  }
+}
+
+function getPrimaryScheduleMessage(
+  schedule: CampaignSchedule,
+  preflight: SequencePreflightData | null,
+): { tone: 'info' | 'warning' | 'error' | 'success'; text: string } {
+  if (!schedule.senderIdentity) {
+    return { tone: 'warning', text: 'This schedule does not have a sending mailbox connected yet.' }
+  }
+  if (schedule.status === 'paused') {
+    return { tone: 'info', text: 'This schedule is paused and will not send until you resume it.' }
+  }
+  if (schedule.mailboxMismatch) {
     return {
-      ...schedule,
-      description: '',
-      isActive: schedule.status === 'running',
-      timezone: schedule.senderIdentity?.sendWindowTimeZone ?? 'Europe/London',
-      daysOfWeek: [1, 2, 3, 4, 5],
-      timeWindows: [
-        {
-          startTime: `${String(startHour).padStart(2, '0')}:00`,
-          endTime: `${String(endHour).padStart(2, '0')}:00`,
-          maxEmails: maxDaily,
-        },
-      ],
-      maxEmailsPerDay: maxDaily,
-      maxEmailsPerHour: Math.max(1, Math.floor(maxDaily / 6)),
-      respectRecipientTimezone: true,
+      tone: 'warning',
+      text: 'This schedule and its linked sequence use different mailboxes. Test now is disabled until they match.',
     }
   }
+  if (preflight?.overallStatus === 'NO_GO' && preflight.blockers.length > 0) {
+    return { tone: 'error', text: preflight.blockers[0] }
+  }
+  if (preflight?.overallStatus === 'WARNING' && preflight.warnings.length > 0) {
+    return { tone: 'warning', text: preflight.warnings[0] }
+  }
+  if (schedule.nextScheduledAt) {
+    return { tone: 'success', text: `Next send is due ${formatDateTime(schedule.nextScheduledAt)}.` }
+  }
+  return { tone: 'info', text: 'No send is currently queued for this schedule.' }
+}
+
+const SchedulesTab: React.FC = () => {
+  const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
+  const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  const [scheduleStats, setScheduleStats] = useState<ScheduleStats | null>(null)
+  const [preflightData, setPreflightData] = useState<SequencePreflightData | null>(null)
+  const [runHistoryData, setRunHistoryData] = useState<RunHistoryData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
+  const [busyScheduleId, setBusyScheduleId] = useState<string | null>(null)
+  const [testSendLoadingId, setTestSendLoadingId] = useState<string | null>(null)
+  const toast = useToast()
 
   const loadData = useCallback(async (isManualRefresh = false) => {
     try {
       if (isManualRefresh) setRefreshing(true)
       else setLoading(true)
       setError(null)
+
       const [schedulesRes, emailsRes] = await Promise.all([
         api.get<CampaignSchedule[]>('/api/schedules'),
-        api.get<ScheduledEmail[]>('/api/schedules/emails')
+        api.get<ScheduledEmail[]>('/api/schedules/emails?limit=200'),
       ])
 
-      if (schedulesRes.error) {
-        setError(schedulesRes.error)
-        setSchedules([])
-      } else {
-        setSchedules((schedulesRes.data || []).map(toDeliverySchedule))
-      }
+      const firstError = schedulesRes.error || emailsRes.error || null
+      if (firstError) setError(firstError)
 
-      if (emailsRes.error) {
-        setError((prev) => prev ? `${prev}; ${emailsRes.error}` : emailsRes.error)
-        setScheduledEmails([])
-      } else {
-        setScheduledEmails(emailsRes.data || [])
-      }
+      const nextSchedules = schedulesRes.data || []
+      setSchedules(nextSchedules)
+      setScheduledEmails(emailsRes.data || [])
+      setSelectedScheduleId((current) => {
+        if (current && nextSchedules.some((schedule) => schedule.id === current)) return current
+        return nextSchedules[0]?.id ?? null
+      })
       setLastUpdatedAt(new Date().toISOString())
-    } catch (error) {
-      console.error('Error loading schedules:', error)
-      setError('Failed to load schedules data')
+    } catch (err) {
+      console.error('Error loading schedules:', err)
+      setError('Failed to load schedules')
       setSchedules([])
       setScheduledEmails([])
+      setSelectedScheduleId(null)
     } finally {
       setRefreshing(false)
       setLoading(false)
+    }
+  }, [])
+
+  const selectedSchedule = useMemo(
+    () => schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null,
+    [schedules, selectedScheduleId],
+  )
+
+  const loadSelectedDetails = useCallback(async (schedule: CampaignSchedule | null) => {
+    if (!schedule) {
+      setScheduleStats(null)
+      setPreflightData(null)
+      setRunHistoryData(null)
+      setDetailError(null)
+      return
+    }
+
+    setDetailLoading(true)
+    setDetailError(null)
+    try {
+      const requests: Array<Promise<any>> = [api.get<ScheduleStats>(`/api/schedules/${schedule.id}/stats`)]
+      if (schedule.sequenceId) {
+        requests.push(
+          api.get<{ success?: boolean; data?: SequencePreflightData }>(
+            `/api/send-worker/sequence-preflight?sequenceId=${encodeURIComponent(schedule.sequenceId)}&sinceHours=${DETAIL_SINCE_HOURS}`,
+          ),
+        )
+        requests.push(
+          api.get<{ success?: boolean; data?: RunHistoryData }>(
+            `/api/send-worker/run-history?sequenceId=${encodeURIComponent(schedule.sequenceId)}&sinceHours=${DETAIL_SINCE_HOURS}&limit=12`,
+          ),
+        )
+      }
+
+      const [statsRes, preflightRes, historyRes] = await Promise.all(requests)
+      if (statsRes.error) {
+        setDetailError(statsRes.error)
+        setScheduleStats(null)
+      } else {
+        setScheduleStats(statsRes.data || null)
+      }
+
+      if (schedule.sequenceId) {
+        if (preflightRes?.error) {
+          setDetailError((current) => current || preflightRes.error)
+          setPreflightData(null)
+        } else {
+          setPreflightData(preflightRes?.data?.data ?? null)
+        }
+
+        if (historyRes?.error) {
+          setDetailError((current) => current || historyRes.error)
+          setRunHistoryData(null)
+        } else {
+          setRunHistoryData(historyRes?.data?.data ?? { rows: [] })
+        }
+      } else {
+        setPreflightData(null)
+        setRunHistoryData(null)
+      }
+    } catch (err) {
+      console.error('Error loading schedule detail:', err)
+      setDetailError('Failed to load schedule detail')
+      setScheduleStats(null)
+      setPreflightData(null)
+      setRunHistoryData(null)
+    } finally {
+      setDetailLoading(false)
     }
   }, [])
 
@@ -222,229 +397,149 @@ const SchedulesTab: React.FC = () => {
     void loadData()
   }, [loadData])
 
-  const loadScheduleStats = async (scheduleId: string) => {
-    try {
-      const statsRes = await api.get<ScheduleStats>(`/api/schedules/${scheduleId}/stats`)
-      if (statsRes.error) {
-        console.error('Failed to load schedule stats:', statsRes.error)
-      } else {
-        setScheduleStats(statsRes.data || null)
-      }
-    } catch (error) {
-      console.error('Error loading schedule stats:', error)
-    }
-  }
+  useEffect(() => {
+    void loadSelectedDetails(selectedSchedule)
+  }, [loadSelectedDetails, selectedSchedule])
 
-  const handlePauseSchedule = async (scheduleId: string) => {
+  const handlePauseResume = async (schedule: CampaignSchedule) => {
+    const action = schedule.status === 'running' ? 'pause' : 'resume'
+    setBusyScheduleId(schedule.id)
     try {
-      const res = await api.post(`/api/schedules/${scheduleId}/pause`, {})
+      const res = await api.post(`/api/schedules/${schedule.id}/${action}`, {})
       if (res.error) {
         toast({
-          title: 'Failed to pause schedule',
+          title: `Failed to ${action} schedule`,
           description: res.error,
           status: 'error',
-          duration: 3000,
+          duration: 5000,
         })
-      } else {
-        toast({
-          title: 'Schedule paused',
-          description: 'The campaign has been paused',
-          status: 'success',
-          duration: 3000,
-        })
-        loadData() // Refresh the list
+        return
       }
-    } catch (error) {
-      console.error('Error pausing schedule:', error)
       toast({
-        title: 'Error',
-        description: 'Failed to pause schedule',
-        status: 'error',
-        duration: 3000,
+        title: action === 'pause' ? 'Schedule paused' : 'Schedule resumed',
+        description:
+          action === 'pause'
+            ? 'The schedule will stop sending until you resume it.'
+            : 'The schedule is active again and can send when recipients are due.',
+        status: 'success',
+        duration: 4000,
       })
+      await loadData(true)
+    } catch (err) {
+      console.error(`Error trying to ${action} schedule:`, err)
+      toast({
+        title: `Failed to ${action} schedule`,
+        description: 'Please try again.',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setBusyScheduleId(null)
     }
   }
 
-  const handleResumeSchedule = async (scheduleId: string) => {
+  const handleTestNow = async (schedule: CampaignSchedule) => {
+    if (!schedule.sequenceId) return
+    setTestSendLoadingId(schedule.id)
     try {
-      const res = await api.post(`/api/schedules/${scheduleId}/resume`, {})
+      const res = await api.post<{
+        success?: boolean
+        data?: {
+          sent?: number
+          processed?: number
+          requeued?: number
+          failed?: number
+          message?: string
+        }
+      }>('/api/send-worker/sequence-test-send', {
+        sequenceId: schedule.sequenceId,
+        limit: 3,
+      })
       if (res.error) {
         toast({
-          title: 'Failed to resume schedule',
-          description: res.error,
+          title: 'Test batch failed',
+          description: humanizeGateReason(res.error),
           status: 'error',
-          duration: 3000,
+          duration: 5000,
         })
-      } else {
-        toast({
-          title: 'Schedule resumed',
-          description: 'The campaign has been resumed',
-          status: 'success',
-          duration: 3000,
-        })
-        loadData() // Refresh the list
+        return
       }
-    } catch (error) {
-      console.error('Error resuming schedule:', error)
+      const summary =
+        res.data?.data?.message ||
+        `Processed ${res.data?.data?.processed ?? 0}; sent ${res.data?.data?.sent ?? 0}; failed ${res.data?.data?.failed ?? 0}.`
       toast({
-        title: 'Error',
-        description: 'Failed to resume schedule',
-        status: 'error',
-        duration: 3000,
+        title: (res.data?.data?.sent ?? 0) > 0 ? 'Test batch sent' : 'Test batch checked',
+        description: summary,
+        status: (res.data?.data?.sent ?? 0) > 0 ? 'success' : 'info',
+        duration: 6000,
       })
+      await loadData(true)
+      await loadSelectedDetails(schedules.find((item) => item.id === schedule.id) ?? schedule)
+    } catch (err) {
+      console.error('Error sending schedule test batch:', err)
+      toast({
+        title: 'Test batch failed',
+        description: 'Please try again.',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setTestSendLoadingId(null)
     }
   }
 
-  const stats = useMemo(() => {
-    const now = new Date()
-    const today = now.toDateString()
-    const weekLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toDateString()
+  const selectedUpcomingEmails = useMemo(() => {
+    if (!selectedSchedule) return []
+    return scheduledEmails
+      .filter((email) => email.campaignId === selectedSchedule.id)
+      .slice(0, 8)
+  }, [scheduledEmails, selectedSchedule])
 
+  const listSummary = useMemo(() => {
+    const nextScheduledAt = schedules
+      .map((schedule) => schedule.nextScheduledAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null
     return {
-      totalSchedules: schedules.length,
-      activeSchedules: schedules.filter((s) => s.status === 'running').length,
-      todayScheduled: scheduledEmails.filter(
-        (e) => new Date(e.scheduledFor).toDateString() === today,
-      ).length,
-      thisWeekScheduled: scheduledEmails.filter(
-        (e) => new Date(e.scheduledFor).toDateString() <= weekLater,
-      ).length,
-      pendingEmails: scheduledEmails.filter((e) => e.status === 'scheduled').length,
+      active: schedules.filter((schedule) => schedule.status === 'running').length,
+      paused: schedules.filter((schedule) => schedule.status === 'paused').length,
+      totalProspects: schedules.reduce((sum, schedule) => sum + schedule.totalProspects, 0),
+      nextScheduledAt,
     }
-  }, [schedules, scheduledEmails])
+  }, [schedules])
 
-  const handleCreateSchedule = () => {
-    setEditingSchedule({
-      id: '',
-      customerId: '',
-      name: '',
-      status: 'draft',
-      senderIdentity: null,
-      totalProspects: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      description: '',
-      isActive: true,
-      timezone: 'Europe/London',
-      daysOfWeek: [1, 2, 3, 4, 5],
-      timeWindows: [{ startTime: '09:00', endTime: '17:00', maxEmails: MAX_DAILY_SEND_LIMIT }],
-      maxEmailsPerDay: MAX_DAILY_SEND_LIMIT,
-      maxEmailsPerHour: Math.max(1, Math.floor(MAX_DAILY_SEND_LIMIT / 6)),
-      respectRecipientTimezone: true,
-    })
-    onOpen()
-  }
+  const selectedOutcomeSummary = runHistoryData?.summary?.byOutcome ?? {}
+  const selectedCounts = preflightData?.counts
+  const selectedMessage = selectedSchedule ? getPrimaryScheduleMessage(selectedSchedule, preflightData) : null
 
-  const handleEditSchedule = (schedule: DeliverySchedule) => {
-    setEditingSchedule({ ...schedule })
-    onOpen()
-  }
-
-  const handleSaveSchedule = async () => {
-    if (!editingSchedule) return
-
-    try {
-      if (editingSchedule.id) {
-        await api.put(`/api/schedules/${editingSchedule.id}`, editingSchedule)
-      } else {
-        const res = await api.post('/api/schedules', editingSchedule)
-        setEditingSchedule({ ...editingSchedule, id: (res.data as any).id })
+  const testNowState = useMemo(() => {
+    if (!selectedSchedule) {
+      return { enabled: false, reason: 'Select a schedule first.' }
+    }
+    if (!selectedSchedule.senderIdentity) {
+      return { enabled: false, reason: 'This schedule does not have a sending mailbox connected yet.' }
+    }
+    if (!selectedSchedule.sequenceId) {
+      return { enabled: false, reason: 'This schedule is not linked to a queue-backed sequence yet.' }
+    }
+    if (!selectedSchedule.sequenceSenderIdentity) {
+      return { enabled: false, reason: 'The linked sequence does not have a sending mailbox yet.' }
+    }
+    if (selectedSchedule.mailboxMismatch) {
+      return {
+        enabled: false,
+        reason: 'Test now is disabled because the schedule mailbox and sequence mailbox do not match.',
       }
-      await loadData()
-      onClose()
-      toast({
-        title: `Schedule ${editingSchedule.id ? 'updated' : 'created'}`,
-        status: 'success',
-        duration: 3000,
-      })
-    } catch (error) {
-      toast({
-        title: `Failed to ${editingSchedule.id ? 'update' : 'create'} schedule`,
-        status: 'error',
-        duration: 3000,
-      })
     }
-  }
-
-  const handleToggleSchedule = async (schedule: DeliverySchedule) => {
-    const nowActive = schedule.status !== 'running'
-    try {
-      await api.patch(`/api/schedules/${schedule.id}`, { isActive: nowActive })
-      await loadData()
-      toast({
-        title: `Schedule ${nowActive ? 'activated' : 'deactivated'}`,
-        status: 'success',
-        duration: 2000,
-      })
-    } catch (error) {
-      toast({
-        title: 'Failed to update schedule',
-        status: 'error',
-        duration: 2000,
-      })
-    }
-  }
-
-  const handleDeleteSchedule = async (scheduleId: string) => {
-    try {
-      await api.delete(`/api/schedules/${scheduleId}`)
-      await loadData()
-      toast({
-        title: 'Schedule deleted',
-        status: 'success',
-        duration: 3000,
-      })
-    } catch (error) {
-      toast({
-        title: 'Failed to delete schedule',
-        status: 'error',
-        duration: 3000,
-      })
-    }
-  }
-
-  const handleAddTimeWindow = () => {
-    if (!editingSchedule) return
-    setEditingSchedule({
-      ...editingSchedule,
-      timeWindows: [
-        ...editingSchedule.timeWindows,
-        { startTime: '09:00', endTime: '17:00', maxEmails: MAX_DAILY_SEND_LIMIT },
-      ]
-    })
-  }
-
-  const handleUpdateTimeWindow = (index: number, field: keyof TimeWindow, value: string | number) => {
-    if (!editingSchedule) return
-    const newWindows = [...editingSchedule.timeWindows]
-    newWindows[index] = { ...newWindows[index], [field]: value }
-    setEditingSchedule({
-      ...editingSchedule,
-      timeWindows: newWindows
-    })
-  }
-
-  const handleRemoveTimeWindow = (index: number) => {
-    if (!editingSchedule) return
-    setEditingSchedule({
-      ...editingSchedule,
-      timeWindows: editingSchedule.timeWindows.filter((_, i) => i !== index)
-    })
-  }
-
-  const formatTimeWindows = (windows: TimeWindow[]) => {
-    return windows.map(w => `${w.startTime}-${w.endTime}`).join(', ')
-  }
-
-  const formatDaysOfWeek = (days: number[]) => {
-    return days.map(d => daysOfWeek[d].label.slice(0, 3)).join(', ')
-  }
+    return { enabled: true, reason: null }
+  }, [selectedSchedule])
 
   if (loading) {
     return (
       <RequireActiveClient>
-        <Box id="schedules-tab-loading" data-testid="schedules-tab-loading" textAlign="center" py={10}>
-          <Text>Loading schedules...</Text>
+        <Box textAlign="center" py={10}>
+          <Spinner size="lg" />
+          <Text mt={3}>Loading schedules...</Text>
         </Box>
       </RequireActiveClient>
     )
@@ -452,486 +547,345 @@ const SchedulesTab: React.FC = () => {
 
   return (
     <RequireActiveClient>
-    <Box id="schedules-tab-panel" data-testid="schedules-tab-panel">
-      {error ? (
-        <Card mb={4}>
-          <CardBody>
-            <Text color="red.600" fontSize="sm">{error}</Text>
-          </CardBody>
-        </Card>
-      ) : null}
+      <Box id="schedules-tab-panel" data-testid="schedules-tab-panel">
+        {error ? (
+          <Alert status="warning" mb={4} borderRadius="md">
+            <AlertIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      <Card mb={4}>
-        <CardBody py={3}>
-          <Text fontSize="sm" color="gray.600">
-            Schedules show when active campaign emails will go out and which mailbox/day limit applies.
-          </Text>
-        </CardBody>
-      </Card>
-
-      {/* Header */}
-      <Flex justify="space-between" align="center" mb={6}>
-        <VStack align="start" spacing={1}>
-          <Heading size="lg">Schedules</Heading>
-          <Text color="gray.600">
-            View and manage active campaign schedules with upcoming sends
-          </Text>
-        </VStack>
-        <HStack>
+        <Flex justify="space-between" align={{ base: 'start', md: 'center' }} mb={6} gap={4} wrap="wrap">
+          <VStack align="start" spacing={1}>
+            <Heading size="lg">Schedules</Heading>
+            <Text color="gray.600">
+              See which outreach schedules are active, which mailbox they use, what happens next, and what happened recently.
+            </Text>
+          </VStack>
           <Button
-            id="schedules-tab-refresh-btn"
-            data-testid="schedules-tab-refresh-btn"
+            leftIcon={<RepeatIcon />}
             variant="outline"
             onClick={() => void loadData(true)}
             isLoading={refreshing}
           >
             Refresh
           </Button>
-          <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateSchedule}>
-            Create Schedule
-          </Button>
-        </HStack>
-      </Flex>
+        </Flex>
 
-      {/* Stats */}
-      <SimpleGrid id="schedules-tab-stats" data-testid="schedules-tab-stats" columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Active Campaigns</StatLabel>
-              <StatNumber>{schedules.filter(s => s.status === 'running').length}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Paused Campaigns</StatLabel>
-              <StatNumber>{schedules.filter(s => s.status === 'paused').length}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Upcoming Sends</StatLabel>
-              <StatNumber>{scheduledEmails.length}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>Total Prospects</StatLabel>
-              <StatNumber>{schedules.reduce((sum, s) => sum + s.totalProspects, 0)}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Stat>
-              <StatLabel>This Week</StatLabel>
-              <StatNumber>{stats.thisWeekScheduled}</StatNumber>
-            </Stat>
-          </CardBody>
-        </Card>
-      </SimpleGrid>
+        <SimpleGrid columns={{ base: 2, xl: 4 }} spacing={4} mb={6}>
+          <Card>
+            <CardBody>
+              <Stat>
+                <StatLabel>Active</StatLabel>
+                <StatNumber>{listSummary.active}</StatNumber>
+              </Stat>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Stat>
+                <StatLabel>Paused</StatLabel>
+                <StatNumber>{listSummary.paused}</StatNumber>
+              </Stat>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Stat>
+                <StatLabel>Total prospects</StatLabel>
+                <StatNumber>{listSummary.totalProspects}</StatNumber>
+              </Stat>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Stat>
+                <StatLabel>Next send due</StatLabel>
+                <StatNumber fontSize="lg">{listSummary.nextScheduledAt ? formatDateTime(listSummary.nextScheduledAt) : 'None queued'}</StatNumber>
+              </Stat>
+            </CardBody>
+          </Card>
+        </SimpleGrid>
 
-      <Text id="schedules-tab-last-updated" data-testid="schedules-tab-last-updated" fontSize="xs" color="gray.500" mb={4}>
-        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'} | Next scheduled send: {scheduledEmails[0]?.scheduledFor ? new Date(scheduledEmails[0].scheduledFor).toLocaleString() : 'none'}
-      </Text>
+        <Text fontSize="xs" color="gray.500" mb={4}>
+          Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'}
+        </Text>
 
-      {!schedules.length && !scheduledEmails.length ? (
-        <Card id="schedules-tab-empty-state" data-testid="schedules-tab-empty-state" mb={6}>
-          <CardBody>
-            <Text fontWeight="semibold">No active schedules found</Text>
-            <Text fontSize="sm" color="gray.600" mt={1}>
-              Create a schedule or activate a paused campaign to see timing operations here.
-            </Text>
-          </CardBody>
-        </Card>
-      ) : null}
-
-      <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6}>
-        {/* Schedules List */}
-        <Card id="schedules-tab-list" data-testid="schedules-tab-list">
-          <CardHeader>
-            <Heading size="md">Delivery Schedules</Heading>
-          </CardHeader>
-          <CardBody p={0}>
-            <VStack spacing={0} align="stretch">
-              {schedules.map((schedule) => (
-                <Box
-                  key={schedule.id}
-                  p={4}
-                  borderBottom="1px solid"
-                  borderColor="gray.100"
-                  _last={{ borderBottom: 'none' }}
-                >
-                  <Flex justify="space-between" align="start" mb={3}>
-                    <VStack align="start" spacing={1}>
-                      <HStack>
-                  <Heading size="md">{schedule.name}</Heading>
-                  <Badge colorScheme={schedule.status === 'running' ? 'green' : schedule.status === 'paused' ? 'yellow' : 'gray'}>
-                    {schedule.status}
-                  </Badge>
-                </HStack>
-                      {schedule.description && (
-                        <Text fontSize="sm" color="gray.600">{schedule.description}</Text>
-                      )}
-                    </VStack>
-                    <Menu>
-                      <MenuButton
-                        as={IconButton}
-                        icon={<SettingsIcon />}
-                        size="sm"
-                        variant="ghost"
-                      />
-                      <MenuList>
-                        <MenuItem icon={<EditIcon />} onClick={() => handleEditSchedule(schedule)}>
-                          Edit
-                        </MenuItem>
-                        {schedule.status === 'running' ? (
-                          <MenuItem icon={<TimeIcon />} onClick={() => handlePauseSchedule(schedule.id)}>
-                            Pause
-                          </MenuItem>
-                        ) : (
-                          <MenuItem icon={<CheckIcon />} onClick={() => handleResumeSchedule(schedule.id)}>
-                            Resume
-                          </MenuItem>
-                        )}
-                        <MenuItem icon={<SettingsIcon />} onClick={() => handleToggleSchedule(schedule)}>
-                          {schedule.status === 'running' ? 'Deactivate' : 'Activate'}
-                        </MenuItem>
-                        <MenuDivider />
-                        <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteSchedule(schedule.id)}>
-                          Delete
-                        </MenuItem>
-                      </MenuList>
-                    </Menu>
-                  </Flex>
-
-                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                    <Box>
-                      <Text fontSize="sm" fontWeight="semibold" mb={1}>Days & Times</Text>
-                      <HStack spacing={4}>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="xs" color="gray.600">Days</Text>
-                          <Text fontSize="sm">{formatDaysOfWeek(schedule.daysOfWeek)}</Text>
-                        </VStack>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="xs" color="gray.600">Hours</Text>
-                          <Text fontSize="sm">{formatTimeWindows(schedule.timeWindows)}</Text>
-                        </VStack>
-                      </HStack>
-                    </Box>
-
-                    <Box>
-                      <Text fontSize="sm" fontWeight="semibold" mb={1}>Limits</Text>
-                      <HStack spacing={4}>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="xs" color="gray.600">Per Day</Text>
-                          <Text fontSize="sm">{schedule.maxEmailsPerDay}</Text>
-                        </VStack>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="xs" color="gray.600">Per Hour</Text>
-                          <Text fontSize="sm">{schedule.maxEmailsPerHour}</Text>
-                        </VStack>
-                      </HStack>
-                    </Box>
-                  </SimpleGrid>
-
-                  <HStack spacing={2} mt={3}>
-                    {schedule.respectRecipientTimezone && (
-                      <Tag size="sm" colorScheme="blue">
-                        <TagLabel>Respects Timezone</TagLabel>
-                      </Tag>
-                    )}
-                    <Text fontSize="xs" color="gray.600">
-                      Updated {new Date(schedule.updatedAt).toLocaleDateString()}
-                    </Text>
-                  </HStack>
-                </Box>
-              ))}
-            </VStack>
-          </CardBody>
-        </Card>
-
-        {/* Upcoming Emails */}
-        <Card id="schedules-tab-upcoming-table" data-testid="schedules-tab-upcoming-table">
-          <CardHeader>
-            <Heading size="md">Upcoming Emails</Heading>
-          </CardHeader>
-          <CardBody p={0}>
-            <Box overflowX="auto">
-              <Table size="sm">
-                <Thead>
-                  <Tr>
-                    <Th>Time</Th>
-                    <Th>Campaign</Th>
-                    <Th>Recipient</Th>
-                    <Th>Status</Th>
-                  </Tr>
-                </Thead>
-                <Tbody>
-                  {scheduledEmails.slice(0, 10).map((email) => (
-                    <Tr key={email.id}>
-                      <Td>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="sm" fontWeight="semibold">
-                            {new Date(email.scheduledFor).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </Text>
-                          <Text fontSize="xs" color="gray.600">
-                            {new Date(email.scheduledFor).toLocaleDateString()}
-                          </Text>
-                        </VStack>
-                      </Td>
-                      <Td>
-                        <Text fontSize="sm" noOfLines={2}>
-                          {email.campaignName}
-                        </Text>
-                      </Td>
-                      <Td>
-                        <VStack align="start" spacing={0}>
-                          <Text fontSize="sm" fontWeight="semibold">
-                            {email.prospectName}
-                          </Text>
-                          <Text fontSize="xs" color="gray.600">
-                            {email.prospectEmail}
-                          </Text>
-                        </VStack>
-                      </Td>
-                      <Td>
-                        <Badge
-                          size="sm"
-                          colorScheme={
-                            email.status === 'sent' ? 'green' :
-                            email.status === 'failed' ? 'red' : 'blue'
-                          }
-                        >
-                          {email.status}
-                        </Badge>
-                      </Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
-            </Box>
-          </CardBody>
-        </Card>
-      </Grid>
-
-      {/* Create/Edit Schedule Modal */}
-      <Modal isOpen={isOpen} onClose={onClose} size="4xl">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>{editingSchedule?.id ? 'Edit Schedule' : 'Create Schedule'}</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody pb={6}>
-            {editingSchedule && (
-              <VStack spacing={4} align="stretch">
-                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                  <FormControl>
-                    <FormLabel>Schedule Name</FormLabel>
-                    <Input
-                      value={editingSchedule.name}
-                      onChange={(e) => setEditingSchedule({...editingSchedule, name: e.target.value})}
-                      placeholder="e.g., Business Hours - EST"
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel>Timezone</FormLabel>
-                    <Select
-                      value={editingSchedule.timezone}
-                      onChange={(e) => setEditingSchedule({...editingSchedule, timezone: e.target.value})}
-                    >
-                      <option value="America/New_York">Eastern Time</option>
-                      <option value="America/Chicago">Central Time</option>
-                      <option value="America/Denver">Mountain Time</option>
-                      <option value="America/Los_Angeles">Pacific Time</option>
-                      <option value="UTC">UTC</option>
-                    </Select>
-                  </FormControl>
-                </SimpleGrid>
-
-                <FormControl>
-                  <FormLabel>Description</FormLabel>
-                  <Textarea
-                    value={editingSchedule.description || ''}
-                    onChange={(e) => setEditingSchedule({...editingSchedule, description: e.target.value})}
-                    placeholder="Describe this delivery schedule..."
-                  />
-                </FormControl>
-
-                <FormControl>
-                  <FormLabel>Days of Week</FormLabel>
-                  <SimpleGrid columns={7} spacing={2}>
-                    {daysOfWeek.map((day) => (
-                      <Checkbox
-                        key={day.value}
-                        isChecked={editingSchedule.daysOfWeek.includes(day.value)}
-                        onChange={(e) => {
-                          const newDays = e.target.checked
-                            ? [...editingSchedule.daysOfWeek, day.value]
-                            : editingSchedule.daysOfWeek.filter(d => d !== day.value)
-                          setEditingSchedule({...editingSchedule, daysOfWeek: newDays})
-                        }}
+        {!schedules.length ? (
+          <Card>
+            <CardBody>
+              <Text fontWeight="semibold">No active schedules yet</Text>
+              <Text fontSize="sm" color="gray.600" mt={1}>
+                Start from a live outreach campaign or linked sequence, then return here to monitor sending, pause/resume, and run a safe test batch.
+              </Text>
+            </CardBody>
+          </Card>
+        ) : (
+          <Grid templateColumns={{ base: '1fr', xl: '1.3fr 1fr' }} gap={6}>
+            <Card>
+              <CardHeader pb={2}>
+                <Heading size="md">Live schedules</Heading>
+              </CardHeader>
+              <CardBody pt={0}>
+                <Stack spacing={4}>
+                  {schedules.map((schedule) => {
+                    const isSelected = schedule.id === selectedScheduleId
+                    const testDisabled =
+                      !schedule.senderIdentity ||
+                      !schedule.sequenceId ||
+                      !schedule.sequenceSenderIdentity ||
+                      schedule.mailboxMismatch
+                    return (
+                      <Box
+                        key={schedule.id}
+                        borderWidth="1px"
+                        borderRadius="lg"
+                        p={4}
+                        borderColor={isSelected ? 'blue.400' : 'gray.200'}
+                        bg={isSelected ? 'blue.50' : 'white'}
                       >
-                        {day.label.slice(0, 3)}
-                      </Checkbox>
-                    ))}
-                  </SimpleGrid>
-                </FormControl>
+                        <Flex justify="space-between" align="start" gap={3} wrap="wrap">
+                          <VStack align="start" spacing={1}>
+                            <HStack>
+                              <Heading size="sm">{schedule.name}</Heading>
+                              <Badge colorScheme={statusColor(schedule.status)}>{humanizeStatus(schedule.status)}</Badge>
+                            </HStack>
+                            {schedule.sequenceName ? (
+                              <Text fontSize="sm" color="gray.600">
+                                Linked sequence: {schedule.sequenceName}
+                              </Text>
+                            ) : null}
+                            {schedule.description ? (
+                              <Text fontSize="sm" color="gray.600">{schedule.description}</Text>
+                            ) : null}
+                          </VStack>
+                          <HStack spacing={2}>
+                            <Button size="sm" variant={isSelected ? 'solid' : 'outline'} onClick={() => setSelectedScheduleId(schedule.id)}>
+                              View results
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => void handlePauseResume(schedule)}
+                              isLoading={busyScheduleId === schedule.id}
+                            >
+                              {schedule.status === 'running' ? 'Pause' : 'Resume'}
+                            </Button>
+                            <Button
+                              size="sm"
+                              colorScheme="blue"
+                              onClick={() => void handleTestNow(schedule)}
+                              isDisabled={testDisabled}
+                              isLoading={testSendLoadingId === schedule.id}
+                            >
+                              Test now
+                            </Button>
+                          </HStack>
+                        </Flex>
 
-                <FormControl>
-                  <Flex justify="space-between" align="center" mb={2}>
-                    <FormLabel mb={0}>Time Windows</FormLabel>
-                    <Button size="sm" leftIcon={<AddIcon />} onClick={handleAddTimeWindow}>
-                      Add Window
-                    </Button>
-                  </Flex>
-                  <VStack spacing={3} align="stretch">
-                    {editingSchedule.timeWindows.map((window, index) => (
-                      <Flex key={index} gap={4} align="center">
-                        <Input
-                          type="time"
-                          value={window.startTime}
-                          onChange={(e) => handleUpdateTimeWindow(index, 'startTime', e.target.value)}
-                          size="sm"
-                          w="120px"
-                        />
-                        <Text fontSize="sm">to</Text>
-                        <Input
-                          type="time"
-                          value={window.endTime}
-                          onChange={(e) => handleUpdateTimeWindow(index, 'endTime', e.target.value)}
-                          size="sm"
-                          w="120px"
-                        />
-                    <NumberInput
-                      value={window.maxEmails}
-                      onChange={(_, value) => handleUpdateTimeWindow(index, 'maxEmails', Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, value)))}
-                      size="sm"
-                      w="120px"
-                      min={1}
-                      max={MAX_DAILY_SEND_LIMIT}
-                    >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                        <Text fontSize="sm">emails</Text>
-                        <IconButton
-                          size="sm"
-                          icon={<DeleteIcon />}
-                          colorScheme="red"
+                        <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} mt={4}>
+                          <Box>
+                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Mailbox</Text>
+                            <Text fontSize="sm">{displayMailbox(schedule.senderIdentity)}</Text>
+                          </Box>
+                          <Box>
+                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Daily limit</Text>
+                            <Text fontSize="sm">{Math.min(MAX_DAILY_SEND_LIMIT, schedule.senderIdentity?.dailySendLimit ?? MAX_DAILY_SEND_LIMIT)} per mailbox</Text>
+                          </Box>
+                          <Box>
+                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Send window</Text>
+                            <Text fontSize="sm">{formatSendWindow(schedule.senderIdentity)}</Text>
+                          </Box>
+                          <Box>
+                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Next send</Text>
+                            <Text fontSize="sm">{formatDateTime(schedule.nextScheduledAt)}</Text>
+                          </Box>
+                        </SimpleGrid>
+
+                        <HStack spacing={4} mt={4} flexWrap="wrap">
+                          <Text fontSize="sm" color="gray.600">Prospects: {schedule.totalProspects}</Text>
+                          <Text fontSize="sm" color="gray.600">
+                            Updated: {new Date(schedule.updatedAt).toLocaleString()}
+                          </Text>
+                        </HStack>
+
+                        {schedule.mailboxMismatch ? (
+                          <Alert status="warning" mt={4} borderRadius="md">
+                            <AlertIcon />
+                            <AlertDescription fontSize="sm">
+                              This schedule uses {displayMailbox(schedule.senderIdentity)}, but the linked sequence uses {displayMailbox(schedule.sequenceSenderIdentity)}.
+                              Align them before using Test now.
+                            </AlertDescription>
+                          </Alert>
+                        ) : null}
+                      </Box>
+                    )
+                  })}
+                </Stack>
+              </CardBody>
+            </Card>
+            <Stack spacing={6}>
+              <Card>
+                <CardHeader pb={2}>
+                  <Heading size="md">{selectedSchedule ? selectedSchedule.name : 'Schedule details'}</Heading>
+                </CardHeader>
+                <CardBody pt={0}>
+                  {!selectedSchedule ? (
+                    <Text color="gray.600">Select a schedule to review its operator summary.</Text>
+                  ) : (
+                    <Stack spacing={4}>
+                      {detailError ? (
+                        <Alert status="warning" borderRadius="md">
+                          <AlertIcon />
+                          <AlertDescription>{detailError}</AlertDescription>
+                        </Alert>
+                      ) : null}
+
+                      {selectedMessage ? (
+                        <Alert
+                          status={
+                            selectedMessage.tone === 'success'
+                              ? 'success'
+                              : selectedMessage.tone === 'error'
+                                ? 'error'
+                                : 'warning'
+                          }
+                          borderRadius="md"
+                        >
+                          <AlertIcon />
+                          <AlertDescription>{selectedMessage.text}</AlertDescription>
+                        </Alert>
+                      ) : null}
+
+                      <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Mailbox</StatLabel><StatNumber fontSize="sm">{selectedSchedule.senderIdentity?.emailAddress || 'Not connected'}</StatNumber></Stat></CardBody></Card>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Daily cap</StatLabel><StatNumber>{scheduleStats?.dailyLimit ?? selectedSchedule.senderIdentity?.dailySendLimit ?? MAX_DAILY_SEND_LIMIT}</StatNumber></Stat></CardBody></Card>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Next send</StatLabel><StatNumber fontSize="sm">{formatDateTime(scheduleStats?.nextScheduledAt ?? selectedSchedule.nextScheduledAt)}</StatNumber></Stat></CardBody></Card>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Sent (recent)</StatLabel><StatNumber>{selectedOutcomeSummary.SENT ?? scheduleStats?.sentSends ?? 0}</StatNumber></Stat></CardBody></Card>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Failed (recent)</StatLabel><StatNumber>{selectedOutcomeSummary.SEND_FAILED ?? 0}</StatNumber></Stat></CardBody></Card>
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Blocked now</StatLabel><StatNumber>{selectedCounts?.blocked ?? 0}</StatNumber></Stat></CardBody></Card>
+                      </SimpleGrid>
+
+                      <HStack spacing={3} flexWrap="wrap">
+                        <Button
+                          colorScheme="blue"
+                          onClick={() => void handleTestNow(selectedSchedule)}
+                          isDisabled={!testNowState.enabled}
+                          isLoading={testSendLoadingId === selectedSchedule.id}
+                        >
+                          Send test batch now
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => void handlePauseResume(selectedSchedule)}
+                          isLoading={busyScheduleId === selectedSchedule.id}
+                        >
+                          {selectedSchedule.status === 'running' ? 'Pause schedule' : 'Resume schedule'}
+                        </Button>
+                        <Button
                           variant="ghost"
-                          onClick={() => handleRemoveTimeWindow(index)}
-                          isDisabled={editingSchedule.timeWindows.length === 1}
-                          aria-label="Remove time window"
-                        />
-                      </Flex>
-                    ))}
-                  </VStack>
-                </FormControl>
+                          leftIcon={<RepeatIcon />}
+                          onClick={() => void loadSelectedDetails(selectedSchedule)}
+                          isLoading={detailLoading}
+                        >
+                          Refresh results
+                        </Button>
+                      </HStack>
 
-                <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
-                  <FormControl>
-                    <FormLabel>Max Emails Per Day</FormLabel>
-                    <NumberInput
-                      value={editingSchedule.maxEmailsPerDay}
-                      onChange={(_, value) => setEditingSchedule({...editingSchedule, maxEmailsPerDay: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, value))})}
-                      min={1}
-                      max={MAX_DAILY_SEND_LIMIT}
-                    >
-                      <NumberInputField />
-                      <NumberInputStepper>
-                        <NumberIncrementStepper />
-                        <NumberDecrementStepper />
-                      </NumberInputStepper>
-                    </NumberInput>
-                    <Text fontSize="xs" color="gray.500" mt={1}>
-                      Strict maximum: {MAX_DAILY_SEND_LIMIT} emails per mailbox each day.
-                    </Text>
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel>Max Emails Per Hour</FormLabel>
-                    <NumberInput
-                      value={editingSchedule.maxEmailsPerHour}
-                      onChange={(_, value) => setEditingSchedule({...editingSchedule, maxEmailsPerHour: value})}
-                      min={1}
-                    >
-                      <NumberInputField />
-                      <NumberInputStepper>
-                        <NumberIncrementStepper />
-                        <NumberDecrementStepper />
-                      </NumberInputStepper>
-                    </NumberInput>
-                  </FormControl>
-                  <FormControl>
-                    <FormLabel>Respect Recipient Timezone</FormLabel>
-                    <Switch
-                      isChecked={editingSchedule.respectRecipientTimezone}
-                      onChange={(e) => setEditingSchedule({...editingSchedule, respectRecipientTimezone: e.target.checked})}
-                    />
-                  </FormControl>
-                </SimpleGrid>
-              </VStack>
-            )}
-          </ModalBody>
-          <Flex justify="flex-end" p={6} pt={0}>
-            <Button variant="ghost" mr={3} onClick={onClose}>
-              Cancel
-            </Button>
-            <Button colorScheme="blue" onClick={handleSaveSchedule}>
-              {editingSchedule?.id ? 'Save Changes' : 'Create Schedule'}
-            </Button>
-          </Flex>
-        </ModalContent>
-      </Modal>
-    </Box>
+                      {!testNowState.enabled && testNowState.reason ? (
+                        <Text fontSize="sm" color="gray.600">{testNowState.reason}</Text>
+                      ) : (
+                        <Text fontSize="sm" color="gray.600">
+                          Test now uses the existing operator-safe test batch route and never exceeds 3 due recipients.
+                        </Text>
+                      )}
+                    </Stack>
+                  )}
+                </CardBody>
+              </Card>
+
+              <Card>
+                <CardHeader pb={2}>
+                  <Heading size="md">Recent outcomes</Heading>
+                </CardHeader>
+                <CardBody pt={0}>
+                  {!selectedSchedule?.sequenceId ? (
+                    <Text color="gray.600">This schedule does not have a linked sequence outcome stream yet.</Text>
+                  ) : !runHistoryData?.rows?.length ? (
+                    <Text color="gray.600">No recent results yet for this schedule in the last {DETAIL_SINCE_HOURS} hours.</Text>
+                  ) : (
+                    <Box overflowX="auto">
+                      <Table size="sm">
+                        <Thead>
+                          <Tr>
+                            <Th>When</Th>
+                            <Th>Recipient</Th>
+                            <Th>Mailbox</Th>
+                            <Th>Outcome</Th>
+                            <Th>Why</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {runHistoryData.rows.slice(0, 8).map((row) => (
+                            <Tr key={row.auditId}>
+                              <Td>{formatDateTime(row.occurredAt)}</Td>
+                              <Td>{row.recipientEmail || 'Unknown recipient'}</Td>
+                              <Td>{row.identityEmail || selectedSchedule?.senderIdentity?.emailAddress || '—'}</Td>
+                              <Td>{humanizeRunOutcome(row.outcome)}</Td>
+                              <Td>{humanizeRunReason(row.reason || row.lastError)}</Td>
+                            </Tr>
+                          ))}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                  )}
+                </CardBody>
+              </Card>
+
+              <Card>
+                <CardHeader pb={2}>
+                  <Heading size="md">Upcoming sends</Heading>
+                </CardHeader>
+                <CardBody pt={0}>
+                  {!selectedUpcomingEmails.length ? (
+                    <Text color="gray.600">No queued sends are currently scheduled for this campaign.</Text>
+                  ) : (
+                    <Box overflowX="auto">
+                      <Table size="sm">
+                        <Thead>
+                          <Tr>
+                            <Th>When</Th>
+                            <Th>Recipient</Th>
+                            <Th>Step</Th>
+                            <Th>Mailbox</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {selectedUpcomingEmails.map((email) => (
+                            <Tr key={email.id}>
+                              <Td>{formatDateTime(email.scheduledFor)}</Td>
+                              <Td>
+                                <VStack align="start" spacing={0}>
+                                  <Text fontSize="sm">{email.prospectName}</Text>
+                                  <Text fontSize="xs" color="gray.500">{email.prospectEmail}</Text>
+                                </VStack>
+                              </Td>
+                              <Td>Step {email.stepNumber + 1}</Td>
+                              <Td>{email.senderIdentity?.emailAddress || selectedSchedule?.senderIdentity?.emailAddress || '—'}</Td>
+                            </Tr>
+                          ))}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                  )}
+                </CardBody>
+              </Card>
+            </Stack>
+          </Grid>
+        )}
+      </Box>
     </RequireActiveClient>
   )
 }
-
-// Mock data — kept for reference only, not used at runtime
-const _mockSchedules: DeliverySchedule[] = [
-  {
-    id: '1',
-    customerId: '',
-    name: 'Business Hours - UK',
-    status: 'running',
-    senderIdentity: null,
-    totalProspects: 0,
-    description: 'Standard business hours for UK prospects',
-    isActive: true,
-    timezone: 'Europe/London',
-    daysOfWeek: [1, 2, 3, 4, 5],
-    timeWindows: [
-      { startTime: '09:00', endTime: '12:00', maxEmails: 50 },
-      { startTime: '13:00', endTime: '17:00', maxEmails: 50 },
-    ],
-    maxEmailsPerDay: 200,
-    maxEmailsPerHour: 10,
-    respectRecipientTimezone: true,
-    createdAt: '2024-01-15T10:00:00Z',
-    updatedAt: '2024-01-20T14:30:00Z',
-  },
-]
-
-const _mockScheduledEmails: ScheduledEmail[] = [
-  {
-    id: '1',
-    campaignId: '1',
-    campaignName: 'Q1 Outreach',
-    prospectEmail: 'john.smith@techcorp.com',
-    prospectName: 'John Smith',
-    scheduledFor: '2024-01-25T14:30:00Z',
-    status: 'scheduled',
-    stepNumber: 1,
-  },
-]
 
 export default SchedulesTab
