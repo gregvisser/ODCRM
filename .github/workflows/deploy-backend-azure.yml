@@ -199,6 +199,7 @@ jobs:
       - name: Sync live-send app settings for canary testing
         shell: bash
         env:
+          APP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
           PUBLISH_PROFILE_XML: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           ENABLE_SEND_QUEUE_SENDING_APPSETTING: ${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
           ENABLE_LIVE_SENDING_APPSETTING: ${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
@@ -208,27 +209,32 @@ jobs:
           import shlex
           import xml.etree.ElementTree as ET
 
+          app_name = os.environ.get('APP_NAME', '').strip()
           raw = os.environ.get('PUBLISH_PROFILE_XML', '').strip()
+          if not app_name:
+            raise SystemExit('Missing AZURE_WEBAPP_NAME secret.')
           if not raw:
             raise SystemExit('Missing AZURE_WEBAPP_PUBLISH_PROFILE secret.')
 
           root = ET.fromstring(raw)
           chosen = None
           for profile in root.iter('publishProfile'):
-            publish_url = profile.attrib.get('publishUrl', '')
-            if '.scm.azurewebsites.net' in publish_url:
+            if profile.attrib.get('publishMethod', '').lower() == 'msdeploy':
               chosen = profile
               break
           if chosen is None:
-            raise SystemExit('Could not find SCM publish profile in AZURE_WEBAPP_PUBLISH_PROFILE.')
+            for profile in root.iter('publishProfile'):
+              chosen = profile
+              break
+          if chosen is None:
+            raise SystemExit('Could not find any publish profile credentials in AZURE_WEBAPP_PUBLISH_PROFILE.')
 
-          publish_url = chosen.attrib.get('publishUrl', '').split(':')[0].strip()
           username = chosen.attrib.get('userName', '').strip()
           password = chosen.attrib.get('userPWD', '').strip()
-          if not publish_url or not username or not password:
+          if not username or not password:
             raise SystemExit('Publish profile is missing SCM credentials.')
 
-          print(f"export KUDU_BASE_URL={shlex.quote('https://' + publish_url)}")
+          print(f"export KUDU_BASE_URL={shlex.quote(f'https://{app_name}.scm.azurewebsites.net')}")
           print(f"export KUDU_USERNAME={shlex.quote(username)}")
           print(f"export KUDU_PASSWORD={shlex.quote(password)}")
           PY
