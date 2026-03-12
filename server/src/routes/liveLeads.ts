@@ -67,6 +67,7 @@ function buildSheetTruthStatus(params: {
   errorCode?: LiveLeadErrorCode
 } {
   const { sourceOfTruth, configuredSheetUrl, sync, rowCount, bootstrap } = params
+  const syncHasFailedWithoutStatus = sync.status === 'syncing' && !sync.lastSuccessAt && Boolean(sync.lastError)
 
   if (sourceOfTruth === 'db') {
     return { authoritative: true, dataFreshness: 'live' }
@@ -91,7 +92,7 @@ function buildSheetTruthStatus(params: {
     }
   }
 
-  if (sync.status === 'error') {
+  if (sync.status === 'error' || syncHasFailedWithoutStatus) {
     const errorCode = classifySheetSyncError(sync.lastError) ?? 'sync_failed'
     return {
       authoritative: false,

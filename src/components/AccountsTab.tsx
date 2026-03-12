@@ -3712,12 +3712,38 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
   }, { spend: 0, weeklyLeads: 0, monthlyLeads: 0, weeklyTarget: 0, monthlyTarget: 0 })
   const totalsHaveUnavailableLeadMetrics = filteredAndSortedAccounts.some((account) => Boolean(account.sheetMetricsUnavailable))
+  const describeUnavailableLeadMetric = (account: { name: string; errorCode?: string; warning?: string }) => {
+    if (account.warning?.trim()) {
+      return `${account.name}: ${account.warning.trim()}`
+    }
+    switch (account.errorCode) {
+      case 'missing_sheet_url':
+        return `${account.name}: no leads reporting sheet is configured`
+      case 'zero_rows_imported':
+        return `${account.name}: the linked sheet returned no lead rows`
+      case 'stale_sync':
+        return `${account.name}: live sheet metrics need a refresh`
+      case 'unreadable_sheet':
+        return `${account.name}: the linked sheet is not readable`
+      case 'sync_failed':
+        return `${account.name}: the most recent sheet sync failed`
+      case 'never_synced':
+        return `${account.name}: the first sheet sync has not completed yet`
+      default:
+        return `${account.name}: live sheet metrics are unavailable`
+    }
+  }
   const unavailableLeadDiagnostics = filteredAndSortedAccounts
     .filter((account) => Boolean(account.sheetMetricsUnavailable))
     .map((account) => ({
       name: account.name,
       errorCode: account.sheetMetricsErrorCode || 'metrics_unavailable',
       warning: account.sheetMetricsWarning,
+      summary: describeUnavailableLeadMetric({
+        name: account.name,
+        errorCode: account.sheetMetricsErrorCode || 'metrics_unavailable',
+        warning: account.sheetMetricsWarning,
+      }),
     }))
   
   const totalPercentToTarget = !totalsHaveUnavailableLeadMetrics && totals.monthlyTarget > 0 
@@ -4211,7 +4237,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
             </AlertDescription>
             {unavailableLeadDiagnostics.length > 0 && (
               <Text fontSize="xs" color="orange.800" mt={1}>
-                {unavailableLeadDiagnostics.map((account) => `${account.name} [${account.errorCode}]`).join(' • ')}
+                {unavailableLeadDiagnostics.map((account) => account.summary).join(' • ')}
               </Text>
             )}
           </Box>

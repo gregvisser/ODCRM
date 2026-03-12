@@ -247,12 +247,21 @@ function isSheetBackedCustomer(customer: { leadsReportingUrl?: string | null }):
   return Boolean(customer.leadsReportingUrl && customer.leadsReportingUrl.trim())
 }
 
+function isActiveSheetSync(sync: LiveLeadSyncMeta | undefined): boolean {
+  if (sync?.status !== 'syncing') return false
+  if (sync.lastError) return false
+  if (!sync.lastSyncAt) return true
+  const lastSyncMs = Date.parse(sync.lastSyncAt)
+  if (!Number.isFinite(lastSyncMs)) return true
+  return Date.now() - lastSyncMs < 2 * 60 * 1000
+}
+
 function shouldRefreshSheetMetrics(
   customer: { leadsReportingUrl?: string | null },
   data: LiveLeadMetricsResponse
 ): boolean {
   if (!isSheetBackedCustomer(customer)) return false
-  if (data.sync?.status === 'syncing') return false
+  if (isActiveSheetSync(data.sync)) return false
   if (data.errorCode === 'missing_sheet_url' || data.errorCode === 'unreadable_sheet') return false
   return (
     data.errorCode === 'never_synced' ||
