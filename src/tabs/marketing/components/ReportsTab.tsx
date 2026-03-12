@@ -3,7 +3,6 @@ import {
   Alert,
   AlertDescription,
   AlertIcon,
-  Badge,
   Box,
   Button,
   Card,
@@ -56,22 +55,20 @@ type OutreachReportResponse = {
 }
 
 type RunHistoryRow = {
+  auditId?: string | null
   recipientEmail?: string | null
   decision?: string | null
+  outcome?: string | null
   reason?: string | null
   sequenceName?: string | null
   identityEmail?: string | null
-  createdAt?: string | null
+  occurredAt?: string | null
 }
 
 type RunHistoryResponse = {
   summary?: {
-    WOULD_SEND?: number
-    SENT?: number
-    SEND_FAILED?: number
-    SKIP_SUPPRESSED?: number
-    SKIP_REPLIED_STOP?: number
-    hard_bounce_invalid_recipient?: number
+    byDecision?: Record<string, number>
+    byOutcome?: Record<string, number>
   }
   rows?: RunHistoryRow[]
 }
@@ -85,7 +82,81 @@ type IdentityCapacityResponse = {
   }
 }
 
+type OperatorConsoleResponse = {
+  lastUpdatedAt?: string
+  queue?: {
+    totalQueued?: number
+    readyNow?: number
+    scheduledLater?: number
+    suppressed?: number
+    replyStopped?: number
+    failedRecently?: number
+    sentRecently?: number
+    blocked?: number
+  }
+}
+
+type QueueWorkbenchRow = {
+  queueItemId?: string | null
+  sequenceName?: string | null
+  identityEmail?: string | null
+  recipientEmail?: string | null
+  reason?: string | null
+  scheduledFor?: string | null
+  sentAt?: string | null
+  updatedAt?: string | null
+}
+
+type QueueWorkbenchResponse = {
+  rows?: QueueWorkbenchRow[]
+}
+
 const EMPTY_RUN_ROWS: RunHistoryRow[] = []
+const EMPTY_QUEUE_ROWS: QueueWorkbenchRow[] = []
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString()
+}
+
+function humanizeOutcome(outcome?: string | null): string {
+  switch (outcome) {
+    case 'SENT':
+      return 'Sent'
+    case 'SEND_FAILED':
+      return 'Failed'
+    case 'SKIP_SUPPRESSED':
+      return 'Suppressed'
+    case 'SKIP_REPLIED_STOP':
+      return 'Reply stopped'
+    case 'hard_bounce_invalid_recipient':
+      return 'Invalid recipient'
+    case 'WOULD_SEND':
+      return 'Test preview'
+    default:
+      return String(outcome || 'Unknown').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase())
+  }
+}
+
+function humanizeReason(reason?: string | null): string {
+  const normalized = String(reason || '').trim().toLowerCase()
+  if (!normalized) return '—'
+  if (normalized.includes('unsubscribe')) return 'Recipient unsubscribed.'
+  if (normalized.includes('suppress')) return 'Recipient is on the suppression list.'
+  if (normalized.includes('replied_stop')) return 'Stopped because the recipient already replied.'
+  if (normalized.includes('outside_window')) return 'Waiting for the next allowed send window.'
+  if (normalized.includes('daily_cap_reached')) return 'Mailbox is at its daily limit.'
+  if (normalized.includes('per_minute_cap_reached')) return 'Mailbox is pacing sends right now.'
+  if (normalized.includes('no_sender_identity')) return 'No active sender mailbox is available.'
+  if (normalized.includes('hard_bounce_invalid_recipient') || normalized.includes('invalid_recipient')) return 'Recipient email address is invalid.'
+  if (normalized.includes('canary')) return 'Live sending is not enabled for this client yet.'
+  if (normalized.includes('kill_switch') || normalized.includes('live_send_disabled')) return 'Live sending is disabled.'
+  if (normalized.includes('scheduled_later')) return 'Queued for a later scheduled time.'
+  if (normalized.includes('failed_recently')) return 'A recent send failed and needs attention.'
+  if (normalized.includes('blocked_other')) return 'Blocked by current sending rules.'
+  return normalized.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) + '.'
+}
 
 const ReportsTab: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
@@ -96,6 +167,8 @@ const ReportsTab: React.FC = () => {
   const [outreachData, setOutreachData] = useState<OutreachReportResponse | null>(null)
   const [runHistoryData, setRunHistoryData] = useState<RunHistoryResponse | null>(null)
   const [identityData, setIdentityData] = useState<IdentityCapacityResponse | null>(null)
+  const [consoleData, setConsoleData] = useState<OperatorConsoleResponse | null>(null)
+  const [scheduledQueueData, setScheduledQueueData] = useState<QueueWorkbenchResponse | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
   const goToMarketingReadiness = useCallback(() => {
@@ -132,13 +205,15 @@ const ReportsTab: React.FC = () => {
     const sinceHours = Math.min(windowDays * 24, 168)
     const headers = { 'X-Customer-Id': selectedCustomerId }
 
-    const [outreachRes, runHistoryRes, identityRes] = await Promise.all([
+    const [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes] = await Promise.all([
       api.get<{ data?: OutreachReportResponse }>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers }),
       api.get<{ success?: boolean; data?: RunHistoryResponse }>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers }),
       api.get<{ success?: boolean; data?: IdentityCapacityResponse }>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers }),
+      api.get<{ success?: boolean; data?: OperatorConsoleResponse }>(`/api/send-worker/console?sinceHours=${sinceHours}`, { headers }),
+      api.get<{ success?: boolean; data?: QueueWorkbenchResponse }>(`/api/send-worker/queue-workbench?state=scheduled&limit=5&sinceHours=${sinceHours}`, { headers }),
     ])
 
-    const firstErr = [outreachRes, runHistoryRes, identityRes].find((row) => row.error)
+    const firstErr = [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes].find((row) => row.error)
     if (firstErr?.error) {
       setError(firstErr.error)
       setLoading(false)
@@ -149,6 +224,8 @@ const ReportsTab: React.FC = () => {
     setOutreachData(outreachRes.data?.data ?? null)
     setRunHistoryData(runHistoryRes.data?.data ?? null)
     setIdentityData(identityRes.data?.data ?? null)
+    setConsoleData(consoleRes.data?.data ?? null)
+    setScheduledQueueData(scheduledQueueRes.data?.data ?? null)
     setLastUpdatedAt(new Date().toISOString())
     setLoading(false)
     setRefreshing(false)
@@ -158,21 +235,48 @@ const ReportsTab: React.FC = () => {
     void loadData(false)
   }, [loadData])
 
-  const bySequence = outreachData?.bySequence ?? []
-  const byIdentity = outreachData?.byIdentity ?? []
+  const bySequence = useMemo(() => outreachData?.bySequence ?? [], [outreachData?.bySequence])
+  const byIdentity = useMemo(() => outreachData?.byIdentity ?? [], [outreachData?.byIdentity])
   const runRows = runHistoryData?.rows ?? EMPTY_RUN_ROWS
+  const scheduledRows = scheduledQueueData?.rows ?? EMPTY_QUEUE_ROWS
 
-  const topReasons = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const row of runRows) {
-      const reason = String(row.reason || row.decision || 'UNKNOWN')
-      counts.set(reason, (counts.get(reason) || 0) + 1)
-    }
-    return Array.from(counts.entries())
-      .map(([reason, count]) => ({ reason, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 8)
-  }, [runRows])
+  const operatorRows = useMemo(
+    () => runRows.filter((row) => row.outcome && row.outcome !== 'WOULD_SEND').slice(0, 14),
+    [runRows],
+  )
+
+  const sequenceTotals = useMemo(() => bySequence.reduce(
+    (acc, row) => ({
+      sent: acc.sent + (row.sent ?? 0),
+      failed: acc.failed + (row.sendFailed ?? 0),
+      suppressed: acc.suppressed + (row.suppressed ?? 0),
+      replies: acc.replies + (row.replies ?? 0),
+      optOuts: acc.optOuts + (row.optOuts ?? 0),
+    }),
+    { sent: 0, failed: 0, suppressed: 0, replies: 0, optOuts: 0 },
+  ), [bySequence])
+
+  const queueSummary = consoleData?.queue ?? {}
+  const nextScheduled = scheduledRows[0] ?? null
+
+  const attentionItems = useMemo(() => {
+    const items: string[] = []
+    if ((queueSummary.blocked ?? 0) > 0) items.push(`${queueSummary.blocked} queued sends are blocked right now.`)
+    if ((queueSummary.failedRecently ?? 0) > 0) items.push(`${queueSummary.failedRecently} sends failed recently and need review.`)
+    if ((queueSummary.suppressed ?? 0) > 0) items.push(`${queueSummary.suppressed} recipients were skipped because they are suppressed or unsubscribed.`)
+    if ((queueSummary.replyStopped ?? 0) > 0) items.push(`${queueSummary.replyStopped} recipients were stopped because they already replied.`)
+    if ((identityData?.summary?.usable ?? 0) < 1) items.push('No active sender mailbox is available right now.')
+    else if ((identityData?.summary?.risky ?? 0) > 0) items.push(`${identityData?.summary?.risky} mailbox${identityData?.summary?.risky === 1 ? '' : 'es'} need attention.`)
+    if ((queueSummary.readyNow ?? 0) < 1 && (queueSummary.scheduledLater ?? 0) > 0) items.push('Queued recipients are waiting for the next allowed send window.')
+    return items
+  }, [identityData?.summary?.risky, identityData?.summary?.usable, queueSummary.blocked, queueSummary.failedRecently, queueSummary.readyNow, queueSummary.replyStopped, queueSummary.scheduledLater, queueSummary.suppressed])
+
+  const mailboxRows = useMemo(
+    () => byIdentity
+      .filter((row) => (row.sent ?? 0) + (row.sendFailed ?? 0) + (row.replies ?? 0) + (row.optOuts ?? 0) + (row.suppressed ?? 0) > 0)
+      .slice(0, 10),
+    [byIdentity],
+  )
 
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
     return (
@@ -191,16 +295,16 @@ const ReportsTab: React.FC = () => {
           <Alert status="info" data-testid="reports-retrospective-role-separation">
             <AlertIcon />
             <AlertDescription>
-              Reports is retrospective: use it to review what happened. For live priorities and next action, return to Marketing Readiness.
+              Open Reports to see what sent, what stopped, what failed, and what needs attention next.
             </AlertDescription>
           </Alert>
           <Card id="reports-tab-controls" data-testid="reports-tab-controls">
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Reports: Recent Outreach Results</Heading>
+                  <Heading size="md">Outreach Results</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
-                    Review recent outcomes here, then jump to Sequences or Inbox for follow-up.
+                    Check recent results, see what is queued next, and follow up from Sequences or Inbox only when needed.
                   </Text>
                 </VStack>
                 <HStack>
@@ -247,30 +351,38 @@ const ReportsTab: React.FC = () => {
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
               ) : null}
-              <SimpleGrid id="reports-tab-summary-cards" data-testid="reports-tab-summary-cards" columns={{ base: 2, md: 4, lg: 6 }} spacing={3}>
+              <SimpleGrid id="reports-tab-summary-cards" data-testid="reports-tab-summary-cards" columns={{ base: 2, md: 4, xl: 8 }} spacing={3}>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>SENT</StatLabel>
-                  <StatNumber>{runHistoryData?.summary?.SENT ?? 0}</StatNumber>
+                  <StatLabel>Sent</StatLabel>
+                  <StatNumber>{sequenceTotals.sent}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>SEND_FAILED</StatLabel>
-                  <StatNumber>{runHistoryData?.summary?.SEND_FAILED ?? 0}</StatNumber>
+                  <StatLabel>Failed</StatLabel>
+                  <StatNumber>{sequenceTotals.failed}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>SKIP_SUPPRESSED</StatLabel>
-                  <StatNumber>{runHistoryData?.summary?.SKIP_SUPPRESSED ?? 0}</StatNumber>
+                  <StatLabel>Blocked now</StatLabel>
+                  <StatNumber>{queueSummary.blocked ?? 0}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>SKIP_REPLIED_STOP</StatLabel>
-                  <StatNumber>{runHistoryData?.summary?.SKIP_REPLIED_STOP ?? 0}</StatNumber>
+                  <StatLabel>Suppressed</StatLabel>
+                  <StatNumber>{(queueSummary.suppressed ?? 0) || sequenceTotals.suppressed}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Usable Identities</StatLabel>
-                  <StatNumber>{identityData?.summary?.usable ?? 0}</StatNumber>
+                  <StatLabel>Replies</StatLabel>
+                  <StatNumber>{sequenceTotals.replies}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Risky Identities</StatLabel>
-                  <StatNumber>{identityData?.summary?.risky ?? 0}</StatNumber>
+                  <StatLabel>Opt-outs</StatLabel>
+                  <StatNumber>{sequenceTotals.optOuts}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>Pending</StatLabel>
+                  <StatNumber>{queueSummary.totalQueued ?? 0}</StatNumber>
+                </Stat>
+                <Stat borderWidth="1px" borderRadius="md" p={3}>
+                  <StatLabel>Reply stopped</StatLabel>
+                  <StatNumber>{queueSummary.replyStopped ?? 0}</StatNumber>
                 </Stat>
               </SimpleGrid>
               <Text id="reports-tab-last-updated" data-testid="reports-tab-last-updated" mt={3} fontSize="xs" color="gray.500">
@@ -279,11 +391,72 @@ const ReportsTab: React.FC = () => {
             </CardBody>
           </Card>
 
+          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+            <Card id="reports-tab-next-up" data-testid="reports-tab-next-up">
+              <CardHeader><Heading size="sm">What Happens Next</Heading></CardHeader>
+              <CardBody>
+                <VStack align="stretch" spacing={3}>
+                  <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                    <Stat borderWidth="1px" borderRadius="md" p={3}>
+                      <StatLabel>Ready now</StatLabel>
+                      <StatNumber>{queueSummary.readyNow ?? 0}</StatNumber>
+                    </Stat>
+                    <Stat borderWidth="1px" borderRadius="md" p={3}>
+                      <StatLabel>Queued later</StatLabel>
+                      <StatNumber>{queueSummary.scheduledLater ?? 0}</StatNumber>
+                    </Stat>
+                    <Stat borderWidth="1px" borderRadius="md" p={3}>
+                      <StatLabel>Active mailboxes</StatLabel>
+                      <StatNumber>{identityData?.summary?.usable ?? 0}</StatNumber>
+                    </Stat>
+                  </SimpleGrid>
+                  {queueSummary.readyNow ? (
+                    <Alert status="success" variant="left-accent">
+                      <AlertIcon />
+                      <AlertDescription>{queueSummary.readyNow} recipient{queueSummary.readyNow === 1 ? '' : 's'} can send now in the active window.</AlertDescription>
+                    </Alert>
+                  ) : nextScheduled ? (
+                    <Alert status="info" variant="left-accent">
+                      <AlertIcon />
+                      <AlertDescription>
+                        Next queued send: {formatDateTime(nextScheduled.scheduledFor)} to {nextScheduled.recipientEmail || 'unknown recipient'}
+                        {nextScheduled.sequenceName ? ` for ${nextScheduled.sequenceName}` : ''}{nextScheduled.identityEmail ? ` via ${nextScheduled.identityEmail}` : ''}.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <Alert status="info" variant="left-accent">
+                      <AlertIcon />
+                      <AlertDescription>No pending recipients are due now.</AlertDescription>
+                    </Alert>
+                  )}
+                </VStack>
+              </CardBody>
+            </Card>
+
+            <Card id="reports-tab-attention-needed" data-testid="reports-tab-attention-needed">
+              <CardHeader><Heading size="sm">Needs Attention</Heading></CardHeader>
+              <CardBody>
+                {attentionItems.length === 0 ? (
+                  <Text color="gray.600">No immediate operator issues from the current reporting window.</Text>
+                ) : (
+                  <VStack align="stretch" spacing={2}>
+                    {attentionItems.map((item) => (
+                      <Alert key={item} status="warning" variant="left-accent">
+                        <AlertIcon />
+                        <AlertDescription>{item}</AlertDescription>
+                      </Alert>
+                    ))}
+                  </VStack>
+                )}
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
           <Card id="reports-tab-next-steps" data-testid="reports-tab-next-steps">
             <CardHeader><Heading size="sm">Operator Follow-Up</Heading></CardHeader>
             <CardBody>
               <Text fontSize="sm" color="gray.600" mb={3}>
-                If failures, skips, or mismatches are rising, open Sequences for remediation or Inbox for reply handling.
+                Open Sequences when you need to fix sending or pending items. Open Inbox when you need to handle replies.
               </Text>
               <HStack flexWrap="wrap">
                 <Button size="sm" variant="outline" data-testid="reports-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'run-history-panel')}>
@@ -300,8 +473,44 @@ const ReportsTab: React.FC = () => {
           </Card>
 
           <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+            <Card id="reports-tab-recent-attempts" data-testid="reports-tab-recent-attempts">
+              <CardHeader><Heading size="sm">Recent Outcomes</Heading></CardHeader>
+              <CardBody>
+                <Box overflowX="auto">
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        <Th>Time</Th>
+                        <Th>Sequence</Th>
+                        <Th>Mailbox</Th>
+                        <Th>Recipient</Th>
+                        <Th>Outcome</Th>
+                        <Th>Why</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {operatorRows.length === 0 ? (
+                        <Tr><Td colSpan={6} color="gray.500">No recent send outcomes yet in this window.</Td></Tr>
+                      ) : (
+                        operatorRows.map((row, idx) => (
+                          <Tr key={row.auditId || `${row.recipientEmail || 'unknown'}-${row.occurredAt || idx}`}>
+                            <Td whiteSpace="nowrap">{formatDateTime(row.occurredAt)}</Td>
+                            <Td>{row.sequenceName || 'Unknown sequence'}</Td>
+                            <Td>{row.identityEmail || 'No mailbox recorded'}</Td>
+                            <Td>{row.recipientEmail || 'Unknown recipient'}</Td>
+                            <Td>{humanizeOutcome(row.outcome)}</Td>
+                            <Td>{humanizeReason(row.reason)}</Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                </Box>
+              </CardBody>
+            </Card>
+
             <Card id="reports-tab-by-sequence" data-testid="reports-tab-by-sequence">
-              <CardHeader><Heading size="sm">By Sequence</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Results By Sequence</Heading></CardHeader>
               <CardBody>
                 <Box overflowX="auto">
                   <Table size="sm">
@@ -312,11 +521,12 @@ const ReportsTab: React.FC = () => {
                         <Th isNumeric>Failed</Th>
                         <Th isNumeric>Suppressed</Th>
                         <Th isNumeric>Replies</Th>
+                        <Th isNumeric>Opt-Outs</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
                       {bySequence.length === 0 ? (
-                        <Tr><Td colSpan={5} color="gray.500">No sequence metrics in this window. Check Readiness to confirm sequence activity.</Td></Tr>
+                        <Tr><Td colSpan={6} color="gray.500">No sequence metrics in this window yet.</Td></Tr>
                       ) : (
                         bySequence.slice(0, 12).map((row, idx) => (
                           <Tr key={row.sequenceId || row.sequenceName || `seq-${idx}`}>
@@ -324,39 +534,6 @@ const ReportsTab: React.FC = () => {
                             <Td isNumeric>{row.sent ?? 0}</Td>
                             <Td isNumeric>{row.sendFailed ?? 0}</Td>
                             <Td isNumeric>{row.suppressed ?? 0}</Td>
-                            <Td isNumeric>{row.replies ?? 0}</Td>
-                          </Tr>
-                        ))
-                      )}
-                    </Tbody>
-                  </Table>
-                </Box>
-              </CardBody>
-            </Card>
-
-            <Card id="reports-tab-by-identity" data-testid="reports-tab-by-identity">
-              <CardHeader><Heading size="sm">By Identity</Heading></CardHeader>
-              <CardBody>
-                <Box overflowX="auto">
-                  <Table size="sm">
-                    <Thead>
-                      <Tr>
-                        <Th>Identity</Th>
-                        <Th isNumeric>Sent</Th>
-                        <Th isNumeric>Failed</Th>
-                        <Th isNumeric>Replies</Th>
-                        <Th isNumeric>Opt-Outs</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {byIdentity.length === 0 ? (
-                        <Tr><Td colSpan={5} color="gray.500">No identity metrics in this window. Verify Email Accounts and recent run activity.</Td></Tr>
-                      ) : (
-                        byIdentity.slice(0, 12).map((row, idx) => (
-                          <Tr key={row.identityId || row.email || `identity-${idx}`}>
-                            <Td>{row.name || row.email || row.identityId || 'Unknown identity'}</Td>
-                            <Td isNumeric>{row.sent ?? 0}</Td>
-                            <Td isNumeric>{row.sendFailed ?? 0}</Td>
                             <Td isNumeric>{row.replies ?? 0}</Td>
                             <Td isNumeric>{row.optOuts ?? 0}</Td>
                           </Tr>
@@ -368,47 +545,31 @@ const ReportsTab: React.FC = () => {
               </CardBody>
             </Card>
 
-            <Card id="reports-tab-recent-reasons" data-testid="reports-tab-recent-reasons">
-              <CardHeader><Heading size="sm">Recent Reasons</Heading></CardHeader>
-              <CardBody>
-                {topReasons.length === 0 ? (
-                  <Text color="gray.500">No recent reasons in this window. If this is unexpected, refresh or review Sequences run history.</Text>
-                ) : (
-                  <VStack align="stretch" spacing={2}>
-                    {topReasons.map((row) => (
-                      <HStack key={row.reason} justify="space-between" borderWidth="1px" borderRadius="md" p={2}>
-                        <Text fontSize="sm">{row.reason}</Text>
-                        <Badge>{row.count}</Badge>
-                      </HStack>
-                    ))}
-                  </VStack>
-                )}
-              </CardBody>
-            </Card>
-
-            <Card id="reports-tab-recent-attempts" data-testid="reports-tab-recent-attempts">
-              <CardHeader><Heading size="sm">Recent Attempts</Heading></CardHeader>
+            <Card id="reports-tab-by-identity" data-testid="reports-tab-by-identity">
+              <CardHeader><Heading size="sm">Results By Mailbox</Heading></CardHeader>
               <CardBody>
                 <Box overflowX="auto">
                   <Table size="sm">
                     <Thead>
                       <Tr>
-                        <Th>Recipient</Th>
-                        <Th>Outcome</Th>
-                        <Th>Reason</Th>
-                        <Th>Time</Th>
+                        <Th>Mailbox</Th>
+                        <Th isNumeric>Sent</Th>
+                        <Th isNumeric>Failed</Th>
+                        <Th isNumeric>Replies</Th>
+                        <Th isNumeric>Opt-Outs</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
-                      {runRows.length === 0 ? (
-                        <Tr><Td colSpan={4} color="gray.500">No recent attempts in this window. Open Sequences to run preflight or check queue state.</Td></Tr>
+                      {mailboxRows.length === 0 ? (
+                        <Tr><Td colSpan={5} color="gray.500">No mailbox activity in this window yet.</Td></Tr>
                       ) : (
-                        runRows.slice(0, 14).map((row, idx) => (
-                          <Tr key={`${row.recipientEmail || 'unknown'}-${row.createdAt || idx}`}>
-                            <Td>{row.recipientEmail || 'unknown'}</Td>
-                            <Td>{row.decision || '—'}</Td>
-                            <Td>{row.reason || '—'}</Td>
-                            <Td>{row.createdAt ? new Date(row.createdAt).toLocaleString() : '—'}</Td>
+                        mailboxRows.map((row, idx) => (
+                          <Tr key={row.identityId || row.email || `identity-${idx}`}>
+                            <Td>{row.name || row.email || row.identityId || 'Unknown mailbox'}</Td>
+                            <Td isNumeric>{row.sent ?? 0}</Td>
+                            <Td isNumeric>{row.sendFailed ?? 0}</Td>
+                            <Td isNumeric>{row.replies ?? 0}</Td>
+                            <Td isNumeric>{row.optOuts ?? 0}</Td>
                           </Tr>
                         ))
                       )}
