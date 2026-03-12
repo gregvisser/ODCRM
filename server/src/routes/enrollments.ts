@@ -18,13 +18,32 @@ import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
-import { EnrollmentStatus, OutboundSendQueueStatus } from '@prisma/client'
+import { EnrollmentStatus, OutboundSendQueueStatus, Prisma } from '@prisma/client'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
 const router = Router()
 
+type EnrollmentSourceMeta = {
+  recipientSource?: 'manual' | 'snapshot'
+  sourceListId?: string | null
+  sourceListName?: string | null
+}
+
 /** Serialize enrollment for list/detail responses (tenant-safe shape) */
-function toEnrollmentListItem(e: { id: string; sequenceId: string; customerId: string; name: string | null; status: string; createdAt: Date; updatedAt: Date; _count?: { recipients: number }; recipients?: unknown[] }) {
+function toEnrollmentListItem(
+  e: {
+    id: string
+    sequenceId: string
+    customerId: string
+    name: string | null
+    status: string
+    createdAt: Date
+    updatedAt: Date
+    _count?: { recipients: number }
+    recipients?: unknown[]
+  },
+  sourceMeta?: EnrollmentSourceMeta | null
+) {
   return {
     id: e.id,
     sequenceId: e.sequenceId,
@@ -34,7 +53,22 @@ function toEnrollmentListItem(e: { id: string; sequenceId: string; customerId: s
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
     recipientCount: e._count?.recipients ?? (Array.isArray(e.recipients) ? e.recipients.length : 0),
+    recipientSource: sourceMeta?.recipientSource ?? null,
+    sourceListId: sourceMeta?.sourceListId ?? null,
+    sourceListName: sourceMeta?.sourceListName ?? null,
   }
+}
+
+function readEnrollmentSourceMeta(meta: Prisma.JsonValue | null | undefined): EnrollmentSourceMeta | null {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return null
+  const record = meta as Record<string, unknown>
+  const recipientSourceRaw = record.recipientSource
+  const recipientSource =
+    recipientSourceRaw === 'manual' || recipientSourceRaw === 'snapshot' ? recipientSourceRaw : undefined
+  const sourceListId = typeof record.sourceListId === 'string' && record.sourceListId.trim() ? record.sourceListId.trim() : null
+  const sourceListName = typeof record.sourceListName === 'string' && record.sourceListName.trim() ? record.sourceListName.trim() : null
+  if (!recipientSource && !sourceListId && !sourceListName) return null
+  return { recipientSource, sourceListId, sourceListName }
 }
 
 const ENROLLMENTS_UNAVAILABLE_MSG = {
@@ -67,18 +101,25 @@ export async function listEnrollmentsForSequence(req: Request, res: Response): P
       },
       orderBy: { createdAt: 'desc' },
     })
+    const sourceEvents = enrollments.length
+      ? await prisma.enrollmentAuditEvent.findMany({
+          where: {
+            customerId,
+            enrollmentId: { in: enrollments.map((row) => row.id) },
+            eventType: 'enrollment_created',
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      : []
+    const sourceMetaByEnrollmentId = new Map<string, EnrollmentSourceMeta>()
+    for (const event of sourceEvents) {
+      if (sourceMetaByEnrollmentId.has(event.enrollmentId)) continue
+      const meta = readEnrollmentSourceMeta(event.meta)
+      if (meta) sourceMetaByEnrollmentId.set(event.enrollmentId, meta)
+    }
     res.setHeader('x-odcrm-customer-id', customerId)
     res.json({
-      data: enrollments.map((e) => ({
-        id: e.id,
-        sequenceId: e.sequenceId,
-        customerId: e.customerId,
-        name: e.name,
-        status: e.status,
-        createdAt: e.createdAt.toISOString(),
-        updatedAt: e.updatedAt.toISOString(),
-        recipientCount: e._count.recipients,
-      })),
+      data: enrollments.map((e) => toEnrollmentListItem(e, sourceMetaByEnrollmentId.get(e.id))),
     })
   } catch (err) {
     console.error('GET /api/sequences/:id/enrollments error:', err)
@@ -124,6 +165,8 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
     let resolvedSource: 'manual' | 'snapshot'
     let invalidCount = 0
     let dedupedCount = 0
+    let sourceListId: string | null = null
+    let sourceListName: string | null = null
 
     if (recipientSource === 'snapshot' || (!recipientSource && manualRecipients.length === 0)) {
       resolvedSource = 'snapshot'
@@ -138,12 +181,14 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
       }
       const list = await prisma.contactList.findFirst({
         where: { id: listId, customerId },
-        select: { id: true },
+        select: { id: true, name: true },
       })
       if (!list) {
         res.status(404).json({ success: false, error: 'Leads Snapshot list not found' })
         return
       }
+      sourceListId = list.id
+      sourceListName = list.name ?? null
       const members = await prisma.contactListMember.findMany({
         where: { listId: list.id },
         include: { contact: { select: { email: true, firstName: true, lastName: true, companyName: true } } },
@@ -239,6 +284,25 @@ export async function createEnrollmentForSequence(req: Request, res: Response): 
         })),
         skipDuplicates: true,
       })
+      await tx.enrollmentAuditEvent.create({
+        data: {
+          customerId,
+          enrollmentId: e.id,
+          eventType: 'enrollment_created',
+          message:
+            resolvedSource === 'snapshot'
+              ? `Enrollment created from linked lead batch${sourceListName ? `: ${sourceListName}` : ''}`
+              : 'Enrollment created from manual recipients',
+          meta: {
+            recipientSource: resolvedSource,
+            sourceListId: resolvedSource === 'snapshot' ? sourceListId : null,
+            sourceListName: resolvedSource === 'snapshot' ? sourceListName : null,
+            recipientCount: normalized.length,
+            invalidCount: resolvedSource === 'snapshot' ? invalidCount : 0,
+            dedupedCount,
+          },
+        },
+      })
       const count = await tx.enrollmentRecipient.count({ where: { enrollmentId: e.id } })
       return { enrollment: e, recipientCount: count }
     })
@@ -284,8 +348,24 @@ router.get('/', async (req: Request, res: Response) => {
       include: { _count: { select: { recipients: true } } },
       orderBy: { createdAt: 'desc' },
     })
+    const sourceEvents = enrollments.length
+      ? await prisma.enrollmentAuditEvent.findMany({
+          where: {
+            customerId,
+            enrollmentId: { in: enrollments.map((row) => row.id) },
+            eventType: 'enrollment_created',
+          },
+          orderBy: { createdAt: 'desc' },
+        })
+      : []
+    const sourceMetaByEnrollmentId = new Map<string, EnrollmentSourceMeta>()
+    for (const event of sourceEvents) {
+      if (sourceMetaByEnrollmentId.has(event.enrollmentId)) continue
+      const meta = readEnrollmentSourceMeta(event.meta)
+      if (meta) sourceMetaByEnrollmentId.set(event.enrollmentId, meta)
+    }
     res.setHeader('x-odcrm-customer-id', customerId)
-    res.json({ data: enrollments.map(toEnrollmentListItem) })
+    res.json({ data: enrollments.map((row) => toEnrollmentListItem(row, sourceMetaByEnrollmentId.get(row.id))) })
   } catch (err) {
     console.error('GET /api/enrollments error:', err)
     res.status(400).json({ error: 'An error occurred' })

@@ -7,7 +7,7 @@
  */
 import cron from 'node-cron'
 import os from 'node:os'
-import { OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
+import { EnrollmentStatus, OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
@@ -407,6 +407,22 @@ export async function processOne(
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.FAILED, 'enrollment_not_found')
     return 'failed_terminal'
+  }
+
+  if (enrollment.status !== EnrollmentStatus.ACTIVE) {
+    const reason = enrollment.status === EnrollmentStatus.PAUSED ? 'enrollment_paused' : 'enrollment_inactive'
+    await prisma.enrollmentAuditEvent.create({
+      data: {
+        customerId,
+        enrollmentId,
+        recipientEmail,
+        eventType: 'send_skipped',
+        message: reason,
+        meta: { reason, stepIndex, enrollmentStatus: enrollment.status },
+      },
+    })
+    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, reason)
+    return 'requeued'
   }
 
   if (enrollment.recipients.length === 0) {

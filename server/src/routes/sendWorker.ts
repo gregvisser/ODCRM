@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
-import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, LeadSourceAppliesTo } from '@prisma/client'
+import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, LeadSourceAppliesTo, EnrollmentStatus } from '@prisma/client'
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { sendEmail } from '../services/outlookEmailService.js'
@@ -633,7 +633,7 @@ async function getSequenceReadinessSnapshot(customerId: string, sequenceId: stri
   if (!sequence) return null
 
   const enrollmentRows = await prisma.enrollment.findMany({
-    where: { customerId, sequenceId: sequence.id },
+    where: { customerId, sequenceId: sequence.id, status: EnrollmentStatus.ACTIVE },
     select: { id: true },
   })
   const enrollmentIds = enrollmentRows.map((row) => row.id)
@@ -1143,7 +1143,7 @@ router.post('/sequence-test-send', requireMarketingMutationAuth, async (req: Req
     }
 
     const enrollmentRows = await prisma.enrollment.findMany({
-      where: { customerId, sequenceId },
+      where: { customerId, sequenceId, status: EnrollmentStatus.ACTIVE },
       select: { id: true },
     })
     const enrollmentIds = enrollmentRows.map((row) => row.id)
@@ -1502,7 +1502,7 @@ router.get('/sequence-readiness', async (req: Request, res: Response) => {
     }
 
     const enrollmentRows = await prisma.enrollment.findMany({
-      where: { customerId, sequenceId: sequence.id },
+      where: { customerId, sequenceId: sequence.id, status: EnrollmentStatus.ACTIVE },
       select: { id: true, status: true },
     })
     const enrollmentIds = enrollmentRows.map((row) => row.id)
@@ -1847,7 +1847,7 @@ router.get('/launch-preview', async (req: Request, res: Response) => {
       getLiveGatesSnapshot(customerId, sinceHours),
       Promise.resolve(assertLiveSendAllowed({ customerId, trigger: 'manual' })),
       prisma.enrollment.findMany({
-        where: { customerId, sequenceId },
+        where: { customerId, sequenceId, status: EnrollmentStatus.ACTIVE },
         select: { id: true, name: true, sequenceId: true },
       }),
     ])
