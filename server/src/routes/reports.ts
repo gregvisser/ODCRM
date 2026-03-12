@@ -286,36 +286,75 @@ router.get('/outreach', async (req, res, next) => {
       if (audit.reason === 'hard_bounce_invalid_recipient') recentReasons.hard_bounce_invalid_recipient += 1
     }
 
-    const repliesByIdentity = await prisma.emailEvent.groupBy({
-      by: ['senderIdentityId'],
-      where: { customerId, type: 'replied', occurredAt: { gte: since } },
-      _count: { id: true },
-    })
-    let optOutsByIdentity: Array<{ senderIdentityId: string | null; _count: { id: number } }> = []
+    let recentEmailEvents: Array<{
+      type: string
+      senderIdentityId: string | null
+      campaign: { sequenceId: string | null } | null
+    }> = []
     try {
-      const groupedOptOuts = await prisma.emailEvent.groupBy({
-        by: ['senderIdentityId'],
-        where: { customerId, type: 'opted_out', occurredAt: { gte: since } },
-        _count: { id: true },
+      recentEmailEvents = await prisma.emailEvent.findMany({
+        where: {
+          customerId,
+          type: { in: ['replied', 'opted_out'] },
+          occurredAt: { gte: since },
+        },
+        select: {
+          type: true,
+          senderIdentityId: true,
+          campaign: {
+            select: {
+              sequenceId: true,
+            },
+          },
+        },
       })
-      optOutsByIdentity = groupedOptOuts.map((row) => ({
-        senderIdentityId: row.senderIdentityId ?? null,
-        _count: { id: row._count.id },
-      }))
     } catch (error) {
-      // Some environments can lag enum values; keep reports available and treat opt-outs as 0.
-      console.warn('[reports/outreach] opted_out groupBy unavailable; defaulting optOuts to 0')
+      // Some environments can lag enum values; keep reports available and treat reply/opt-out event streams as 0.
+      console.warn('[reports/outreach] reply/opt-out event query unavailable; defaulting those metrics to 0')
     }
 
-    for (const row of repliesByIdentity) {
-      const identKey = row.senderIdentityId ?? 'unknown'
+    for (const event of recentEmailEvents) {
+      const identKey = event.senderIdentityId ?? 'unknown'
       if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
-      byIdentity.get(identKey)!.replies += row._count.id
+      const sequenceId = event.campaign?.sequenceId ?? 'unknown'
+      if (!bySequence.has(sequenceId)) bySequence.set(sequenceId, zero())
+      if (event.type === 'replied') {
+        byIdentity.get(identKey)!.replies += 1
+        bySequence.get(sequenceId)!.replies += 1
+      } else if (event.type === 'opted_out') {
+        byIdentity.get(identKey)!.optOuts += 1
+        bySequence.get(sequenceId)!.optOuts += 1
+      }
     }
-    for (const row of optOutsByIdentity) {
-      const identKey = row.senderIdentityId ?? 'unknown'
-      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
-      byIdentity.get(identKey)!.optOuts += row._count.id
+
+    const queueOptOutAuditRows = await prisma.enrollmentAuditEvent.findMany({
+      where: {
+        customerId,
+        createdAt: { gte: since },
+        eventType: 'send_skipped',
+        message: 'unsubscribe_link_clicked',
+      },
+      select: {
+        enrollmentId: true,
+      },
+    })
+    const queueOptOutEnrollmentIds = Array.from(new Set(queueOptOutAuditRows.map((row) => row.enrollmentId).filter(Boolean)))
+    const queueOptOutEnrollments = queueOptOutEnrollmentIds.length
+      ? await prisma.enrollment.findMany({
+          where: { customerId, id: { in: queueOptOutEnrollmentIds } },
+          select: { id: true, sequenceId: true },
+        })
+      : []
+    const queueOptOutEnrollmentToSequence = new Map(queueOptOutEnrollments.map((row) => [row.id, row.sequenceId]))
+
+    for (const row of queueOptOutAuditRows) {
+      const sequenceId = queueOptOutEnrollmentToSequence.get(row.enrollmentId) ?? 'unknown'
+      const sequence = sequenceById.get(sequenceId)
+      const identityId = sequence?.senderIdentityId ?? 'unknown'
+      if (!bySequence.has(sequenceId)) bySequence.set(sequenceId, zero())
+      if (!byIdentity.has(identityId)) byIdentity.set(identityId, zero())
+      bySequence.get(sequenceId)!.optOuts += 1
+      byIdentity.get(identityId)!.optOuts += 1
     }
 
     const sequenceRows = Array.from(bySequence.entries()).map(([sequenceId, metrics]) => ({
