@@ -188,15 +188,7 @@ jobs:
           echo "Deploying backend to: ${{ env.APP_NAME_DISPLAY }} slot=none package=./server"
           echo "Smoke test will hit: ${{ env.BACKEND_DEPLOY_URL }}"
 
-      # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
-      - name: Deploy to Azure App Service
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: ./server
-
-      - name: Sync live-send app settings for canary testing
+      - name: Prepare live-send app settings for deploy restart
         shell: bash
         env:
           BACKEND_DEPLOY_URL: ${{ env.BACKEND_DEPLOY_URL }}
@@ -287,6 +279,14 @@ jobs:
           for key, expected_value in expected.items():
             print(f'  {key}={expected_value}')
           PY
+
+      # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./server
 
       - name: Post-deploy smoke — verify same app frontend uses
         run: |
