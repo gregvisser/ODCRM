@@ -31,11 +31,11 @@ function readRuntimeEnv(): RuntimeEnvPayload | null {
 }
 
 function readRuntimeFlag(key: 'ENABLE_SEND_QUEUE_SENDING' | 'ENABLE_LIVE_SENDING'): string | undefined {
-  const envValue = process.env[key]
-  if (typeof envValue === 'string' && envValue !== '') return envValue
   const runtimeEnv = readRuntimeEnv()
   const fallback = runtimeEnv?.[key]
-  return typeof fallback === 'string' && fallback !== '' ? fallback : undefined
+  if (typeof fallback === 'string' && fallback !== '') return fallback
+  const envValue = process.env[key]
+  return typeof envValue === 'string' && envValue !== '' ? envValue : undefined
 }
 
 export function isSendQueueSendingEnabled(): boolean {
