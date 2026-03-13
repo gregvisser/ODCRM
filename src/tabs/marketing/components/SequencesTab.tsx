@@ -825,7 +825,6 @@ const SequencesTab: React.FC = () => {
   const [operatorConsoleLastUpdatedAt, setOperatorConsoleLastUpdatedAt] = useState<string | null>(null)
   const [operatorActionStatus, setOperatorActionStatus] = useState<string | null>(null)
   const [operatorTestSendLoading, setOperatorTestSendLoading] = useState(false)
-  const [operatorTestSendIgnoreWindow, setOperatorTestSendIgnoreWindow] = useState(false)
   const [operatorLastActionResult, setOperatorLastActionResult] = useState<{
     action: 'DRY_RUN' | 'LIVE_CANARY' | 'TEST_SEND'
     success: boolean
@@ -1439,7 +1438,7 @@ const SequencesTab: React.FC = () => {
       : !adminSecret
         ? 'Admin secret required.'
         : !operatorConsoleData?.status.manualLiveTickAllowed
-          ? operatorConsoleData?.status.manualLiveTickReason || operatorConsoleData?.status.scheduledLiveReason || 'Live canary tick is blocked by current gates.'
+          ? operatorConsoleData?.status.manualLiveTickReason || operatorConsoleData?.status.scheduledLiveReason || 'Live send is blocked by current gates.'
           : null
 
   const operatorTestSendDisabledReason =
@@ -1456,17 +1455,17 @@ const SequencesTab: React.FC = () => {
       case 'live_send_disabled_env':
         return 'Live sending is disabled in the current environment.'
       case 'customer_not_in_canary':
-        return 'Live sending is currently limited to approved canary clients. You can still save this sequence, review the live recipients, and prepare test recipients, but this client cannot send yet.'
+        return 'Live sending is not enabled for this client right now. You can still save this sequence, review the live recipients, and prepare test recipients.'
       case 'identity_not_in_canary':
-        return 'The selected sending mailbox is not approved for live sending.'
+        return 'The selected sending mailbox is not enabled for live sending.'
       case 'canary_customer_not_configured':
-        return 'Live sending is not configured for any client yet.'
+        return 'Live sending is not configured right now.'
       case 'canary_identity_required_but_missing':
-        return 'No approved sending mailbox is available for live sending.'
+        return 'No active sending mailbox is available for live sending.'
       case 'manual_live_tick_not_allowed':
         return 'Immediate live testing is blocked by current launch gates.'
       case 'ignore_window_not_enabled':
-        return 'Send-window bypass is not enabled in this environment.'
+        return 'Immediate send override is not enabled in this environment.'
       default:
         return reason || 'This action is blocked by current launch gates.'
     }
@@ -1479,7 +1478,7 @@ const SequencesTab: React.FC = () => {
       case 'per_minute_cap_reached':
         return 'Mailbox send rate limit reached'
       case 'outside_window':
-        return 'Outside the sending window'
+        return 'Queued for a later retry'
       case 'replied_stop':
       case 'SKIP_REPLIED_STOP':
         return 'Stopped because the contact replied'
@@ -2304,7 +2303,7 @@ const SequencesTab: React.FC = () => {
     if (!selectedCustomerId?.startsWith('cust_') || !adminSecret) return
     const startedAt = new Date().toISOString()
     setLiveCanaryTickLoading(true)
-    setOperatorActionStatus('Running live canary tick...')
+    setOperatorActionStatus('Running live send now...')
     try {
       const cap = operatorConsoleData?.status.liveSendCap ?? 1
       const res = await api.post<{ success?: boolean; data?: { processed?: number; sent?: number; failed?: number; skipped?: number; reasons?: Record<string, number> } }>(
@@ -2314,14 +2313,14 @@ const SequencesTab: React.FC = () => {
       )
       if (res.error) {
         const msg = `${res.errorDetails?.status ?? ''} ${res.error}`.trim()
-        toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
-        setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+        toast({ title: 'Live send failed', description: msg, status: 'error' })
+        setOperatorActionStatus(`Live send failed: ${msg}`)
         setOperatorLastActionResult({
           action: 'LIVE_CANARY',
           success: false,
           startedAt,
           finishedAt: new Date().toISOString(),
-          summary: `Live canary failed: ${msg}`,
+          summary: `Live send failed: ${msg}`,
           refreshedAt: null,
         })
         return
@@ -2329,7 +2328,7 @@ const SequencesTab: React.FC = () => {
       const d = res.data?.data
       const summary = d ? `processed=${d.processed ?? 0} sent=${d.sent ?? 0} failed=${d.failed ?? 0} skipped=${d.skipped ?? 0}` : 'completed'
       toast({
-        title: 'Live canary tick done',
+        title: 'Live send complete',
         description: summary,
         status: 'success',
         duration: 4500,
@@ -2343,17 +2342,17 @@ const SequencesTab: React.FC = () => {
         summary,
         refreshedAt: new Date().toISOString(),
       })
-      setOperatorActionStatus('Live canary tick complete. Console refreshed from backend truth.')
+      setOperatorActionStatus('Live send complete. Console refreshed from backend truth.')
     } catch (err) {
       const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Network error'
-      toast({ title: 'Live canary tick failed', description: msg, status: 'error' })
-      setOperatorActionStatus(`Live canary tick failed: ${msg}`)
+      toast({ title: 'Live send failed', description: msg, status: 'error' })
+      setOperatorActionStatus(`Live send failed: ${msg}`)
       setOperatorLastActionResult({
         action: 'LIVE_CANARY',
         success: false,
         startedAt,
         finishedAt: new Date().toISOString(),
-        summary: `Live canary failed: ${msg}`,
+        summary: `Live send failed: ${msg}`,
         refreshedAt: null,
       })
     } finally {
@@ -2382,7 +2381,6 @@ const SequencesTab: React.FC = () => {
         {
           sequenceId: chosenSequenceId,
           limit: 3,
-          ignoreWindow: operatorTestSendIgnoreWindow,
         },
         { headers: { 'X-Customer-Id': selectedCustomerId } },
       )
@@ -2928,8 +2926,8 @@ const SequencesTab: React.FC = () => {
     }
     if ((sequenceReadinessData?.summary.blockedCount ?? 0) > 0) {
       return {
-        label: 'Waiting for an allowed send window',
-        detail: 'Queued recipients exist, but current send rules are blocking the next test send.',
+        label: 'Blocked right now',
+        detail: 'Queued recipients exist, but current sending rules are blocking the next test send.',
       }
     }
     return {
@@ -2998,7 +2996,7 @@ const SequencesTab: React.FC = () => {
       return {
         tone: 'info' as const,
         title: 'Scheduled',
-        detail: 'The live recipients are active and will send in the allowed window.',
+        detail: 'The live recipients are active and queued for sending.',
       }
     }
     if (editingSequence?.status === 'sent') {
@@ -3053,8 +3051,8 @@ const SequencesTab: React.FC = () => {
     if (!sequenceStartBlockedReason) {
       if (editingSequence?.status === 'scheduled') {
         return {
-          label: 'Waiting for send window',
-          detail: 'The live recipients are active and will send in the next allowed window.',
+          label: 'Queued for sending',
+          detail: 'The live recipients are active and queued for sending.',
         }
       }
       if (editingSequence?.status === 'sending' || editingSequence?.status === 'running') {
@@ -3071,7 +3069,7 @@ const SequencesTab: React.FC = () => {
       }
       return {
         label: 'Start sequence',
-        detail: 'This uses the linked live recipients and may wait for the next allowed send window.',
+        detail: 'This uses the linked live recipients and starts the live sequence.',
       }
     }
     return {
@@ -4447,7 +4445,7 @@ const SequencesTab: React.FC = () => {
                                 isLoading={liveCanaryTickLoading}
                                 isDisabled={Boolean(liveCanaryActionDisabledReason)}
                               >
-                                Run Live Canary Tick
+                                Run Live Send Now
                               </Button>
                               <Button
                                 size="sm"
@@ -4467,7 +4465,7 @@ const SequencesTab: React.FC = () => {
                               )}
                               {liveCanaryActionDisabledReason && (
                                 <Text id="sending-console-live-disabled-reason" data-testid="sending-console-live-disabled-reason" fontSize="xs" color="orange.600">
-                                  Live canary action unavailable: {humanizeGateReason(liveCanaryActionDisabledReason)}
+                                  Live send unavailable: {humanizeGateReason(liveCanaryActionDisabledReason)}
                                 </Text>
                               )}
                               {Array.isArray(operatorConsoleData.status.liveGateReasons) && operatorConsoleData.status.liveGateReasons.length > 0 && (
@@ -4489,7 +4487,7 @@ const SequencesTab: React.FC = () => {
                                     </Badge>
                                   </HStack>
                                   <HStack justify="space-between" borderWidth="1px" borderRadius="md" px={2} py={1}>
-                                    <Text fontSize="xs" color="gray.600">Live canary tick</Text>
+                                    <Text fontSize="xs" color="gray.600">Live send now</Text>
                                     <Badge colorScheme={liveCanaryActionDisabledReason ? 'orange' : 'green'}>
                                       {liveCanaryActionDisabledReason ? 'Blocked' : 'Ready'}
                                     </Badge>
@@ -4530,11 +4528,11 @@ const SequencesTab: React.FC = () => {
                       </Card>
 
                       <SimpleGrid columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
-                        <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Mode</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEngineMode === 'LIVE_CANARY' ? 'LIVE' : operatorConsoleData.status.scheduledEngineMode}</StatNumber></Stat></CardBody></Card>
                         <Card><CardBody py={3}><Stat><StatLabel>Scheduled</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledEnabled ? 'On' : 'Off'}</StatNumber></Stat></CardBody></Card>
                         <Card><CardBody py={3}><Stat><StatLabel>Live Allowed</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledLiveAllowed ? 'Yes' : 'No'}</StatNumber></Stat></CardBody></Card>
                         <Card><CardBody py={3}><Stat><StatLabel>Cron</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.cron}</StatNumber></Stat></CardBody></Card>
-                        <Card><CardBody py={3}><Stat><StatLabel>Canary</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.canaryCustomerIdPresent ? 'Set' : 'Missing'}</StatNumber></Stat></CardBody></Card>
+                        <Card><CardBody py={3}><Stat><StatLabel>Live approval</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.scheduledLiveAllowed ? 'Ready' : 'Blocked'}</StatNumber></Stat></CardBody></Card>
                         <Card><CardBody py={3}><Stat><StatLabel>Live Cap</StatLabel><StatNumber fontSize="md">{operatorConsoleData.status.liveSendCap}</StatNumber></Stat></CardBody></Card>
                       </SimpleGrid>
                       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
@@ -4572,16 +4570,8 @@ const SequencesTab: React.FC = () => {
                         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
                           <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Selected sequence</StatLabel><StatNumber fontSize="sm">{sequencePreflightData?.sequenceName || sequences.find((row) => row.id === sequenceReadinessSequenceId)?.name || 'Choose a sequence'}</StatNumber></Stat></CardBody></Card>
                           <Card variant="outline"><CardBody py={3}><Stat><StatLabel>First batch ready</StatLabel><StatNumber>{launchPreviewData?.summary.firstBatchCount ?? 0}</StatNumber></Stat></CardBody></Card>
-                          <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Send window bypass</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualWindowBypassAllowed ? 'Available' : 'Not available'}</StatNumber></Stat></CardBody></Card>
+                          <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Immediate send</StatLabel><StatNumber fontSize="sm">{operatorConsoleData.status.manualLiveTickAllowed ? 'Available' : 'Blocked'}</StatNumber></Stat></CardBody></Card>
                         </SimpleGrid>
-                        {operatorConsoleData.status.manualWindowBypassAllowed ? (
-                          <Checkbox
-                            isChecked={operatorTestSendIgnoreWindow}
-                            onChange={(e) => setOperatorTestSendIgnoreWindow(e.target.checked)}
-                          >
-                            Bypass the send window for this one test batch
-                          </Checkbox>
-                        ) : null}
                         {operatorTestSendDisabledReason ? (
                           <Alert status="warning" size="sm">
                             <AlertIcon />
@@ -4700,7 +4690,7 @@ const SequencesTab: React.FC = () => {
                                   <Text fontSize="xs" color="gray.600">Next safe action</Text>
                                   <Text fontSize="sm">{sequencePreflightData.actions?.nextSafeAction || 'Review blockers/warnings first.'}</Text>
                                   <Text fontSize="xs" color="gray.500">
-                                    Dry-run: {sequencePreflightData.actions?.canDryRun ? 'ready' : 'blocked'} · Live canary: {sequencePreflightData.actions?.canLiveCanary ? 'ready' : 'blocked'}
+                                    Dry-run: {sequencePreflightData.actions?.canDryRun ? 'ready' : 'blocked'} · Live send: {sequencePreflightData.actions?.canLiveCanary ? 'ready' : 'blocked'}
                                     {sequencePreflightData.actions?.liveCanaryReason ? ` (${sequencePreflightData.actions.liveCanaryReason})` : ''}
                                   </Text>
                                   {isDiagnosticsOpen ? (
@@ -7204,7 +7194,7 @@ const SequencesTab: React.FC = () => {
                         Start Sequence
                       </Button>
                       <Text fontSize="xs" color="gray.600">
-                        Send test batch now uses active test recipients only. Start Sequence uses the linked live recipients and may wait for the next allowed send window.
+                        Send test batch now uses active test recipients only. Start Sequence uses the linked live recipients immediately after you start it.
                       </Text>
                     </Flex>
                   </VStack>
@@ -8013,7 +8003,7 @@ const SequencesTab: React.FC = () => {
             ) : (
               <VStack align="start" spacing={3}>
                 <Text>
-                  This starts the live sequence for the linked live recipients. Manual test enrollments are not used by this action, and live sends may wait for the allowed send window after start.
+                  This starts the live sequence for the linked live recipients. Manual test enrollments are not used by this action.
                 </Text>
                 <Box>
                   <Text fontWeight="semibold">Sender</Text>
@@ -8033,7 +8023,7 @@ const SequencesTab: React.FC = () => {
                 <Alert status="info" size="sm">
                   <AlertIcon />
                   <AlertDescription>
-                    Start Sequence uses the linked lead batch. Use &quot;Send test batch now&quot; in the sequence view when you want to send only to active test enrollments.
+                    Start Sequence uses the linked live recipients. Use &quot;Send test batch now&quot; in the sequence view when you want to send only to active test recipients.
                   </AlertDescription>
                 </Alert>
                 <Box>

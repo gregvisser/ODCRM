@@ -145,12 +145,12 @@ function humanizeReason(reason?: string | null): string {
   if (normalized.includes('unsubscribe')) return 'Recipient unsubscribed.'
   if (normalized.includes('suppress')) return 'Recipient is on the suppression list.'
   if (normalized.includes('replied_stop')) return 'Stopped because the recipient already replied.'
-  if (normalized.includes('outside_window')) return 'Waiting for the next allowed send window.'
+  if (normalized.includes('outside_window')) return 'Queued for a later retry.'
   if (normalized.includes('daily_cap_reached')) return 'Mailbox is at its daily limit.'
   if (normalized.includes('per_minute_cap_reached')) return 'Mailbox is pacing sends right now.'
   if (normalized.includes('no_sender_identity')) return 'No active sender mailbox is available.'
   if (normalized.includes('hard_bounce_invalid_recipient') || normalized.includes('invalid_recipient')) return 'Recipient email address is invalid.'
-  if (normalized.includes('canary')) return 'Live sending is not enabled for this client yet.'
+  if (normalized.includes('canary')) return 'Live sending is not enabled for this client right now.'
   if (normalized.includes('kill_switch') || normalized.includes('live_send_disabled')) return 'Live sending is disabled.'
   if (normalized.includes('scheduled_later')) return 'Queued for a later scheduled time.'
   if (normalized.includes('failed_recently')) return 'A recent send failed and needs attention.'
@@ -267,7 +267,7 @@ const ReportsTab: React.FC = () => {
     if ((queueSummary.replyStopped ?? 0) > 0) items.push(`${queueSummary.replyStopped} recipients were stopped because they already replied.`)
     if ((identityData?.summary?.usable ?? 0) < 1) items.push('No active sender mailbox is available right now.')
     else if ((identityData?.summary?.risky ?? 0) > 0) items.push(`${identityData?.summary?.risky} mailbox${identityData?.summary?.risky === 1 ? '' : 'es'} need attention.`)
-    if ((queueSummary.readyNow ?? 0) < 1 && (queueSummary.scheduledLater ?? 0) > 0) items.push('Queued recipients are waiting for the next allowed send window.')
+    if ((queueSummary.readyNow ?? 0) < 1 && (queueSummary.scheduledLater ?? 0) > 0) items.push('Queued recipients are scheduled for later.')
     return items
   }, [identityData?.summary?.risky, identityData?.summary?.usable, queueSummary.blocked, queueSummary.failedRecently, queueSummary.readyNow, queueSummary.replyStopped, queueSummary.scheduledLater, queueSummary.suppressed])
 

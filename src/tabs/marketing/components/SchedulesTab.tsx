@@ -160,17 +160,9 @@ function formatDateTime(value: string | null | undefined): string {
   return new Date(value).toLocaleString()
 }
 
-function formatHour(value: number | null | undefined): string {
-  const hour = typeof value === 'number' ? value : 0
-  return `${String(hour).padStart(2, '0')}:00`
-}
-
 function formatSendWindow(identity: SenderIdentity | null | undefined): string {
   if (!identity) return 'No sending mailbox connected'
-  const start = formatHour(identity.sendWindowHoursStart ?? 9)
-  const end = formatHour(identity.sendWindowHoursEnd ?? 17)
-  const zone = identity.sendWindowTimeZone || 'Europe/London'
-  return `${start} to ${end} (${zone})`
+  return 'Sends any time'
 }
 
 function displayMailbox(identity: SenderIdentity | null | undefined): string {
@@ -184,16 +176,16 @@ function humanizeGateReason(reason: string | null | undefined): string {
     case 'live_send_not_allowed':
       return 'Immediate live sending is not allowed for this client right now.'
     case 'customer_not_in_canary':
-      return 'This client is not approved for live sending yet.'
+      return 'Live sending is not enabled for this client right now.'
     case 'identity_not_in_canary':
-      return 'The sending mailbox is not approved for live sending yet.'
+      return 'The sending mailbox is not enabled for live sending right now.'
     case 'live_send_disabled':
     case 'ENABLE_LIVE_SENDING is not true':
       return 'Live sending is disabled right now.'
     case 'ENABLE_SEND_QUEUE_SENDING is not true':
       return 'The sending engine is currently disabled.'
     case 'ignore_window_not_enabled':
-      return 'Immediate window bypass is not enabled in this environment.'
+      return 'Immediate send override is not enabled in this environment.'
     case 'sequence_has_no_sender_identity':
       return 'This linked sequence does not have a sending mailbox yet.'
     case 'sequence_not_found':
@@ -224,7 +216,7 @@ function humanizeRunReason(reason: string | null | undefined): string {
   switch ((reason || '').trim()) {
     case 'outside_send_window':
     case 'outside_window':
-      return 'Blocked by the mailbox send window.'
+      return 'Queued for a later retry.'
     case 'daily_cap_reached':
       return 'Blocked because the mailbox reached its daily limit.'
     case 'per_minute_cap_reached':
@@ -240,7 +232,7 @@ function humanizeRunReason(reason: string | null | undefined): string {
       return 'Blocked because no active sending mailbox is available.'
     case 'canary_required_when_live_sending':
     case 'customer_not_in_canary':
-      return 'Blocked because live sending is not enabled for this client.'
+      return 'Blocked because live sending is not enabled for this client right now.'
     default:
       return reason || 'No extra detail available.'
   }
@@ -693,7 +685,7 @@ const SchedulesTab: React.FC = () => {
                             <Text fontSize="sm">{Math.min(MAX_DAILY_SEND_LIMIT, schedule.senderIdentity?.dailySendLimit ?? MAX_DAILY_SEND_LIMIT)} per mailbox</Text>
                           </Box>
                           <Box>
-                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Send window</Text>
+                            <Text fontSize="xs" color="gray.500" textTransform="uppercase">Sending</Text>
                             <Text fontSize="sm">{formatSendWindow(schedule.senderIdentity)}</Text>
                           </Box>
                           <Box>

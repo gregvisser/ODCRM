@@ -12,31 +12,13 @@ export interface AssertLiveSendAllowedOpts {
 }
 
 export function assertLiveSendAllowed(opts: AssertLiveSendAllowedOpts): { allowed: boolean; reason?: string } {
-  const { customerId, identityId, trigger: _trigger } = opts
+  const { customerId: _customerId, identityId: _identityId, trigger: _trigger } = opts
 
   if (!isSendQueueSendingEnabled()) {
     return { allowed: false, reason: 'live_send_disabled_env' }
   }
   if (!isLiveSendingEnabled()) {
     return { allowed: false, reason: 'live_send_disabled_env' }
-  }
-
-  const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID
-  if (!canaryCustomerId || canaryCustomerId.trim() === '') {
-    return { allowed: false, reason: 'canary_customer_not_configured' }
-  }
-  if (canaryCustomerId.trim() !== customerId) {
-    return { allowed: false, reason: 'customer_not_in_canary' }
-  }
-
-  const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim()
-  if (canaryIdentityId) {
-    if (identityId == null || identityId === '') {
-      return { allowed: false, reason: 'canary_identity_required_but_missing' }
-    }
-    if (identityId !== canaryIdentityId) {
-      return { allowed: false, reason: 'identity_not_in_canary' }
-    }
   }
 
   return { allowed: true }
