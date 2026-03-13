@@ -5,6 +5,7 @@
  * production AI features share one env/model path.
  */
 
+import { GoogleGenerativeAI } from '@google/generative-ai'
 import { extractPlaceholders } from './templateRenderer.js'
 
 export interface AITweakRequest {
@@ -98,41 +99,20 @@ async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}
   }
 
   const failures: string[] = []
+  const client = new GoogleGenerativeAI(apiKey)
 
   for (const model of GEMINI_MODELS) {
-    const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`
-
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey,
+      const modelClient = client.getGenerativeModel({ model })
+      const result = await modelClient.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 4096,
+          ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
         },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 4096,
-            ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
-          },
-        }),
       })
-
-      if (!response.ok) {
-        const body = await response.text()
-        failures.push(`${model}: ${response.status} ${body.slice(0, 300)}`)
-        continue
-      }
-
-      const payload = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-      }
-
-      const text = payload?.candidates?.[0]?.content?.parts
-        ?.map((part) => part?.text || '')
-        .join('')
-        .trim()
+      const text = result.response.text().trim()
 
       if (!text) {
         failures.push(`${model}: empty text response`)
@@ -140,8 +120,49 @@ async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}
       }
 
       return text
-    } catch (error) {
-      failures.push(`${model}: ${error instanceof Error ? error.message : String(error)}`)
+    } catch (sdkError) {
+      const sdkMessage = sdkError instanceof Error ? sdkError.message : String(sdkError)
+      failures.push(`${model}: ${sdkMessage}`)
+
+      try {
+        const url = `${GEMINI_API_BASE}/${model}:generateContent?key=${apiKey}`
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 4096,
+              ...(options.responseMimeType ? { responseMimeType: options.responseMimeType } : {}),
+            },
+          }),
+        })
+
+        if (!response.ok) {
+          const body = await response.text()
+          failures.push(`${model}: ${response.status} ${body.slice(0, 300)}`)
+          continue
+        }
+
+        const payload = (await response.json()) as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+        }
+
+        const text = payload?.candidates?.[0]?.content?.parts
+          ?.map((part) => part?.text || '')
+          .join('')
+          .trim()
+
+        if (!text) {
+          failures.push(`${model}: empty text response`)
+          continue
+        }
+
+        return text
+      } catch (fetchError) {
+        failures.push(`${model}: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`)
+      }
     }
   }
 
