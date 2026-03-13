@@ -113,6 +113,51 @@ const toHtmlBody = (text: string) => {
   return `<p>${escaped.replace(/\n/g, '<br/>')}</p>`
 }
 
+const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        background: #f7fafc;
+        font-family: Arial, sans-serif;
+        color: #1a202c;
+      }
+      .preview-shell {
+        padding: 24px;
+      }
+      .preview-frame {
+        max-width: 680px;
+        margin: 0 auto;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 32px;
+        overflow-wrap: anywhere;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+      }
+      table {
+        max-width: 100%;
+      }
+      a {
+        color: #2563eb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-shell">
+      <div class="preview-frame">
+        ${bodyHtml || '<p></p>'}
+      </div>
+    </div>
+  </body>
+</html>`
+
 const TemplatesTab: React.FC = () => {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -976,22 +1021,29 @@ const TemplatesTab: React.FC = () => {
                 <Box>
                   <Text fontWeight="semibold">Content (backend rendered):</Text>
                   <Box
-                    p={4}
-                    bg="white"
+                    mt={2}
+                    bg="gray.50"
                     border="1px solid"
                     borderColor="gray.200"
                     borderRadius="md"
-                    minH="300px"
-                    whiteSpace="pre-wrap"
-                    dangerouslySetInnerHTML={{
-                      __html: previewLoading
-                        ? '<p>Rendering preview...</p>'
-                        : ((previewRendered?.body || previewingTemplate.content).trim()
-                            ? (previewRendered?.body || previewingTemplate.content)
-                            : '<p></p>'),
-                    }}
+                    overflow="hidden"
                   >
+                    <iframe
+                      title="template-preview-frame"
+                      srcDoc={buildEmailPreviewDocument(
+                        previewLoading
+                          ? '<p>Rendering preview...</p>'
+                          : ((previewRendered?.body || previewingTemplate.content).trim()
+                              ? (previewRendered?.body || previewingTemplate.content)
+                              : '<p></p>'),
+                      )}
+                      style={{ width: '100%', minHeight: '720px', border: 0, background: 'white' }}
+                      sandbox="allow-same-origin"
+                    />
                   </Box>
+                  <Text mt={2} fontSize="xs" color="gray.500">
+                    Preview framed at a realistic email width.
+                  </Text>
                   {previewError ? (
                     <Alert status="warning" mt={2}>
                       <AlertIcon />

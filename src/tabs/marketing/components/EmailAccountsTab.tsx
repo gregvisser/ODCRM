@@ -95,18 +95,32 @@ type Customer = {
 
 type IdentityCapacityRow = {
   identityId: string
-  emailAddress: string
-  displayName: string | null
+  email: string
+  label: string | null
   provider: string
   isActive: boolean
   state: 'usable' | 'unavailable' | 'risky'
   reasons: string[]
-  sent: number
-  failed: number
-  wouldSend: number
+  recent: {
+    windowHours: number
+    sent: number
+    sendFailed: number
+    wouldSend: number
+    skipped: number
+  }
+  queuePressure?: {
+    queuedNow?: number
+  }
+  guardrails?: {
+    dailySendLimit?: number | null
+    sendWindowTimeZone?: string | null
+    sendWindowHoursStart?: number | null
+    sendWindowHoursEnd?: number | null
+  }
 }
 
 type IdentityCapacityData = {
+  sinceHours: number
   summary: {
     total: number
     usable: number
@@ -118,7 +132,7 @@ type IdentityCapacityData = {
   }
   guardrails: {
     warnings: string[]
-    blocker: boolean
+    liveGateReasons?: string[]
   }
   rows: IdentityCapacityRow[]
   lastUpdatedAt: string
@@ -177,7 +191,7 @@ const EmailAccountsTab: React.FC = () => {
     }
     setCapacityLoading(true)
     setCapacityError(null)
-    const { data, error: apiError } = await api.get<{ success?: boolean; data?: IdentityCapacityData }>(
+    const { data, error: apiError } = await api.get<IdentityCapacityData>(
       '/api/send-worker/identity-capacity?sinceHours=72',
       { headers: { 'X-Customer-Id': selectedCustomerId } },
     )
@@ -186,12 +200,12 @@ const EmailAccountsTab: React.FC = () => {
       setCapacityLoading(false)
       return
     }
-    if (!data?.success || !data?.data) {
-      setCapacityError('Identity capacity response missing data')
+    if (!data) {
+      setCapacityError('No identity capacity data is available right now')
       setCapacityLoading(false)
       return
     }
-    setIdentityCapacity(data.data)
+    setIdentityCapacity(data)
     setCapacityLoading(false)
   }, [selectedCustomerId])
 
@@ -626,11 +640,21 @@ const EmailAccountsTab: React.FC = () => {
             <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="md">{identityCapacity?.summary.recommendedIdentityId ?? '—'}</StatNumber></Stat></CardBody></Card>
           </SimpleGrid>
 
-          {!!identityCapacity?.guardrails?.warnings?.length && (
-            <Alert id="email-accounts-identity-guardrails" data-testid="email-accounts-identity-guardrails" status={identityCapacity.guardrails.blocker ? 'error' : 'warning'} mb={4}>
+          {!capacityError && identityCapacity && identityCapacity.rows.length === 0 ? (
+            <Alert status="info" mb={4}>
               <AlertIcon />
               <Box>
-                <AlertTitle>{identityCapacity.guardrails.blocker ? 'Identity launch blocker' : 'Identity launch warning'}</AlertTitle>
+                <AlertTitle>No sending mailbox connected</AlertTitle>
+                <AlertDescription>Connect an active mailbox for this client to see capacity and guardrail status here.</AlertDescription>
+              </Box>
+            </Alert>
+          ) : null}
+
+          {!!identityCapacity?.guardrails?.warnings?.length && (
+            <Alert id="email-accounts-identity-guardrails" data-testid="email-accounts-identity-guardrails" status="warning" mb={4}>
+              <AlertIcon />
+              <Box>
+                <AlertTitle>Identity launch warning</AlertTitle>
                 <AlertDescription>{identityCapacity.guardrails.warnings.join(' ')}</AlertDescription>
               </Box>
             </Alert>
@@ -645,29 +669,31 @@ const EmailAccountsTab: React.FC = () => {
                   <Th>State</Th>
                   <Th isNumeric>Sent</Th>
                   <Th isNumeric>Failed</Th>
+                  <Th>Queue</Th>
                   <Th>Reason</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {(identityCapacity?.rows ?? []).map((row) => (
                   <Tr key={row.identityId}>
-                    <Td>{row.displayName ? `${row.displayName} (${row.emailAddress})` : row.emailAddress}</Td>
+                    <Td>{row.label ? `${row.label} (${row.email})` : row.email}</Td>
                     <Td>{row.provider}</Td>
                     <Td>
                       <Badge id="email-accounts-identity-state" data-testid="email-accounts-identity-state" colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'red'}>
                         {row.state}
                       </Badge>
                     </Td>
-                    <Td isNumeric>{row.sent}</Td>
-                    <Td isNumeric>{row.failed}</Td>
-                    <Td fontSize="xs">{row.reasons?.join('; ') || '—'}</Td>
+                    <Td isNumeric>{row.recent?.sent ?? 0}</Td>
+                    <Td isNumeric>{row.recent?.sendFailed ?? 0}</Td>
+                    <Td fontSize="xs">{row.queuePressure?.queuedNow ?? 0} queued now</Td>
+                    <Td fontSize="xs">{row.reasons?.join('; ') || 'No current guardrail issues'}</Td>
                   </Tr>
                 ))}
               </Tbody>
             </Table>
           </Box>
           <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
-            Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'} | Route: /api/send-worker/identity-capacity
+            Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'}
           </Text>
         </CardBody>
       </Card>

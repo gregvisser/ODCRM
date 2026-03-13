@@ -1106,21 +1106,22 @@ async function syncCustomerLeads(
     )
 
     if (leads.length === 0) {
-      const zeroRowError = 'Sheet returned 0 rows (check publish-to-web CSV and that the sheet has data)'
+      const zeroRowMessage = 'Connected sheet is valid and currently empty'
       await prisma.leadSyncState.update({
         where: { customerId: customer.id },
         data: {
           isRunning: false,
-          syncStatus: 'error',
-          lastError: zeroRowError,
+          syncStatus: 'success',
+          lastError: null,
           lastSyncAt: syncStartedAt,
+          lastSuccessAt: syncStartedAt,
           progressPercent: 100,
-          progressMessage: zeroRowError,
+          progressMessage: zeroRowMessage,
         },
       })
       const usedKeys = diagnostics.usedKeys ?? {}
       console.log(`   [leadsSync] customerId=${customer.id} sheetGid=${gidUsed} rowCount=0 usedKeys=${JSON.stringify(usedKeys)}`)
-      onProgress?.({ percent: 100, message: zeroRowError })
+      onProgress?.({ percent: 100, message: zeroRowMessage })
       return
     }
 

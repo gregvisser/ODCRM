@@ -115,6 +115,7 @@ function LeadsTab() {
   )
   const lastRefresh = lastUpdatedAt ?? new Date()
   const liveWarning = liveData?.warning ?? null
+  const liveHint = liveData?.hint ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null
   const apiDisplayColumns = liveData?.displayColumns ?? []
 
@@ -530,14 +531,21 @@ function LeadsTab() {
   }
 
   if (leads.length === 0) {
+    const isConnectedEmptySheet =
+      sourceOfTruth === 'google_sheets' &&
+      liveData?.authoritative === true &&
+      !liveWarning
     const whyZeroMessage =
       error?.toLowerCase().includes('no leads reporting url')
         ? 'This account has no Leads reporting URL configured. Add a Google Sheet URL in Settings → Accounts.'
         : error
+          ?? (isConnectedEmptySheet
+            ? (liveHint || 'The linked Google Sheet is connected and currently empty.')
+            : null)
           ?? (sheetValidateForEmpty
             ? sheetValidateForEmpty.ok
               ? (sheetValidateForEmpty.rowCount === 0
-                ? 'The sheet returned 0 data rows. Publish the sheet to web (File → Share → Publish to web) as CSV and ensure it has a header row and at least one data row.'
+                ? 'The linked Google Sheet is valid and currently empty.'
                 : null)
               : sheetValidateForEmpty.error
             : null)
@@ -567,12 +575,14 @@ function LeadsTab() {
             {whyZeroMessage
               ?? (sourceOfTruth === 'db'
                 ? 'No lead records are stored for this client yet.'
-                : 'Configure Client Leads sheets in account settings to view leads data')}
+                : 'The linked Google Sheet is connected and currently empty.')}
           </Text>
           <Text fontSize="sm" color="gray.500" mt={2} data-testid="leads-acceptance-next-step">
             {sourceOfTruth === 'db'
               ? 'Next step: add or import lead records for this client in ODCRM, then refresh.'
-              : 'Next step: update the client lead sheet link in Accounts and confirm sheet access, then refresh.'}
+              : isConnectedEmptySheet
+                ? 'Next step: add lead rows to the linked Google Sheet, then refresh.'
+                : 'Next step: update the client lead sheet link in Accounts and confirm sheet access, then refresh.'}
           </Text>
           {sheetValidateForEmpty?.hint && !sheetValidateForEmpty.ok && (
             <Text fontSize="sm" color="gray.500" mt={1} fontStyle="italic">{sheetValidateForEmpty.hint}</Text>

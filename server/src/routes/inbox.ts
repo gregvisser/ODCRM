@@ -537,6 +537,22 @@ router.post('/messages/:id/optout', requireMarketingMutationAuth, async (req, re
       },
     })
 
+    if (domain && !domain.includes('@')) {
+      await prisma.suppressionEntry.upsert({
+        where: { customerId_type_value: { customerId, type: 'domain', value: domain } },
+        update: { reason: 'Opted out via inbox', source: 'inbox-optout' },
+        create: {
+          id: randomUUID(),
+          customerId,
+          type: 'domain',
+          value: domain,
+          emailNormalized: null,
+          reason: 'Opted out via inbox',
+          source: 'inbox-optout',
+        },
+      })
+    }
+
     res.json({ success: true, suppressedEmail: email, suppressedDomain: domain || null })
   } catch (error) {
     next(error)

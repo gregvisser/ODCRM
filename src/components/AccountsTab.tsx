@@ -3720,7 +3720,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       case 'missing_sheet_url':
         return `${account.name}: no leads reporting sheet is configured`
       case 'zero_rows_imported':
-        return `${account.name}: the linked sheet returned no lead rows`
+        return `${account.name}: the linked sheet is connected and currently empty`
       case 'stale_sync':
         return `${account.name}: live sheet metrics need a refresh`
       case 'unreadable_sheet':

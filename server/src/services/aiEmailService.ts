@@ -29,7 +29,7 @@ type GeminiRequestOptions = {
   responseMimeType?: string
 }
 
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.0-flash'] as const
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'] as const
 const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 
 const SYSTEM_PROMPT = `You are an expert email copywriter specializing in B2B outreach and sales emails. Your task is to personalize and improve email templates to make them more engaging, human, and effective.
