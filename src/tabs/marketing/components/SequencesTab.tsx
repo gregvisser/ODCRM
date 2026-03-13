@@ -6864,23 +6864,40 @@ const SequencesTab: React.FC = () => {
                         <Box mt={2} p={2} bg="white" borderRadius="sm" fontSize="xs" color="gray.600">
                           <Text fontWeight="semibold">Subject:</Text>
                           <Text noOfLines={1}>{step.subjectTemplate}</Text>
+                          {step.templateId && templates.find((template) => template.id === step.templateId)?.name ? (
+                            <Text mt={1} color="gray.500">
+                              Based on shared template: {templates.find((template) => template.id === step.templateId)?.name}
+                            </Text>
+                          ) : null}
                         </Box>
                       )}
 
                       <Flex mt={2} justify="space-between" align={{ base: 'stretch', md: 'center' }} gap={2} wrap="wrap">
                         <Box flex="1">
                           <Text fontSize="xs" color="gray.600">
-                            Enhance with AI creates a sequence-only draft for this step. It does not change the shared template.
+                            This only changes this sequence step. It does not change the shared template.
                           </Text>
-                          {sequenceStepOriginals[step.stepOrder] &&
-                          (
-                            sequenceStepOriginals[step.stepOrder].subject !== step.subjectTemplate ||
-                            sequenceStepOriginals[step.stepOrder].content !== (step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || ''))
-                          ) ? (
-                            <Badge mt={2} colorScheme="blue" variant="subtle">
-                              AI draft applied to this sequence only
-                            </Badge>
-                          ) : null}
+                          <HStack mt={2} spacing={2} flexWrap="wrap">
+                            {sequenceStepAiSuggestion[step.stepOrder] ? (
+                              <Badge colorScheme="blue" variant="subtle">
+                                AI suggestion ready
+                              </Badge>
+                            ) : null}
+                            {sequenceStepOriginals[step.stepOrder] &&
+                            (
+                              sequenceStepOriginals[step.stepOrder].subject !== step.subjectTemplate ||
+                              sequenceStepOriginals[step.stepOrder].content !== (step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || ''))
+                            ) ? (
+                              <>
+                                <Badge colorScheme="purple" variant="subtle">
+                                  AI changes applied
+                                </Badge>
+                                <Badge colorScheme="orange" variant="subtle">
+                                  Not saved yet
+                                </Badge>
+                              </>
+                            ) : null}
+                          </HStack>
                         </Box>
                         <HStack spacing={2}>
                           {sequenceStepOriginals[step.stepOrder] &&
