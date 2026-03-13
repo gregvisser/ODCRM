@@ -367,7 +367,7 @@ router.post('/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
     if (error.message?.includes('authentication failed')) {
       return res.status(502).json({
         success: false,
-        error: 'AI provider authentication failed. Check the live Gemini key and model access.',
+        error: error.message,
       })
     }
 
