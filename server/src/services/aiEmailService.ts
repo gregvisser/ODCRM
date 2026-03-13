@@ -81,6 +81,40 @@ function preservedPlaceholdersMatch(restored: string, expected: string[]): boole
   return expected.every((placeholder) => restored.includes(`{{${placeholder}}}`))
 }
 
+function sanitizeProviderMessage(input: string): string {
+  return input
+    .replace(/AIza[0-9A-Za-z_-]{20,}/g, '[redacted]')
+    .replace(/key=[^&\s]+/gi, 'key=[redacted]')
+    .trim()
+}
+
+function extractGeminiProviderMessage(failure: string): string | null {
+  const trimmed = sanitizeProviderMessage(failure)
+  const jsonStart = trimmed.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const payload = JSON.parse(trimmed.slice(jsonStart)) as {
+        error?: { message?: unknown; status?: unknown; code?: unknown }
+      }
+      const message = payload?.error?.message
+      const status = payload?.error?.status
+      if (typeof message === 'string' && message.trim()) {
+        return status && typeof status === 'string'
+          ? `${message.trim()} (${status})`
+          : message.trim()
+      }
+    } catch {
+      // Fall through to plain-text parsing.
+    }
+  }
+
+  const statusLine = trimmed.match(/\b(4\d\d|5\d\d)\b\s+(.+)/)
+  if (statusLine?.[2]) return statusLine[2].trim()
+
+  const modelPrefix = trimmed.replace(/^[^:]+:\s*/, '').trim()
+  return modelPrefix || null
+}
+
 function getGeminiApiKey(): string | null {
   const allowEmergentGemini = process.env.ODCRM_USE_EMERGENT_LLM_KEY_FOR_GEMINI === 'true'
   const raw =
@@ -170,6 +204,10 @@ async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}
   console.error('[AI Service] Gemini API error:', failures)
   const firstFailure = failures[0] || 'unknown_upstream_error'
   if (/401|403|api key|permission|unauth/i.test(firstFailure)) {
+    const providerMessage = extractGeminiProviderMessage(firstFailure)
+    if (providerMessage) {
+      throw new Error(`AI service authentication failed. ${providerMessage}`)
+    }
     throw new Error('AI service authentication failed. Check the configured Gemini API key and model access.')
   }
   if (/429|quota|rate limit/i.test(firstFailure)) {
