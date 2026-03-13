@@ -210,6 +210,7 @@ const TemplatesTab: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiSuggestion, setAiSuggestion] = useState<{ subject: string; content: string } | null>(null)
+  const [aiAppliedLocally, setAiAppliedLocally] = useState(false)
   const [originalTemplateSnapshot, setOriginalTemplateSnapshot] = useState<TemplateEditorSnapshot | null>(null)
   const toast = useToast()
 
@@ -326,6 +327,7 @@ const TemplatesTab: React.FC = () => {
     setAiLoading(false)
     setAiError(null)
     setAiSuggestion(null)
+    setAiAppliedLocally(false)
     setAiTone('professional')
   }
 
@@ -446,6 +448,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       subject: aiSuggestion.subject,
       content: aiSuggestion.content,
     })
+    setAiAppliedLocally(true)
     setAiSuggestion(null)
   }
 
@@ -456,6 +459,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       subject: originalTemplateSnapshot.subject,
       content: originalTemplateSnapshot.content,
     })
+    setAiAppliedLocally(false)
     setAiSuggestion(null)
     setAiError(null)
   }
@@ -959,6 +963,32 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                       </Button>
                     </HStack>
                   </Flex>
+                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3} mb={3}>
+                    <HStack spacing={2} flexWrap="wrap">
+                      {aiSuggestion ? (
+                        <Badge colorScheme="blue" variant="subtle">
+                          AI suggestion ready
+                        </Badge>
+                      ) : null}
+                      {aiAppliedLocally ? (
+                        <>
+                          <Badge colorScheme="purple" variant="subtle">
+                            AI changes applied locally
+                          </Badge>
+                          <Badge colorScheme="orange" variant="subtle">
+                            Not saved yet
+                          </Badge>
+                        </>
+                      ) : (
+                        <Badge colorScheme="gray" variant="subtle">
+                          Original
+                        </Badge>
+                      )}
+                    </HStack>
+                    <Text mt={2} fontSize="xs" color="gray.600">
+                      AI suggestions do not save automatically. Your original template stays unchanged until you click Save.
+                    </Text>
+                  </Box>
                   <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="gray.50" p={3} mb={3}>
                     <Text fontSize="sm" fontWeight="semibold">Supported placeholders</Text>
                     <Flex mt={2} gap={2} wrap="wrap">
