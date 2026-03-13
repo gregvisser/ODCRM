@@ -177,6 +177,9 @@ jobs:
             BUILD_TIME: t,
             ENABLE_SEND_QUEUE_SENDING: process.env.ENABLE_SEND_QUEUE_SENDING_APPSETTING || '',
             ENABLE_LIVE_SENDING: process.env.ENABLE_LIVE_SENDING_APPSETTING || '',
+            SEND_CANARY_CUSTOMER_ID: process.env.SEND_CANARY_CUSTOMER_ID_APPSETTING || '',
+            SEND_CANARY_IDENTITY_ID: process.env.SEND_CANARY_IDENTITY_ID_APPSETTING || '',
+            ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW: process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING || '',
           });
           fs.writeFileSync('buildInfo.generated.json', payload);
           "
@@ -186,6 +189,9 @@ jobs:
           BUILD_TIME: ${{ env.BUILD_TIME }}
           ENABLE_SEND_QUEUE_SENDING_APPSETTING: ${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
           ENABLE_LIVE_SENDING_APPSETTING: ${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
+          SEND_CANARY_CUSTOMER_ID_APPSETTING: ${{ env.SEND_CANARY_CUSTOMER_ID_APPSETTING }}
+          SEND_CANARY_IDENTITY_ID_APPSETTING: ${{ env.SEND_CANARY_IDENTITY_ID_APPSETTING }}
+          ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING: ${{ env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING }}
 
       - name: Write runtime live-send overrides
         run: |
@@ -193,11 +199,13 @@ jobs:
           cat > runtimeEnv.generated.json <<EOF
           {
             "ENABLE_SEND_QUEUE_SENDING": "${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}",
-            "ENABLE_LIVE_SENDING": "${{ env.ENABLE_LIVE_SENDING_APPSETTING }}"
+            "ENABLE_LIVE_SENDING": "${{ env.ENABLE_LIVE_SENDING_APPSETTING }}",
+            "SEND_CANARY_CUSTOMER_ID": "${{ env.SEND_CANARY_CUSTOMER_ID_APPSETTING }}",
+            "SEND_CANARY_IDENTITY_ID": "${{ env.SEND_CANARY_IDENTITY_ID_APPSETTING }}",
+            "ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW": "${{ env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING }}"
           }
           EOF
-          echo "Wrote server/runtimeEnv.generated.json for deploy runtime:"
-          cat runtimeEnv.generated.json
+          echo "Wrote server/runtimeEnv.generated.json for deploy runtime."
 
       - name: Build application
         run: cd server && npm run build
