@@ -82,9 +82,9 @@ function preservedPlaceholdersMatch(restored: string, expected: string[]): boole
 
 function getGeminiApiKey(): string | null {
   const raw =
-    process.env.EMERGENT_LLM_KEY ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.EMERGENT_LLM_KEY ||
     ''
 
   const value = String(raw).trim()
@@ -105,7 +105,10 @@ async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
@@ -143,7 +146,14 @@ async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}
   }
 
   console.error('[AI Service] Gemini API error:', failures)
-  throw new Error('Failed to generate AI response. Please try again.')
+  const firstFailure = failures[0] || 'unknown_upstream_error'
+  if (/401|403|api key|permission|unauth/i.test(firstFailure)) {
+    throw new Error('AI service authentication failed. Check the configured Gemini API key and model access.')
+  }
+  if (/429|quota|rate limit/i.test(firstFailure)) {
+    throw new Error('AI service is temporarily rate limited. Please try again shortly.')
+  }
+  throw new Error(`AI provider request failed: ${firstFailure}`)
 }
 
 /**
