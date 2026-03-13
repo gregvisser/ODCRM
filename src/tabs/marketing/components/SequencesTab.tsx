@@ -84,6 +84,7 @@ import {
   InfoIcon,
   CopyIcon,
 } from '@chakra-ui/icons'
+import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
@@ -109,6 +110,12 @@ type SequenceStep = {
   subjectTemplate: string
   bodyTemplateHtml: string
   bodyTemplateText?: string
+}
+
+type AITone = 'professional' | 'friendly' | 'casual'
+type StepContentSnapshot = {
+  subject: string
+  content: string
 }
 
 type SequenceCampaign = {
@@ -218,6 +225,52 @@ type SequenceDetail = {
   }>
 }
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const toHtmlBody = (text: string) => {
+  const normalized = text.replace(/\r\n/g, '\n').trim()
+  if (!normalized) return '<p></p>'
+
+  return normalized
+    .split(/\n\s*\n/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph.trim()).replace(/\n/g, '<br/>')}</p>`)
+    .join('')
+}
+
+const htmlToPlainText = (html: string) => {
+  if (!html) return ''
+
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+const toStepContentSnapshot = (step: SequenceStep): StepContentSnapshot => ({
+  subject: step.subjectTemplate || '',
+  content: step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || ''),
+})
+
+const buildStepSnapshotMap = (steps?: SequenceStep[]) =>
+  Object.fromEntries((steps || []).map((step) => [step.stepOrder, toStepContentSnapshot(step)])) as Record<number, StepContentSnapshot>
+
 const LEAD_SOURCES: SnapshotOption['source'][] = ['cognism', 'apollo', 'blackbook']
 const MAX_STEP_DELAY_DAYS = 365
 
@@ -267,6 +320,10 @@ const SequencesTab: React.FC = () => {
   const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
   const [isSequenceSetupOpen, setIsSequenceSetupOpen] = useState(false)
   const [sequenceValidationVisible, setSequenceValidationVisible] = useState(false)
+  const [sequenceStepAiLoading, setSequenceStepAiLoading] = useState<Record<number, boolean>>({})
+  const [sequenceStepAiError, setSequenceStepAiError] = useState<Record<number, string | null>>({})
+  const [sequenceStepAiSuggestion, setSequenceStepAiSuggestion] = useState<Record<number, StepContentSnapshot | null>>({})
+  const [sequenceStepOriginals, setSequenceStepOriginals] = useState<Record<number, StepContentSnapshot>>({})
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
@@ -341,6 +398,19 @@ const SequencesTab: React.FC = () => {
   const [queueActionId, setQueueActionId] = useState<string | null>(null)
   const [queueOperatorActionId, setQueueOperatorActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
+
+  const resetSequenceStepAiState = () => {
+    setSequenceStepAiLoading({})
+    setSequenceStepAiError({})
+    setSequenceStepAiSuggestion({})
+    setSequenceStepOriginals({})
+  }
+
+  const handleCloseSequenceEditor = () => {
+    resetSequenceStepAiState()
+    setSequenceValidationVisible(false)
+    onClose()
+  }
 
   // Send Queue Preview (dry-run, read-only)
   type SendQueuePreviewItem = {
@@ -3158,7 +3228,7 @@ const SequencesTab: React.FC = () => {
     setMaterializedBatchKey(null)
     setIsSequenceSetupOpen(true)
     setSequenceValidationVisible(false)
-    setEditingSequence({
+    const nextSequence: SequenceCampaign = {
       id: '',
       name: '',
       description: '',
@@ -3175,7 +3245,12 @@ const SequencesTab: React.FC = () => {
           bodyTemplateText: '',
         }
       ],
-    })
+    }
+    setEditingSequence(nextSequence)
+    setSequenceStepOriginals(buildStepSnapshotMap(nextSequence.steps))
+    setSequenceStepAiSuggestion({})
+    setSequenceStepAiError({})
+    setSequenceStepAiLoading({})
     onOpen()
   }, [templates.length, toast, onOpen])
 
@@ -3205,6 +3280,10 @@ const SequencesTab: React.FC = () => {
       ...editingSequence,
       steps: [...editingSequence.steps, newStep],
     })
+    setSequenceStepOriginals((prev) => ({
+      ...prev,
+      [newStep.stepOrder]: toStepContentSnapshot(newStep),
+    }))
   }
 
   const handleRemoveStep = (stepOrder: number) => {
@@ -3221,13 +3300,40 @@ const SequencesTab: React.FC = () => {
     }
 
     const steps = Array.isArray(editingSequence.steps) ? editingSequence.steps : []
-    const updatedSteps = steps
-      .filter(s => s.stepOrder !== stepOrder)
-      .map((s, index) => ({ ...s, stepOrder: index + 1 }))
+    const remainingSteps = steps.filter((step) => step.stepOrder !== stepOrder)
+    const updatedSteps = remainingSteps.map((step, index) => ({ ...step, stepOrder: index + 1 }))
 
     setEditingSequence({
       ...editingSequence,
       steps: updatedSteps,
+    })
+    setSequenceStepOriginals((prev) => {
+      const next: Record<number, StepContentSnapshot> = {}
+      remainingSteps.forEach((step, index) => {
+        next[index + 1] = prev[step.stepOrder] || toStepContentSnapshot(step)
+      })
+      return next
+    })
+    setSequenceStepAiSuggestion((prev) => {
+      const next: Record<number, StepContentSnapshot | null> = {}
+      remainingSteps.forEach((step, index) => {
+        if (prev[step.stepOrder]) next[index + 1] = prev[step.stepOrder]
+      })
+      return next
+    })
+    setSequenceStepAiError((prev) => {
+      const next: Record<number, string | null> = {}
+      remainingSteps.forEach((step, index) => {
+        if (prev[step.stepOrder]) next[index + 1] = prev[step.stepOrder]
+      })
+      return next
+    })
+    setSequenceStepAiLoading((prev) => {
+      const next: Record<number, boolean> = {}
+      remainingSteps.forEach((step, index) => {
+        if (prev[step.stepOrder]) next[index + 1] = prev[step.stepOrder]
+      })
+      return next
     })
   }
 
@@ -3254,6 +3360,28 @@ const SequencesTab: React.FC = () => {
       ...editingSequence,
       steps: updatedSteps,
     })
+    const updatedStep = updatedSteps.find((step) => step.stepOrder === stepOrder)
+    if (updatedStep) {
+      setSequenceStepOriginals((prev) => ({
+        ...prev,
+        [stepOrder]: toStepContentSnapshot(updatedStep),
+      }))
+    }
+    setSequenceStepAiSuggestion((prev) => {
+      const next = { ...prev }
+      delete next[stepOrder]
+      return next
+    })
+    setSequenceStepAiError((prev) => {
+      const next = { ...prev }
+      delete next[stepOrder]
+      return next
+    })
+    setSequenceStepAiLoading((prev) => {
+      const next = { ...prev }
+      delete next[stepOrder]
+      return next
+    })
   }
 
   const handleStepDelayChange = (stepOrder: number, delay: number) => {
@@ -3276,7 +3404,7 @@ const SequencesTab: React.FC = () => {
     setMaterializedBatchKey(null)
     setIsSequenceSetupOpen(false)
     setSequenceValidationVisible(false)
-    setEditingSequence({
+    const nextSequence: SequenceCampaign = {
       ...sequence,
       listId: sequence.listId || '',
       senderIdentityId: sequence.senderIdentity?.id || sequence.senderIdentityId || '',
@@ -3289,7 +3417,12 @@ const SequencesTab: React.FC = () => {
           bodyTemplateText: '',
         }
       ],
-    })
+    }
+    setEditingSequence(nextSequence)
+    setSequenceStepOriginals(buildStepSnapshotMap(nextSequence.steps))
+    setSequenceStepAiSuggestion({})
+    setSequenceStepAiError({})
+    setSequenceStepAiLoading({})
     onOpen()
     
     // Load steps from backend if sequenceId exists
@@ -3312,7 +3445,112 @@ const SequencesTab: React.FC = () => {
       }))
 
       setEditingSequence(prev => prev ? { ...prev, steps: loadedSteps } : prev)
+      setSequenceStepOriginals(buildStepSnapshotMap(loadedSteps))
+      setSequenceStepAiSuggestion({})
+      setSequenceStepAiError({})
+      setSequenceStepAiLoading({})
     }
+  }
+
+  const handleSequenceStepRewriteWithAI = async (stepOrder: number, tone: AITone = 'professional') => {
+    if (!editingSequence) return
+    const step = editingSequence.steps?.find((item) => item.stepOrder === stepOrder)
+    if (!step) return
+
+    const baseContent = step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || '')
+    if (!baseContent.trim()) {
+      setSequenceStepAiError((prev) => ({
+        ...prev,
+        [stepOrder]: 'Add step content before using AI.',
+      }))
+      return
+    }
+
+    setSequenceStepOriginals((prev) => ({
+      ...prev,
+      [stepOrder]: prev[stepOrder] || toStepContentSnapshot(step),
+    }))
+    setSequenceStepAiLoading((prev) => ({ ...prev, [stepOrder]: true }))
+    setSequenceStepAiError((prev) => ({ ...prev, [stepOrder]: null }))
+    setSequenceStepAiSuggestion((prev) => ({ ...prev, [stepOrder]: null }))
+
+    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : undefined
+    const response = await api.post<{ tweakedBody?: string; tweakedSubject?: string }>(
+      '/api/templates/ai/tweak',
+      {
+        templateBody: baseContent,
+        templateSubject: step.subjectTemplate || undefined,
+        contactCompany: selectedCustomerName !== 'No client selected' ? selectedCustomerName : undefined,
+        tone,
+        instruction: 'Improve the wording for this sequence step only. Keep placeholders and unsubscribe tokens exactly as written.',
+        preservePlaceholders: true,
+      },
+      { headers },
+    )
+
+    setSequenceStepAiLoading((prev) => ({ ...prev, [stepOrder]: false }))
+
+    if (response.error) {
+      setSequenceStepAiError((prev) => ({
+        ...prev,
+        [stepOrder]: response.error,
+      }))
+      return
+    }
+
+    setSequenceStepAiSuggestion((prev) => ({
+      ...prev,
+      [stepOrder]: {
+        subject: response.data?.tweakedSubject || step.subjectTemplate,
+        content: response.data?.tweakedBody || baseContent,
+      },
+    }))
+  }
+
+  const applySequenceStepAiSuggestion = (stepOrder: number) => {
+    const suggestion = sequenceStepAiSuggestion[stepOrder]
+    if (!editingSequence || !suggestion) return
+
+    const updatedSteps = (editingSequence.steps || []).map((step) =>
+      step.stepOrder === stepOrder
+        ? {
+            ...step,
+            subjectTemplate: suggestion.subject,
+            bodyTemplateText: suggestion.content,
+            bodyTemplateHtml: toHtmlBody(suggestion.content),
+          }
+        : step
+    )
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: updatedSteps,
+    })
+    setSequenceStepAiSuggestion((prev) => ({ ...prev, [stepOrder]: null }))
+    setSequenceStepAiError((prev) => ({ ...prev, [stepOrder]: null }))
+  }
+
+  const restoreSequenceStepOriginal = (stepOrder: number) => {
+    const original = sequenceStepOriginals[stepOrder]
+    if (!editingSequence || !original) return
+
+    const updatedSteps = (editingSequence.steps || []).map((step) =>
+      step.stepOrder === stepOrder
+        ? {
+            ...step,
+            subjectTemplate: original.subject,
+            bodyTemplateText: original.content,
+            bodyTemplateHtml: toHtmlBody(original.content),
+          }
+        : step
+    )
+
+    setEditingSequence({
+      ...editingSequence,
+      steps: updatedSteps,
+    })
+    setSequenceStepAiSuggestion((prev) => ({ ...prev, [stepOrder]: null }))
+    setSequenceStepAiError((prev) => ({ ...prev, [stepOrder]: null }))
   }
 
   const saveSequenceWithSteps = async (
@@ -3508,7 +3746,7 @@ const SequencesTab: React.FC = () => {
       }
 
       await loadData()
-      onClose()
+      handleCloseSequenceEditor()
       toast({
         title: `Sequence ${editingSequence.id ? 'updated' : 'created'} (Draft)`,
         description: `${editingSequence.steps.length} step${editingSequence.steps.length > 1 ? 's' : ''} saved`,
@@ -3749,7 +3987,7 @@ const SequencesTab: React.FC = () => {
 
       await loadData()
       onStartClose()
-      onClose()
+      handleCloseSequenceEditor()
       toast({
         title: 'Sequence started',
         description: 'Emails will be sent according to the schedule.',
@@ -3815,7 +4053,7 @@ const SequencesTab: React.FC = () => {
         return
       }
       if (editingSequence?.id === sequenceId) {
-        onClose()
+        handleCloseSequenceEditor()
         setEditingSequence(null)
       }
       toast({
@@ -6494,7 +6732,7 @@ const SequencesTab: React.FC = () => {
         </CardBody>
       </Card>
 
-      <Modal isOpen={isOpen} onClose={onClose} size="6xl" scrollBehavior="inside">
+      <Modal isOpen={isOpen} onClose={handleCloseSequenceEditor} size="6xl" scrollBehavior="inside">
         <ModalOverlay />
           <ModalContent maxH="90vh">
             <ModalHeader borderBottom="1px solid" borderColor="gray.200" pb={4}>
@@ -6628,6 +6866,98 @@ const SequencesTab: React.FC = () => {
                           <Text noOfLines={1}>{step.subjectTemplate}</Text>
                         </Box>
                       )}
+
+                      <Flex mt={2} justify="space-between" align={{ base: 'stretch', md: 'center' }} gap={2} wrap="wrap">
+                        <Box flex="1">
+                          <Text fontSize="xs" color="gray.600">
+                            Enhance with AI creates a sequence-only draft for this step. It does not change the shared template.
+                          </Text>
+                          {sequenceStepOriginals[step.stepOrder] &&
+                          (
+                            sequenceStepOriginals[step.stepOrder].subject !== step.subjectTemplate ||
+                            sequenceStepOriginals[step.stepOrder].content !== (step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || ''))
+                          ) ? (
+                            <Badge mt={2} colorScheme="blue" variant="subtle">
+                              AI draft applied to this sequence only
+                            </Badge>
+                          ) : null}
+                        </Box>
+                        <HStack spacing={2}>
+                          {sequenceStepOriginals[step.stepOrder] &&
+                          (
+                            sequenceStepOriginals[step.stepOrder].subject !== step.subjectTemplate ||
+                            sequenceStepOriginals[step.stepOrder].content !== (step.bodyTemplateText || htmlToPlainText(step.bodyTemplateHtml || ''))
+                          ) ? (
+                            <Button size="xs" variant="ghost" onClick={() => restoreSequenceStepOriginal(step.stepOrder)}>
+                              Restore original
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            leftIcon={<Icon as={RiSparkling2Line} />}
+                            onClick={() => handleSequenceStepRewriteWithAI(step.stepOrder)}
+                            isLoading={!!sequenceStepAiLoading[step.stepOrder]}
+                            isDisabled={!step.subjectTemplate.trim() || !(step.bodyTemplateText || step.bodyTemplateHtml || '').trim()}
+                          >
+                            Enhance with AI
+                          </Button>
+                        </HStack>
+                      </Flex>
+
+                      {sequenceStepAiError[step.stepOrder] ? (
+                        <Alert status="warning" mt={3} borderRadius="md">
+                          <AlertIcon />
+                          <AlertDescription fontSize="xs">{sequenceStepAiError[step.stepOrder]}</AlertDescription>
+                        </Alert>
+                      ) : null}
+
+                      {sequenceStepAiSuggestion[step.stepOrder] ? (
+                        <Box mt={3} borderWidth="1px" borderColor="blue.200" borderRadius="md" bg="blue.50" p={3}>
+                          <HStack justify="space-between" align="start" mb={2}>
+                            <VStack align="start" spacing={0}>
+                              <HStack spacing={2}>
+                                <Icon as={RiSparkling2Line} color="blue.500" />
+                                <Text fontSize="sm" fontWeight="semibold">AI suggestion</Text>
+                              </HStack>
+                              <Text fontSize="xs" color="gray.600">
+                                Apply this only if you want this sequence step to differ from the shared template.
+                              </Text>
+                            </VStack>
+                            <HStack spacing={2}>
+                              <Button size="xs" colorScheme="blue" onClick={() => applySequenceStepAiSuggestion(step.stepOrder)}>
+                                Apply suggestion
+                              </Button>
+                              <Button size="xs" variant="ghost" onClick={() => restoreSequenceStepOriginal(step.stepOrder)}>
+                                Restore original
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() =>
+                                  setSequenceStepAiSuggestion((prev) => ({ ...prev, [step.stepOrder]: null }))
+                                }
+                              >
+                                Dismiss
+                              </Button>
+                            </HStack>
+                          </HStack>
+                          <VStack align="stretch" spacing={2}>
+                            <Box>
+                              <Text fontSize="xs" fontWeight="semibold">Suggested subject</Text>
+                              <Text mt={1} fontSize="xs" whiteSpace="pre-wrap">
+                                {sequenceStepAiSuggestion[step.stepOrder]?.subject}
+                              </Text>
+                            </Box>
+                            <Box>
+                              <Text fontSize="xs" fontWeight="semibold">Suggested content</Text>
+                              <Text mt={1} fontSize="xs" whiteSpace="pre-wrap">
+                                {sequenceStepAiSuggestion[step.stepOrder]?.content}
+                              </Text>
+                            </Box>
+                          </VStack>
+                        </Box>
+                      ) : null}
                     </Box>
                   ))}
                 </Box>
@@ -7045,7 +7375,7 @@ const SequencesTab: React.FC = () => {
             borderTop="1px solid"
             borderColor="gray.200"
           >
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={handleCloseSequenceEditor}>
               Close
             </Button>
             <Button variant="outline" onClick={handleSaveDraft} isDisabled={!canSaveDraft}>

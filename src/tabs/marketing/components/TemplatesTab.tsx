@@ -98,6 +98,10 @@ const TEMPLATE_PLACEHOLDER_HELP = [
 ] as const
 
 type AITone = 'professional' | 'friendly' | 'casual'
+type TemplateEditorSnapshot = {
+  subject: string
+  content: string
+}
 
 const escapeHtml = (value: string) => {
   return value
@@ -206,6 +210,7 @@ const TemplatesTab: React.FC = () => {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiSuggestion, setAiSuggestion] = useState<{ subject: string; content: string } | null>(null)
+  const [originalTemplateSnapshot, setOriginalTemplateSnapshot] = useState<TemplateEditorSnapshot | null>(null)
   const toast = useToast()
 
   const selectedCustomer = useMemo(
@@ -324,9 +329,16 @@ const TemplatesTab: React.FC = () => {
     setAiTone('professional')
   }
 
+  const captureOriginalTemplateSnapshot = (template: Pick<EmailTemplate, 'subject' | 'content'>) => {
+    setOriginalTemplateSnapshot({
+      subject: template.subject,
+      content: template.content,
+    })
+  }
+
   const handleCreateTemplate = () => {
     resetAiAssist()
-    setEditingTemplate({
+    const nextTemplate = {
       id: '',
       name: '',
       subject: '',
@@ -343,13 +355,16 @@ const TemplatesTab: React.FC = () => {
         name: 'Current User',
         email: 'user@company.com',
       },
-    })
+    }
+    setEditingTemplate(nextTemplate)
+    captureOriginalTemplateSnapshot(nextTemplate)
     onOpen()
   }
 
   const handleEditTemplate = (template: EmailTemplate) => {
     resetAiAssist()
     setEditingTemplate(template)
+    captureOriginalTemplateSnapshot(template)
     onOpen()
   }
 
@@ -434,8 +449,20 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     setAiSuggestion(null)
   }
 
+  const restoreOriginalTemplate = () => {
+    if (!editingTemplate || !originalTemplateSnapshot) return
+    setEditingTemplate({
+      ...editingTemplate,
+      subject: originalTemplateSnapshot.subject,
+      content: originalTemplateSnapshot.content,
+    })
+    setAiSuggestion(null)
+    setAiError(null)
+  }
+
   const handleCloseEditor = () => {
     resetAiAssist()
+    setOriginalTemplateSnapshot(null)
     onClose()
   }
 
@@ -593,6 +620,14 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       </RequireActiveClient>
     )
   }
+
+  const templateHasOriginalSnapshot =
+    !!editingTemplate &&
+    !!originalTemplateSnapshot &&
+    (
+      editingTemplate.subject !== originalTemplateSnapshot.subject ||
+      editingTemplate.content !== originalTemplateSnapshot.content
+    )
 
   if (loading) {
     return (
@@ -897,6 +932,11 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                   <Flex justify="space-between" align="center" mb={2} gap={3}>
                     <FormLabel mb={0}>Email Content</FormLabel>
                     <HStack spacing={2}>
+                      {templateHasOriginalSnapshot ? (
+                        <Button size="sm" variant="ghost" onClick={restoreOriginalTemplate}>
+                          Restore original
+                        </Button>
+                      ) : null}
                       <Select
                         size="sm"
                         value={aiTone}
@@ -955,12 +995,17 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                           <Icon as={RiSparkling2Line} color="blue.500" />
                           <Text fontWeight="semibold">AI suggestion</Text>
                         </HStack>
-                        <Text fontSize="sm" color="gray.600">Review before applying.</Text>
+                        <Text fontSize="sm" color="gray.600">Review before applying. The saved original stays unchanged until you explicitly save.</Text>
                       </VStack>
                       <HStack spacing={2}>
                         <Button size="sm" colorScheme="blue" onClick={applyAiSuggestion}>
                           Apply suggestion
                         </Button>
+                        {originalTemplateSnapshot ? (
+                          <Button size="sm" variant="ghost" onClick={restoreOriginalTemplate}>
+                            Restore original
+                          </Button>
+                        ) : null}
                         <Button size="sm" variant="ghost" onClick={() => setAiSuggestion(null)}>
                           Dismiss
                         </Button>
