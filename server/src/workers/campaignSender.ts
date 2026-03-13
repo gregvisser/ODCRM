@@ -11,7 +11,7 @@
  */
 
 import { PrismaClient } from '@prisma/client'
-import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { sendEmail as sendEmailViaOutlook } from '../services/outlookEmailService.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
@@ -354,7 +354,7 @@ export async function processSequenceBasedCampaigns(
           emailSignature: identity.signatureHtml || '',
         })
 
-        const bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, {
+        const bodyHtml = applyTemplatePlaceholdersHtml(step.bodyTemplateHtml, {
           firstName: contact.firstName,
           lastName: contact.lastName,
           fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),

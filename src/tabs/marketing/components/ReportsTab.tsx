@@ -26,7 +26,8 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
+import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
+import { getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type WindowDays = 7 | 30 | 90
@@ -52,6 +53,11 @@ type OutreachReportResponse = {
   byIdentity: OutreachMetricsRow[]
   recentReasons?: Array<{ reason: string; count: number }>
   generatedAt?: string
+}
+
+type Customer = {
+  id: string
+  name: string
 }
 
 type RunHistoryRow = {
@@ -159,6 +165,7 @@ function humanizeReason(reason?: string | null): string {
 }
 
 const ReportsTab: React.FC = () => {
+  const [customers, setCustomers] = useState<Customer[]>([])
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
   const [loading, setLoading] = useState(false)
@@ -191,6 +198,29 @@ const ReportsTab: React.FC = () => {
     })
     return () => unsubscribe()
   }, [])
+
+  const loadCustomers = useCallback(async () => {
+    const { data, error: apiError } = await api.get('/api/customers')
+    if (apiError) {
+      setCustomers([])
+      return
+    }
+
+    try {
+      const customerList = normalizeCustomersListResponse(data) as Customer[]
+      setCustomers(customerList)
+      const storedCustomerId = getCurrentCustomerId()
+      if (!selectedCustomerId && storedCustomerId && customerList.some((customer) => customer.id === storedCustomerId)) {
+        setSelectedCustomerId(storedCustomerId)
+      }
+    } catch {
+      setCustomers([])
+    }
+  }, [selectedCustomerId])
+
+  useEffect(() => {
+    void loadCustomers()
+  }, [loadCustomers])
 
   const loadData = useCallback(async (isRefresh = false) => {
     if (!selectedCustomerId?.startsWith('cust_')) {
@@ -308,6 +338,25 @@ const ReportsTab: React.FC = () => {
                   </Text>
                 </VStack>
                 <HStack>
+                  <Select
+                    id="reports-tab-customer-select"
+                    data-testid="reports-tab-customer-select"
+                    size="sm"
+                    value={selectedCustomerId}
+                    onChange={(event) => {
+                      const nextCustomerId = event.target.value
+                      setSelectedCustomerId(nextCustomerId)
+                      setCurrentCustomerId(nextCustomerId)
+                    }}
+                    minW="220px"
+                  >
+                    <option value="">Select client</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.name}
+                      </option>
+                    ))}
+                  </Select>
                   <Button
                     size="sm"
                     variant="outline"
