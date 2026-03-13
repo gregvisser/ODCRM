@@ -123,7 +123,7 @@ export default function ComplianceTab() {
 
     setDataHealthLoading(true)
     setDataHealthError(null)
-    const { data, error } = await api.get<{ success: boolean; data?: { suppressionSheets?: { email: SuppressionSheetHealth; domain: SuppressionSheetHealth } } }>(
+    const { data, error } = await api.get<{ suppressionSheets?: { email: SuppressionSheetHealth; domain: SuppressionSheetHealth } }>(
       `/api/suppression/health?customerId=${customerId}`,
     )
 
@@ -134,7 +134,7 @@ export default function ComplianceTab() {
       return
     }
 
-    const sheets = data?.data?.suppressionSheets
+    const sheets = data?.suppressionSheets
     if (sheets?.email && sheets?.domain) {
       setSuppressionSheetHealth(sheets)
       setSheetUrls((prev) => ({

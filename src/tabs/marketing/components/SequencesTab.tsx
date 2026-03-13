@@ -266,6 +266,7 @@ const SequencesTab: React.FC = () => {
   const [linkedListSummaryLoading, setLinkedListSummaryLoading] = useState(false)
   const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
   const [isSequenceSetupOpen, setIsSequenceSetupOpen] = useState(false)
+  const [sequenceValidationVisible, setSequenceValidationVisible] = useState(false)
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
@@ -1385,7 +1386,7 @@ const SequencesTab: React.FC = () => {
       case 'live_send_disabled_env':
         return 'Live sending is disabled in the current environment.'
       case 'customer_not_in_canary':
-        return 'This client is not approved for live sending yet.'
+        return 'Live sending is only enabled for approved clients right now. You can save this sequence, but live sending cannot start for this client yet.'
       case 'identity_not_in_canary':
         return 'The selected sending mailbox is not approved for live sending.'
       case 'canary_customer_not_configured':
@@ -3156,6 +3157,7 @@ const SequencesTab: React.FC = () => {
 
     setMaterializedBatchKey(null)
     setIsSequenceSetupOpen(true)
+    setSequenceValidationVisible(false)
     setEditingSequence({
       id: '',
       name: '',
@@ -3273,6 +3275,7 @@ const SequencesTab: React.FC = () => {
   const handleEditSequence = async (sequence: SequenceCampaign) => {
     setMaterializedBatchKey(null)
     setIsSequenceSetupOpen(false)
+    setSequenceValidationVisible(false)
     setEditingSequence({
       ...sequence,
       listId: sequence.listId || '',
@@ -3460,6 +3463,7 @@ const SequencesTab: React.FC = () => {
 
   const handleSaveDraft = async () => {
     if (!editingSequence) return
+    setSequenceValidationVisible(true)
     const validationErrors = getSequenceDraftValidationErrors(editingSequence)
     if (validationErrors.length > 0) {
       toast({
@@ -3580,7 +3584,7 @@ const SequencesTab: React.FC = () => {
   }
 
   const sequenceDraftValidationErrors = editingSequence ? getSequenceDraftValidationErrors(editingSequence) : []
-  const canSaveDraft = !!editingSequence && sequenceDraftValidationErrors.length === 0
+  const canSaveDraft = !!editingSequence
 
   const handleRequestStart = async (sequence: SequenceCampaign) => {
     const validationError = validateStartRequirements(sequence)
@@ -6633,7 +6637,7 @@ const SequencesTab: React.FC = () => {
                   <Heading size="sm" mb={4}>
                     Configuration
                   </Heading>
-                  {sequenceDraftValidationErrors.length > 0 && (
+                  {sequenceValidationVisible && sequenceDraftValidationErrors.length > 0 && (
                     <Alert status="error" mb={4} borderRadius="md">
                       <AlertIcon />
                       <Box>

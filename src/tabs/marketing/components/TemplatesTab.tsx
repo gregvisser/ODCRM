@@ -109,8 +109,26 @@ const escapeHtml = (value: string) => {
 }
 
 const toHtmlBody = (text: string) => {
-  const escaped = escapeHtml(text)
-  return `<p>${escaped.replace(/\n/g, '<br/>')}</p>`
+  const normalized = text.replace(/\r\n/g, '\n').trim()
+  if (!normalized) return '<p></p>'
+
+  return normalized
+    .split(/\n\s*\n/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph.trim()).replace(/\n/g, '<br/>')}</p>`)
+    .join('')
+}
+
+const toPreviewBodyHtml = (body: string) => {
+  const trimmed = body.trim()
+  if (!trimmed) return '<p></p>'
+  if (trimmed.startsWith('<')) return trimmed
+
+  const firstTagIndex = trimmed.indexOf('<')
+  if (firstTagIndex < 0) return toHtmlBody(trimmed)
+
+  const leadingText = trimmed.slice(0, firstTagIndex).trimEnd()
+  const trailingHtml = trimmed.slice(firstTagIndex)
+  return `${leadingText ? toHtmlBody(leadingText) : ''}${trailingHtml}`
 }
 
 const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
@@ -1033,9 +1051,7 @@ const TemplatesTab: React.FC = () => {
                       srcDoc={buildEmailPreviewDocument(
                         previewLoading
                           ? '<p>Rendering preview...</p>'
-                          : ((previewRendered?.body || previewingTemplate.content).trim()
-                              ? (previewRendered?.body || previewingTemplate.content)
-                              : '<p></p>'),
+                          : toPreviewBodyHtml(previewRendered?.body || previewingTemplate.content),
                       )}
                       style={{ width: '100%', minHeight: '720px', border: 0, background: 'white' }}
                       sandbox="allow-same-origin"
