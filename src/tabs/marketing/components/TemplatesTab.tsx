@@ -141,6 +141,8 @@ const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
         margin: 0;
         background: #f7fafc;
         font-family: Arial, sans-serif;
+        font-size: 15px;
+        line-height: 1.6;
         color: #1a202c;
       }
       .preview-shell {
@@ -154,6 +156,15 @@ const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
         border-radius: 16px;
         padding: 32px;
         overflow-wrap: anywhere;
+      }
+      p {
+        margin: 0 0 16px 0;
+      }
+      p:last-child {
+        margin-bottom: 0;
+      }
+      div, td, th {
+        line-height: 1.6;
       }
       img {
         max-width: 100%;
@@ -342,7 +353,7 @@ const TemplatesTab: React.FC = () => {
     onOpen()
   }
 
-  const handlePreviewTemplate = (template: EmailTemplate) => {
+const handlePreviewTemplate = (template: EmailTemplate) => {
     setPreviewingTemplate(template)
     setPreviewLoading(true)
     setPreviewError(null)
@@ -353,7 +364,7 @@ const TemplatesTab: React.FC = () => {
       '/api/templates/preview',
       {
         subject: template.subject,
-        body: template.content,
+        body: toHtmlBody(template.content),
         variables: {
           first_name: 'Alex',
           last_name: 'Taylor',
@@ -369,7 +380,7 @@ const TemplatesTab: React.FC = () => {
       } else {
         setPreviewRendered({
           subject: res.data?.subject || template.subject,
-          body: res.data?.body || template.content,
+          body: res.data?.body || toHtmlBody(template.content),
         })
       }
     }).finally(() => setPreviewLoading(false))
@@ -1051,7 +1062,7 @@ const TemplatesTab: React.FC = () => {
                       srcDoc={buildEmailPreviewDocument(
                         previewLoading
                           ? '<p>Rendering preview...</p>'
-                          : toPreviewBodyHtml(previewRendered?.body || previewingTemplate.content),
+                          : toPreviewBodyHtml(previewRendered?.body || toHtmlBody(previewingTemplate.content)),
                       )}
                       style={{ width: '100%', minHeight: '720px', border: 0, background: 'white' }}
                       sandbox="allow-same-origin"

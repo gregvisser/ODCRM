@@ -1386,7 +1386,7 @@ const SequencesTab: React.FC = () => {
       case 'live_send_disabled_env':
         return 'Live sending is disabled in the current environment.'
       case 'customer_not_in_canary':
-        return 'Live sending is only enabled for approved clients right now. You can save this sequence, but live sending cannot start for this client yet.'
+        return 'Live sending is currently limited to approved canary clients. You can still save this sequence, review the live recipients, and prepare test recipients, but this client cannot send yet.'
       case 'identity_not_in_canary':
         return 'The selected sending mailbox is not approved for live sending.'
       case 'canary_customer_not_configured':
@@ -6641,7 +6641,7 @@ const SequencesTab: React.FC = () => {
                     <Alert status="error" mb={4} borderRadius="md">
                       <AlertIcon />
                       <Box>
-                        <AlertTitle fontSize="sm">Validation required before save</AlertTitle>
+                          <AlertTitle fontSize="sm">Complete the required fields to save</AlertTitle>
                         <AlertDescription fontSize="xs">
                           {sequenceDraftValidationErrors[0]}
                         </AlertDescription>
@@ -6748,15 +6748,9 @@ const SequencesTab: React.FC = () => {
 
                     {/* Save-first notice — only shown for new (unsaved) sequences */}
                     {!editingSequence.id && (
-                      <Alert status="info" variant="left-accent" fontSize="sm">
-                        <AlertIcon />
-                        <Box>
-                          <AlertTitle fontSize="sm">Save draft to enable Start</AlertTitle>
-                          <AlertDescription fontSize="xs">
-                            Save first, then use "Start Sequence" to launch.
-                          </AlertDescription>
-                        </Box>
-                      </Alert>
+                      <Text fontSize="sm" color="gray.600">
+                        Save this sequence first, then use Start Sequence to launch the linked live recipients.
+                      </Text>
                     )}
                   </VStack>
                 </Box>

@@ -276,9 +276,12 @@ export default function ComplianceTab() {
     const health = suppressionSheetHealth?.[kind]
     const result = importResults[kind]
     const label = kind === 'email' ? 'Email DNC' : 'Domain DNC'
+    const awaitingHealth = dataHealthLoading && !suppressionSheetHealth
     const isConnected = Boolean(health?.configured)
     const editorOpen = sheetEditorOpen[kind]
-    const statusText = !health?.configured
+    const statusText = awaitingHealth
+      ? 'Checking the linked Google Sheet for this client.'
+      : !health?.configured
       ? 'Connect the Google Sheet for this client.'
       : health?.lastImportStatus === 'error'
         ? `Last sync failed${health.lastError ? `: ${health.lastError}` : '.'}`
@@ -291,8 +294,8 @@ export default function ComplianceTab() {
         <VStack align="stretch" spacing={3}>
           <HStack justify="space-between" flexWrap="wrap">
             <Heading size="sm">{label}</Heading>
-            <Badge colorScheme={health?.configured ? 'green' : 'orange'}>
-              {health?.configured ? 'Connected' : 'Not connected'}
+            <Badge colorScheme={awaitingHealth ? 'blue' : health?.configured ? 'green' : 'orange'}>
+              {awaitingHealth ? 'Checking…' : health?.configured ? 'Connected' : 'Not connected'}
             </Badge>
           </HStack>
 
@@ -320,6 +323,7 @@ export default function ComplianceTab() {
               colorScheme="teal"
               onClick={() => void handleSheetSync(kind, isConnected ? health?.sheetUrl || undefined : undefined)}
               isLoading={importingKind === kind}
+              isDisabled={awaitingHealth}
               loadingText={isConnected ? 'Syncing' : 'Connecting'}
             >
               {isConnected ? 'Sync now' : 'Connect sheet'}
@@ -334,7 +338,7 @@ export default function ComplianceTab() {
             ) : null}
           </HStack>
 
-          {(!isConnected || editorOpen) ? (
+          {!awaitingHealth && (!isConnected || editorOpen) ? (
             <FormControl>
               <FormLabel fontSize="sm">Google Sheet URL</FormLabel>
               <Input
@@ -348,7 +352,7 @@ export default function ComplianceTab() {
             </FormControl>
           ) : null}
 
-          {isConnected && editorOpen ? (
+          {isConnected && editorOpen && !awaitingHealth ? (
             <Button
               variant="outline"
               onClick={() => void handleSheetSync(kind)}
@@ -359,7 +363,7 @@ export default function ComplianceTab() {
             </Button>
           ) : null}
 
-          {result ? (
+          {result && !awaitingHealth ? (
             <HStack spacing={2} flexWrap="wrap">
               <Badge colorScheme="green">Inserted: {result.inserted}</Badge>
               <Badge colorScheme="red">Replaced: {result.replacedCount}</Badge>
