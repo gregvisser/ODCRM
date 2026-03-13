@@ -1,7 +1,7 @@
 /**
  * Stage 2A: Dry-run send worker — process queue items into audited decisions without sending.
  * Stage 2B-min: GET /api/send-worker/audits — read-only audit list (tenant-scoped).
- * Stage 4-min: POST /api/send-worker/live-tick — admin + canary gated real send of N items.
+ * Stage 4-min: POST /api/send-worker/live-tick — admin-gated real send of N items.
  */
 import { Router, Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'
@@ -261,8 +261,6 @@ async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
   const cap = getLiveSendCap()
   const queueGateEnabled = isSendQueueSendingEnabled()
   const liveGateEnabled = isLiveSendingEnabled()
-  const canaryCustomerId = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
-  const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
   const allowLiveTick = process.env.ODCRM_ALLOW_LIVE_TICK === 'true'
   const allowLiveTickIgnoreWindow = process.env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW === 'true'
   const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
@@ -300,19 +298,8 @@ async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
   const reasons: string[] = []
   if (!queueGateEnabled) reasons.push('ENABLE_SEND_QUEUE_SENDING is not true')
   if (!liveGateEnabled) reasons.push('ENABLE_LIVE_SENDING is not true')
-  if (!canaryCustomerId) reasons.push('SEND_CANARY_CUSTOMER_ID is not configured')
-  if (canaryCustomerId && canaryCustomerId !== customerId) reasons.push('tenant is not in canary (customer mismatch)')
   if (activeIdentityCount < 1) reasons.push('no active sender identity for tenant')
-  if (canaryIdentityId) {
-    const canaryIdentity = await prisma.emailIdentity.findFirst({
-      where: { id: canaryIdentityId, customerId, isActive: true },
-      select: { id: true },
-    })
-    if (!canaryIdentity) reasons.push('SEND_CANARY_IDENTITY_ID is not active for tenant')
-  }
-  const scheduledLiveGate = canaryCustomerId
-    ? assertLiveSendAllowed({ customerId, trigger: 'worker' })
-    : { allowed: false, reason: 'canary_customer_not_configured' }
+  const scheduledLiveGate = assertLiveSendAllowed({ customerId, trigger: 'worker' })
   const scheduledMode =
     !scheduledEngineEnabled
       ? 'OFF'
@@ -351,13 +338,13 @@ async function getLiveGatesSnapshot(customerId: string, sinceHours: number) {
       scheduledLiveReason: scheduledMode === 'LIVE_CANARY' ? null : scheduledLiveGate.reason ?? 'scheduled_live_not_enabled',
     },
     canary: {
-      customerIdPresent: Boolean(canaryCustomerId),
-      identityIdPresent: Boolean(canaryIdentityId),
-      customerId: canaryCustomerId,
-      identityId: canaryIdentityId,
+      customerIdPresent: false,
+      identityIdPresent: false,
+      customerId: null,
+      identityId: null,
     },
-    canaryCustomerId,
-    canaryIdentityId,
+    canaryCustomerId: null,
+    canaryIdentityId: null,
     currentCount: {
       queuedDueNow: dueNowCount,
       activeIdentities: activeIdentityCount,
@@ -775,7 +762,7 @@ router.post('/dry-run', validateAdminSecret, async (req: Request, res: Response)
 })
 
 /**
- * POST /api/send-worker/live-tick — Stage 4-min: real send of up to N QUEUED items (admin + canary gated).
+ * POST /api/send-worker/live-tick — Stage 4-min: real send of up to N QUEUED items (admin gated).
  * Body: { limit?: number } (default 5, max getLiveSendCap()). Requires X-Customer-Id and X-Admin-Secret.
  */
 router.post('/live-tick', validateAdminSecret, async (req: Request, res: Response) => {
@@ -788,29 +775,14 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
     if (Number.isNaN(limit) || limit < 1) limit = 5
     limit = Math.min(limit, cap)
 
-    const canaryIdentityId = process.env.SEND_CANARY_IDENTITY_ID?.trim()
-    let identity: { id: string } | null = null
-    if (canaryIdentityId) {
-      const row = await prisma.emailIdentity.findFirst({
-        where: { id: canaryIdentityId, customerId, isActive: true },
-        select: { id: true },
-      })
-      if (!row) {
-        res.status(400).json({ success: false, error: 'canary_identity_not_found_or_inactive' })
-        return
-      }
-      identity = row
-    } else {
-      const row = await prisma.emailIdentity.findFirst({
-        where: { customerId, isActive: true },
-        orderBy: { id: 'asc' },
-        select: { id: true },
-      })
-      if (!row) {
-        res.status(400).json({ success: false, error: 'no_active_identity' })
-        return
-      }
-      identity = row
+    const identity = await prisma.emailIdentity.findFirst({
+      where: { customerId, isActive: true },
+      orderBy: { id: 'asc' },
+      select: { id: true },
+    })
+    if (!identity) {
+      res.status(400).json({ success: false, error: 'no_active_identity' })
+      return
     }
 
     const gate = assertLiveSendAllowed({ customerId, identityId: identity.id, trigger: 'manual' })
@@ -1098,7 +1070,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
 
 /**
  * POST /api/send-worker/sequence-test-send — operator-facing constrained live send for one sequence.
- * Tenant + marketing-auth scoped. Uses the same live-send gates as manual canary send and only sends
+ * Tenant + marketing-auth scoped. Uses the same live-send gates as manual live send and only sends
  * a tiny first test batch so operators can verify real delivery without waiting for the next cron cycle.
  */
 router.post('/sequence-test-send', requireMarketingMutationAuth, async (req: Request, res: Response) => {
@@ -1282,7 +1254,7 @@ router.post('/sequence-test-send', requireMarketingMutationAuth, async (req: Req
           sent > 0
             ? `Sent ${sent} live test email${sent === 1 ? '' : 's'}.`
             : requeued > 0
-              ? 'No emails were sent. Current queue rules or send windows re-queued the test batch.'
+              ? 'No emails were sent. Current queue rules re-queued the test batch.'
               : 'No emails were sent from this test batch.',
       },
     })
@@ -1726,7 +1698,7 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
     if ((readiness.breakdown.suppressed ?? 0) > 0) warnings.push(`${readiness.breakdown.suppressed} recipients currently suppressed.`)
     if ((readiness.breakdown.reply_stopped ?? 0) > 0) warnings.push(`${readiness.breakdown.reply_stopped} recipients are reply-stopped.`)
     if ((readiness.breakdown.invalid_recipient ?? 0) > 0) warnings.push(`${readiness.breakdown.invalid_recipient} recipients are invalid/hard-bounced.`)
-    if (!manualLiveGate.allowed) warnings.push(`Live canary currently blocked: ${manualLiveGate.reason ?? 'manual_live_tick_not_allowed'}`)
+    if (!manualLiveGate.allowed) warnings.push(`Immediate live sending is currently blocked: ${manualLiveGate.reason ?? 'manual_live_tick_not_allowed'}`)
     if ((gateData.recent.counts.SEND_FAILED ?? 0) > 0) warnings.push(`Recent SEND_FAILED events in window (${sinceHours}h): ${gateData.recent.counts.SEND_FAILED}`)
     if ((identityCapacity.summary.risky ?? 0) > 0) warnings.push(`${identityCapacity.summary.risky} identities currently flagged as risky.`)
     if (identityCapacity.summary.preferredIdentityState === 'unavailable') warnings.push('Sequence preferred identity is currently unavailable.')
@@ -1784,7 +1756,7 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
             blockers.length > 0
               ? 'Resolve blockers, then run Dry-Run Tick.'
               : manualLiveGate.allowed
-                ? 'Run Live Canary Tick from the Sending Console.'
+                ? 'Run Live Send Now from the Sending Console.'
                 : 'Run Dry-Run Tick and monitor readiness/reporting.',
         },
         dependencies: {

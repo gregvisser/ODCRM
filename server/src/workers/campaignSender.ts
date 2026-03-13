@@ -2,7 +2,7 @@
  * Campaign Email Sender Worker
  * 
  * Processes running campaigns and sends emails based on sequences
- * Enforces daily sending caps, send windows, and delays between steps
+ * Enforces daily sending caps and delays between steps
  * 
  * IDEMPOTENCY:
  * - Uses atomic updateMany with lastStatus change (pending → sending) to claim
@@ -40,24 +40,6 @@ export interface SenderConfig {
   spreadHours?: number
   stepJitterMinutes?: number
   retryMinutes?: number
-}
-
-/**
- * Check if current time is within the campaign's send window
- */
-function isWithinSendWindow(
-  sendWindowHoursStart: number,
-  sendWindowHoursEnd: number
-): boolean {
-  const now = new Date()
-  const currentHour = now.getHours()
-  
-  // Handle cases where window crosses midnight (e.g., 22 to 6)
-  if (sendWindowHoursStart <= sendWindowHoursEnd) {
-    return currentHour >= sendWindowHoursStart && currentHour < sendWindowHoursEnd
-  } else {
-    return currentHour >= sendWindowHoursStart || currentHour < sendWindowHoursEnd
-  }
 }
 
 /**
@@ -192,8 +174,6 @@ export async function processSequenceBasedCampaigns(
       customerId: true,
       sequenceId: true,
       senderIdentityId: true,
-      sendWindowHoursStart: true,
-      sendWindowHoursEnd: true,
       customer: {
         select: {
           name: true,
@@ -214,11 +194,6 @@ export async function processSequenceBasedCampaigns(
 
   for (const campaign of campaigns) {
     if (!campaign.sequenceId) continue
-
-    // Check send window
-    if (!isWithinSendWindow(campaign.sendWindowHoursStart, campaign.sendWindowHoursEnd)) {
-      continue
-    }
 
     // Get sequence steps
     const sequence = await prisma.emailSequence.findUnique({

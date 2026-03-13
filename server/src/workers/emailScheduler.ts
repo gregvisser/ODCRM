@@ -113,25 +113,9 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       continue
     }
 
-    // Check if we're within send window using sender identity's configuration
+    // Check daily send limit for this identity
     const timeZone = senderIdentity.sendWindowTimeZone || 'UTC'
     const senderTime = new Date(now.toLocaleString('en-US', { timeZone }))
-    const currentHour = senderTime.getHours()
-
-    const windowStart = senderIdentity.sendWindowHoursStart ?? 9
-    const windowEnd = senderIdentity.sendWindowHoursEnd ?? 17
-
-    // Handle wrap-around windows (e.g., 22 to 6)
-    const inWindow = windowStart <= windowEnd
-      ? (currentHour >= windowStart && currentHour < windowEnd)
-      : (currentHour >= windowStart || currentHour < windowEnd)
-
-    if (!inWindow) {
-      console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Outside send window for ${senderIdentity.emailAddress} (${currentHour} not in ${windowStart}-${windowEnd})`)
-      continue
-    }
-
-    // Check daily send limit for this identity
     const todayStart = new Date(senderTime)
     todayStart.setHours(0, 0, 0, 0)
     const todayEnd = new Date(senderTime)

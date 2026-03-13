@@ -1,8 +1,8 @@
 /**
  * Stage 2B: Send-queue worker with optional live sending.
  * - Locks QUEUED OutboundSendQueueItems with a lease (no double-processing).
- * - Enforces kill-switch (ENABLE_LIVE_SENDING default false) and canary gating.
- * - When ENABLE_LIVE_SENDING and canary vars are set, sends via Outlook (Graph).
+ * - Enforces kill-switch (ENABLE_LIVE_SENDING default false).
+ * - When ENABLE_LIVE_SENDING is enabled, sends via Outlook (Graph).
  * - Writes append-only EnrollmentAuditEvent entries for every decision/send.
  */
 import cron from 'node-cron'
@@ -24,8 +24,6 @@ const SCHEDULED_SENDING_CRON = process.env.SCHEDULED_SENDING_CRON || '*/2 * * * 
 const ENABLE_LIVE_SENDING = isLiveSendingEnabled()
 // Stage 1B/1D: explicit sending gate; default false = dry-run (non-destructive: leave QUEUED, no FAILED)
 const ENABLE_SEND_QUEUE_SENDING = isSendQueueSendingEnabled()
-const SEND_CANARY_CUSTOMER_ID = process.env.SEND_CANARY_CUSTOMER_ID?.trim() || null
-const SEND_CANARY_IDENTITY_ID = process.env.SEND_CANARY_IDENTITY_ID?.trim() || null
 const SEND_QUEUE_PER_MINUTE_CAP = Number(process.env.SEND_QUEUE_PER_MINUTE_CAP) || 0
 const HARD_BOUNCE_REASON = 'hard_bounce_invalid_recipient'
 const ENABLE_SCHEDULED_SENDING_LIVE = process.env.ENABLE_SCHEDULED_SENDING_LIVE === 'true'
@@ -38,20 +36,16 @@ function resolveScheduledEngineMode(): {
   reason?: string
   customerId: string | null
 } {
-  const customerId = SEND_CANARY_CUSTOMER_ID
   const scheduledEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
-  if (!scheduledEnabled) return { mode: 'OFF', liveAllowed: false, reason: 'scheduled_engine_disabled', customerId }
+  if (!scheduledEnabled) return { mode: 'OFF', liveAllowed: false, reason: 'scheduled_engine_disabled', customerId: null }
   if (!ENABLE_SCHEDULED_SENDING_LIVE) {
-    return { mode: 'DRY_RUN', liveAllowed: false, reason: 'scheduled_live_not_enabled', customerId }
+    return { mode: 'DRY_RUN', liveAllowed: false, reason: 'scheduled_live_not_enabled', customerId: null }
   }
-  if (!customerId) {
-    return { mode: 'DRY_RUN', liveAllowed: false, reason: 'canary_customer_missing', customerId }
-  }
-  const gate = assertLiveSendAllowed({ customerId, trigger: 'worker' })
+  const gate = assertLiveSendAllowed({ customerId: 'scheduled_engine', trigger: 'worker' })
   if (!gate.allowed) {
-    return { mode: 'DRY_RUN', liveAllowed: false, reason: gate.reason ?? 'live_gate_blocked', customerId }
+    return { mode: 'DRY_RUN', liveAllowed: false, reason: gate.reason ?? 'live_gate_blocked', customerId: null }
   }
-  return { mode: 'LIVE_CANARY', liveAllowed: true, customerId }
+  return { mode: 'LIVE_CANARY', liveAllowed: true, customerId: null }
 }
 
 function isHardInvalidRecipientFailure(errorMessage: string): boolean {
@@ -100,17 +94,6 @@ function buildEnrollmentUnsubscribeUrl(enrollmentId: string, recipientEmailNorm:
   return `${base}/api/email/unsubscribe?enrollmentId=${encodeURIComponent(enrollmentId)}&email=${encodeURIComponent(recipientEmailNorm)}`
 }
 
-function inSendWindow(identity: { sendWindowTimeZone?: string | null; sendWindowHoursStart?: number; sendWindowHoursEnd?: number }): boolean {
-  const timeZone = identity.sendWindowTimeZone || 'Europe/London'
-  const now = new Date()
-  const dtf = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hour12: false })
-  const hourStr = dtf.format(now)
-  const currentHour = parseInt(hourStr, 10)
-  const start = identity.sendWindowHoursStart ?? 9
-  const end = identity.sendWindowHoursEnd ?? 17
-  return currentHour >= start && currentHour < end
-}
-
 export function startSendQueueWorker(prisma: PrismaClient) {
   const scheduledEngineEnabled = process.env.ENABLE_SCHEDULED_SENDING_ENGINE === 'true'
   const legacyWorkerEnabled = process.env.ENABLE_SEND_QUEUE_WORKER === 'true'
@@ -120,7 +103,7 @@ export function startSendQueueWorker(prisma: PrismaClient) {
   }
 
   console.log(
-    `[sendQueueWorker] config: scheduledEngine=${scheduledEngineEnabled} legacyWorker=${legacyWorkerEnabled} mode=${scheduledResolution.mode} scheduledLiveAllowed=${scheduledResolution.liveAllowed} cron=${SCHEDULED_SENDING_CRON} canaryCustomerId=${scheduledResolution.customerId ?? 'unset'} liveSendEnv=${ENABLE_LIVE_SENDING} queueSendEnv=${ENABLE_SEND_QUEUE_SENDING} reason=${scheduledResolution.reason ?? 'ready'}`
+    `[sendQueueWorker] config: scheduledEngine=${scheduledEngineEnabled} legacyWorker=${legacyWorkerEnabled} mode=${scheduledResolution.mode} scheduledLiveAllowed=${scheduledResolution.liveAllowed} cron=${SCHEDULED_SENDING_CRON} customerScope=${scheduledResolution.customerId ?? 'all'} liveSendEnv=${ENABLE_LIVE_SENDING} queueSendEnv=${ENABLE_SEND_QUEUE_SENDING} reason=${scheduledResolution.reason ?? 'ready'}`
   )
 
   cron.schedule(SCHEDULED_SENDING_CRON, async () => {
@@ -147,24 +130,18 @@ export function startSendQueueWorker(prisma: PrismaClient) {
   )
 }
 
-async function runScheduledDryRunTick(prisma: PrismaClient, canaryCustomerId: string | null, reason?: string) {
-  if (!canaryCustomerId) {
-    console.log(
-      `[sendQueueWorker] ${WORKER_ID} scheduled tick skipped mode=DRY_RUN reason=${reason ?? 'canary_customer_missing'}`
-    )
-    return
-  }
+async function runScheduledDryRunTick(prisma: PrismaClient, customerId: string | null, reason?: string) {
   const startedAt = Date.now()
   console.log(
-    `[sendQueueWorker] ${WORKER_ID} scheduled tick start mode=DRY_RUN customerId=${canaryCustomerId} reason=${reason ?? 'dry_run'}`
+    `[sendQueueWorker] ${WORKER_ID} scheduled tick start mode=DRY_RUN customerId=${customerId ?? 'all'} reason=${reason ?? 'dry_run'}`
   )
   const result = await runSendWorkerDryRunBatch(prisma, {
-    customerId: canaryCustomerId,
+    customerId: customerId ?? undefined,
     limit: BATCH_SIZE,
   })
   const elapsedMs = Date.now() - startedAt
   console.log(
-    `[sendQueueWorker] ${WORKER_ID} scheduled tick end mode=DRY_RUN customerId=${canaryCustomerId} processed=${result.processedCount} audits=${result.auditsCreated} elapsedMs=${elapsedMs}`
+    `[sendQueueWorker] ${WORKER_ID} scheduled tick end mode=DRY_RUN customerId=${customerId ?? 'all'} processed=${result.processedCount} audits=${result.auditsCreated} elapsedMs=${elapsedMs}`
   )
 }
 
@@ -172,18 +149,14 @@ async function runScheduledLiveCanaryTick(
   prisma: PrismaClient,
   now: Date,
   leaseExpiry: Date,
-  canaryCustomerId: string | null
+  customerId: string | null
 ) {
-  if (!canaryCustomerId) {
-    console.log(`[sendQueueWorker] ${WORKER_ID} scheduled tick skipped mode=LIVE_CANARY reason=canary_customer_missing`)
-    return
-  }
   const startedAt = Date.now()
-  console.log(`[sendQueueWorker] ${WORKER_ID} scheduled tick start mode=LIVE_CANARY customerId=${canaryCustomerId}`)
-  await tick(prisma, now, leaseExpiry, { customerId: canaryCustomerId })
+  console.log(`[sendQueueWorker] ${WORKER_ID} scheduled tick start mode=LIVE_CANARY customerId=${customerId ?? 'all'}`)
+  await tick(prisma, now, leaseExpiry, customerId ? { customerId } : undefined)
   const elapsedMs = Date.now() - startedAt
   console.log(
-    `[sendQueueWorker] ${WORKER_ID} scheduled tick end mode=LIVE_CANARY customerId=${canaryCustomerId} elapsedMs=${elapsedMs}`
+    `[sendQueueWorker] ${WORKER_ID} scheduled tick end mode=LIVE_CANARY customerId=${customerId ?? 'all'} elapsedMs=${elapsedMs}`
   )
 }
 
@@ -346,7 +319,7 @@ async function propagateReplyStopToSiblingQueuedItems(
   return { siblingQueuedCount: siblingItems.length, siblingAuditsCreated }
 }
 
-/** Options for processOne (Stage 1G: ignoreWindow only from tick when env gate set). */
+/** Options for processOne. Reserved for controlled tick-specific overrides. */
 export type ProcessOneOptions = { ignoreWindow?: boolean }
 export type ProcessOneResult = 'sent' | 'requeued' | 'skipped' | 'failed_terminal'
 
@@ -355,7 +328,7 @@ export async function processOne(
   prisma: PrismaClient,
   item: { id: string; customerId: string; enrollmentId: string; recipientEmail: string; stepIndex: number },
   now: Date,
-  options?: ProcessOneOptions
+  _options?: ProcessOneOptions
 ): Promise<ProcessOneResult> {
   const { customerId, enrollmentId, recipientEmail, stepIndex } = item
 
@@ -460,53 +433,6 @@ export async function processOne(
       },
     })
     await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, null)
-    return 'requeued'
-  }
-
-  // Stage 1F: canary — SEND_CANARY_CUSTOMER_ID required; SEND_CANARY_IDENTITY_ID optional (if set, must match)
-  if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID == null) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_skipped',
-        message: 'SEND_BLOCKED_CANARY_MISCONFIG',
-        meta: { reason: 'canary_required_when_live_sending', stepIndex },
-      },
-    })
-    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_required')
-    return 'requeued'
-  }
-
-  if (ENABLE_LIVE_SENDING && SEND_CANARY_CUSTOMER_ID != null && customerId !== SEND_CANARY_CUSTOMER_ID) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_skipped',
-        message: 'canary_blocked',
-        meta: { reason: 'customer_not_in_canary', stepIndex },
-      },
-    })
-    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
-    return 'requeued'
-  }
-
-  const identityId = enrollment.sequence?.senderIdentityId ?? null
-  if (ENABLE_LIVE_SENDING && SEND_CANARY_IDENTITY_ID != null && identityId !== SEND_CANARY_IDENTITY_ID) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_skipped',
-        message: 'canary_blocked',
-        meta: { reason: 'identity_not_in_canary', stepIndex },
-      },
-    })
-    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'canary_blocked')
     return 'requeued'
   }
 
@@ -619,34 +545,6 @@ export async function processOne(
       return 'skipped'
     }
   }
-  // Stage 1G: ignoreWindow only when tick passes option (env ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW); worker never sets it
-  if (!options?.ignoreWindow && !inSendWindow(identity)) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_skipped',
-        message: 'outside_window',
-        meta: { reason: 'outside_send_window', stepIndex },
-      },
-    })
-    await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'outside_window')
-    return 'requeued'
-  }
-  if (options?.ignoreWindow) {
-    await prisma.enrollmentAuditEvent.create({
-      data: {
-        customerId,
-        enrollmentId,
-        recipientEmail,
-        eventType: 'send_window_bypass',
-        message: 'SEND_WINDOW_BYPASS',
-        meta: { stepIndex, identityId: identity.id },
-      },
-    })
-  }
-
   // Respect mailbox throughput guardrails before attempting a live send.
   const dailyLimit = clampDailySendLimit((enrollment.sequence?.senderIdentity as any)?.dailySendLimit)
   const nowUtc = now

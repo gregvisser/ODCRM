@@ -49,9 +49,6 @@ router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
       if (!parsed.senderIdentityId) {
         return res.status(400).json({ error: 'senderIdentityId is required when status is not draft' })
       }
-      if (parsed.sendWindowHoursStart === undefined || parsed.sendWindowHoursEnd === undefined) {
-        return res.status(400).json({ error: 'sendWindowHoursStart and sendWindowHoursEnd are required when status is not draft' })
-      }
       if (parsed.randomizeWithinHours === undefined) {
         return res.status(400).json({ error: 'randomizeWithinHours is required when status is not draft' })
       }
@@ -438,9 +435,6 @@ router.post('/:id/start', requireMarketingMutationAuth, async (req, res, next) =
 
     if (!campaign.senderIdentityId) {
       return res.status(400).json({ error: 'Campaign must have a sender identity before starting' })
-    }
-    if (campaign.sendWindowHoursStart === null || campaign.sendWindowHoursEnd === null) {
-      return res.status(400).json({ error: 'Campaign must have send window hours configured before starting' })
     }
     if (!campaign.randomizeWithinHours) {
       return res.status(400).json({ error: 'Campaign must have randomizeWithinHours configured before starting' })
