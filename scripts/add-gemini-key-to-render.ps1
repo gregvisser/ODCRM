@@ -1,14 +1,17 @@
-# Add GOOGLE_GEMINI_API_KEY to Render via API
-# Service ID: srv-d5ldkn4mrvns73edi4rg
+# Legacy helper for adding GOOGLE_GEMINI_API_KEY to Render via API.
+# Do not place real API keys in this file.
 
 param(
     [Parameter(Mandatory=$true)]
-    [string]$RenderApiToken
+    [string]$RenderApiToken,
+
+    [Parameter(Mandatory=$true)]
+    [string]$Value
 )
 
 $serviceId = "srv-d5ldkn4mrvns73edi4rg"
 $key = "GOOGLE_GEMINI_API_KEY"
-$value = "AIzaSyDHGQxTnemCQ2yRYx6r0ogXGgo4KPfWQfI"
+$value = $Value
 
 $headers = @{
     "Authorization" = "Bearer $RenderApiToken"

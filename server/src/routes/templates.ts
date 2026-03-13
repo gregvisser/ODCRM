@@ -360,7 +360,21 @@ router.post('/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
     if (error.message?.includes('not configured')) {
       return res.status(503).json({ 
         success: false, 
-        error: 'AI service not configured. Please set EMERGENT_LLM_KEY, GEMINI_API_KEY, or GOOGLE_GEMINI_API_KEY.' 
+        error: 'AI service not configured. Add a Gemini runtime key (GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY).' 
+      })
+    }
+
+    if (error.message?.includes('authentication failed')) {
+      return res.status(502).json({
+        success: false,
+        error: 'AI provider authentication failed. Check the live Gemini key and model access.',
+      })
+    }
+
+    if (error.message?.includes('rate limited')) {
+      return res.status(429).json({
+        success: false,
+        error: error.message,
       })
     }
     

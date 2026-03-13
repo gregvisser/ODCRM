@@ -20,6 +20,11 @@ env:
   APP_NAME_DISPLAY: odcrm-api-hkbsfbdzdvezedg8
   ENABLE_SEND_QUEUE_SENDING_APPSETTING: 'true'
   ENABLE_LIVE_SENDING_APPSETTING: 'true'
+  SEND_CANARY_CUSTOMER_ID_APPSETTING: ${{ vars.SEND_CANARY_CUSTOMER_ID }}
+  SEND_CANARY_IDENTITY_ID_APPSETTING: ${{ vars.SEND_CANARY_IDENTITY_ID }}
+  ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING: ${{ vars.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW }}
+  GEMINI_API_KEY_APPSETTING: ${{ secrets.GEMINI_API_KEY }}
+  GOOGLE_GEMINI_API_KEY_APPSETTING: ${{ secrets.GOOGLE_GEMINI_API_KEY }}
 
 jobs:
   check:
@@ -216,6 +221,11 @@ jobs:
           PUBLISH_PROFILE_XML: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           ENABLE_SEND_QUEUE_SENDING_APPSETTING: ${{ env.ENABLE_SEND_QUEUE_SENDING_APPSETTING }}
           ENABLE_LIVE_SENDING_APPSETTING: ${{ env.ENABLE_LIVE_SENDING_APPSETTING }}
+          SEND_CANARY_CUSTOMER_ID_APPSETTING: ${{ env.SEND_CANARY_CUSTOMER_ID_APPSETTING }}
+          SEND_CANARY_IDENTITY_ID_APPSETTING: ${{ env.SEND_CANARY_IDENTITY_ID_APPSETTING }}
+          ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING: ${{ env.ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING }}
+          GEMINI_API_KEY_APPSETTING: ${{ env.GEMINI_API_KEY_APPSETTING }}
+          GOOGLE_GEMINI_API_KEY_APPSETTING: ${{ env.GOOGLE_GEMINI_API_KEY_APPSETTING }}
         run: |
           python <<'PY' >/tmp/kudu-profile.sh
           import os
@@ -264,10 +274,23 @@ jobs:
           import json
           import os
 
-          print(json.dumps({
+          payload = {
             'ENABLE_SEND_QUEUE_SENDING': os.environ['ENABLE_SEND_QUEUE_SENDING_APPSETTING'],
             'ENABLE_LIVE_SENDING': os.environ['ENABLE_LIVE_SENDING_APPSETTING'],
-          }))
+          }
+
+          optional_keys = {
+            'SEND_CANARY_CUSTOMER_ID': os.environ.get('SEND_CANARY_CUSTOMER_ID_APPSETTING', '').strip(),
+            'SEND_CANARY_IDENTITY_ID': os.environ.get('SEND_CANARY_IDENTITY_ID_APPSETTING', '').strip(),
+            'ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW': os.environ.get('ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW_APPSETTING', '').strip(),
+            'GEMINI_API_KEY': os.environ.get('GEMINI_API_KEY_APPSETTING', '').strip(),
+            'GOOGLE_GEMINI_API_KEY': os.environ.get('GOOGLE_GEMINI_API_KEY_APPSETTING', '').strip(),
+          }
+          for key, value in optional_keys.items():
+            if value:
+              payload[key] = value
+
+          print(json.dumps(payload))
           PY
           )
 
@@ -299,6 +322,17 @@ jobs:
           print('Confirmed live-send app settings:')
           for key, expected_value in expected.items():
             print(f'  {key}={expected_value}')
+
+          optional_present = {
+            'SEND_CANARY_CUSTOMER_ID': bool(str(data.get('SEND_CANARY_CUSTOMER_ID', '')).strip()),
+            'SEND_CANARY_IDENTITY_ID': bool(str(data.get('SEND_CANARY_IDENTITY_ID', '')).strip()),
+            'ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW': bool(str(data.get('ODCRM_ALLOW_LIVE_TICK_IGNORE_WINDOW', '')).strip()),
+            'GEMINI_API_KEY': bool(str(data.get('GEMINI_API_KEY', '')).strip()),
+            'GOOGLE_GEMINI_API_KEY': bool(str(data.get('GOOGLE_GEMINI_API_KEY', '')).strip()),
+          }
+          print('Confirmed optional app settings presence:')
+          for key, is_present in optional_present.items():
+            print(f'  {key}={"present" if is_present else "absent"}')
           PY
 
       # AZURE_WEBAPP_NAME must equal APP_NAME_DISPLAY so frontend (VITE_API_URL) and this deploy use the same app
