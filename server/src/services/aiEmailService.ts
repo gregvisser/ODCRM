@@ -82,10 +82,11 @@ function preservedPlaceholdersMatch(restored: string, expected: string[]): boole
 }
 
 function getGeminiApiKey(): string | null {
+  const allowEmergentGemini = process.env.ODCRM_USE_EMERGENT_LLM_KEY_FOR_GEMINI === 'true'
   const raw =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
-    process.env.EMERGENT_LLM_KEY ||
+    (allowEmergentGemini ? process.env.EMERGENT_LLM_KEY : '') ||
     ''
 
   const value = String(raw).trim()
@@ -95,7 +96,7 @@ function getGeminiApiKey(): string | null {
 async function callGeminiText(prompt: string, options: GeminiRequestOptions = {}): Promise<string> {
   const apiKey = getGeminiApiKey()
   if (!apiKey) {
-    throw new Error('AI service not configured. Set EMERGENT_LLM_KEY, GEMINI_API_KEY, or GOOGLE_GEMINI_API_KEY environment variable.')
+    throw new Error('AI service not configured. Set GEMINI_API_KEY or GOOGLE_GEMINI_API_KEY. If EMERGENT_LLM_KEY is intentionally a Gemini key, also set ODCRM_USE_EMERGENT_LLM_KEY_FOR_GEMINI=true.')
   }
 
   const failures: string[] = []

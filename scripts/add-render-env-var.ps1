@@ -1,21 +1,21 @@
-# PowerShell script to add GOOGLE_GEMINI_API_KEY to Render
-# This requires Render API token - alternative: use Render dashboard
+# Legacy helper for adding a Render env var without committing a secret.
+# Do not place real API keys in this file.
 
 param(
     [string]$RenderApiToken = "",
     [string]$ServiceId = "srv-d5ldkn4mrvns73edi4rg",
     [string]$Key = "GOOGLE_GEMINI_API_KEY",
-    [string]$Value = "AIzaSyDHGQxTnemCQ2yRYx6r0ogXGgo4KPfWQfI"
+    [string]$Value = ""
 )
 
-if (-not $RenderApiToken) {
+if (-not $RenderApiToken -or -not $Value) {
     Write-Host "❌ Render API token required. Please:"
     Write-Host "1. Get your API token from: https://dashboard.render.com/account/api-keys"
-    Write-Host "2. Run: .\add-render-env-var.ps1 -RenderApiToken 'your-token'"
+    Write-Host "2. Run: .\add-render-env-var.ps1 -RenderApiToken 'your-token' -Value 'your-rotated-key'"
     Write-Host ""
     Write-Host "OR add manually in Render dashboard:"
     Write-Host "   Key: $Key"
-    Write-Host "   Value: $Value"
+    Write-Host "   Value: <rotated-secret>"
     exit 1
 }
 
