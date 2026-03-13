@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 // Unique instance ID for multi-instance environments (Azure, scaling)
@@ -545,7 +545,7 @@ async function sendCampaignEmail(
     }
     const textVariables = { ...variables, emailSignature: '', senderSignature: '' }
     
-    const renderedHtml = applyTemplatePlaceholders(template.bodyTemplateHtml, variables)
+    const renderedHtml = applyTemplatePlaceholdersHtml(template.bodyTemplateHtml, variables)
     const renderedSubject = applyTemplatePlaceholders(template.subjectTemplate, variables)
     const renderedText = template.bodyTemplateText
       ? applyTemplatePlaceholders(template.bodyTemplateText, textVariables)

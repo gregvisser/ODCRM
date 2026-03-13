@@ -235,6 +235,32 @@ export function applyTemplatePlaceholders(
   });
 }
 
+function renderHtmlUnsubscribePlaceholder(template: string, rendered: string, unsubscribeUrl: string): string {
+  const marker = '__ODCRM_UNSUBSCRIBE_LINK__'
+  const normalizedTemplate = String(template || '')
+  if (!/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}/.test(normalizedTemplate)) {
+    return rendered
+  }
+
+  const safeUrl = escapeForHtml(unsubscribeUrl)
+  return rendered
+    .replaceAll(`"${marker}"`, `"${safeUrl}"`)
+    .replaceAll(`'${marker}'`, `'${safeUrl}'`)
+    .replaceAll(marker, `<a href="${safeUrl}">Unsubscribe</a>`)
+}
+
+export function applyTemplatePlaceholdersHtml(
+  template: string,
+  vars: TemplateVariables
+): string {
+  const marker = '__ODCRM_UNSUBSCRIBE_LINK__'
+  const unsubscribeUrl = getFirstNonEmpty(vars.unsubscribe_link, vars.unsubscribeLink)
+  const templateWithMarker = String(template || '').replace(/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}/g, marker)
+  const rendered = applyTemplatePlaceholders(templateWithMarker, vars)
+  if (!unsubscribeUrl) return rendered
+  return renderHtmlUnsubscribePlaceholder(templateWithMarker, rendered, unsubscribeUrl)
+}
+
 /**
  * Preview template with sample data
  */
@@ -295,6 +321,24 @@ export function applyTemplatePlaceholdersSafe(
     escaped[key as keyof TemplateVariables] = shouldPreserveHtml ? value : escapeForHtml(value);
   }
   return applyTemplatePlaceholders(template, escaped as TemplateVariables);
+}
+
+export function applyTemplatePlaceholdersSafeHtml(
+  template: string,
+  vars: TemplateVariables
+): string {
+  const marker = '__ODCRM_UNSUBSCRIBE_LINK__'
+  const templateWithMarker = String(template || '').replace(/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}/g, marker)
+  const escaped: Partial<TemplateVariables> = {}
+  for (const key of SUPPORTED_PLACEHOLDER_KEYS) {
+    const value = getCanonicalPlaceholderValue(key, vars)
+    const shouldPreserveHtml = key === 'email_signature' || key === 'emailSignature' || key === 'senderSignature'
+    escaped[key as keyof TemplateVariables] = shouldPreserveHtml ? value : escapeForHtml(value)
+  }
+  const rendered = applyTemplatePlaceholders(templateWithMarker, escaped as TemplateVariables)
+  const unsubscribeUrl = getFirstNonEmpty(vars.unsubscribe_link, vars.unsubscribeLink)
+  if (!unsubscribeUrl) return rendered
+  return renderHtmlUnsubscribePlaceholder(templateWithMarker, rendered, unsubscribeUrl)
 }
 
 /**

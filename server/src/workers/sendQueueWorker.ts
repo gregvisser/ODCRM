@@ -9,7 +9,7 @@ import cron from 'node-cron'
 import os from 'node:os'
 import { EnrollmentStatus, OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { assertLiveSendAllowed } from '../utils/liveSendGate.js'
@@ -635,7 +635,7 @@ export async function processOne(
     }
     const textVars = { ...vars, emailSignature: '', senderSignature: '' }
     subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
-    htmlBody = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
+    htmlBody = applyTemplatePlaceholdersHtml(step.bodyTemplateHtml, vars)
     textBody = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, textVars) : undefined
     const enforced = enforceUnsubscribeFooter(htmlBody, textBody, unsubscribeUrl)
     htmlBody = enforced.htmlBody

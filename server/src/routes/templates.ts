@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import {
   applyTemplatePlaceholdersSafe,
+  applyTemplatePlaceholdersSafeHtml,
   buildPreviewTemplateVariables,
   previewTemplate,
   type TemplateVariables,
@@ -279,8 +280,8 @@ router.post('/preview', async (req, res) => {
       : previewTemplate(subject || '')
 
     const previewedBody = previewVariables
-      ? applyTemplatePlaceholdersSafe(body || '', previewVariables)
-      : previewTemplate(body || '')
+      ? applyTemplatePlaceholdersSafeHtml(body || '', previewVariables)
+      : applyTemplatePlaceholdersSafeHtml(body || '', buildPreviewTemplateVariables())
 
     return res.json({
       data: {

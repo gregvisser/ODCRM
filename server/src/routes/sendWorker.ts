@@ -11,8 +11,7 @@ import { requireCustomerId } from '../utils/tenantId.js'
 import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, LeadSourceAppliesTo, EnrollmentStatus } from '@prisma/client'
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
-import { sendEmail } from '../services/outlookEmailService.js'
-import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
@@ -775,17 +774,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
     if (Number.isNaN(limit) || limit < 1) limit = 5
     limit = Math.min(limit, cap)
 
-    const identity = await prisma.emailIdentity.findFirst({
-      where: { customerId, isActive: true },
-      orderBy: { id: 'asc' },
-      select: { id: true },
-    })
-    if (!identity) {
-      res.status(400).json({ success: false, error: 'no_active_identity' })
-      return
-    }
-
-    const gate = assertLiveSendAllowed({ customerId, identityId: identity.id, trigger: 'manual' })
+    const gate = assertLiveSendAllowed({ customerId, trigger: 'manual' })
     if (!gate.allowed) {
       res.status(403).json({ success: false, error: gate.reason ?? 'live_send_not_allowed' })
       return
@@ -834,6 +823,7 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
           orderBy: [{ scheduledFor: 'asc' }, { id: 'asc' }],
           select: {
             id: true,
+            customerId: true,
             enrollmentId: true,
             stepIndex: true,
             recipientEmail: true,
@@ -841,214 +831,31 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
         })
       : []
 
-    const suppressionEntries = await prisma.suppressionEntry.findMany({
-      where: { customerId },
-      select: { type: true, value: true, emailNormalized: true, reason: true },
-    })
-
     let processed = 0
     let sent = 0
     let failed = 0
-    let skipped = 0
-    const reasons: Record<string, number> = {}
+    let requeued = 0
 
     const now = new Date()
 
     for (const item of lockedItems) {
       processed += 1
-      const recipientEmail = (item.recipientEmail ?? '').trim()
-      const recipientEmailNormalized = recipientEmail.toLowerCase()
-      if (!recipientEmail) {
-        await prisma.outboundSendQueueItem.update({
-          where: { id: item.id },
-          data: {
-            status: OutboundSendQueueStatus.SKIPPED,
-            lastError: 'missing_recipient_email',
-            lockedAt: null,
-            lockedBy: null,
-          },
-        })
-        await prisma.outboundSendAttemptAudit.create({
-          data: {
-            customerId,
-            queueItemId: item.id,
-            decision: OutboundSendAttemptDecision.SKIP_INVALID,
-            reason: 'missing_recipient_email',
-            snapshot: { recipientEmail: item.recipientEmail ?? null },
-          },
-        })
-        skipped += 1
-        reasons['skip_invalid'] = (reasons['skip_invalid'] ?? 0) + 1
-        continue
-      }
-
-      const suppressionReason = getSuppressionReason(suppressionEntries, recipientEmailNormalized)
-      if (suppressionReason) {
-        await prisma.outboundSendQueueItem.update({
-          where: { id: item.id },
-          data: {
-            status: OutboundSendQueueStatus.SKIPPED,
-            lastError: suppressionReason,
-            lockedAt: null,
-            lockedBy: null,
-          },
-        })
-        await prisma.outboundSendAttemptAudit.create({
-          data: {
-            customerId,
-            queueItemId: item.id,
-            decision: OutboundSendAttemptDecision.SKIP_SUPPRESSED,
-            reason: suppressionReason,
-            snapshot: { recipientEmail },
-          },
-        })
-        skipped += 1
-        reasons['skip_suppressed'] = (reasons['skip_suppressed'] ?? 0) + 1
-        continue
-      }
-
-      const enrollment = await prisma.enrollment.findFirst({
-        where: { id: item.enrollmentId, customerId },
-        select: {
-          id: true,
-          sequenceId: true,
-          customer: {
-            select: {
-              name: true,
-              website: true,
-              domain: true,
-            },
-          },
-          sequence: {
-            select: {
-              senderIdentity: {
-                select: {
-                  emailAddress: true,
-                  displayName: true,
-                  signatureHtml: true,
-                },
-              },
-            },
-          },
-        },
-      })
-      if (!enrollment) {
-        await prisma.outboundSendQueueItem.update({
-          where: { id: item.id },
-          data: {
-            status: OutboundSendQueueStatus.FAILED,
-            lastError: 'enrollment_not_found',
-            lockedAt: null,
-            lockedBy: null,
-          },
-        })
-        await prisma.outboundSendAttemptAudit.create({
-          data: {
-            customerId,
-            queueItemId: item.id,
-            decision: OutboundSendAttemptDecision.SEND_FAILED,
-            reason: 'enrollment_not_found',
-            snapshot: { recipientEmail },
-          },
-        })
+      try {
+        const outcome = await processOne(prisma, item, now)
+        if (outcome === 'sent') sent += 1
+        else if (outcome === 'requeued') requeued += 1
+        else if (outcome === 'failed_terminal') failed += 1
+      } catch (err) {
         failed += 1
-        reasons['fail_enrollment'] = (reasons['fail_enrollment'] ?? 0) + 1
-        continue
-      }
-
-      const step = await prisma.emailSequenceStep.findFirst({
-        where: { sequenceId: enrollment.sequenceId, stepOrder: item.stepIndex + 1 },
-        select: { subjectTemplate: true, bodyTemplateHtml: true, bodyTemplateText: true },
-      })
-      let subject: string
-      let htmlBody: string
-      let textBody: string | undefined
-      if (step?.subjectTemplate != null && step?.bodyTemplateHtml != null) {
-        const recipientRow = await prisma.enrollmentRecipient.findFirst({
-          where: { enrollmentId: item.enrollmentId, email: recipientEmailNormalized },
-          select: { firstName: true, lastName: true, company: true, email: true },
-        })
-        const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmailNormalized)
-        const vars = {
-          firstName: recipientRow?.firstName ?? '',
-          lastName: recipientRow?.lastName ?? '',
-          company: recipientRow?.company ?? '',
-          companyName: recipientRow?.company ?? '',
-          accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
-          email: recipientEmail,
-          role: '',
-          jobTitle: '',
-          title: '',
-          phone: '',
-          website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
-          senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-          senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-          unsubscribeLink: unsubscribeUrl,
-          emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
-        }
-        const textVars = { ...vars, emailSignature: '', senderSignature: '' }
-        subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
-        const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
-        const renderedText = step.bodyTemplateText ? applyTemplatePlaceholders(step.bodyTemplateText, textVars) : undefined
-        const enforced = enforceUnsubscribeFooter(renderedHtml, renderedText, unsubscribeUrl)
-        htmlBody = enforced.htmlBody
-        textBody = enforced.textBody
-      } else {
-        subject = `[ODCRM] Step ${item.stepIndex + 1}`
-        htmlBody = `<p>Email from sequence. Recipient: ${recipientEmail}</p>`
-      }
-
-      const result = await sendEmail(prisma, {
-        senderIdentityId: identity.id,
-        toEmail: recipientEmail,
-        subject,
-        htmlBody,
-        textBody,
-      })
-
-      if (result.success) {
         await prisma.outboundSendQueueItem.update({
           where: { id: item.id },
           data: {
-            status: OutboundSendQueueStatus.SENT,
-            sentAt: now,
-            lastError: null,
+            status: OutboundSendQueueStatus.QUEUED,
             lockedAt: null,
             lockedBy: null,
+            lastError: err instanceof Error ? err.message.slice(0, 500) : 'live_tick_failed',
           },
         })
-        await prisma.outboundSendAttemptAudit.create({
-          data: {
-            customerId,
-            queueItemId: item.id,
-            decision: OutboundSendAttemptDecision.SENT,
-            reason: null,
-            snapshot: { recipientEmail },
-          },
-        })
-        sent += 1
-      } else {
-        const errMsg = result.error ?? 'send_failed'
-        await prisma.outboundSendQueueItem.update({
-          where: { id: item.id },
-          data: {
-            status: OutboundSendQueueStatus.FAILED,
-            lastError: errMsg,
-            lockedAt: null,
-            lockedBy: null,
-          },
-        })
-        await prisma.outboundSendAttemptAudit.create({
-          data: {
-            customerId,
-            queueItemId: item.id,
-            decision: OutboundSendAttemptDecision.SEND_FAILED,
-            reason: errMsg,
-            snapshot: { recipientEmail },
-          },
-        })
-        failed += 1
-        reasons['send_failed'] = (reasons['send_failed'] ?? 0) + 1
       }
     }
 
@@ -1058,8 +865,15 @@ router.post('/live-tick', validateAdminSecret, async (req: Request, res: Respons
         processed,
         sent,
         failed,
-        skipped,
-        reasons: Object.keys(reasons).length > 0 ? reasons : undefined,
+        requeued,
+        locked: lockedItems.length,
+        queueItemIds: lockedItems.map((item) => item.id),
+        message:
+          sent > 0
+            ? `Sent ${sent} live email${sent === 1 ? '' : 's'}.`
+            : requeued > 0
+              ? 'No emails were sent. Current queue rules re-queued the batch.'
+              : 'No emails were sent from this live batch.',
       },
     })
   } catch (err) {
