@@ -79,6 +79,7 @@ export default function ComplianceTab() {
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [sheetUrls, setSheetUrls] = useState<Record<SheetKind, string>>({ email: '', domain: '' })
+  const [sheetEditorOpen, setSheetEditorOpen] = useState<Record<SheetKind, boolean>>({ email: false, domain: false })
   const [importingKind, setImportingKind] = useState<SheetKind | null>(null)
   const [importResults, setImportResults] = useState<Partial<Record<SheetKind, SheetImportResult | null>>>({})
   const [suppressionSheetHealth, setSuppressionSheetHealth] = useState<{ email: SuppressionSheetHealth; domain: SuppressionSheetHealth } | null>(null)
@@ -170,6 +171,7 @@ export default function ComplianceTab() {
     setSuppressionSheetHealth(null)
     setDataHealthError(null)
     setSheetUrls({ email: '', domain: '' })
+    setSheetEditorOpen({ email: false, domain: false })
     setLoading(Boolean(nextCustomerId))
     if (nextCustomerId) {
       setCurrentCustomerId(nextCustomerId)
@@ -222,13 +224,13 @@ export default function ComplianceTab() {
     await loadSuppressionHealth()
   }
 
-  const handleSheetConnect = async (kind: SheetKind) => {
+  const handleSheetSync = async (kind: SheetKind, overrideSheetUrl?: string) => {
     if (!customerId) {
       toast({ title: 'Select a client first', description: 'Choose the target client before connecting a suppression sheet.', status: 'warning' })
       return
     }
 
-    const nextSheetUrl = sheetUrls[kind].trim()
+    const nextSheetUrl = String(overrideSheetUrl ?? sheetUrls[kind] ?? '').trim()
     if (!nextSheetUrl) {
       toast({ title: 'Google Sheet URL is required', status: 'error' })
       return
@@ -256,12 +258,17 @@ export default function ComplianceTab() {
     setImportResults((prev) => ({ ...prev, [kind]: data || null }))
     setSheetUrls((prev) => ({ ...prev, [kind]: data?.sheetUrl || prev[kind] }))
     toast({
-      title: kind === 'email' ? 'Email DNC updated' : 'Domain DNC updated',
-      description: `Synced ${data?.inserted ?? 0} entries from Google Sheets.`,
+      title: kind === 'email' ? 'Email DNC synced' : 'Domain DNC synced',
+      description: (data?.inserted ?? 0) > 0
+        ? `Synced ${data?.inserted ?? 0} entries from Google Sheets.`
+        : 'Connected sheet is valid and currently empty.',
       status: 'success',
     })
     await loadEntries()
     await loadSuppressionHealth()
+    if (data?.sheetUrl) {
+      setSheetEditorOpen((prev) => ({ ...prev, [kind]: false }))
+    }
     setImportingKind(null)
   }
 
@@ -269,7 +276,15 @@ export default function ComplianceTab() {
     const health = suppressionSheetHealth?.[kind]
     const result = importResults[kind]
     const label = kind === 'email' ? 'Email DNC' : 'Domain DNC'
-    const actionLabel = health?.configured ? 'Replace Sheet' : 'Connect Sheet'
+    const isConnected = Boolean(health?.configured)
+    const editorOpen = sheetEditorOpen[kind]
+    const statusText = !health?.configured
+      ? 'Connect the Google Sheet for this client.'
+      : health?.lastImportStatus === 'error'
+        ? `Last sync failed${health.lastError ? `: ${health.lastError}` : '.'}`
+        : (health.totalEntries ?? 0) === 0
+          ? 'Connected. The linked Google Sheet is live and currently empty.'
+          : 'Connected. Changes from the linked Google Sheet sync into this client list.'
 
     return (
       <Box key={kind} borderWidth="1px" borderRadius="lg" p={4} bg="white">
@@ -291,11 +306,7 @@ export default function ComplianceTab() {
           </SimpleGrid>
 
           <Text fontSize="sm" color={health?.lastImportStatus === 'error' ? 'red.600' : 'gray.600'}>
-            {health?.lastImportStatus === 'error'
-              ? `Last sync failed${health.lastError ? `: ${health.lastError}` : '.'}`
-              : health?.configured
-                ? 'Google Sheet connected.'
-                : 'Connect the Google Sheet for this client.'}
+            {statusText}
           </Text>
 
           {health?.sheetUrl ? (
@@ -304,26 +315,49 @@ export default function ComplianceTab() {
             </Link>
           ) : null}
 
-          <FormControl>
-            <FormLabel fontSize="sm">Google Sheet URL</FormLabel>
-            <Input
-              value={sheetUrls[kind]}
-              onChange={(e) => {
-                const nextUrl = e.target.value
-                setSheetUrls((prev) => ({ ...prev, [kind]: nextUrl }))
-              }}
-              placeholder="https://docs.google.com/spreadsheets/d/..."
-            />
-          </FormControl>
+          <HStack spacing={3} flexWrap="wrap">
+            <Button
+              colorScheme="teal"
+              onClick={() => void handleSheetSync(kind, isConnected ? health?.sheetUrl || undefined : undefined)}
+              isLoading={importingKind === kind}
+              loadingText={isConnected ? 'Syncing' : 'Connecting'}
+            >
+              {isConnected ? 'Sync now' : 'Connect sheet'}
+            </Button>
+            {isConnected ? (
+              <Button
+                variant="outline"
+                onClick={() => setSheetEditorOpen((prev) => ({ ...prev, [kind]: !prev[kind] }))}
+              >
+                {editorOpen ? 'Hide advanced sheet settings' : 'Show advanced sheet settings'}
+              </Button>
+            ) : null}
+          </HStack>
 
-          <Button
-            colorScheme="teal"
-            onClick={() => void handleSheetConnect(kind)}
-            isLoading={importingKind === kind}
-            loadingText={health?.configured ? 'Replacing' : 'Connecting'}
-          >
-            {actionLabel}
-          </Button>
+          {(!isConnected || editorOpen) ? (
+            <FormControl>
+              <FormLabel fontSize="sm">Google Sheet URL</FormLabel>
+              <Input
+                value={sheetUrls[kind]}
+                onChange={(e) => {
+                  const nextUrl = e.target.value
+                  setSheetUrls((prev) => ({ ...prev, [kind]: nextUrl }))
+                }}
+                placeholder="https://docs.google.com/spreadsheets/d/..."
+              />
+            </FormControl>
+          ) : null}
+
+          {isConnected && editorOpen ? (
+            <Button
+              variant="outline"
+              onClick={() => void handleSheetSync(kind)}
+              isLoading={importingKind === kind}
+              loadingText="Updating"
+            >
+              Update linked sheet
+            </Button>
+          ) : null}
 
           {result ? (
             <HStack spacing={2} flexWrap="wrap">
@@ -343,9 +377,9 @@ export default function ComplianceTab() {
       <VStack align="stretch" spacing={6}>
         <Box>
           <Heading size="lg" mb={2}>Suppression List</Heading>
-          <Text fontSize="sm" color="gray.600">
-            Connect the selected client&apos;s Email DNC and Domain DNC sheets.
-          </Text>
+                <Text fontSize="sm" color="gray.600">
+                  Connect each client&apos;s Email DNC and Domain DNC sheet once, then sync from the linked sheet when needed.
+                </Text>
         </Box>
 
         <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
@@ -406,7 +440,7 @@ export default function ComplianceTab() {
                 </HStack>
 
                 <Text fontSize="sm" color="gray.600">
-                  Connect each client sheet once, then replace it here when the source sheet changes.
+                  Connected sheets stay linked to this client. Sync from the linked sheet without re-pasting URLs.
                 </Text>
 
                 {dataHealthError ? (

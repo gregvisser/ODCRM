@@ -266,8 +266,7 @@ function shouldRefreshSheetMetrics(
   return (
     data.errorCode === 'never_synced' ||
     data.errorCode === 'stale_sync' ||
-    data.errorCode === 'sync_failed' ||
-    data.errorCode === 'zero_rows_imported'
+    data.errorCode === 'sync_failed'
   )
 }
 

@@ -3521,7 +3521,7 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  const validateStartRequirements = (sequence: SequenceCampaign) => {
+  function validateStartRequirements(sequence: SequenceCampaign) {
     if (!sequence.name.trim()) return 'Name this sequence before starting.'
     if (!sequence.listId) return leadBatches.length === 0 ? 'No live recipients are ready yet. Go to Lead Sources and sync a batch first.' : 'Choose the live recipients for Start Sequence.'
     if (templates.length === 0) return 'Add at least one template before starting.'

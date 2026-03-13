@@ -68,6 +68,12 @@ function buildSheetTruthStatus(params: {
 } {
   const { sourceOfTruth, configuredSheetUrl, sync, rowCount, bootstrap } = params
   const syncHasFailedWithoutStatus = sync.status === 'syncing' && !sync.lastSuccessAt && Boolean(sync.lastError)
+  const emptySheetState =
+    rowCount === 0 &&
+    (
+      (sync.lastSuccessAt && sync.status === 'success') ||
+      classifySheetSyncError(sync.lastError) === 'zero_rows_imported'
+    )
 
   if (sourceOfTruth === 'db') {
     return { authoritative: true, dataFreshness: 'live' }
@@ -92,6 +98,14 @@ function buildSheetTruthStatus(params: {
     }
   }
 
+  if (emptySheetState) {
+    return {
+      authoritative: true,
+      dataFreshness: 'live',
+      hint: 'The linked Google Sheet is connected and currently empty.',
+    }
+  }
+
   if (sync.status === 'error' || syncHasFailedWithoutStatus) {
     const errorCode = classifySheetSyncError(sync.lastError) ?? 'sync_failed'
     return {
@@ -105,10 +119,9 @@ function buildSheetTruthStatus(params: {
   if (!sync.lastSuccessAt) {
     if (bootstrap.started && rowCount === 0) {
       return {
-        authoritative: false,
-        dataFreshness: 'diagnostic_stale',
-        warning: 'Initial sheet sync ran but no lead rows were imported.',
-        errorCode: 'zero_rows_imported',
+        authoritative: true,
+        dataFreshness: 'live',
+        hint: 'The linked Google Sheet is connected and currently empty.',
       }
     }
 

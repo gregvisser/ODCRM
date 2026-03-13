@@ -1200,12 +1200,15 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
           <AlertIcon />
           <Box>
-            <AlertTitle>Why 0 leads?</AlertTitle>
+            <AlertTitle>{syncStatusForEmpty.lastError ? 'Why 0 leads?' : 'Connected sheet is empty'}</AlertTitle>
             <AlertDescription>
               Last sync: {syncStatusForEmpty.lastSyncAt ? new Date(syncStatusForEmpty.lastSyncAt).toLocaleString() : 'Never'}
               {syncStatusForEmpty.lastSuccessAt && ` · Last success: ${new Date(syncStatusForEmpty.lastSuccessAt).toLocaleString()}`}
               {syncStatusForEmpty.lastError && (
                 <Text mt={2} fontWeight="semibold" color="orange.600">Sync error: {syncStatusForEmpty.lastError}</Text>
+              )}
+              {!syncStatusForEmpty.lastError && (
+                <Text mt={2}>The linked Google Sheet is connected and currently empty.</Text>
               )}
               {(syncStatusForEmpty.isPaused || syncStatusForEmpty.isRunning) && (
                 <Text mt={1} fontSize="sm">Status: {syncStatusForEmpty.isPaused ? 'Paused' : ''} {syncStatusForEmpty.isRunning ? 'Sync in progress' : ''}</Text>
