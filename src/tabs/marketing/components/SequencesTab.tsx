@@ -7093,14 +7093,14 @@ const SequencesTab: React.FC = () => {
             {createEnrollmentRecipientSource === 'snapshot' ? (
               <Box mb={4}>
                 <Alert status="info" borderRadius="md">
-                    <AlertIcon />
-                    <Box>
-                      <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
-                      <AlertDescription fontSize="xs">
-                        Creates a test group from the linked live recipients. Start Sequence still uses the live recipients directly.
-                      </AlertDescription>
-                    </Box>
-                  </Alert>
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
+                    <AlertDescription fontSize="xs">
+                      Creates a test group from the linked live recipients. Start Sequence still uses the live recipients directly.
+                    </AlertDescription>
+                  </Box>
+                </Alert>
                 {!editingSequence?.listId && (
                   <Alert status="error" mt={2} borderRadius="md">
                     <AlertIcon />
@@ -7109,9 +7109,9 @@ const SequencesTab: React.FC = () => {
                     </AlertDescription>
                   </Alert>
                 )}
-                <FormHelperText mt={2}>
+                <Text fontSize="xs" color="gray.500" mt={2}>
                   Recipient preview: {linkedListSummary?.contactCount ?? leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0} recipients from the linked lead batch.
-                </FormHelperText>
+                </Text>
               </Box>
             ) : (
               <FormControl mb={4} isRequired>
