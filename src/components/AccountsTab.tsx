@@ -2837,6 +2837,15 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   } | null>(null)
   const [sheetValidateLoading, setSheetValidateLoading] = useState(false)
 
+  const buildCustomerScopedRequest = useCallback(
+    (customerId: string): RequestInit => ({
+      headers: {
+        'X-Customer-Id': customerId,
+      },
+    }),
+    [],
+  )
+
   const patchCustomerAccount = useCallback(
     async (customerId: string, patch: any) => {
       const { data, error } = await api.patch<{
@@ -2846,7 +2855,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         note?: any
         customer?: any
         requestId?: string
-      }>(`/api/customers/${customerId}/account`, patch)
+      }>(`/api/customers/${customerId}/account`, patch, buildCustomerScopedRequest(customerId))
 
       if (error || !data?.success) {
         toast({
@@ -2868,7 +2877,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
       return { ok: true as const, data }
     },
-    [refetchCustomers, toast],
+    [buildCustomerScopedRequest, refetchCustomers, toast],
   )
 
   // Customer detail used by the Account Card (DB source of truth: GET /api/customers/:id)
@@ -2949,7 +2958,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       setLoadingCustomerDetail(true)
       setCustomerDetailError(null)
 
-      const { data, error } = await api.get<CustomerDetailApi>(`/api/customers/${selectedCustomerId}`)
+      const { data, error } = await api.get<CustomerDetailApi>(
+        `/api/customers/${selectedCustomerId}`,
+        buildCustomerScopedRequest(selectedCustomerId),
+      )
       if (cancelled) return
 
       if (error || !data) {
@@ -2967,7 +2979,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     return () => {
       cancelled = true
     }
-  }, [selectedCustomerId, isDrawerOpen])
+  }, [buildCustomerScopedRequest, selectedCustomerId, isDrawerOpen])
 
   // Sync contact counts when contactsData changes (initial load and updates)
   // Note: contactsData already excludes deleted contacts since loadContactsFromStorage filters them
@@ -3080,7 +3092,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       
       try {
         const { data, error } = await api.get<ConnectedEmailIdentity[]>(
-          `/api/customers/${selectedCustomerId}/email-identities`
+          `/api/customers/${selectedCustomerId}/email-identities`,
+          buildCustomerScopedRequest(selectedCustomerId),
         )
         
         // Check if request was cancelled
@@ -3131,7 +3144,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         console.log('[EmailAccounts] Cleanup for customerId:', selectedCustomerId)
       }
     }
-  }, [selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
+  }, [buildCustomerScopedRequest, selectedCustomerId]) // ONLY depends on selectedCustomerId - no other dependencies!
 
   // Manual refresh function for the refresh button
   const refreshConnectedEmails = useCallback(() => {
@@ -3153,7 +3166,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     setLoadingEmails(true)
     setEmailFetchError(null)
     
-    api.get<ConnectedEmailIdentity[]>(`/api/customers/${selectedCustomerId}/email-identities`)
+    api.get<ConnectedEmailIdentity[]>(
+      `/api/customers/${selectedCustomerId}/email-identities`,
+      buildCustomerScopedRequest(selectedCustomerId),
+    )
       .then(({ data, error }) => {
         if (error) {
           setEmailFetchError(error)
@@ -3169,7 +3185,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       .finally(() => {
         setLoadingEmails(false)
       })
-  }, [selectedCustomerId])
+  }, [buildCustomerScopedRequest, selectedCustomerId])
 
   // Handle OAuth success redirect (oauth=success in URL)
   useEffect(() => {
@@ -3322,13 +3338,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       }
 
       if (refreshDetail) {
-        const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${customerId}`)
+        const refreshed = await api.get<CustomerDetailApi>(
+          `/api/customers/${customerId}`,
+          buildCustomerScopedRequest(customerId),
+        )
         if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
       }
 
       return { ok: true as const }
     },
-    [patchCustomerAccount, selectedAccount?.name, updateAccountSilent],
+    [buildCustomerScopedRequest, patchCustomerAccount, selectedAccount?.name, updateAccountSilent],
   )
 
   // Auto-enrich existing accounts with verified web data (no AI).
@@ -3434,7 +3453,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
     // If drawer is open for this customer, refresh the detail view so computed fields update.
     if (selectedCustomerId && selectedCustomerId === customerId) {
-      const refreshed = await api.get<CustomerDetailApi>(`/api/customers/${customerId}`)
+      const refreshed = await api.get<CustomerDetailApi>(
+        `/api/customers/${customerId}`,
+        buildCustomerScopedRequest(customerId),
+      )
       if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
     }
 
