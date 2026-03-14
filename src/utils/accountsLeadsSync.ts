@@ -47,4 +47,28 @@ export function syncAccountLeadCountsFromLeads(leads: LeadLike[]): number {
   return updated
 }
 
+export function syncSingleAccountLeadCount(accountName: string, leadCount: number): number {
+  const normalizedAccountName = (accountName || '').trim().toLowerCase()
+  if (!normalizedAccountName) return 0
+
+  const accounts = getJson<AccountLike[]>(OdcrmStorageKeys.accounts)
+  if (!accounts || !Array.isArray(accounts)) return 0
+
+  let updated = 0
+  const next = accounts.map((acc) => {
+    const key = (acc.name || '').trim().toLowerCase()
+    if (key !== normalizedAccountName) return acc
+    if ((acc.leads || 0) === leadCount) return acc
+    updated++
+    return { ...acc, leads: leadCount }
+  })
+
+  if (updated > 0) {
+    setJson(OdcrmStorageKeys.accounts, next)
+    emit('accountsUpdated', next)
+  }
+
+  return updated
+}
+
 

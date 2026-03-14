@@ -28,7 +28,7 @@ import {
   Button,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
-import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
+import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import RequireActiveClient from './RequireActiveClient'
@@ -51,8 +51,18 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 }
 
 function LeadsReportingTab() {
+  const DEFAULT_PAGE_SIZE = 50
   const customerId = getCurrentCustomerId()
-  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null)
+  const [filters, setFilters] = useState({
+    account: '',
+    channelOfLead: '',
+  })
+  const [currentPage, setCurrentPage] = useState(1)
+  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, {
+    page: currentPage,
+    pageSize: DEFAULT_PAGE_SIZE,
+    channel: filters.channelOfLead || undefined,
+  })
   const leads = useMemo(
     () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
     [liveData]
@@ -60,11 +70,12 @@ function LeadsReportingTab() {
   const lastRefresh = lastUpdatedAt
   const liveWarning = liveData?.warning ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null
-
-  const [filters, setFilters] = useState({
-    account: '',
-    channelOfLead: '',
-  })
+  const filteredLeadCount = liveData?.total ?? leads.length
+  const totalLeadCount = liveData?.rowCount ?? leads.length
+  const totalPages = liveData?.totalPages ?? 1
+  const page = liveData?.page ?? currentPage
+  const customerName = liveData?.customerName ?? ''
+  const availableChannels = liveData?.availableChannels ?? []
   const toast = useToast()
 
   // Helper to format last refresh time
@@ -77,8 +88,18 @@ function LeadsReportingTab() {
   }
 
   useEffect(() => {
-    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
-  }, [leads])
+    if (customerName) {
+      syncSingleAccountLeadCount(customerName, totalLeadCount)
+    }
+  }, [customerName, totalLeadCount])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [customerId, filters.account, filters.channelOfLead])
+
+  useEffect(() => {
+    setFilters({ account: '', channelOfLead: '' })
+  }, [customerId])
 
   useEffect(() => {
     const handleNavigate = () => {
@@ -121,7 +142,7 @@ function LeadsReportingTab() {
         </Box>
       </Alert>
     )
-  } else if (leads.length === 0) {
+  } else if (totalLeadCount === 0) {
     content = (
       <Box textAlign="center" py={12}>
         <Text fontSize="lg" color="gray.600">
@@ -197,58 +218,12 @@ function LeadsReportingTab() {
 
   const columns = [...orderedColumns, ...remainingColumns.sort()]
 
-  // Filter leads based on filter criteria
-  const filteredLeads = leads
-    .filter((lead) => {
-      if (filters.account && lead.accountName !== filters.account) return false
-      if (
-        filters.channelOfLead &&
-        lead['Channel of Lead']?.toLowerCase().includes(filters.channelOfLead.toLowerCase()) === false
-      )
-        return false
-      return true
-    })
-    .sort((a, b) => {
-      // Sort by date (newest to oldest)
-      const dateA = a['Date'] || ''
-      const dateB = b['Date'] || ''
-      
-      // Try to parse dates in various formats
-      const parseDate = (dateStr: string): Date | null => {
-        if (!dateStr || dateStr.trim() === '') return null
-        
-        // Try DD.MM.YY or DD.MM.YYYY format (from the Google Sheet)
-        const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-        if (ddmmyy) {
-          const day = parseInt(ddmmyy[1], 10)
-          const month = parseInt(ddmmyy[2], 10) - 1
-          const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-          return new Date(year, month, day)
-        }
-        
-        // Try standard date parsing
-        const parsed = new Date(dateStr)
-        return isNaN(parsed.getTime()) ? null : parsed
-      }
-
-      const dateAObj = parseDate(dateA)
-      const dateBObj = parseDate(dateB)
-
-      if (!dateAObj && !dateBObj) return 0
-      if (!dateAObj) return 1 // Put dates without valid date at the end
-      if (!dateBObj) return -1
-      
-      // Newest first (descending order)
-      return dateBObj.getTime() - dateAObj.getTime()
-    })
+  // Account is already fixed by the selected client; keep the existing filter control but scope it honestly.
+  const filteredLeads = filters.account && customerName && filters.account !== customerName ? [] : leads
 
   // Get unique values for filter dropdowns
-  const uniqueAccounts = Array.from(new Set(leads.map((lead) => lead.accountName))).sort()
-  const uniqueChannels = Array.from(
-    new Set(
-      leads.map((lead) => lead['Channel of Lead']).filter((c) => c && c.trim() !== ''),
-    ),
-  ).sort()
+  const uniqueAccounts = customerName ? [customerName] : []
+  const uniqueChannels = availableChannels
 
   // Helper to check if a value is a URL
   const isUrl = (str: string): boolean => {
@@ -305,7 +280,7 @@ function LeadsReportingTab() {
             Leads Reporting
           </Heading>
           <Text color="gray.600">
-            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeads.length} of {leads.length} leads)
+            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeadCount} of {totalLeadCount} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
@@ -477,6 +452,29 @@ function LeadsReportingTab() {
           </Table>
         </Box>
       )}
+      <HStack justify="space-between" flexWrap="wrap">
+        <Text fontSize="sm" color="gray.600">
+          Page {page} of {totalPages}
+        </Text>
+        <HStack>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            isDisabled={page <= 1 || loading}
+          >
+            Previous
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            isDisabled={page >= totalPages || loading}
+          >
+            Next
+          </Button>
+        </HStack>
+      </HStack>
     </Stack>
   )
   }

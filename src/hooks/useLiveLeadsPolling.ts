@@ -4,17 +4,23 @@
  * Only runs when enabled is true (e.g. when the actual Leads tab is active).
  */
 import { useCallback, useEffect, useState } from 'react'
-import { getLiveLeads, getLiveLeadMetrics, type LiveLeadsResponse, type LiveLeadMetricsResponse } from '../utils/liveLeadsApi'
+import {
+  getLiveLeads,
+  getLiveLeadMetrics,
+  type GetLiveLeadsParams,
+  type LiveLeadsResponse,
+  type LiveLeadMetricsResponse,
+} from '../utils/liveLeadsApi'
 
 const POLL_MS = 30000
 
 export type UseLiveLeadsPollingOptions = {
   /** When false, no fetch and no interval. Default true. */
   enabled?: boolean
-}
+} & GetLiveLeadsParams
 
 export function useLiveLeadsPolling(customerId: string | null, options: UseLiveLeadsPollingOptions = {}) {
-  const { enabled = true } = options
+  const { enabled = true, page, pageSize, channel } = options
   const [data, setData] = useState<LiveLeadsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +35,7 @@ export function useLiveLeadsPolling(customerId: string | null, options: UseLiveL
     setLoading(true)
     setError(null)
     try {
-      const res = await getLiveLeads(customerId)
+      const res = await getLiveLeads(customerId, { page, pageSize, channel })
       setData(res)
       setLastUpdatedAt(new Date(res.queriedAt))
     } catch (e) {
@@ -38,7 +44,7 @@ export function useLiveLeadsPolling(customerId: string | null, options: UseLiveL
     } finally {
       setLoading(false)
     }
-  }, [customerId, enabled])
+  }, [channel, customerId, enabled, page, pageSize])
 
   useEffect(() => {
     if (!enabled) {
