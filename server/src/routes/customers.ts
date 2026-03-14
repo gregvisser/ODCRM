@@ -961,21 +961,6 @@ router.put('/:id/onboarding', async (req, res) => {
 
     const hasOwn = (obj: any, key: string) => Object.prototype.hasOwnProperty.call(obj, key)
 
-    // Enforce: if a Google Sheet URL is set, a label must also be set (we display label-only in the UI).
-    // This applies to onboarding saves to prevent "URL shown / label missing" regressions.
-    if (hasOwn(validated, 'leadsReportingUrl')) {
-      const url = typeof validated.leadsReportingUrl === 'string' ? validated.leadsReportingUrl.trim() : ''
-      if (url) {
-        const label =
-          typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
-        if (!label) {
-          return res.status(400).json({
-            error: 'Invalid input',
-            details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
-          })
-        }
-      }
-    }
     const allowNullScalar = new Set([
       // Explicitly allowed clears from the onboarding UI
       'website',
@@ -1401,22 +1386,6 @@ router.patch('/:id/account', async (req, res) => {
         throw err
       }
 
-      // Enforce: when leadsReportingUrl is set (incoming or existing), label must be present.
-      const nextLeadsUrl =
-        patch.leadsReportingUrl !== undefined
-          ? (typeof patch.leadsReportingUrl === 'string' ? patch.leadsReportingUrl.trim() : '')
-          : (typeof existing.leadsReportingUrl === 'string' ? existing.leadsReportingUrl.trim() : '')
-
-      if (nextLeadsUrl) {
-        const nextLabel =
-          patch.leadsGoogleSheetLabel !== undefined
-            ? (typeof patch.leadsGoogleSheetLabel === 'string' ? patch.leadsGoogleSheetLabel.trim() : '')
-            : (typeof existing.leadsGoogleSheetLabel === 'string' ? existing.leadsGoogleSheetLabel.trim() : '')
-        if (!nextLabel) {
-          return { status: 400 as const, body: { error: 'Invalid input', details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }], requestId } }
-        }
-      }
-
       // Resolve actor display name from User Authorization table (best effort)
       const actorEmail = actor.emailNormalized || actor.email
       const user =
@@ -1569,17 +1538,6 @@ router.put('/:id', async (req, res) => {
     
     const validated = validationResult.data
 
-    // Enforce: if a Google Sheet URL is set, a label must also be set (label-only display across UI).
-    const leadsUrl = typeof validated.leadsReportingUrl === 'string' ? validated.leadsReportingUrl.trim() : ''
-    if (leadsUrl) {
-      const leadsLabel = typeof validated.leadsGoogleSheetLabel === 'string' ? validated.leadsGoogleSheetLabel.trim() : ''
-      if (!leadsLabel) {
-        return res.status(400).json({
-          error: 'Invalid input',
-          details: [{ message: 'leadsGoogleSheetLabel is required when leadsReportingUrl is set' }],
-        })
-      }
-    }
     const shouldClearLeads = validated.leadsReportingUrl === null
 
     // Best-effort snapshot for server-side audit diff (never blocks PUT success).
