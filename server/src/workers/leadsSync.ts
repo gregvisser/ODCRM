@@ -221,6 +221,56 @@ function parseCsv(csvText: string, chunkSize: number = 500): string[][] {
   return lines
 }
 
+const ACTIVE_TABLE_BLANK_ROW_TERMINATION = 25
+
+function isBlankSheetRow(row: string[]): boolean {
+  return row.length === 0 || row.every((cell) => !cell || cell.trim() === '')
+}
+
+export function limitRowsToActiveSheetTable(
+  dataRows: string[][],
+  blankRowTermination: number = ACTIVE_TABLE_BLANK_ROW_TERMINATION,
+): {
+  rows: string[][]
+  truncated: boolean
+  blankRowsIncluded: number
+} {
+  const rows: string[][] = []
+  let blankRun = 0
+  let sawData = false
+
+  for (const row of dataRows) {
+    const isBlank = isBlankSheetRow(row)
+
+    if (!sawData) {
+      if (isBlank) continue
+      sawData = true
+    }
+
+    if (isBlank) {
+      blankRun += 1
+      rows.push(row)
+      if (blankRun >= blankRowTermination) {
+        return {
+          rows,
+          truncated: true,
+          blankRowsIncluded: blankRun,
+        }
+      }
+      continue
+    }
+
+    blankRun = 0
+    rows.push(row)
+  }
+
+  return {
+    rows,
+    truncated: false,
+    blankRowsIncluded: blankRun,
+  }
+}
+
 /**
  * Fetch leads from Google Sheets with retry logic and exponential backoff
  */
@@ -396,7 +446,14 @@ async function fetchLeadsFromSheetUrl(
       diagnostics.usedKeys = { occurredAtKey, sourceKey, ownerKey, externalIdKey }
 
       // Skip the header row and any rows before it
-      const dataRows = rows.slice(headerRowIndex + 1)
+      const tableBoundary = limitRowsToActiveSheetTable(rows.slice(headerRowIndex + 1))
+      const dataRows = tableBoundary.rows
+
+      if (tableBoundary.truncated) {
+        console.log(
+          `   Detected end of active lead table after ${tableBoundary.blankRowsIncluded} consecutive blank rows; ignoring detached rows below that gap`
+        )
+      }
 
       console.log(`   Headers found: ${diagnostics.validHeaders.join(', ')}`)
 
@@ -597,7 +654,8 @@ export async function validateSheetUrl(sheetUrl: string): Promise<ValidateSheetR
   }
 
   const headers = rows[headerRowIndex].map((h: string) => h.trim()).filter(Boolean)
-  const dataRows = rows.slice(headerRowIndex + 1)
+  const tableBoundary = limitRowsToActiveSheetTable(rows.slice(headerRowIndex + 1))
+  const dataRows = tableBoundary.rows
 
   const occurredAtKey = headers.find((h) => toCanonicalHeader(h) === 'occurredAt') ?? null
   const sourceKey = headers.find((h) => toCanonicalHeader(h) === 'source') ?? null
