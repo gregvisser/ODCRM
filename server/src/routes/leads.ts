@@ -1,7 +1,8 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
-import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
+import { asLeadRawData, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
+import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
 import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -170,26 +171,11 @@ router.get('/', async (req, res) => {
     const state = await prisma.leadSyncState.findUnique({ where: { customerId } })
     const lastSyncAt = state?.lastSuccessAt || state?.lastSyncAt || null
 
-    const filteredLeadRows = leadRows.filter((lead) => {
-      const leadData = lead.data && typeof lead.data === 'object' ? lead.data as Record<string, string> : {}
-      return isRealLeadRow({
-        ...leadData,
-        ...(lead.fullName ? { Name: lead.fullName } : {}),
-        ...(lead.email ? { Email: lead.email } : {}),
-        ...(lead.phone ? { Phone: lead.phone } : {}),
-        ...(lead.company ? { Company: lead.company } : {}),
-        ...(lead.jobTitle ? { 'Job Title': lead.jobTitle } : {}),
-        ...(lead.location ? { Location: lead.location } : {}),
-        ...(lead.notes ? { Notes: lead.notes } : {}),
-        ...(lead.source ? { 'Channel of Lead': lead.source } : {}),
-        ...(lead.owner ? { 'OD Team Member': lead.owner } : {}),
-        ...(lead.status ? { 'Lead Status': lead.status } : {}),
-      }, { sourceType: lead.externalSourceType ?? null })
-    })
+    const filteredLeadRows = leadRows.filter((lead) => isRealStoredLeadRow(lead))
 
     const leads = filteredLeadRows.map((lead) => {
       try {
-        const leadData = lead.data && typeof lead.data === 'object' ? lead.data as Record<string, any> : {}
+        const leadData = asLeadRawData(lead.data)
         return {
           ...leadData,
           id: lead.id,
@@ -306,20 +292,8 @@ router.get('/aggregations', async (req, res) => {
 
     // Group leads by customer
     const leadsByCustomer = leadRecords.reduce((acc, record) => {
-      const recordData = (record.data && typeof record.data === 'object') ? record.data as Record<string, string> : {}
-      if (!isRealLeadRow({
-        ...recordData,
-        ...(record.fullName ? { Name: record.fullName } : {}),
-        ...(record.email ? { Email: record.email } : {}),
-        ...(record.phone ? { Phone: record.phone } : {}),
-        ...(record.company ? { Company: record.company } : {}),
-        ...(record.jobTitle ? { 'Job Title': record.jobTitle } : {}),
-        ...(record.location ? { Location: record.location } : {}),
-        ...(record.status ? { 'Lead Status': record.status } : {}),
-        ...(record.notes ? { Notes: record.notes } : {}),
-        ...(record.source ? { 'Channel of Lead': record.source } : {}),
-        ...(record.owner ? { 'OD Team Member': record.owner } : {}),
-      }, { sourceType: record.externalSourceType ?? null })) {
+      const recordData = asLeadRawData(record.data)
+      if (!isRealStoredLeadRow(record)) {
         return acc
       }
       if (!acc[record.customerId]) {
@@ -477,52 +451,9 @@ function getMetricsTimeRangesUtcSafe (): { todayStart: Date, todayEnd: Date, wee
 }
 
 /**
- * Build a Prisma where clause for "lead date in [start, end)": (occurredAt in range) OR (occurredAt is null AND createdAt in range).
- * Uses equals: null for Prisma compatibility. Dates must be valid (use getMetricsTimeRangesUtcSafe).
- */
-function leadDateInRange (customerId: string, start: Date, end: Date) {
-  return {
-    customerId,
-    OR: [
-      { occurredAt: { gte: start, lt: end } },
-      { AND: [{ occurredAt: { equals: null } }, { createdAt: { gte: start, lt: end } }] },
-    ],
-  } as const
-}
-
-/** True if the error is Prisma complaining that occurredAt is unknown (e.g. prod schema without occurredAt). */
-function isUnknownOccurredAtError (err: any): boolean {
-  const msg = String(err?.message || '')
-  return msg.includes('Unknown argument occurredAt') || msg.includes('Unknown argument `occurredAt`')
-}
-
-/** Where clause for "lead date in [start, end)" using occurredAt when present. Throws in prod if occurredAt missing (use fallback). */
-function buildWhereWithOccurredAt (customerId: string, start: Date, end: Date) {
-  return {
-    customerId,
-    OR: [
-      { occurredAt: { gte: start, lt: end } },
-      { AND: [{ occurredAt: { equals: null as unknown as Date } }, { createdAt: { gte: start, lt: end } }] },
-    ],
-  }
-}
-
-/** Where clause for "lead createdAt in [start, end)" only. Used when occurredAt is missing in schema. */
-function buildWhereCreatedAtOnly (customerId: string, start: Date, end: Date) {
-  return { customerId, createdAt: { gte: start, lt: end } }
-}
-
-function isInvalidGroupByFieldError (err: unknown): boolean {
-  const msg = err && typeof err === 'object' && 'message' in err && typeof (err as any).message === 'string'
-    ? (err as any).message
-    : ''
-  return msg.includes('Invalid value for argument `by`') && msg.includes('Expected LeadRecordScalarFieldEnum')
-}
-
-/**
  * GET /api/leads/metrics
  * Customer: prefer x-customer-id header; use query customerId only when header absent. Always verify customer exists.
- * Counts: DB-native (occurredAt in range OR occurredAt is null AND createdAt in range). Week = Monday–Sunday in LEADS_METRICS_TIMEZONE.
+ * Counts: shared stored-lead truth filtering + shared date-window counting. Week = Monday–Sunday in LEADS_METRICS_TIMEZONE.
  *
  * Self-test (commented; run manually or in test):
  *   curl -s "http://localhost:3001/api/leads/metrics?customerId=cust_XXX"   -> 200 + JSON (customerId, counts, breakdownBySource, breakdownByOwner, lastSync)
@@ -573,89 +504,38 @@ router.get('/metrics', async (req, res) => {
 
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtcSafe()
 
-    async function countWithDateFallback (op: 'counts.today' | 'counts.week' | 'counts.month', start: Date, end: Date): Promise<number> {
-      try {
-        return await prisma.leadRecord.count({
-          where: buildWhereWithOccurredAt(customerId, start, end),
-        })
-      } catch (err) {
-        if (isUnknownOccurredAtError(err)) {
-          console.warn(JSON.stringify({ tag: 'leadsMetricsFallback', reqId, reason: 'occurredAtMissing', op }))
-          return await prisma.leadRecord.count({
-            where: buildWhereCreatedAtOnly(customerId, start, end),
-          })
-        }
-        logErr(op, err)
-        throw err
-      }
-    }
-
-    async function groupByDateFallback (
-      op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy',
-      by: 'source' | 'owner',
-      start: Date,
-      end: Date,
-    ) {
-      try {
-        return await prisma.leadRecord.groupBy({
-          by: [by],
-          where: buildWhereWithOccurredAt(customerId, start, end),
-          _count: { id: true },
-        })
-      } catch (err) {
-        if (isUnknownOccurredAtError(err)) {
-          console.warn(JSON.stringify({ tag: 'leadsMetricsFallback', reqId, reason: 'occurredAtMissing', op }))
-          return await prisma.leadRecord.groupBy({
-            by: [by],
-            where: buildWhereCreatedAtOnly(customerId, start, end),
-            _count: { id: true },
-          })
-        }
-        logErr(op, err)
-        throw err
-      }
-    }
-
-    async function safeBreakdown (
-      op: 'breakdown.source.groupBy' | 'breakdown.owner.groupBy',
-      by: 'source' | 'owner',
-      start: Date,
-      end: Date,
-    ) {
-      try {
-        return await groupByDateFallback(op, by, start, end)
-      } catch (err) {
-        if (isInvalidGroupByFieldError(err)) {
-          console.warn(JSON.stringify({ tag: 'leadsMetricsBreakdownUnsupported', reqId, customerId, op, by }))
-          return [] as Array<any>
-        }
-        logErr(op, err)
-        throw err
-      }
-    }
-
-    const [countToday, countWeek, countMonth, total, bySourceRows, byOwnerRows, syncState] = await Promise.all([
-      countWithDateFallback('counts.today', todayStart, todayEnd),
-      countWithDateFallback('counts.week', weekStart, weekEnd),
-      countWithDateFallback('counts.month', monthStart, monthEnd),
-      prisma.leadRecord.count({ where: { customerId } })
-        .catch(err => { logErr('counts.total', err); throw err }),
-      safeBreakdown('breakdown.source.groupBy', 'source', weekStart, weekEnd),
-      safeBreakdown('breakdown.owner.groupBy', 'owner', weekStart, weekEnd),
+    const [leadRows, syncState] = await Promise.all([
+      prisma.leadRecord.findMany({
+        where: { customerId },
+        select: {
+          occurredAt: true,
+          createdAt: true,
+          externalSourceType: true,
+          source: true,
+          owner: true,
+          company: true,
+          fullName: true,
+          email: true,
+          phone: true,
+          jobTitle: true,
+          location: true,
+          status: true,
+          notes: true,
+          data: true,
+        },
+      }).catch((err) => { logErr('leadRows.findMany', err); throw err }),
       prisma.leadSyncState.findUnique({ where: { customerId } })
         .catch(err => { logErr('lastSyncState', err); throw err }),
     ])
 
-    const breakdownBySource: Record<string, number> = {}
-    for (const row of bySourceRows) {
-      const key = row.source != null && String(row.source).trim() !== '' ? String(row.source).trim() : '(none)'
-      breakdownBySource[key] = row._count.id
-    }
-    const breakdownByOwner: Record<string, number> = {}
-    for (const row of byOwnerRows) {
-      const key = row.owner != null && String(row.owner).trim() !== '' ? String(row.owner).trim() : '(none)'
-      breakdownByOwner[key] = row._count.id
-    }
+    const metrics = calculateStoredLeadMetrics(leadRows, {
+      todayStart,
+      todayEnd,
+      weekStart,
+      weekEnd,
+      monthStart,
+      monthEnd,
+    })
 
     const lastSync = syncState
       ? {
@@ -668,20 +548,20 @@ router.get('/metrics', async (req, res) => {
         }
       : null
 
-    console.log(JSON.stringify({ tag: 'leadsMetricsOk', reqId, customerId, total }))
+    console.log(JSON.stringify({ tag: 'leadsMetricsOk', reqId, customerId, total: metrics.total }))
 
     res.json({
       customerId,
       timezone: METRICS_TIMEZONE,
       weekDefinition: 'Monday–Sunday (week boundaries in the timezone above)',
       counts: {
-        today: countToday,
-        week: countWeek,
-        month: countMonth,
-        total,
+        today: metrics.today,
+        week: metrics.week,
+        month: metrics.month,
+        total: metrics.total,
       },
-      breakdownBySource,
-      breakdownByOwner,
+      breakdownBySource: metrics.breakdownBySource,
+      breakdownByOwner: metrics.breakdownByOwner,
       lastSync,
     })
   } catch (error: unknown) {

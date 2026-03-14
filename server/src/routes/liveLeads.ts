@@ -8,7 +8,8 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
-import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
+import { asLeadRawData, extractStoredLeadCanonicalRecord, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
+import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
 import { retryLeadOutboundSync, syncManualLeadEditOutbound, syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -324,14 +325,6 @@ function asString(value: unknown): string {
   return String(value)
 }
 
-function asRawMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object') return {}
-  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [k, v]) => {
-    acc[k] = asString(v)
-    return acc
-  }, {})
-}
-
 function isBlank(value: unknown): boolean {
   if (value == null) return true
   return String(value).trim() === ''
@@ -629,31 +622,20 @@ function mapDbLeadRows(rows: Array<{
   data: unknown
 }>): MappedLeadRow[] {
   return rows
-    .filter((row) => isRealLeadRow({
-      ...asRawMap(row.data),
-      ...(row.fullName ? { Name: row.fullName } : {}),
-      ...(row.email ? { Email: row.email } : {}),
-      ...(row.phone ? { Phone: row.phone } : {}),
-      ...(row.company ? { Company: row.company } : {}),
-      ...(row.jobTitle ? { 'Job Title': row.jobTitle } : {}),
-      ...(row.location ? { Location: row.location } : {}),
-      ...(row.status ? { 'Lead Status': row.status } : {}),
-      ...(row.notes ? { Notes: row.notes } : {}),
-      ...(row.source ? { 'Channel of Lead': row.source } : {}),
-      ...(row.owner ? { 'OD Team Member': row.owner } : {}),
-    }, { sourceType: row.externalSourceType ?? null }))
+    .filter((row) => isRealStoredLeadRow(row))
     .map((row) => {
-      const raw = asRawMap(row.data)
+      const raw = asLeadRawData(row.data)
+      const canonical = extractStoredLeadCanonicalRecord(row)
       const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
-      const source = row.source ?? (raw['Channel of Lead'] || raw['channel'] || raw['Source'] || null)
-      const owner = row.owner ?? (raw['OD Team Member'] || raw['Owner'] || raw['owner'] || null)
-      const company = row.company ?? (raw['Company'] || raw['company'] || row.accountName || null)
-      const fullName = row.fullName ?? (raw['Name'] || raw['name'] || null)
-      const email = row.email ?? (raw['Email'] || raw['email'] || null)
-      const phone = row.phone ?? (raw['Phone'] || raw['phone'] || raw['Mobile'] || raw['mobile'] || null)
-      const jobTitle = row.jobTitle ?? (raw['Job Title'] || raw['jobTitle'] || raw['Title'] || null)
-      const location = row.location ?? (raw['Location'] || raw['location'] || null)
-      const notes = row.notes ?? (raw['Notes'] || raw['notes'] || null)
+      const source = row.source ?? canonical.source
+      const owner = row.owner ?? canonical.owner
+      const company = row.company ?? canonical.company ?? row.accountName ?? null
+      const fullName = row.fullName ?? canonical.fullName
+      const email = row.email ?? canonical.email
+      const phone = row.phone ?? canonical.phone
+      const jobTitle = row.jobTitle ?? canonical.jobTitle
+      const location = row.location ?? canonical.location
+      const notes = row.notes ?? canonical.notes
 
       return {
         id: row.id,
@@ -1423,24 +1405,14 @@ router.get('/leads/metrics', async (req, res) => {
       sync = await getSyncMeta(customerId, sourceOfTruth)
     }
 
-    let todayLeads = 0
-    let weekLeads = 0
-    let monthLeads = 0
-    const breakdownBySource: Record<string, number> = {}
-    const breakdownByOwner: Record<string, number> = {}
-
-    for (const row of leads) {
-      const at = row.occurredAt ? new Date(row.occurredAt) : null
-      if (at && at >= todayStart && at < todayEnd) todayLeads++
-      if (at && at >= weekStart && at < weekEnd) weekLeads++
-      if (at && at >= monthStart && at < monthEnd) monthLeads++
-      if (at && at >= weekStart && at < weekEnd) {
-        const source = row.source && String(row.source).trim() ? String(row.source).trim() : '(none)'
-        const owner = row.owner && String(row.owner).trim() ? String(row.owner).trim() : '(none)'
-        breakdownBySource[source] = (breakdownBySource[source] || 0) + 1
-        breakdownByOwner[owner] = (breakdownByOwner[owner] || 0) + 1
-      }
-    }
+    const metrics = calculateStoredLeadMetrics(dbRows, {
+      todayStart,
+      todayEnd,
+      weekStart,
+      weekEnd,
+      monthStart,
+      monthEnd,
+    })
 
     const truth = buildSheetTruthStatus({
       sourceOfTruth,
@@ -1452,14 +1424,14 @@ router.get('/leads/metrics', async (req, res) => {
 
     return res.json({
       customerId,
-      totalLeads: leads.length,
-      todayLeads,
-      weekLeads,
-      monthLeads,
-      counts: { today: todayLeads, week: weekLeads, month: monthLeads, total: leads.length },
-      breakdownBySource,
-      breakdownByOwner,
-      rowCount: leads.length,
+      totalLeads: metrics.total,
+      todayLeads: metrics.today,
+      weekLeads: metrics.week,
+      monthLeads: metrics.month,
+      counts: { today: metrics.today, week: metrics.week, month: metrics.month, total: metrics.total },
+      breakdownBySource: metrics.breakdownBySource,
+      breakdownByOwner: metrics.breakdownByOwner,
+      rowCount: metrics.total,
       queriedAt: new Date().toISOString(),
       sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
       sourceOfTruth,

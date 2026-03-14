@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
+import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
 import { calculateActualsFromLeads, type LeadRow } from '../types/leads.js'
 import { limitRowsToActiveSheetTable } from '../workers/leadsSync.js'
 
@@ -299,5 +300,58 @@ const greenMarchRows: LeadRow[] = [
 const greenMarchActuals = calculateActualsFromLeads('GreenTheUK', greenMarchRows)
 assert.equal(greenMarchActuals.weeklyActual, 6, 'GreenTheUK weeklyActual must count real sparse rows')
 assert.equal(greenMarchActuals.monthlyActual, 11, 'GreenTheUK monthlyActual must count real sparse rows')
+
+const metricsRanges = {
+  todayStart: new Date('2026-03-10T00:00:00.000Z'),
+  todayEnd: new Date('2026-03-11T00:00:00.000Z'),
+  weekStart: new Date('2026-03-09T00:00:00.000Z'),
+  weekEnd: new Date('2026-03-16T00:00:00.000Z'),
+  monthStart: new Date('2026-03-01T00:00:00.000Z'),
+  monthEnd: new Date('2026-04-01T00:00:00.000Z'),
+}
+
+const storedOcsRows = ocsMarchRows.map((row) => ({
+  occurredAt: row.Date ? new Date(`20${row.Date.slice(6, 8)}-${row.Date.slice(3, 5)}-${row.Date.slice(0, 2)}T00:00:00.000Z`) : null,
+  createdAt: new Date('2026-03-10T09:00:00.000Z'),
+  externalSourceType: 'google_sheets',
+  source: row['Channel of Lead'] || null,
+  owner: row['OD Team Member'] || null,
+  company: row.Company || null,
+  fullName: row.Name || null,
+  email: row.Email || null,
+  phone: row['Phone Number'] || row.Phone || null,
+  jobTitle: row['Job Title'] || null,
+  location: row.Location || null,
+  status: row['Lead Status'] || null,
+  notes: row['OD Notes'] || null,
+  data: row,
+}))
+
+const storedGreenRows = greenMarchRows.map((row) => ({
+  occurredAt: row.Date ? new Date(`20${row.Date.slice(6, 8)}-${row.Date.slice(3, 5)}-${row.Date.slice(0, 2)}T00:00:00.000Z`) : null,
+  createdAt: new Date('2026-03-10T09:00:00.000Z'),
+  externalSourceType: 'google_sheets',
+  source: row['Lead Channel'] || row['Channel of Lead'] || null,
+  owner: row['OD Team Member'] || null,
+  company: row.Company || null,
+  fullName: row['Full Name'] || row.Name || null,
+  email: row.Email || null,
+  phone: row['Phone Number'] || row.Phone || null,
+  jobTitle: row['Job Title'] || null,
+  location: row.Location || null,
+  status: row['Lead Status'] || null,
+  notes: row['OD Notes'] || null,
+  data: row,
+}))
+
+const storedOcsMetrics = calculateStoredLeadMetrics(storedOcsRows, metricsRanges)
+assert.equal(storedOcsMetrics.week, 3, 'stored OCS metrics must reject marker rows and match weekly truth')
+assert.equal(storedOcsMetrics.month, 4, 'stored OCS metrics must reject marker rows and match monthly truth')
+assert.equal(storedOcsMetrics.total, 4, 'stored OCS metrics total must match real lead rows only')
+
+const storedGreenMetrics = calculateStoredLeadMetrics(storedGreenRows, metricsRanges)
+assert.equal(storedGreenMetrics.week, 6, 'stored GreenTheUK metrics must count real sparse rows in the active week')
+assert.equal(storedGreenMetrics.month, 11, 'stored GreenTheUK metrics must count all real March sparse rows')
+assert.equal(storedGreenMetrics.total, 11, 'stored GreenTheUK metrics total must match accepted sparse rows only')
 
 console.log('lead row classification self-test passed')
