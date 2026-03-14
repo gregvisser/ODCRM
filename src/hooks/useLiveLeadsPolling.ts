@@ -20,7 +20,23 @@ export type UseLiveLeadsPollingOptions = {
 } & GetLiveLeadsParams
 
 export function useLiveLeadsPolling(customerId: string | null, options: UseLiveLeadsPollingOptions = {}) {
-  const { enabled = true, page, pageSize, channel } = options
+  const {
+    enabled = true,
+    page,
+    pageSize,
+    channel,
+    search,
+    accounts,
+    channels,
+    teamMembers,
+    leadStatuses,
+    outcomes,
+    dateField,
+    dateStart,
+    dateEnd,
+    sortBy,
+    sortOrder,
+  } = options
   const [data, setData] = useState<LiveLeadsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -35,7 +51,22 @@ export function useLiveLeadsPolling(customerId: string | null, options: UseLiveL
     setLoading(true)
     setError(null)
     try {
-      const res = await getLiveLeads(customerId, { page, pageSize, channel })
+      const res = await getLiveLeads(customerId, {
+        page,
+        pageSize,
+        channel,
+        search,
+        accounts,
+        channels,
+        teamMembers,
+        leadStatuses,
+        outcomes,
+        dateField,
+        dateStart,
+        dateEnd,
+        sortBy,
+        sortOrder,
+      })
       setData(res)
       setLastUpdatedAt(new Date(res.queriedAt))
     } catch (e) {
@@ -44,7 +75,24 @@ export function useLiveLeadsPolling(customerId: string | null, options: UseLiveL
     } finally {
       setLoading(false)
     }
-  }, [channel, customerId, enabled, page, pageSize])
+  }, [
+    accounts,
+    channels,
+    channel,
+    customerId,
+    dateEnd,
+    dateField,
+    dateStart,
+    enabled,
+    leadStatuses,
+    outcomes,
+    page,
+    pageSize,
+    search,
+    sortBy,
+    sortOrder,
+    teamMembers,
+  ])
 
   useEffect(() => {
     if (!enabled) {
