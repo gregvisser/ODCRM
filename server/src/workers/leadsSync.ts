@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import crypto from 'crypto'
 import type { PrismaClient } from '@prisma/client'
-import { buildExternalRowFingerprint, extractCanonicalLeadRecord } from '../services/leadCanonicalMapping.js'
+import { buildExternalRowFingerprint, extractCanonicalLeadRecord, isRealLeadRow } from '../services/leadCanonicalMapping.js'
 
 type LeadRow = {
   [key: string]: string
@@ -404,9 +404,8 @@ async function fetchLeadsFromSheetUrl(
 
       const leads: LeadRow[] = []
       let filteredEmpty = 0
-      let filteredWcWv = 0
-      let filteredNoNameCompany = 0
-      let filteredTooFewFields = 0
+      let filteredWeekMarker = 0
+      let filteredNonLead = 0
 
       // Process rows in batches for better performance; set __rowIndex for deterministic externalId
       const batchSize = 100
@@ -435,33 +434,16 @@ async function fetchLeadsFromSheetUrl(
           // Apply normalization
           const normalizedLead = normalizeLeadData(lead)
 
-          // Filter out W/C and W/V rows (only check Week column, not all fields)
-          // These are week marker rows like "W/C 02.02.26", not actual leads
           const weekValue = String(normalizedLead['Week'] || normalizedLead['week'] || '').toLowerCase()
           const isWeekMarker = weekValue.startsWith('w/c') || weekValue.startsWith('w/v')
           if (isWeekMarker) {
-            filteredWcWv++
+            filteredWeekMarker++
             dataRowIndex++
             continue
           }
 
-          // Require at least name or company
-          const nameValue = normalizedLead['Name'] || normalizedLead['name'] || ''
-          const companyValue = normalizedLead['Company'] || normalizedLead['company'] || ''
-          const hasName = nameValue && nameValue.trim() !== ''
-          const hasCompany = companyValue && companyValue.trim() !== ''
-          if (!hasName && !hasCompany) {
-            filteredNoNameCompany++
-            dataRowIndex++
-            continue
-          }
-
-          // Require at least 2 non-empty fields (besides accountName)
-          const nonEmptyFields = Object.keys(normalizedLead).filter(
-            (key) => key !== 'accountName' && normalizedLead[key] && String(normalizedLead[key]).trim() !== '',
-          )
-          if (nonEmptyFields.length < 2) {
-            filteredTooFewFields++
+          if (!isRealLeadRow(normalizedLead)) {
+            filteredNonLead++
             dataRowIndex++
             continue
           }
@@ -478,14 +460,13 @@ async function fetchLeadsFromSheetUrl(
         }
       }
 
-      diagnostics.filteredRows = filteredEmpty + filteredWcWv + filteredNoNameCompany + filteredTooFewFields
+      diagnostics.filteredRows = filteredEmpty + filteredWeekMarker + filteredNonLead
       diagnostics.finalLeads = leads.length
 
       console.log(`   Filtering results:`)
       console.log(`     - Empty rows: ${filteredEmpty}`)
-      console.log(`     - W/C or W/V rows: ${filteredWcWv}`)
-      console.log(`     - No name/company: ${filteredNoNameCompany}`)
-      console.log(`     - Too few fields: ${filteredTooFewFields}`)
+      console.log(`     - Explicit week marker rows: ${filteredWeekMarker}`)
+      console.log(`     - Non-lead rows: ${filteredNonLead}`)
       console.log(`   ✅ Final leads: ${leads.length}`)
 
       const totalDuration = Date.now() - startTime
@@ -929,6 +910,8 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   const platformCounts = new Map<string, number>()
 
   accountLeads.forEach((lead) => {
+    if (!isRealLeadRow(lead)) return
+
     let dateValue = lead['Date'] || lead['date'] || lead['Created At'] || lead['createdAt'] || lead['First Meeting Date'] || ''
 
     if (!dateValue) {

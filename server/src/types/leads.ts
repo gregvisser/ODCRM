@@ -3,6 +3,8 @@
  * Extracted from leadsSync.ts for use across routes and workers
  */
 
+import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
+
 export type LeadRow = {
   [key: string]: string
   accountName: string
@@ -93,6 +95,8 @@ export function calculateActualsFromLeads(accountName: string, leads: LeadRow[])
   const platformCounts = new Map<string, number>()
 
   accountLeads.forEach((lead) => {
+    if (!isRealLeadRow(lead)) return
+
     let dateValue = lead['Date'] || lead['date'] || lead['Created At'] || lead['createdAt'] || lead['First Meeting Date'] || ''
 
     if (!dateValue) {

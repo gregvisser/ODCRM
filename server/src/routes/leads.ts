@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
+import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
 import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -169,7 +170,24 @@ router.get('/', async (req, res) => {
     const state = await prisma.leadSyncState.findUnique({ where: { customerId } })
     const lastSyncAt = state?.lastSuccessAt || state?.lastSyncAt || null
 
-    const leads = leadRows.map((lead) => {
+    const filteredLeadRows = leadRows.filter((lead) => {
+      const leadData = lead.data && typeof lead.data === 'object' ? lead.data as Record<string, string> : {}
+      return isRealLeadRow({
+        ...leadData,
+        ...(lead.fullName ? { Name: lead.fullName } : {}),
+        ...(lead.email ? { Email: lead.email } : {}),
+        ...(lead.phone ? { Phone: lead.phone } : {}),
+        ...(lead.company ? { Company: lead.company } : {}),
+        ...(lead.jobTitle ? { 'Job Title': lead.jobTitle } : {}),
+        ...(lead.location ? { Location: lead.location } : {}),
+        ...(lead.notes ? { Notes: lead.notes } : {}),
+        ...(lead.source ? { 'Channel of Lead': lead.source } : {}),
+        ...(lead.owner ? { 'OD Team Member': lead.owner } : {}),
+        ...(lead.status ? { 'Lead Status': lead.status } : {}),
+      })
+    })
+
+    const leads = filteredLeadRows.map((lead) => {
       try {
         const leadData = lead.data && typeof lead.data === 'object' ? lead.data as Record<string, any> : {}
         return {
@@ -206,11 +224,11 @@ router.get('/', async (req, res) => {
     console.log(`📊 LEADS API RESPONSE - ${new Date().toISOString()}`)
     console.log(`   Customer ID: ${customerId}`)
     console.log(`   Since filter: ${since?.toISOString() || 'NONE'}`)
-    console.log(`   Total leads in DB: ${leadRows.length}`)
+    console.log(`   Total real leads in DB: ${filteredLeadRows.length}`)
     console.log(`   Last sync at: ${lastSyncAt?.toISOString() || 'NEVER'}`)
 
     // Count by account
-    const accountCounts = leadRows.reduce((acc, lead) => {
+    const accountCounts = filteredLeadRows.reduce((acc, lead) => {
       acc[lead.accountName] = (acc[lead.accountName] || 0) + 1
       return acc
     }, {} as Record<string, number>)
@@ -226,7 +244,7 @@ router.get('/', async (req, res) => {
       leads,
       lastSyncAt: lastSyncAt ? lastSyncAt.toISOString() : null,
       diagnostics: {
-        totalLeads: leadRows.length,
+        totalLeads: filteredLeadRows.length,
         accountCounts,
         checksum,
         queriedAt: new Date().toISOString(),
@@ -268,6 +286,16 @@ router.get('/aggregations', async (req, res) => {
       select: {
         customerId: true,
         accountName: true,
+        source: true,
+        owner: true,
+        company: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        jobTitle: true,
+        location: true,
+        status: true,
+        notes: true,
         data: true,
       },
     })
@@ -277,10 +305,25 @@ router.get('/aggregations', async (req, res) => {
 
     // Group leads by customer
     const leadsByCustomer = leadRecords.reduce((acc, record) => {
+      const recordData = (record.data && typeof record.data === 'object') ? record.data as Record<string, string> : {}
+      if (!isRealLeadRow({
+        ...recordData,
+        ...(record.fullName ? { Name: record.fullName } : {}),
+        ...(record.email ? { Email: record.email } : {}),
+        ...(record.phone ? { Phone: record.phone } : {}),
+        ...(record.company ? { Company: record.company } : {}),
+        ...(record.jobTitle ? { 'Job Title': record.jobTitle } : {}),
+        ...(record.location ? { Location: record.location } : {}),
+        ...(record.status ? { 'Lead Status': record.status } : {}),
+        ...(record.notes ? { Notes: record.notes } : {}),
+        ...(record.source ? { 'Channel of Lead': record.source } : {}),
+        ...(record.owner ? { 'OD Team Member': record.owner } : {}),
+      })) {
+        return acc
+      }
       if (!acc[record.customerId]) {
         acc[record.customerId] = []
       }
-      const recordData = (record.data && typeof record.data === 'object') ? record.data as Record<string, string> : {}
       acc[record.customerId].push({
         ...recordData,
         accountName: record.accountName,

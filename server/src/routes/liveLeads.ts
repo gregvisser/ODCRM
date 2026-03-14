@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { triggerManualSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
+import { isRealLeadRow } from '../services/leadCanonicalMapping.js'
 import { retryLeadOutboundSync, syncManualLeadEditOutbound, syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -627,37 +628,51 @@ function mapDbLeadRows(rows: Array<{
   accountName: string
   data: unknown
 }>): MappedLeadRow[] {
-  return rows.map((row) => {
-    const raw = asRawMap(row.data)
-    const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
-    const source = row.source ?? (raw['Channel of Lead'] || raw['channel'] || raw['Source'] || null)
-    const owner = row.owner ?? (raw['OD Team Member'] || raw['Owner'] || raw['owner'] || null)
-    const company = row.company ?? (raw['Company'] || raw['company'] || row.accountName || null)
-    const fullName = row.fullName ?? (raw['Name'] || raw['name'] || null)
-    const email = row.email ?? (raw['Email'] || raw['email'] || null)
-    const phone = row.phone ?? (raw['Phone'] || raw['phone'] || raw['Mobile'] || raw['mobile'] || null)
-    const jobTitle = row.jobTitle ?? (raw['Job Title'] || raw['jobTitle'] || raw['Title'] || null)
-    const location = row.location ?? (raw['Location'] || raw['location'] || null)
-    const notes = row.notes ?? (raw['Notes'] || raw['notes'] || null)
+  return rows
+    .filter((row) => isRealLeadRow({
+      ...asRawMap(row.data),
+      ...(row.fullName ? { Name: row.fullName } : {}),
+      ...(row.email ? { Email: row.email } : {}),
+      ...(row.phone ? { Phone: row.phone } : {}),
+      ...(row.company ? { Company: row.company } : {}),
+      ...(row.jobTitle ? { 'Job Title': row.jobTitle } : {}),
+      ...(row.location ? { Location: row.location } : {}),
+      ...(row.status ? { 'Lead Status': row.status } : {}),
+      ...(row.notes ? { Notes: row.notes } : {}),
+      ...(row.source ? { 'Channel of Lead': row.source } : {}),
+      ...(row.owner ? { 'OD Team Member': row.owner } : {}),
+    }))
+    .map((row) => {
+      const raw = asRawMap(row.data)
+      const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
+      const source = row.source ?? (raw['Channel of Lead'] || raw['channel'] || raw['Source'] || null)
+      const owner = row.owner ?? (raw['OD Team Member'] || raw['Owner'] || raw['owner'] || null)
+      const company = row.company ?? (raw['Company'] || raw['company'] || row.accountName || null)
+      const fullName = row.fullName ?? (raw['Name'] || raw['name'] || null)
+      const email = row.email ?? (raw['Email'] || raw['email'] || null)
+      const phone = row.phone ?? (raw['Phone'] || raw['phone'] || raw['Mobile'] || raw['mobile'] || null)
+      const jobTitle = row.jobTitle ?? (raw['Job Title'] || raw['jobTitle'] || raw['Title'] || null)
+      const location = row.location ?? (raw['Location'] || raw['location'] || null)
+      const notes = row.notes ?? (raw['Notes'] || raw['notes'] || null)
 
-    return {
-      id: row.id,
-      occurredAt,
-      source,
-      owner,
-      company,
-      name: fullName,
-      fullName,
-      email,
-      phone,
-      jobTitle,
-      location,
-      status: row.status,
-      syncStatus: row.syncStatus,
-      notes,
-      raw,
-    }
-  })
+      return {
+        id: row.id,
+        occurredAt,
+        source,
+        owner,
+        company,
+        name: fullName,
+        fullName,
+        email,
+        phone,
+        jobTitle,
+        location,
+        status: row.status,
+        syncStatus: row.syncStatus,
+        notes,
+        raw,
+      }
+    })
 }
 
 async function getCustomerTruthContext(customerId: string) {
