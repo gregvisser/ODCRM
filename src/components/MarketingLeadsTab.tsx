@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Box,
   Heading,
@@ -51,7 +51,7 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, SettingsIcon, StarIcon } from '@chakra-ui/icons'
 import { type Account } from './AccountsTab'
-import { syncAccountLeadCountsFromLeads } from '../utils/accountsLeadsSync'
+import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
@@ -59,8 +59,8 @@ import { getCurrentCustomerId } from '../platform/stores/settings'
 import RequireActiveClient from './RequireActiveClient'
 import { getSyncStatus, type SyncStatus } from '../utils/leadsApi'
 import { fetchAllCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
-import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
-import { fetchLiveMetricsForCustomers, type LiveLeadRow } from '../utils/liveLeadsApi'
+import { useLiveLeadMetricsPolling, useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
+import { fetchLiveMetricsForCustomers, getLiveLeads, type LiveLeadRow } from '../utils/liveLeadsApi'
 
 // Load accounts from storage (includes any edits made through the UI)
 function loadAccountsFromStorage(): Account[] {
@@ -173,14 +173,6 @@ const DEFAULT_FILTERS: FilterState = {
 
 function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountName?: string; enabled?: boolean }) {
   const customerId = getCurrentCustomerId()
-  const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(customerId || null, { enabled })
-  const leads = useMemo(
-    () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
-    [liveData]
-  )
-  const lastRefresh = lastUpdatedAt ?? new Date()
-  const liveWarning = liveData?.warning ?? null
-  const sourceOfTruth = liveData?.sourceOfTruth ?? null
 
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
@@ -243,9 +235,70 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   useEffect(() => {
     setCurrentPage(1)
   }, [filters])
+
+  const [accountPage, setAccountPage] = useState(1)
+  useEffect(() => {
+    setAccountPage(1)
+  }, [performanceAccountFilter])
+
+  const {
+    data: liveData,
+    loading,
+    error,
+    lastUpdatedAt,
+    refetch,
+  } = useLiveLeadsPolling(customerId || null, {
+    enabled,
+    page: currentPage,
+    pageSize: ITEMS_PER_PAGE,
+    search: filters.search,
+    accounts: filters.accounts,
+    channels: filters.channels,
+    teamMembers: filters.teamMembers,
+    leadStatuses: filters.leadStatuses,
+    outcomes: filters.outcomes,
+    dateField: filters.dateRange.field || undefined,
+    dateStart: filters.dateRange.start || undefined,
+    dateEnd: filters.dateRange.end || undefined,
+    sortBy: filters.sortBy,
+    sortOrder: filters.sortOrder,
+  })
+  const leads = useMemo(
+    () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
+    [liveData]
+  )
+  const customerName = liveData?.customerName
+    || aggregateCustomersList?.find((customer) => customer.id === customerId)?.name
+    || ''
+  const {
+    data: metricsData,
+  } = useLiveLeadMetricsPolling(enabled ? (customerId || null) : null)
+  const {
+    data: accountDetailData,
+    loading: accountDetailLoading,
+  } = useLiveLeadsPolling(customerId || null, {
+    enabled: enabled && Boolean(performanceAccountFilter) && (!customerName || performanceAccountFilter === customerName),
+    page: accountPage,
+    pageSize: ITEMS_PER_PAGE,
+    sortBy: 'Date',
+    sortOrder: 'desc',
+  })
+  const accountDetailLeads = useMemo(
+    () => (accountDetailData ? mapLiveLeadsToLead(accountDetailData.leads, accountDetailData.customerName ?? '') : []),
+    [accountDetailData]
+  )
+  const lastRefresh = lastUpdatedAt ?? new Date()
+  const liveWarning = liveData?.warning ?? null
+  const sourceOfTruth = liveData?.sourceOfTruth ?? null
+  const filteredLeadCount = liveData?.total ?? 0
+  const totalLeadCount = liveData?.rowCount ?? 0
+  const totalPages = liveData?.totalPages ?? 1
+  const serverPage = liveData?.page ?? currentPage
+  const accountDetailTotal = accountDetailData?.total ?? 0
+  const accountDetailTotalPages = accountDetailData?.totalPages ?? 1
+  const accountDetailServerPage = accountDetailData?.page ?? accountPage
   
   const toast = useToast()
-  const lastErrorToastAtRef = useRef(0)
   
 
   // Allow parent navigators (top-tab shell) to focus an account's performance view.
@@ -271,8 +324,10 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   }, [refetch])
 
   useEffect(() => {
-    if (leads.length > 0) syncAccountLeadCountsFromLeads(leads)
-  }, [leads])
+    if (customerName && totalLeadCount > 0) {
+      syncSingleAccountLeadCount(customerName, totalLeadCount)
+    }
+  }, [customerName, totalLeadCount])
 
   // Aggregate metrics for "All Accounts Combined" — live metrics, 30s polling
   const loadAggregate = useCallback(async () => {
@@ -298,21 +353,13 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
 
   // When leads are empty, fetch sync status so we can show lastError / lastSyncAt
   useEffect(() => {
-    if (leads.length > 0 || sourceOfTruth === 'db') { setSyncStatusForEmpty(null); return }
+    if (totalLeadCount > 0 || sourceOfTruth === 'db') { setSyncStatusForEmpty(null); return }
     const customerId = getCurrentCustomerId()
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
-  }, [leads.length, sourceOfTruth])
+  }, [totalLeadCount, sourceOfTruth])
 
-  // Get all unique column headers from all leads (excluding accountName)
-  const allColumns = new Set<string>()
-  leads.forEach((lead) => {
-    Object.keys(lead).forEach((key) => {
-      if (key !== 'accountName') {
-        allColumns.add(key)
-      }
-    })
-  })
+  const allColumns = new Set<string>(liveData?.allDisplayColumns ?? [])
 
   // Define preferred column order based on the Google Sheet structure
   const preferredColumnOrder = [
@@ -639,10 +686,16 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     }
   }, [leads])
 
-  // For "All Accounts Combined" card: use API aggregate when available, else in-memory unifiedAnalytics
+  // For "All Accounts Combined" card: use API aggregate counts and keep target values from local account settings.
   const displayUnifiedPeriodMetrics = useMemo(() => {
     const base = unifiedAnalytics.periodMetrics
-    if (!aggregateMetrics) return base
+    if (!aggregateMetrics) {
+      return {
+        today: { ...base.today, actual: 0, breakdown: {}, teamBreakdown: {} },
+        week: { ...base.week, actual: 0, breakdown: {}, teamBreakdown: {} },
+        month: { ...base.month, actual: 0, breakdown: {}, teamBreakdown: {} },
+      }
+    }
     return {
       today: { ...base.today, actual: aggregateMetrics.totals.today, breakdown: aggregateMetrics.breakdownBySource, teamBreakdown: aggregateMetrics.breakdownByOwner },
       week: { ...base.week, actual: aggregateMetrics.totals.week, breakdown: aggregateMetrics.breakdownBySource, teamBreakdown: aggregateMetrics.breakdownByOwner },
@@ -654,56 +707,13 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   const accountPerformance = useMemo(() => {
     try {
       if (!performanceAccountFilter) return null
+      if (customerName && performanceAccountFilter !== customerName) return null
 
       const accountsData = loadAccountsFromStorage()
       const account = accountsData.find((acc) => acc.name === performanceAccountFilter)
       if (!account) return null
 
-      const accountLeads = leads.filter((lead) => lead.accountName === performanceAccountFilter)
-      
-      // Enhanced date field detection - check all fields for date patterns first
-      const leadsWithDates: LeadWithDate[] = accountLeads
-        .map((lead) => {
-          let dateValue = ''
-          let dateFieldName = ''
-          
-          // FIRST: Check ALL fields for DD.MM.YY format (like "05.01.26")
-          for (const key of Object.keys(lead)) {
-            const value = lead[key] || ''
-            if (value && value.trim() && /^\d{1,2}\.\d{1,2}\.\d{2,4}$/.test(value.trim())) {
-              dateValue = value.trim()
-              dateFieldName = key
-              break
-            }
-          }
-          
-          // SECOND: If no DD.MM.YY format found, check for date fields in preferred order
-          if (!dateValue || !dateValue.trim()) {
-            dateValue =
-              lead['Date'] ||
-              lead['date'] ||
-              lead['Week'] ||
-              lead['week'] ||
-              lead['First Meeting Date'] ||
-              ''
-            
-            if (dateValue) {
-              dateFieldName = lead['Date'] ? 'Date' : lead['date'] ? 'date' : lead['Week'] ? 'Week' : lead['week'] ? 'week' : lead['First Meeting Date'] ? 'First Meeting Date' : 'unknown'
-            }
-          }
-          
-          const parsedDate = parseDate(dateValue)
-          if (!parsedDate) {
-            return null
-          }
-          return {
-            data: lead,
-            parsedDate,
-          }
-        })
-        .filter((item): item is LeadWithDate => Boolean(item))
-
-      // Use Europe/London timezone for consistent date calculations
+      // Calculate daily target with division by zero protection
       const now = new Date()
       const londonTime = new Intl.DateTimeFormat('en-GB', {
         timeZone: 'Europe/London',
@@ -713,93 +723,33 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
       }).format(now)
       const [day, month, year] = londonTime.split('/').map(Number)
       const londonNow = new Date(year, month - 1, day)
-      
-      const startOfToday = new Date(londonNow.getFullYear(), londonNow.getMonth(), londonNow.getDate())
-      const endOfToday = new Date(startOfToday)
-      endOfToday.setDate(endOfToday.getDate() + 1)
-
-      // Current week: Monday -> next Monday (exclusive)
-      const currentWeekStart = new Date(startOfToday)
-      const dayOfWeek = currentWeekStart.getDay()
-      const diff = dayOfWeek === 0 ? -6 : 1 - dayOfWeek
-      currentWeekStart.setDate(currentWeekStart.getDate() + diff)
-      currentWeekStart.setHours(0, 0, 0, 0)
-      const currentWeekEnd = new Date(currentWeekStart)
-      currentWeekEnd.setDate(currentWeekEnd.getDate() + 7)
-
-      const monthStart = new Date(londonNow.getFullYear(), londonNow.getMonth(), 1)
-      monthStart.setHours(0, 0, 0, 0)
-      const monthEnd = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 1) // exclusive (start of next month)
       const daysInMonth = new Date(londonNow.getFullYear(), londonNow.getMonth() + 1, 0).getDate()
-
-      const computeMetrics = (start: Date, end: Date) => {
-        const breakdown: Record<string, number> = {}
-        const teamBreakdown: Record<string, number> = {}
-        let actual = 0
-
-        leadsWithDates.forEach((entry) => {
-          try {
-            if (entry.parsedDate >= start && entry.parsedDate < end) {
-              actual += 1
-              const channel = entry.data['Channel of Lead'] || entry.data['channel of lead'] || ''
-              const normalizedSource = normalizeLeadSource(channel)
-              if (normalizedSource) {
-                breakdown[normalizedSource] = (breakdown[normalizedSource] || 0) + 1
-              } else if (channel && channel.trim()) {
-                breakdown[channel] = (breakdown[channel] || 0) + 1
-              }
-
-              // OD Team Member breakdown - enhanced parsing with multiple separators
-              const rawTeamMember =
-                entry.data['OD Team Member'] ||
-                entry.data['OD team member'] ||
-                entry.data['od team member'] ||
-                entry.data['OD Team'] ||
-                entry.data['od team'] ||
-                ''
-
-              if (rawTeamMember && rawTeamMember.trim()) {
-                // Split by comma, &, /, +, and "and" (case insensitive)
-                const members = rawTeamMember
-                  .split(/,|&|\/|\+|\band\b/gi)
-                  .map((m) => m.trim())
-                  .filter(Boolean)
-
-                members.forEach((member) => {
-                  if (member) {
-                    teamBreakdown[member] = (teamBreakdown[member] || 0) + 1
-                  }
-                })
-              }
-            }
-          } catch (error) {
-            console.warn('Error processing lead entry:', error)
-            // Continue processing other leads
-          }
-        })
-
-        return { actual, breakdown, teamBreakdown }
-      }
-
-      // Calculate daily target with division by zero protection
       const dailyTargetFromWeekly = account.weeklyTarget && account.weeklyTarget > 0 ? account.weeklyTarget / 7 : 0
       const dailyTargetFromMonthly = account.monthlyTarget && account.monthlyTarget > 0 && daysInMonth > 0 ? account.monthlyTarget / daysInMonth : 0
       const dailyTarget = dailyTargetFromWeekly > 0 ? dailyTargetFromWeekly : dailyTargetFromMonthly
+      const breakdownBySource = metricsData?.breakdownBySource ?? {}
+      const breakdownByOwner = metricsData?.breakdownByOwner ?? {}
 
       const periodMetrics = {
         today: {
           label: 'Today',
-          ...computeMetrics(startOfToday, endOfToday),
+          actual: metricsData?.counts?.today ?? metricsData?.todayLeads ?? 0,
+          breakdown: breakdownBySource,
+          teamBreakdown: breakdownByOwner,
           target: Math.max(Math.round(dailyTarget || 0), 0),
         },
         week: {
           label: 'This Week',
-          ...computeMetrics(currentWeekStart, currentWeekEnd),
+          actual: metricsData?.counts?.week ?? metricsData?.weekLeads ?? 0,
+          breakdown: breakdownBySource,
+          teamBreakdown: breakdownByOwner,
           target: Math.max(Math.round(account.weeklyTarget || 0), 0),
         },
         month: {
           label: 'This Month',
-          ...computeMetrics(monthStart, monthEnd),
+          actual: metricsData?.counts?.month ?? metricsData?.monthLeads ?? 0,
+          breakdown: breakdownBySource,
+          teamBreakdown: breakdownByOwner,
           target: Math.max(Math.round(account.monthlyTarget || 0), 0),
         },
       }
@@ -812,182 +762,25 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
       console.error('Error calculating account performance analytics:', error)
       return null
     }
-  }, [leads, performanceAccountFilter])
+  }, [customerName, metricsData, performanceAccountFilter])
 
   // Get all leads for the selected account (for detailed table)
   const accountPerformanceLeads = useMemo(() => {
     if (!performanceAccountFilter) return []
-    return leads
-      .filter((lead) => lead.accountName === performanceAccountFilter)
-      .sort((a, b) => {
-        // Sort by date (most recent first)
-        const dateA = parseDate(a['Date'] || a['Week'] || '')
-        const dateB = parseDate(b['Date'] || b['Week'] || '')
-        if (!dateA && !dateB) return 0
-        if (!dateA) return 1
-        if (!dateB) return -1
-        return dateB.getTime() - dateA.getTime()
-      })
-  }, [leads, performanceAccountFilter])
+    return accountDetailLeads
+  }, [accountDetailLeads, performanceAccountFilter])
 
-  // Get unique values for filter dropdowns
-  const uniqueAccounts = useMemo(() => 
-    Array.from(new Set(leads.map((lead) => lead.accountName))).sort(),
-    [leads]
-  )
-  
-  const uniqueChannels = useMemo(() => {
-    const channels = new Set<string>()
-    leads.forEach(lead => {
-      const channel = lead['Channel of Lead'] || lead['channel of lead'] || ''
-      if (channel && channel.trim()) {
-        channels.add(channel.trim())
-      }
-    })
-    return Array.from(channels).sort()
-  }, [leads])
-  
-  const uniqueTeamMembers = useMemo(() => {
-    const members = new Set<string>()
-    leads.forEach(lead => {
-      const teamMember = lead['OD Team Member'] || lead['OD team member'] || lead['OD Team'] || ''
-      if (teamMember && teamMember.trim()) {
-        // Split by common separators
-        teamMember.split(/,|&|\/|\+|\band\b/gi).forEach(m => {
-          const trimmed = m.trim()
-          if (trimmed) members.add(trimmed)
-        })
-      }
-    })
-    return Array.from(members).sort()
-  }, [leads])
-  
-  const uniqueOutcomes = useMemo(() => {
-    const outcomes = new Set<string>()
-    leads.forEach(lead => {
-      const outcome = lead['Outcome'] || lead['outcome'] || ''
-      if (outcome && outcome.trim()) {
-        outcomes.add(outcome.trim())
-      }
-    })
-    return Array.from(outcomes).sort()
-  }, [leads])
-  
-  // Filter and sort leads
-  const filteredAndSortedLeads = useMemo(() => {
-    let filtered = [...leads]
-    
-    // Search filter (multi-column)
-    if (filters.search.trim()) {
-      const searchLower = filters.search.toLowerCase()
-      filtered = filtered.filter(lead => {
-        const searchFields = [
-          lead['Name'] || '',
-          lead['Company'] || '',
-          lead['Contact Info'] || '',
-          lead['Job Title'] || '',
-          lead.accountName || '',
-        ]
-        return searchFields.some(field => field.toLowerCase().includes(searchLower))
-      })
-    }
-    
-    // Account filter
-    if (filters.accounts.length > 0) {
-      filtered = filtered.filter(lead => filters.accounts.includes(lead.accountName))
-    }
-    
-    // Channel filter
-    if (filters.channels.length > 0) {
-      filtered = filtered.filter(lead => {
-        const channel = lead['Channel of Lead'] || lead['channel of lead'] || ''
-        return filters.channels.includes(channel.trim())
-      })
-    }
-    
-    // Team member filter
-    if (filters.teamMembers.length > 0) {
-      filtered = filtered.filter(lead => {
-        const teamMember = lead['OD Team Member'] || lead['OD team member'] || lead['OD Team'] || ''
-        if (!teamMember) return false
-        const members = teamMember.split(/,|&|\/|\+|\band\b/gi).map(m => m.trim())
-        return filters.teamMembers.some(filterMember => members.includes(filterMember))
-      })
-    }
-    
-    // Lead status filter
-    if (filters.leadStatuses.length > 0) {
-      filtered = filtered.filter(lead => {
-        const status = lead['Lead Status'] || lead['lead status'] || ''
-        return filters.leadStatuses.some(filterStatus => 
-          status.toLowerCase().includes(filterStatus.toLowerCase())
-        )
-      })
-    }
-    
-    // Outcome filter
-    if (filters.outcomes.length > 0) {
-      filtered = filtered.filter(lead => {
-        const outcome = lead['Outcome'] || lead['outcome'] || ''
-        return filters.outcomes.includes(outcome.trim())
-      })
-    }
-    
-    // Date range filter
-    if (filters.dateRange.field && (filters.dateRange.start || filters.dateRange.end)) {
-      filtered = filtered.filter(lead => {
-        const dateValue = lead[filters.dateRange.field] || ''
-        if (!dateValue) return false
-        const parsedDate = parseDate(dateValue)
-        if (!parsedDate) return false
-        
-        if (filters.dateRange.start) {
-          const startDate = new Date(filters.dateRange.start)
-          startDate.setHours(0, 0, 0, 0)
-          if (parsedDate < startDate) return false
-        }
-        
-        if (filters.dateRange.end) {
-          const endDate = new Date(filters.dateRange.end)
-          endDate.setHours(23, 59, 59, 999)
-          if (parsedDate > endDate) return false
-        }
-        
-        return true
-      })
-    }
-    
-    // Sorting
-    if (filters.sortBy) {
-      filtered.sort((a, b) => {
-        const aValue = a[filters.sortBy] || ''
-        const bValue = b[filters.sortBy] || ''
-        
-        // Try to parse as date first
-        const aDate = parseDate(aValue)
-        const bDate = parseDate(bValue)
-        
-        if (aDate && bDate) {
-          const diff = aDate.getTime() - bDate.getTime()
-          return filters.sortOrder === 'asc' ? diff : -diff
-        }
-        
-        // String comparison
-        const comparison = aValue.localeCompare(bValue)
-        return filters.sortOrder === 'asc' ? comparison : -comparison
-      })
-    }
-    
-    return filtered
-  }, [leads, filters])
-  
-  // Pagination
-  const totalPages = Math.ceil(filteredAndSortedLeads.length / ITEMS_PER_PAGE)
-  const paginatedLeads = useMemo(() => {
-    const start = (currentPage - 1) * ITEMS_PER_PAGE
-    const end = start + ITEMS_PER_PAGE
-    return filteredAndSortedLeads.slice(start, end)
-  }, [filteredAndSortedLeads, currentPage])
+  // Server-provided filter metadata
+  const uniqueAccounts = useMemo(() => {
+    if (liveData?.availableAccounts?.length) return liveData.availableAccounts
+    return customerName ? [customerName] : []
+  }, [customerName, liveData?.availableAccounts])
+
+  const uniqueChannels = liveData?.availableChannels ?? []
+  const uniqueTeamMembers = liveData?.availableTeamMembers ?? []
+  const uniqueOutcomes = liveData?.availableOutcomes ?? []
+  const availableLeadStatuses = liveData?.availableLeadStatuses ?? LEAD_STATUS_OPTIONS
+  const filteredAndSortedLeads = leads
   
   // Helper to highlight search terms
   const highlightSearch = (text: string): ReactNode => {
@@ -1008,8 +801,19 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   }
   
   // Export filtered results to CSV
-  const exportFilteredToCSV = useCallback(() => {
-    if (filteredAndSortedLeads.length === 0) {
+  const exportFilteredToCSV = useCallback(async () => {
+    if (!customerId) {
+      toast({
+        title: 'No client selected',
+        description: 'Select a client before exporting leads.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    if (filteredLeadCount === 0) {
       toast({
         title: 'No data to export',
         description: 'There are no filtered leads to export.',
@@ -1021,9 +825,35 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     }
     
     try {
+      const exportData = await getLiveLeads(customerId, {
+        search: filters.search,
+        accounts: filters.accounts,
+        channels: filters.channels,
+        teamMembers: filters.teamMembers,
+        leadStatuses: filters.leadStatuses,
+        outcomes: filters.outcomes,
+        dateField: filters.dateRange.field || undefined,
+        dateStart: filters.dateRange.start || undefined,
+        dateEnd: filters.dateRange.end || undefined,
+        sortBy: filters.sortBy,
+        sortOrder: filters.sortOrder,
+      })
+      const exportLeads = mapLiveLeadsToLead(exportData.leads, exportData.customerName ?? customerName)
+
+      if (exportLeads.length === 0) {
+        toast({
+          title: 'No data to export',
+          description: 'There are no filtered leads to export.',
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+
       // Get all unique column headers
       const allHeaders = new Set<string>()
-      filteredAndSortedLeads.forEach(lead => {
+      exportLeads.forEach(lead => {
         Object.keys(lead).forEach(key => {
           if (key !== 'accountName' || allHeaders.size === 0) {
             allHeaders.add(key)
@@ -1034,7 +864,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
       const headers = Array.from(allHeaders)
       const csvRows = [
         headers.join(','),
-        ...filteredAndSortedLeads.map(lead =>
+        ...exportLeads.map(lead =>
           headers.map(header => {
             const value = lead[header] || ''
             return `"${String(value).replace(/"/g, '""')}"`
@@ -1055,7 +885,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
       
       toast({
         title: 'Export successful',
-        description: `Exported ${filteredAndSortedLeads.length} lead(s) to CSV.`,
+        description: `Exported ${exportLeads.length} lead(s) to CSV.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -1070,7 +900,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         isClosable: true,
       })
     }
-  }, [filteredAndSortedLeads, toast])
+  }, [customerId, customerName, filteredLeadCount, filters, toast])
   
   // Save current filter as preset
   const saveCurrentFilter = useCallback(() => {
@@ -1163,14 +993,14 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
 
   return (
     <RequireActiveClient>
-      {loading && leads.length === 0 ? (
+      {loading && totalLeadCount === 0 ? (
         <Box textAlign="center" py={12}>
           <Spinner size="xl" color="brand.700" thickness="4px" />
           <Text mt={4} color="gray.600">
             Loading leads data from the server...
           </Text>
         </Box>
-      ) : error && leads.length === 0 ? (
+      ) : error && totalLeadCount === 0 ? (
         <Alert status="error" borderRadius="lg" data-testid="marketing-leads-actionable-error">
           <AlertIcon />
           <Box>
@@ -1196,7 +1026,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
           </Box>
         </Alert>
       )}
-      {leads.length === 0 && syncStatusForEmpty && (
+      {totalLeadCount === 0 && syncStatusForEmpty && (
         <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
           <AlertIcon />
           <Box>
@@ -1237,8 +1067,8 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
               Marketing Leads
             </Heading>
             <Text color="gray.600" fontSize={{ base: "sm", md: "md" }}>
-              {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed leads via ODCRM'} ({leads.length} total
-              {filteredAndSortedLeads.length !== leads.length && `, ${filteredAndSortedLeads.length} filtered`})
+              {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed leads via ODCRM'} ({totalLeadCount} total
+              {filteredLeadCount !== totalLeadCount && `, ${filteredLeadCount} filtered`})
             </Text>
             <Text fontSize="xs" color="gray.500" mt={1}>
               Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
@@ -1641,7 +1471,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                 Status {filters.leadStatuses.length > 0 && `(${filters.leadStatuses.length})`}
               </MenuButton>
               <MenuList maxH="300px" overflowY="auto">
-                {LEAD_STATUS_OPTIONS.map(status => (
+                {availableLeadStatuses.map(status => (
                   <MenuItem key={status} onClick={() => toggleFilterValue('leadStatuses', status)}>
                     <Checkbox isChecked={filters.leadStatuses.includes(status)} mr={2} />
                     {status}
@@ -1787,8 +1617,8 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         {/* Results Summary and Export */}
         <HStack justify="space-between" mb={4} flexWrap="wrap" gap={2}>
           <Text fontSize="sm" color="gray.700" fontWeight="medium">
-            Showing <Badge colorScheme="blue">{filteredAndSortedLeads.length}</Badge> of{' '}
-            <Badge colorScheme="gray">{leads.length}</Badge> leads
+            Showing <Badge colorScheme="blue">{filteredLeadCount}</Badge> of{' '}
+            <Badge colorScheme="gray">{totalLeadCount}</Badge> leads
             {filters.search && (
               <Text as="span" color="gray.500" ml={2}>
                 matching "{filters.search}"
@@ -1800,9 +1630,9 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
             colorScheme="green"
             leftIcon={<DownloadIcon />}
             onClick={exportFilteredToCSV}
-            isDisabled={filteredAndSortedLeads.length === 0}
+            isDisabled={filteredLeadCount === 0}
           >
-            Export Filtered ({filteredAndSortedLeads.length})
+            Export Filtered ({filteredLeadCount})
           </Button>
         </HStack>
         
@@ -1814,17 +1644,17 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
               icon={<ChevronLeftIcon />}
               size="sm"
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              isDisabled={currentPage === 1}
+              isDisabled={serverPage === 1}
             />
             <Text fontSize="sm" color="gray.700" fontWeight="medium">
-              Page {currentPage} of {totalPages}
+              Page {serverPage} of {totalPages}
             </Text>
             <IconButton
               aria-label="Next page"
               icon={<ChevronRightIcon />}
               size="sm"
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              isDisabled={currentPage === totalPages}
+              isDisabled={serverPage === totalPages}
             />
           </HStack>
         )}
@@ -2229,7 +2059,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                       ) : (
                         <Tr>
                           <Td colSpan={visibleColumns.size} textAlign="center" py={8} color="gray.500">
-                            No leads found for this account
+                            {accountDetailLoading ? 'Loading leads for this account...' : 'No leads found for this account'}
                           </Td>
                         </Tr>
                       )}
@@ -2245,12 +2075,33 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                   flexWrap="wrap"
                 >
                   <Text fontSize="sm" color="gray.700" fontWeight="medium">
-                    Total Leads: <Badge colorScheme="blue" ml={2}>{accountPerformanceLeads.length}</Badge>
+                    Total Leads: <Badge colorScheme="blue" ml={2}>{accountDetailTotal}</Badge>
                   </Text>
                   <Text fontSize="xs" color="gray.600">
                     Account: {performanceAccountFilter}
                   </Text>
                 </HStack>
+                {accountDetailTotalPages > 1 && (
+                  <HStack justify="center" mt={4}>
+                    <IconButton
+                      aria-label="Previous account page"
+                      icon={<ChevronLeftIcon />}
+                      size="sm"
+                      onClick={() => setAccountPage((prev) => Math.max(1, prev - 1))}
+                      isDisabled={accountDetailServerPage === 1}
+                    />
+                    <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                      Page {accountDetailServerPage} of {accountDetailTotalPages} ({accountDetailTotal} total)
+                    </Text>
+                    <IconButton
+                      aria-label="Next account page"
+                      icon={<ChevronRightIcon />}
+                      size="sm"
+                      onClick={() => setAccountPage((prev) => Math.min(accountDetailTotalPages, prev + 1))}
+                      isDisabled={accountDetailServerPage === accountDetailTotalPages}
+                    />
+                  </HStack>
+                )}
               </Box>
             )}
           </Box>
@@ -2290,7 +2141,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
       </Modal>
       
       {/* Comprehensive Filtered Leads Table */}
-      {filteredAndSortedLeads.length > 0 && (
+      {filteredLeadCount > 0 && (
         <Box 
           p={{ base: 4, md: 6 }} 
           bg="white" 
@@ -2300,7 +2151,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
           boxShadow="md"
         >
           <Heading size={{ base: "sm", md: "md" }} mb={4} color="gray.800">
-            Filtered Leads ({filteredAndSortedLeads.length})
+            Filtered Leads ({filteredLeadCount})
           </Heading>
           <Box
             overflowX="auto"
@@ -2379,7 +2230,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                 </Tr>
               </Thead>
               <Tbody>
-                {paginatedLeads.map((lead, index) => (
+                {filteredAndSortedLeads.map((lead, index) => (
                   <Tr 
                     key={`filtered-lead-${index}`} 
                     _hover={{ bg: 'blue.50' }}
@@ -2452,24 +2303,24 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
                 icon={<ChevronLeftIcon />}
                 size="sm"
                 onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                isDisabled={currentPage === 1}
+                isDisabled={serverPage === 1}
               />
               <Text fontSize="sm" color="gray.700" fontWeight="medium">
-                Page {currentPage} of {totalPages} ({filteredAndSortedLeads.length} total)
+                Page {serverPage} of {totalPages} ({filteredLeadCount} total)
               </Text>
               <IconButton
                 aria-label="Next page"
                 icon={<ChevronRightIcon />}
                 size="sm"
                 onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                isDisabled={currentPage === totalPages}
+                isDisabled={serverPage === totalPages}
               />
             </HStack>
           )}
         </Box>
       )}
       
-      {filteredAndSortedLeads.length === 0 && leads.length > 0 && (
+      {filteredLeadCount === 0 && totalLeadCount > 0 && (
         <Alert status="info" borderRadius="xl">
           <AlertIcon />
           <AlertDescription>
@@ -2478,7 +2329,7 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         </Alert>
       )}
 
-      {error && leads.length > 0 && (
+      {error && totalLeadCount > 0 && (
         <Alert 
           status="warning" 
           borderRadius="xl"

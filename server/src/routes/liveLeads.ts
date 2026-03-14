@@ -35,6 +35,24 @@ type SyncMeta = {
   rowCount: number
 }
 
+type MappedLeadRow = {
+  id: string
+  occurredAt: string | null
+  source: string | null
+  owner: string | null
+  company: string | null
+  name: string | null
+  fullName: string | null
+  email: string | null
+  phone: string | null
+  jobTitle: string | null
+  location: string | null
+  status: string | null
+  syncStatus: string | null
+  notes: string | null
+  raw: Record<string, string>
+}
+
 const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
 
 function parsePositiveInt(value: unknown, fallback: number, opts?: { min?: number; max?: number }) {
@@ -43,6 +61,28 @@ function parsePositiveInt(value: unknown, fallback: number, opts?: { min?: numbe
   const parsed = Number.parseInt(String(value ?? ''), 10)
   if (!Number.isFinite(parsed)) return fallback
   return Math.min(max, Math.max(min, parsed))
+}
+
+function parseStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => parseStringList(item))
+      .filter((item, index, arr) => arr.indexOf(item) === index)
+  }
+  const text = String(value ?? '').trim()
+  if (!text) return []
+  return text
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((item, index, arr) => arr.indexOf(item) === index)
+}
+
+function splitTeamMembers(value: string): string[] {
+  return value
+    .split(/,|&|\/|\+|\band\b/gi)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
 }
 
 function classifySheetSyncError(message: string | null | undefined): LiveLeadErrorCode | null {
@@ -328,6 +368,246 @@ function deriveDisplayColumns(rows: Array<{ occurredAt: string | null; source: s
   return [...canonical, ...raw]
 }
 
+function parseFlexibleLeadDate(value: string): Date | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  const dotMatch = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/)
+  if (dotMatch) {
+    const day = Number.parseInt(dotMatch[1], 10)
+    const month = Number.parseInt(dotMatch[2], 10) - 1
+    let year = Number.parseInt(dotMatch[3], 10)
+    if (year < 100) year += 2000
+    const parsed = new Date(year, month, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/)
+  if (slashMatch) {
+    const day = Number.parseInt(slashMatch[1], 10)
+    const month = Number.parseInt(slashMatch[2], 10) - 1
+    let year = Number.parseInt(slashMatch[3], 10)
+    if (year < 100) year += 2000
+    const parsed = new Date(year, month, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const dashMatch = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})$/)
+  if (dashMatch) {
+    const day = Number.parseInt(dashMatch[1], 10)
+    const month = Number.parseInt(dashMatch[2], 10) - 1
+    let year = Number.parseInt(dashMatch[3], 10)
+    if (year < 100) year += 2000
+    const parsed = new Date(year, month, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  if (isoMatch) {
+    const year = Number.parseInt(isoMatch[1], 10)
+    const month = Number.parseInt(isoMatch[2], 10) - 1
+    const day = Number.parseInt(isoMatch[3], 10)
+    const parsed = new Date(year, month, day)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const parsed = new Date(trimmed)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function getLeadFieldValue(lead: MappedLeadRow, field: string): string {
+  const key = field.trim()
+  if (!key) return ''
+
+  switch (key) {
+    case 'Account':
+      return lead.company ?? ''
+    case 'Date':
+      return lead.raw['Date'] || (lead.occurredAt ? lead.occurredAt.slice(0, 10) : '')
+    case 'Week':
+      return lead.raw['Week'] || lead.raw['week'] || ''
+    case 'First Meeting Date':
+      return lead.raw['First Meeting Date'] || ''
+    case 'Closed Date':
+      return lead.raw['Closed Date'] || ''
+    case 'Name':
+      return lead.raw['Name'] || lead.fullName || lead.name || ''
+    case 'Company':
+      return lead.raw['Company'] || lead.company || ''
+    case 'Contact Info':
+      return lead.raw['Contact Info'] || ''
+    case 'Job Title':
+      return lead.raw['Job Title'] || lead.jobTitle || ''
+    case 'Channel of Lead':
+    case 'Channel':
+      return lead.raw['Channel of Lead'] || lead.raw['channel of lead'] || lead.source || ''
+    case 'OD Team Member':
+    case 'Owner':
+      return lead.raw['OD Team Member'] || lead.raw['OD team member'] || lead.raw['OD Team'] || lead.owner || ''
+    case 'Outcome':
+      return lead.raw['Outcome'] || lead.raw['outcome'] || ''
+    case 'Lead Status':
+    case 'Status':
+      return lead.raw['Lead Status'] || lead.raw['lead status'] || lead.status || ''
+    case 'Email':
+      return lead.raw['Email'] || lead.email || ''
+    case 'Phone':
+      return lead.raw['Phone'] || lead.phone || ''
+    case 'Location':
+      return lead.raw['Location'] || lead.location || ''
+    case 'Notes':
+      return lead.raw['Notes'] || lead.notes || ''
+    default:
+      return lead.raw[key] || ''
+  }
+}
+
+function buildLeadListMetadata(leads: MappedLeadRow[], customerName: string) {
+  const channelSet = new Set<string>()
+  const teamMemberSet = new Set<string>()
+  const outcomeSet = new Set<string>()
+  const leadStatusSet = new Set<string>()
+
+  for (const lead of leads) {
+    const channel = getLeadFieldValue(lead, 'Channel of Lead').trim()
+    if (channel) channelSet.add(channel)
+
+    const teamValue = getLeadFieldValue(lead, 'OD Team Member').trim()
+    if (teamValue) {
+      splitTeamMembers(teamValue).forEach((member) => teamMemberSet.add(member))
+    }
+
+    const outcome = getLeadFieldValue(lead, 'Outcome').trim()
+    if (outcome) outcomeSet.add(outcome)
+
+    const status = getLeadFieldValue(lead, 'Lead Status').trim()
+    if (status) leadStatusSet.add(status)
+  }
+
+  return {
+    availableAccounts: customerName ? [customerName] : [],
+    availableChannels: Array.from(channelSet).sort((a, b) => a.localeCompare(b)),
+    availableTeamMembers: Array.from(teamMemberSet).sort((a, b) => a.localeCompare(b)),
+    availableOutcomes: Array.from(outcomeSet).sort((a, b) => a.localeCompare(b)),
+    availableLeadStatuses: Array.from(leadStatusSet).sort((a, b) => a.localeCompare(b)),
+    allDisplayColumns: deriveDisplayColumns(leads),
+  }
+}
+
+function applyLeadListFilters(params: {
+  leads: MappedLeadRow[]
+  customerName: string
+  search: string
+  accounts: string[]
+  channels: string[]
+  teamMembers: string[]
+  leadStatuses: string[]
+  outcomes: string[]
+  dateField: string
+  dateStart: string
+  dateEnd: string
+  sortBy: string
+  sortOrder: 'asc' | 'desc'
+}) {
+  const {
+    leads,
+    customerName,
+    search,
+    accounts,
+    channels,
+    teamMembers,
+    leadStatuses,
+    outcomes,
+    dateField,
+    dateStart,
+    dateEnd,
+    sortBy,
+    sortOrder,
+  } = params
+
+  let filtered = [...leads]
+  const normalizedSearch = search.trim().toLowerCase()
+
+  if (normalizedSearch) {
+    filtered = filtered.filter((lead) => {
+      const searchFields = [
+        getLeadFieldValue(lead, 'Name'),
+        getLeadFieldValue(lead, 'Company'),
+        getLeadFieldValue(lead, 'Contact Info'),
+        getLeadFieldValue(lead, 'Job Title'),
+        getLeadFieldValue(lead, 'Email'),
+        getLeadFieldValue(lead, 'Phone'),
+        customerName,
+      ]
+      return searchFields.some((field) => field.toLowerCase().includes(normalizedSearch))
+    })
+  }
+
+  if (accounts.length > 0) {
+    filtered = filtered.filter(() => accounts.includes(customerName))
+  }
+
+  if (channels.length > 0) {
+    const channelSet = new Set(channels.map((entry) => entry.trim()))
+    filtered = filtered.filter((lead) => channelSet.has(getLeadFieldValue(lead, 'Channel of Lead').trim()))
+  }
+
+  if (teamMembers.length > 0) {
+    filtered = filtered.filter((lead) => {
+      const teamValue = getLeadFieldValue(lead, 'OD Team Member').trim()
+      if (!teamValue) return false
+      const members = splitTeamMembers(teamValue)
+      return teamMembers.some((member) => members.includes(member))
+    })
+  }
+
+  if (leadStatuses.length > 0) {
+    filtered = filtered.filter((lead) => {
+      const status = getLeadFieldValue(lead, 'Lead Status').toLowerCase()
+      return leadStatuses.some((filterStatus) => status.includes(filterStatus.toLowerCase()))
+    })
+  }
+
+  if (outcomes.length > 0) {
+    const outcomeSet = new Set(outcomes.map((entry) => entry.trim()))
+    filtered = filtered.filter((lead) => outcomeSet.has(getLeadFieldValue(lead, 'Outcome').trim()))
+  }
+
+  if (dateField && (dateStart || dateEnd)) {
+    const start = dateStart ? new Date(dateStart) : null
+    if (start) start.setHours(0, 0, 0, 0)
+    const end = dateEnd ? new Date(dateEnd) : null
+    if (end) end.setHours(23, 59, 59, 999)
+
+    filtered = filtered.filter((lead) => {
+      const parsed = parseFlexibleLeadDate(getLeadFieldValue(lead, dateField))
+      if (!parsed) return false
+      if (start && parsed < start) return false
+      if (end && parsed > end) return false
+      return true
+    })
+  }
+
+  if (sortBy) {
+    filtered.sort((a, b) => {
+      const aValue = getLeadFieldValue(a, sortBy)
+      const bValue = getLeadFieldValue(b, sortBy)
+      const aDate = parseFlexibleLeadDate(aValue)
+      const bDate = parseFlexibleLeadDate(bValue)
+
+      if (aDate && bDate) {
+        const diff = aDate.getTime() - bDate.getTime()
+        return sortOrder === 'asc' ? diff : -diff
+      }
+
+      const comparison = aValue.localeCompare(bValue)
+      return sortOrder === 'asc' ? comparison : -comparison
+    })
+  }
+
+  return filtered
+}
+
 function mapDbLeadRows(rows: Array<{
   id: string
   occurredAt: Date | null
@@ -346,23 +626,7 @@ function mapDbLeadRows(rows: Array<{
   notes: string | null
   accountName: string
   data: unknown
-}>): Array<{
-  id: string
-  occurredAt: string | null
-  source: string | null
-  owner: string | null
-  company: string | null
-  name: string | null
-  fullName: string | null
-  email: string | null
-  phone: string | null
-  jobTitle: string | null
-  location: string | null
-  status: string | null
-  syncStatus: string | null
-  notes: string | null
-  raw: Record<string, string>
-}> {
+}>): MappedLeadRow[] {
   return rows.map((row) => {
     const raw = asRawMap(row.data)
     const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
@@ -394,13 +658,6 @@ function mapDbLeadRows(rows: Array<{
       raw,
     }
   })
-}
-
-function getLeadChannelValue(row: {
-  source: string | null
-  raw: Record<string, string>
-}): string {
-  return String(row.source ?? row.raw['Channel of Lead'] ?? row.raw['Channel'] ?? '').trim()
 }
 
 async function getCustomerTruthContext(customerId: string) {
@@ -910,7 +1167,20 @@ router.get('/leads', async (req, res) => {
   try {
     const requestedPage = parsePositiveInt(req.query.page, 1, { min: 1 })
     const pageSize = parsePositiveInt(req.query.pageSize, 50, { min: 1, max: 200 })
-    const channelFilter = String(req.query.channel || '').trim().toLowerCase()
+    const search = String(req.query.search || '').trim()
+    const accounts = parseStringList(req.query.accounts)
+    const channels = [
+      ...parseStringList(req.query.channel),
+      ...parseStringList(req.query.channels),
+    ].filter((item, index, arr) => arr.indexOf(item) === index)
+    const teamMembers = parseStringList(req.query.teamMembers)
+    const leadStatuses = parseStringList(req.query.leadStatuses)
+    const outcomes = parseStringList(req.query.outcomes)
+    const dateField = String(req.query.dateField || '').trim()
+    const dateStart = String(req.query.dateStart || '').trim()
+    const dateEnd = String(req.query.dateEnd || '').trim()
+    const sortBy = String(req.query.sortBy || '').trim()
+    const sortOrder = String(req.query.sortOrder || '').trim().toLowerCase() === 'asc' ? 'asc' : 'desc'
     const paginationRequested = req.query.page != null || req.query.pageSize != null
     const context = await getCustomerTruthContext(customerId)
     if (!context) {
@@ -976,17 +1246,22 @@ router.get('/leads', async (req, res) => {
       leads = mapDbLeadRows(dbRows)
       sync = await getSyncMeta(customerId, sourceOfTruth)
     }
-    const availableChannels = Array.from(
-      new Set(
-        leads
-          .map((lead) => getLeadChannelValue(lead))
-          .filter((value) => value.length > 0),
-      ),
-    ).sort((a, b) => a.localeCompare(b))
-
-    const filteredLeads = channelFilter
-      ? leads.filter((lead) => getLeadChannelValue(lead).toLowerCase().includes(channelFilter))
-      : leads
+    const metadata = buildLeadListMetadata(leads, customer.name || '')
+    const filteredLeads = applyLeadListFilters({
+      leads,
+      customerName: customer.name || '',
+      search,
+      accounts,
+      channels,
+      teamMembers,
+      leadStatuses,
+      outcomes,
+      dateField,
+      dateStart,
+      dateEnd,
+      sortBy,
+      sortOrder,
+    })
 
     const total = filteredLeads.length
     const totalPages = paginationRequested ? Math.max(1, Math.ceil(total / pageSize)) : 1
@@ -1014,7 +1289,12 @@ router.get('/leads', async (req, res) => {
       page,
       pageSize,
       leads: pageSlice,
-      availableChannels,
+      availableAccounts: metadata.availableAccounts,
+      availableChannels: metadata.availableChannels,
+      availableTeamMembers: metadata.availableTeamMembers,
+      availableOutcomes: metadata.availableOutcomes,
+      availableLeadStatuses: metadata.availableLeadStatuses,
+      allDisplayColumns: metadata.allDisplayColumns,
       displayColumns,
       queriedAt: new Date().toISOString(),
       sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,

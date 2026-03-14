@@ -50,7 +50,12 @@ export type LiveLeadsResponse = {
   page?: number
   pageSize?: number
   leads: LiveLeadRow[]
+  availableAccounts?: string[]
   availableChannels?: string[]
+  availableTeamMembers?: string[]
+  availableOutcomes?: string[]
+  availableLeadStatuses?: string[]
+  allDisplayColumns?: string[]
   displayColumns?: string[]
   queriedAt: string
   sourceUrl: string | null
@@ -68,6 +73,17 @@ export type GetLiveLeadsParams = {
   page?: number
   pageSize?: number
   channel?: string
+  search?: string
+  accounts?: string[]
+  channels?: string[]
+  teamMembers?: string[]
+  leadStatuses?: string[]
+  outcomes?: string[]
+  dateField?: string
+  dateStart?: string
+  dateEnd?: string
+  sortBy?: string
+  sortOrder?: 'asc' | 'desc'
 }
 
 export type LiveLeadMetricsResponse = {
@@ -162,9 +178,18 @@ export async function getLiveLeads(customerId: string, params: GetLiveLeadsParam
   if (typeof params.pageSize === 'number' && Number.isFinite(params.pageSize)) {
     search.set('pageSize', String(params.pageSize))
   }
-  if (params.channel && params.channel.trim()) {
-    search.set('channel', params.channel.trim())
-  }
+  if (params.channel && params.channel.trim()) search.set('channel', params.channel.trim())
+  if (params.search && params.search.trim()) search.set('search', params.search.trim())
+  params.accounts?.filter(Boolean).forEach((value) => search.append('accounts', value))
+  params.channels?.filter(Boolean).forEach((value) => search.append('channels', value))
+  params.teamMembers?.filter(Boolean).forEach((value) => search.append('teamMembers', value))
+  params.leadStatuses?.filter(Boolean).forEach((value) => search.append('leadStatuses', value))
+  params.outcomes?.filter(Boolean).forEach((value) => search.append('outcomes', value))
+  if (params.dateField && params.dateField.trim()) search.set('dateField', params.dateField.trim())
+  if (params.dateStart && params.dateStart.trim()) search.set('dateStart', params.dateStart.trim())
+  if (params.dateEnd && params.dateEnd.trim()) search.set('dateEnd', params.dateEnd.trim())
+  if (params.sortBy && params.sortBy.trim()) search.set('sortBy', params.sortBy.trim())
+  if (params.sortOrder) search.set('sortOrder', params.sortOrder)
   const res = await fetch(`${API_BASE}/api/live/leads?${search.toString()}`, {
     headers: getCustomerHeaders(customerId),
   })
