@@ -92,6 +92,8 @@ const REAL_LEAD_CONTEXT_ALIASES = [
   'outcome',
 ]
 
+const REAL_LEAD_CHANNEL_ALIASES = ['source', 'channel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type']
+
 const LEAD_FIELD_ALIASES: Record<CanonicalLeadField, string[]> = {
   occurredAt: ['occurredat', 'date', 'created', 'createdat', 'timestamp', 'leaddate', 'firstmeetingdate'],
   source: ['source', 'channel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type'],
@@ -187,8 +189,29 @@ export function extractCanonicalLeadRecord(raw: Record<string, string>): Canonic
   }
 }
 
-export function isRealLeadRow(raw: Record<string, string>): boolean {
+function hasMeaningfulAliasValue(raw: Record<string, string>, aliases: string[]): boolean {
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = normalizeLeadHeader(key)
+    if (!aliases.includes(normalizedKey)) continue
+
+    const cleanedValue = asTrimmed(value)
+    if (!cleanedValue) continue
+    if (isWeekMarkerValue(cleanedValue) || parseDate(cleanedValue)) continue
+    return true
+  }
+  return false
+}
+
+export function isRealLeadRow(raw: Record<string, string>, options?: { sourceType?: string | null }): boolean {
   const canonical = extractCanonicalLeadRecord(raw)
+  const sourceType = options?.sourceType ?? null
+  const hasCompany = Boolean(canonical.company) || hasMeaningfulAliasValue(raw, REAL_LEAD_COMPANY_ALIASES)
+  const hasChannel = Boolean(canonical.source) || hasMeaningfulAliasValue(raw, REAL_LEAD_CHANNEL_ALIASES)
+
+  if (sourceType === 'google_sheets') {
+    return hasCompany && hasChannel
+  }
+
   const hasIdentity =
     Boolean(canonical.fullName) ||
     Boolean(canonical.firstName) ||
@@ -196,7 +219,6 @@ export function isRealLeadRow(raw: Record<string, string>): boolean {
     Boolean(canonical.email) ||
     Boolean(canonical.phone)
 
-  let hasCompany = Boolean(canonical.company)
   let hasSupplementalDetail = false
 
   for (const [key, value] of Object.entries(raw)) {
@@ -219,7 +241,6 @@ export function isRealLeadRow(raw: Record<string, string>): boolean {
       if (isWeekMarkerValue(cleanedValue) || parseDate(cleanedValue)) {
         continue
       }
-      hasCompany = true
       continue
     }
 
