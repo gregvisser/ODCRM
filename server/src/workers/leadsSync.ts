@@ -123,6 +123,7 @@ function toCanonicalHeader(header: string): string | null {
   const aliases: Record<string, string> = {
     // Source (Channel)
     'channel of lead': 'source',
+    'lead channel': 'source',
     'lead source': 'source',
     'channel': 'source',
     'source': 'source',
