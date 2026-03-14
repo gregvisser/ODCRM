@@ -41,6 +41,21 @@ export type LiveLeadSyncMeta = {
   rowCount: number
 }
 
+export type LiveLeadSyncState = {
+  code: 'live' | 'stale_last_good' | 'sync_failed' | 'never_synced' | 'connected_empty' | 'misconfigured'
+  severity: 'info' | 'warning' | 'error'
+  canUseLeadData: boolean
+  syncInProgress: boolean
+  message: string
+  detail: string | null
+  errorCode: string | null
+  dataFreshness: 'live' | 'diagnostic_stale'
+  authoritative: boolean
+  warning?: string
+  hint?: string
+  lastSuccessfulSyncAgeMs: number | null
+}
+
 export type LiveLeadsResponse = {
   customerId: string
   customerName?: string
@@ -66,6 +81,7 @@ export type LiveLeadsResponse = {
   warning?: string
   hint?: string
   errorCode?: string
+  syncState?: LiveLeadSyncState
   sync?: LiveLeadSyncMeta
 }
 
@@ -105,6 +121,7 @@ export type LiveLeadMetricsResponse = {
   warning?: string
   hint?: string
   errorCode?: string
+  syncState?: LiveLeadSyncState
   sync?: LiveLeadSyncMeta
 }
 
@@ -279,6 +296,7 @@ export type AggregateMetricsResult = {
     breakdownBySource: Record<string, number>
     breakdownByOwner: Record<string, number>
     lastSync: null
+    syncState?: LiveLeadSyncState
     errorCode?: string
     fetchError?: string
   }>
@@ -308,12 +326,13 @@ function shouldRefreshSheetMetrics(
 ): boolean {
   if (!isSheetBackedCustomer(customer)) return false
   if (isActiveSheetSync(data.sync)) return false
-  if (data.errorCode === 'missing_sheet_url' || data.errorCode === 'unreadable_sheet') return false
-  return (
-    data.errorCode === 'never_synced' ||
-    data.errorCode === 'stale_sync' ||
-    data.errorCode === 'sync_failed'
-  )
+  if (!data.syncState) {
+    if (data.errorCode === 'missing_sheet_url' || data.errorCode === 'unreadable_sheet') return false
+    return data.errorCode === 'never_synced' || data.errorCode === 'sync_failed'
+  }
+  if (data.syncState.canUseLeadData) return false
+  if (data.syncState.code === 'misconfigured') return false
+  return data.syncState.code === 'never_synced' || data.syncState.code === 'sync_failed'
 }
 
 function runWithConcurrency<T, R>(items: T[], fn: (item: T) => Promise<R>, concurrency: number): Promise<R[]> {
@@ -354,16 +373,21 @@ export async function fetchLiveMetricsForCustomers(
     async (c) => {
       try {
         let data = await getLiveLeadMetrics(c.id)
+        const initialData = data
         if (shouldRefreshSheetMetrics(c, data)) {
           try {
             await importLiveLeads(c.id)
             data = await getLiveLeadMetrics(c.id)
           } catch (e) {
+            if (initialData.syncState?.canUseLeadData) {
+              data = initialData
+            } else {
             return {
               customerId: c.id,
               name: c.name,
               errorCode: data.errorCode,
               fetchError: e instanceof Error ? `Lead metrics refresh failed: ${e.message}` : 'Lead metrics refresh failed',
+            }
             }
           }
           if (shouldRefreshSheetMetrics(c, data)) {
@@ -375,12 +399,20 @@ export async function fetchLiveMetricsForCustomers(
             }
           }
         }
-        if (data.authoritative === false || data.dataFreshness === 'diagnostic_stale') {
+        if (data.syncState && !data.syncState.canUseLeadData) {
+          return {
+            customerId: c.id,
+            name: c.name,
+            errorCode: data.syncState.errorCode ?? data.errorCode,
+            fetchError: data.syncState.message || data.warning || data.hint || 'Metrics are not currently available for this customer',
+          }
+        }
+        if (!data.syncState && (data.authoritative === false || data.dataFreshness === 'diagnostic_stale')) {
           return {
             customerId: c.id,
             name: c.name,
             errorCode: data.errorCode,
-            fetchError: data.warning || data.hint || 'Metrics are not currently authoritative for this customer',
+            fetchError: data.warning || data.hint || 'Metrics are not currently available for this customer',
           }
         }
         const counts = data.counts ?? {
@@ -396,6 +428,7 @@ export async function fetchLiveMetricsForCustomers(
           breakdownBySource: data.breakdownBySource || {},
           breakdownByOwner: data.breakdownByOwner || {},
           lastSync: null as const,
+          syncState: data.syncState,
         }
       } catch (e) {
         return { customerId: c.id, name: c.name, fetchError: e instanceof Error ? e.message : 'Network error' }

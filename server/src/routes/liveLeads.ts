@@ -10,32 +10,14 @@ import { triggerManualSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
 import { asLeadRawData, extractStoredLeadCanonicalRecord, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
 import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
+import { resolveLeadSyncViewState, type LeadSyncMetaInput, type TruthSource } from '../services/leadSyncStatus.js'
 import { retryLeadOutboundSync, syncManualLeadEditOutbound, syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
 const METRICS_TIMEZONE = process.env.LEADS_METRICS_TIMEZONE || 'Europe/London'
 
-type TruthSource = 'google_sheets' | 'db'
-type Freshness = 'live' | 'diagnostic_stale'
-type LiveLeadErrorCode =
-  | 'missing_sheet_url'
-  | 'never_synced'
-  | 'stale_sync'
-  | 'sync_failed'
-  | 'zero_rows_imported'
-  | 'unreadable_sheet'
-
-type SyncMeta = {
-  mode: 'sheet_backed' | 'db_backed'
-  status: string | null
-  lastSyncAt: string | null
-  lastSuccessAt: string | null
-  lastInboundSyncAt: string | null
-  lastOutboundSyncAt: string | null
-  lastError: string | null
-  rowCount: number
-}
+type SyncMeta = LeadSyncMetaInput
 
 type MappedLeadRow = {
   id: string
@@ -54,8 +36,6 @@ type MappedLeadRow = {
   notes: string | null
   raw: Record<string, string>
 }
-
-const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
 
 function parsePositiveInt(value: unknown, fallback: number, opts?: { min?: number; max?: number }) {
   const min = opts?.min ?? 1
@@ -85,118 +65,6 @@ function splitTeamMembers(value: string): string[] {
     .split(/,|&|\/|\+|\band\b/gi)
     .map((entry) => entry.trim())
     .filter(Boolean)
-}
-
-function classifySheetSyncError(message: string | null | undefined): LiveLeadErrorCode | null {
-  const text = String(message || '').toLowerCase()
-  if (!text) return null
-  if (
-    text.includes('invalid google sheets url') ||
-    text.includes('sheet is not publicly accessible') ||
-    text.includes('sheet not found') ||
-    text.includes('html instead of csv') ||
-    text.includes('url did not return csv')
-  ) {
-    return 'unreadable_sheet'
-  }
-  if (text.includes('0 rows')) return 'zero_rows_imported'
-  return 'sync_failed'
-}
-
-function buildSheetTruthStatus(params: {
-  sourceOfTruth: TruthSource
-  configuredSheetUrl: string
-  sync: SyncMeta
-  rowCount: number
-  bootstrap: { started: boolean; error: string | null }
-}): {
-  authoritative: boolean
-  dataFreshness: Freshness
-  warning?: string
-  hint?: string
-  errorCode?: LiveLeadErrorCode
-} {
-  const { sourceOfTruth, configuredSheetUrl, sync, rowCount, bootstrap } = params
-  const syncHasFailedWithoutStatus = sync.status === 'syncing' && !sync.lastSuccessAt && Boolean(sync.lastError)
-  const emptySheetState =
-    rowCount === 0 &&
-    (
-      (sync.lastSuccessAt && sync.status === 'success') ||
-      classifySheetSyncError(sync.lastError) === 'zero_rows_imported'
-    )
-
-  if (sourceOfTruth === 'db') {
-    return { authoritative: true, dataFreshness: 'live' }
-  }
-
-  if (!configuredSheetUrl.trim()) {
-    return {
-      authoritative: false,
-      dataFreshness: 'diagnostic_stale',
-      warning: 'This customer has no leads reporting sheet configured.',
-      errorCode: 'missing_sheet_url',
-    }
-  }
-
-  if (bootstrap.error) {
-    const errorCode = classifySheetSyncError(bootstrap.error) ?? 'sync_failed'
-    return {
-      authoritative: false,
-      dataFreshness: 'diagnostic_stale',
-      warning: `Initial sheet sync failed: ${bootstrap.error}`,
-      errorCode,
-    }
-  }
-
-  if (emptySheetState) {
-    return {
-      authoritative: true,
-      dataFreshness: 'live',
-      hint: 'The linked Google Sheet is connected and currently empty.',
-    }
-  }
-
-  if (sync.status === 'error' || syncHasFailedWithoutStatus) {
-    const errorCode = classifySheetSyncError(sync.lastError) ?? 'sync_failed'
-    return {
-      authoritative: false,
-      dataFreshness: 'diagnostic_stale',
-      warning: sync.lastError || 'The most recent sheet sync failed.',
-      errorCode,
-    }
-  }
-
-  if (!sync.lastSuccessAt) {
-    if (bootstrap.started && rowCount === 0) {
-      return {
-        authoritative: true,
-        dataFreshness: 'live',
-        hint: 'The linked Google Sheet is connected and currently empty.',
-      }
-    }
-
-    return {
-      authoritative: false,
-      dataFreshness: 'diagnostic_stale',
-      warning: 'This sheet-backed client has not completed a successful lead sync yet.',
-      errorCode: 'never_synced',
-    }
-  }
-
-  const lastSuccessMs = Date.parse(sync.lastSuccessAt)
-  if (!Number.isFinite(lastSuccessMs) || (Date.now() - lastSuccessMs) > SHEET_METRICS_FRESH_MS) {
-    return {
-      authoritative: false,
-      dataFreshness: 'diagnostic_stale',
-      warning: 'Live sheet-backed lead metrics are stale and need a refresh.',
-      errorCode: 'stale_sync',
-    }
-  }
-
-  return {
-    authoritative: true,
-    dataFreshness: 'live',
-  }
 }
 
 type LeadResponse = {
@@ -1271,7 +1139,7 @@ router.get('/leads', async (req, res) => {
 
     const displayColumns = deriveDisplayColumns(filteredLeads)
 
-    const truth = buildSheetTruthStatus({
+    const truth = resolveLeadSyncViewState({
       sourceOfTruth,
       configuredSheetUrl,
       sync,
@@ -1304,6 +1172,7 @@ router.get('/leads', async (req, res) => {
       warning: truth.warning,
       hint: truth.hint,
       errorCode: truth.errorCode,
+      syncState: truth,
       sync,
     })
   } catch (e) {
@@ -1414,7 +1283,7 @@ router.get('/leads/metrics', async (req, res) => {
       monthEnd,
     })
 
-    const truth = buildSheetTruthStatus({
+    const truth = resolveLeadSyncViewState({
       sourceOfTruth,
       configuredSheetUrl,
       sync,
@@ -1441,6 +1310,7 @@ router.get('/leads/metrics', async (req, res) => {
       warning: truth.warning,
       hint: truth.hint,
       errorCode: truth.errorCode,
+      syncState: truth,
       sync,
     })
   } catch (e) {

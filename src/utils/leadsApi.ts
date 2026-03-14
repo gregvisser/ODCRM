@@ -245,6 +245,21 @@ export async function getSequences(customerId?: string): Promise<{ data?: Array<
 }
 
 // Sync management types
+export type LeadSyncStateView = {
+  code: 'live' | 'stale_last_good' | 'sync_failed' | 'never_synced' | 'connected_empty' | 'misconfigured'
+  severity: 'info' | 'warning' | 'error'
+  canUseLeadData: boolean
+  syncInProgress: boolean
+  message: string
+  detail: string | null
+  errorCode: string | null
+  dataFreshness: 'live' | 'diagnostic_stale'
+  authoritative: boolean
+  warning?: string
+  hint?: string
+  lastSuccessfulSyncAgeMs: number | null
+}
+
 export type SyncStatus = {
   customerId: string
   status: 'never_synced' | 'success' | 'error'
@@ -272,6 +287,7 @@ export type SyncStatus = {
     name: string
     leadsReportingUrl: string | null
   }
+  syncState?: LeadSyncStateView
 }
 
 export type SyncMetrics = {

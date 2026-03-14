@@ -549,10 +549,10 @@ function LeadsTab() {
   }
 
   if (totalLeadCount === 0) {
+    const syncStateForEmpty = syncStatusForEmpty?.syncState
     const isConnectedEmptySheet =
       sourceOfTruth === 'google_sheets' &&
-      liveData?.authoritative === true &&
-      !liveWarning
+      (liveData?.syncState?.code === 'connected_empty' || (liveData?.authoritative === true && !liveWarning))
     const whyZeroMessage =
       error?.toLowerCase().includes('no leads reporting url')
         ? 'This account has no Leads reporting URL configured. Add a Google Sheet URL in Settings → Accounts.'
@@ -607,15 +607,35 @@ function LeadsTab() {
           )}
           </Box>
         {syncStatusForEmpty && (
-          <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg" maxW="2xl" mx="auto">
+          <Alert
+            status={syncStateForEmpty?.severity === 'error' ? 'error' : syncStateForEmpty?.severity === 'warning' ? 'warning' : 'info'}
+            borderRadius="lg"
+            maxW="2xl"
+            mx="auto"
+          >
             <AlertIcon />
             <Box>
-              <AlertTitle>Sync status</AlertTitle>
+              <AlertTitle>
+                {syncStateForEmpty?.code === 'connected_empty'
+                  ? 'Connected sheet is empty'
+                  : syncStateForEmpty?.code === 'never_synced'
+                    ? 'Lead sync not finished yet'
+                    : syncStateForEmpty?.code === 'misconfigured'
+                      ? 'Lead sheet configuration issue'
+                      : syncStateForEmpty?.code === 'sync_failed'
+                        ? 'Lead sync failed'
+                        : syncStateForEmpty?.code === 'stale_last_good'
+                          ? 'Showing last successful snapshot'
+                          : 'Sync status'}
+              </AlertTitle>
               <AlertDescription>
+                {syncStateForEmpty?.message && <Text>{syncStateForEmpty.message}</Text>}
                 Last sync: {syncStatusForEmpty.lastSyncAt ? new Date(syncStatusForEmpty.lastSyncAt).toLocaleString() : 'Never'}
                 {syncStatusForEmpty.lastSuccessAt && ` · Last success: ${new Date(syncStatusForEmpty.lastSuccessAt).toLocaleString()}`}
-                {syncStatusForEmpty.lastError && (
-                  <Text mt={2} fontWeight="semibold" color="orange.600">Error: {syncStatusForEmpty.lastError}</Text>
+                {(syncStateForEmpty?.detail || syncStatusForEmpty.lastError) && (
+                  <Text mt={2} fontWeight="semibold" color={syncStateForEmpty?.severity === 'error' ? 'red.600' : 'orange.600'}>
+                    {syncStateForEmpty?.detail || syncStatusForEmpty.lastError}
+                  </Text>
                 )}
                 {(syncStatusForEmpty.isPaused || syncStatusForEmpty.isRunning) && (
                   <Text mt={1} fontSize="sm">{syncStatusForEmpty.isPaused ? 'Paused' : ''} {syncStatusForEmpty.isRunning ? 'Sync in progress' : ''}</Text>

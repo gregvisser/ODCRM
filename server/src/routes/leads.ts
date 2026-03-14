@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js'
 import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
 import { asLeadRawData, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
 import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
+import { resolveLeadSyncViewState } from '../services/leadSyncStatus.js'
 import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -448,6 +449,76 @@ function getMetricsTimeRangesUtcSafe (): { todayStart: Date, todayEnd: Date, wee
   const monthStart = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0))
   const monthEnd = new Date(Date.UTC(y, m + 1, 1, 0, 0, 0, 0))
   return { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd }
+}
+
+function buildLeadSyncStatusPayload(params: {
+  customerId: string
+  customer?: { id: string; name: string; leadsReportingUrl: string | null } | null
+  syncState?: {
+    syncStatus?: string | null
+    isPaused?: boolean | null
+    isRunning?: boolean | null
+    lastSyncAt?: Date | null
+    lastSuccessAt?: Date | null
+    lastInboundSyncAt?: Date | null
+    lastOutboundSyncAt?: Date | null
+    lastError?: string | null
+    rowCount?: number | null
+    syncDuration?: number | null
+    rowsProcessed?: number | null
+    rowsInserted?: number | null
+    rowsUpdated?: number | null
+    rowsDeleted?: number | null
+    errorCount?: number | null
+    retryCount?: number | null
+    progressPercent?: number | null
+    progressMessage?: string | null
+  } | null
+}) {
+  const { customerId, customer, syncState } = params
+  const sourceOfTruth = customer?.leadsReportingUrl?.trim() ? 'google_sheets' : 'db'
+  const syncMeta = {
+    mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
+    status: syncState?.syncStatus ?? null,
+    lastSyncAt: syncState?.lastSyncAt?.toISOString() ?? null,
+    lastSuccessAt: syncState?.lastSuccessAt?.toISOString() ?? null,
+    lastInboundSyncAt: syncState?.lastInboundSyncAt?.toISOString() ?? null,
+    lastOutboundSyncAt: syncState?.lastOutboundSyncAt?.toISOString() ?? null,
+    lastError: syncState?.lastError ?? null,
+    rowCount: syncState?.rowCount ?? 0,
+  } as const
+  const viewState = resolveLeadSyncViewState({
+    sourceOfTruth,
+    configuredSheetUrl: customer?.leadsReportingUrl ?? '',
+    sync: syncMeta,
+    rowCount: syncMeta.rowCount,
+  })
+
+  return {
+    customerId,
+    status: syncState?.lastError ? 'error' as const : syncState?.lastSuccessAt ? 'success' as const : 'never_synced' as const,
+    isPaused: syncState?.isPaused || false,
+    isRunning: syncState?.isRunning || false,
+    lastSyncAt: syncMeta.lastSyncAt,
+    lastSuccessAt: syncMeta.lastSuccessAt,
+    lastError: syncMeta.lastError,
+    metrics: {
+      rowCount: syncState?.rowCount || 0,
+      syncDuration: syncState?.syncDuration || null,
+      rowsProcessed: syncState?.rowsProcessed || 0,
+      rowsInserted: syncState?.rowsInserted || 0,
+      rowsUpdated: syncState?.rowsUpdated || 0,
+      rowsDeleted: syncState?.rowsDeleted || 0,
+      errorCount: syncState?.errorCount || 0,
+      retryCount: syncState?.retryCount || 0,
+    },
+    progress: {
+      percent: syncState?.progressPercent || 0,
+      message: syncState?.progressMessage || 'Not started',
+    },
+    customer: customer || undefined,
+    syncState: viewState,
+  }
 }
 
 /**
@@ -1256,56 +1327,26 @@ router.get('/sync/status', async (req, res) => {
       },
     })
 
-    if (!syncState) {
-      return res.json({
-        customerId,
-        status: 'never_synced',
-        isPaused: false,
-        isRunning: false,
-        lastSyncAt: null,
-        lastSuccessAt: null,
-        lastError: null,
-        metrics: {
-          rowCount: 0,
-          syncDuration: null,
-          rowsProcessed: 0,
-          rowsInserted: 0,
-          rowsUpdated: 0,
-          rowsDeleted: 0,
-          errorCount: 0,
-          retryCount: 0,
-        },
-        progress: {
-          percent: 0,
-          message: 'Not started',
-        },
-      })
+    const customer = syncState?.customer || await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true,
+        name: true,
+        leadsReportingUrl: true,
+      },
+    })
+
+    if (!customer) {
+      return res.status(404).json({ error: 'Customer not found' })
     }
 
-    res.json({
-      customerId,
-      status: syncState.lastError ? 'error' : syncState.lastSuccessAt ? 'success' : 'never_synced',
-      isPaused: syncState.isPaused || false,
-      isRunning: syncState.isRunning || false,
-      lastSyncAt: syncState.lastSyncAt?.toISOString() || null,
-      lastSuccessAt: syncState.lastSuccessAt?.toISOString() || null,
-      lastError: syncState.lastError || null,
-      metrics: {
-        rowCount: syncState.rowCount || 0,
-        syncDuration: syncState.syncDuration || null,
-        rowsProcessed: syncState.rowsProcessed || 0,
-        rowsInserted: syncState.rowsInserted || 0,
-        rowsUpdated: syncState.rowsUpdated || 0,
-        rowsDeleted: syncState.rowsDeleted || 0,
-        errorCount: syncState.errorCount || 0,
-        retryCount: syncState.retryCount || 0,
-      },
-      progress: {
-        percent: syncState.progressPercent || 0,
-        message: syncState.progressMessage || 'Not started',
-      },
-      customer: syncState.customer,
-    })
+    res.json(
+      buildLeadSyncStatusPayload({
+        customerId,
+        customer,
+        syncState,
+      }),
+    )
   } catch (error) {
     console.error('Error fetching sync status:', error)
     res.status(500).json({ error: 'Failed to fetch sync status' })
@@ -1328,30 +1369,13 @@ router.get('/sync/status/all', async (req, res) => {
       orderBy: { lastSyncAt: 'desc' },
     })
 
-    const allStatuses = syncStates.map(state => ({
-      customerId: state.customerId,
-      status: state.lastError ? 'error' : state.lastSuccessAt ? 'success' : 'never_synced',
-      isPaused: state.isPaused || false,
-      isRunning: state.isRunning || false,
-      lastSyncAt: state.lastSyncAt?.toISOString() || null,
-      lastSuccessAt: state.lastSuccessAt?.toISOString() || null,
-      lastError: state.lastError || null,
-      metrics: {
-        rowCount: state.rowCount || 0,
-        syncDuration: state.syncDuration || null,
-        rowsProcessed: state.rowsProcessed || 0,
-        rowsInserted: state.rowsInserted || 0,
-        rowsUpdated: state.rowsUpdated || 0,
-        rowsDeleted: state.rowsDeleted || 0,
-        errorCount: state.errorCount || 0,
-        retryCount: state.retryCount || 0,
-      },
-      progress: {
-        percent: state.progressPercent || 0,
-        message: state.progressMessage || 'Not started',
-      },
-      customer: state.customer,
-    }))
+    const allStatuses = syncStates.map((state) =>
+      buildLeadSyncStatusPayload({
+        customerId: state.customerId,
+        customer: state.customer,
+        syncState: state,
+      }),
+    )
 
     res.json({
       total: allStatuses.length,

@@ -1027,17 +1027,35 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
         </Alert>
       )}
       {totalLeadCount === 0 && syncStatusForEmpty && (
-        <Alert status={syncStatusForEmpty.lastError ? 'warning' : 'info'} borderRadius="lg">
+        <Alert
+          status={syncStatusForEmpty.syncState?.severity === 'error' ? 'error' : syncStatusForEmpty.syncState?.severity === 'warning' ? 'warning' : 'info'}
+          borderRadius="lg"
+        >
           <AlertIcon />
           <Box>
-            <AlertTitle>{syncStatusForEmpty.lastError ? 'Why 0 leads?' : 'Connected sheet is empty'}</AlertTitle>
+            <AlertTitle>
+              {syncStatusForEmpty.syncState?.code === 'connected_empty'
+                ? 'Connected sheet is empty'
+                : syncStatusForEmpty.syncState?.code === 'never_synced'
+                  ? 'Lead sync not finished yet'
+                  : syncStatusForEmpty.syncState?.code === 'misconfigured'
+                    ? 'Lead sheet configuration issue'
+                    : syncStatusForEmpty.syncState?.code === 'sync_failed'
+                      ? 'Lead sync failed'
+                      : syncStatusForEmpty.syncState?.code === 'stale_last_good'
+                        ? 'Showing last successful snapshot'
+                        : (syncStatusForEmpty.lastError ? 'Why 0 leads?' : 'Connected sheet is empty')}
+            </AlertTitle>
             <AlertDescription>
+              {syncStatusForEmpty.syncState?.message && <Text>{syncStatusForEmpty.syncState.message}</Text>}
               Last sync: {syncStatusForEmpty.lastSyncAt ? new Date(syncStatusForEmpty.lastSyncAt).toLocaleString() : 'Never'}
               {syncStatusForEmpty.lastSuccessAt && ` · Last success: ${new Date(syncStatusForEmpty.lastSuccessAt).toLocaleString()}`}
-              {syncStatusForEmpty.lastError && (
-                <Text mt={2} fontWeight="semibold" color="orange.600">Sync error: {syncStatusForEmpty.lastError}</Text>
+              {(syncStatusForEmpty.syncState?.detail || syncStatusForEmpty.lastError) && (
+                <Text mt={2} fontWeight="semibold" color={syncStatusForEmpty.syncState?.severity === 'error' ? 'red.600' : 'orange.600'}>
+                  {syncStatusForEmpty.syncState?.detail || syncStatusForEmpty.lastError}
+                </Text>
               )}
-              {!syncStatusForEmpty.lastError && (
+              {!syncStatusForEmpty.syncState?.message && !syncStatusForEmpty.lastError && (
                 <Text mt={2}>The linked Google Sheet is connected and currently empty.</Text>
               )}
               {(syncStatusForEmpty.isPaused || syncStatusForEmpty.isRunning) && (

@@ -3759,6 +3759,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     }
   }, { spend: 0, weeklyLeads: 0, monthlyLeads: 0, weeklyTarget: 0, monthlyTarget: 0 })
   const totalsHaveUnavailableLeadMetrics = filteredAndSortedAccounts.some((account) => Boolean(account.sheetMetricsUnavailable))
+  const accountsWithLeadMetricWarnings = filteredAndSortedAccounts.filter(
+    (account) => !account.sheetMetricsUnavailable && Boolean(account.sheetMetricsWarning?.trim()),
+  )
   const describeUnavailableLeadMetric = (account: { name: string; errorCode?: string; warning?: string }) => {
     if (account.warning?.trim()) {
       return `${account.name}: ${account.warning.trim()}`
@@ -3769,7 +3772,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       case 'zero_rows_imported':
         return `${account.name}: the linked sheet is connected and currently empty`
       case 'stale_sync':
-        return `${account.name}: live sheet metrics need a refresh`
+        return `${account.name}: showing the last successful lead snapshot because live refresh is overdue`
+      case 'stale_last_good':
+        return `${account.name}: showing the last successful lead snapshot because live refresh is overdue`
       case 'unreadable_sheet':
         return `${account.name}: the linked sheet is not readable`
       case 'sync_failed':
@@ -3792,6 +3797,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         warning: account.sheetMetricsWarning,
       }),
     }))
+  const leadMetricWarnings = accountsWithLeadMetricWarnings.map((account) => ({
+    name: account.name,
+    summary: describeUnavailableLeadMetric({
+      name: account.name,
+      errorCode: account.sheetMetricsErrorCode || 'metrics_warning',
+      warning: account.sheetMetricsWarning,
+    }),
+  }))
   
   const totalPercentToTarget = !totalsHaveUnavailableLeadMetrics && totals.monthlyTarget > 0 
     ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
@@ -4287,6 +4300,19 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 {unavailableLeadDiagnostics.map((account) => account.summary).join(' • ')}
               </Text>
             )}
+          </Box>
+        </Alert>
+      )}
+      {leadMetricWarnings.length > 0 && (
+        <Alert status="warning" borderRadius="md" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertDescription fontSize="sm">
+              Showing the last successful sheet-backed lead snapshot for one or more accounts while live refresh catches up.
+            </AlertDescription>
+            <Text fontSize="xs" color="orange.800" mt={1}>
+              {leadMetricWarnings.map((account) => account.summary).join(' • ')}
+            </Text>
           </Box>
         </Alert>
       )}
