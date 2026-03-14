@@ -204,6 +204,7 @@ function BatchesBlock({
   batchesLoading,
   batchesFallback,
   sourceLabel,
+  activeBatchKey,
   batchDate,
   onBatchDateChange,
   onBack,
@@ -214,6 +215,7 @@ function BatchesBlock({
   batchesLoading: boolean
   batchesFallback?: boolean
   sourceLabel: string
+  activeBatchKey?: string | null
   batchDate: string
   onBatchDateChange: (date: string) => void
   onBack: () => void
@@ -289,8 +291,13 @@ function BatchesBlock({
                     <Td>{b.lastSeenAt ? new Date(b.lastSeenAt).toLocaleString() : '—'}</Td>
                     <Td>
                       <HStack spacing={2}>
-                        <Button size="xs" onClick={() => onViewContacts(b.batchKey)}>
-                          View contacts
+                        <Button
+                          size="xs"
+                          variant={activeBatchKey === b.batchKey ? 'solid' : 'outline'}
+                          colorScheme={activeBatchKey === b.batchKey ? 'blue' : undefined}
+                          onClick={() => onViewContacts(b.batchKey)}
+                        >
+                          {activeBatchKey === b.batchKey ? 'Viewing contacts' : 'View contacts'}
                         </Button>
                         <Button size="xs" variant="outline" onClick={() => onUseInSequence(b)}>
                           Use in sequence
@@ -595,6 +602,28 @@ export default function LeadSourcesTabNew({
         if (!cancelled) {
           setBatches(safeList)
           setBatchesFallback(!!(data && 'batchesFallback' in data && data.batchesFallback))
+          if (safeList.length === 0) {
+            setContactsBatchKey(null)
+            setContacts([])
+            setContactsColumns([])
+            setContactsConfigScope(null)
+            setContactsTotal(0)
+            setContactsPage(1)
+          } else {
+            const currentBatchStillValid =
+              contactsBatchKey &&
+              contactsBatchKey.sourceType === viewBatchesSource &&
+              safeList.some((batch) => batch.batchKey === contactsBatchKey.batchKey)
+
+            if (!currentBatchStillValid) {
+              setContactsBatchKey({ sourceType: viewBatchesSource, batchKey: safeList[0].batchKey })
+              setContacts([])
+              setContactsColumns([])
+              setContactsConfigScope(null)
+              setContactsTotal(0)
+              setContactsPage(1)
+            }
+          }
           if (import.meta.env.DEV) console.log('[LeadSources] batches[0]=', safeList?.[0])
         }
       } catch {
@@ -612,7 +641,7 @@ export default function LeadSourcesTabNew({
       cancelled = true
       clearInterval(t)
     }
-  }, [customerId, viewBatchesSource, batchDate])
+  }, [contactsBatchKey, customerId, viewBatchesSource, batchDate])
 
   const loadContacts = useCallback(
     async (opts?: { keepPrevious: boolean }) => {
@@ -804,6 +833,35 @@ export default function LeadSourcesTabNew({
                   onOpenConnect={(sourceType) => openConnect(sourceType)}
                   onPoll={(sourceType) => handlePoll(sourceType)}
                 />
+                {viewBatchesSource ? (
+                  <BatchesBlock
+                    sourceLabel={SOURCE_LABELS[viewBatchesSource]}
+                    batches={batches}
+                    batchesLoading={batchesLoading}
+                    batchesFallback={batchesFallback}
+                    activeBatchKey={contactsBatchKey?.batchKey ?? null}
+                    batchDate={batchDate}
+                    onBatchDateChange={(next) => setBatchDate(next)}
+                    onBack={() => {
+                      setViewBatchesSource(null)
+                      setContactsBatchKey(null)
+                      setContacts([])
+                      setContactsColumns([])
+                      setContactsConfigScope(null)
+                      setContactsTotal(0)
+                      setContactsPage(1)
+                    }}
+                    onViewContacts={(batchKey) => {
+                      setContacts([])
+                      setContactsColumns([])
+                      setContactsConfigScope(null)
+                      setContactsTotal(0)
+                      setContactsPage(1)
+                      setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
+                    }}
+                    onUseInSequence={(batch) => handleUseInSequence(batch)}
+                  />
+                ) : null}
                 {contactsBatchKey ? (
                   <ContactsBlock
                     sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
@@ -824,25 +882,6 @@ export default function LeadSourcesTabNew({
                       setContactsTotal(0)
                       setContactsPage(1)
                     }}
-                  />
-                ) : viewBatchesSource ? (
-                  <BatchesBlock
-                    sourceLabel={SOURCE_LABELS[viewBatchesSource]}
-                    batches={batches}
-                    batchesLoading={batchesLoading}
-                    batchesFallback={batchesFallback}
-                    batchDate={batchDate}
-                    onBatchDateChange={(next) => setBatchDate(next)}
-                    onBack={() => setViewBatchesSource(null)}
-                    onViewContacts={(batchKey) => {
-                      setContacts([])
-                      setContactsColumns([])
-                      setContactsConfigScope(null)
-                      setContactsTotal(0)
-                      setContactsPage(1)
-                      setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
-                    }}
-                    onUseInSequence={(batch) => handleUseInSequence(batch)}
                   />
                 ) : null}
               </>
