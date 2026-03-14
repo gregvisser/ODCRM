@@ -2,6 +2,7 @@ import { getItem } from '../platform/storage'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { isClientUI } from '../platform/mode'
 import { getFixedCustomerIdOrNull } from '../platform/me'
+import { getApiAuthToken } from '../auth/apiAuthToken'
 
 // Local getter to avoid importing platform/stores/settings (breaks TDZ when marketing chunk loads).
 // Returns null when no client selected; no silent fallback (PR2). Agency mode only.
@@ -89,6 +90,10 @@ async function apiRequest<T>(
 
       // Caller-provided X-Customer-Id wins. Only set from store when we have an active client (no silent fallback).
       if (!headers.has('X-Customer-Id') && customerId) headers.set('X-Customer-Id', customerId)
+      if (!headers.has('Authorization')) {
+        const bearerToken = getApiAuthToken()
+        if (bearerToken) headers.set('Authorization', `Bearer ${bearerToken}`)
+      }
 
       return {
         ...options,

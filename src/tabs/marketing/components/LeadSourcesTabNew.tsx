@@ -47,6 +47,8 @@ import {
   Input,
   Tooltip,
   useToast,
+  Wrap,
+  WrapItem,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, AddIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
@@ -310,6 +312,7 @@ function BatchesBlock({
 function ContactsBlock({
   contacts,
   contactsColumns,
+  contactsConfigScope,
   contactsTotal,
   contactsLoading,
   contactsPage,
@@ -321,6 +324,7 @@ function ContactsBlock({
 }: {
   contacts: Record<string, string>[]
   contactsColumns: string[]
+  contactsConfigScope: 'customer' | 'all_accounts' | null
   contactsTotal: number
   contactsLoading: boolean
   contactsPage: number
@@ -342,19 +346,40 @@ function ContactsBlock({
     for (const [k, v] of Object.entries(row ?? {})) out[normKey(k)] = typeof v === 'string' ? v : String(v ?? '')
     return out
   })
-  const visibleCols = normalizedContacts.length
+  const recommendedCols = normalizedContacts.length
     ? visibleColumns(normalizedColumns, normalizedContacts)
     : normalizedColumns
-  const cols = visibleCols.length ? visibleCols : normalizedColumns
+  const defaultCols = recommendedCols.length ? recommendedCols : normalizedColumns
+  const [selectedCols, setSelectedCols] = useState<string[]>(defaultCols)
+  const [showColumnChooser, setShowColumnChooser] = useState(false)
+  useEffect(() => {
+    setSelectedCols((current) => {
+      const safeCurrent = current.filter((col) => normalizedColumns.includes(col))
+      return safeCurrent.length > 0 ? safeCurrent : defaultCols
+    })
+  }, [defaultCols, normalizedColumns])
+  const cols = selectedCols.length ? selectedCols : defaultCols
   const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
   return (
     <Card id="lead-sources-contacts-panel" data-testid="lead-sources-contacts-panel" overflow="visible">
       <CardHeader>
-        <Flex justify="space-between" align="center">
-          <Heading size="md">Contacts — {sourceLabel}</Heading>
-          <Button size="sm" onClick={onBack}>
-            Back
-          </Button>
+        <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap">
+          <Box>
+            <Heading size="md">Contacts — {sourceLabel}</Heading>
+            <Text fontSize="sm" color="gray.600" mt={1}>
+              {contactsConfigScope === 'all_accounts'
+                ? 'Using the shared source sheet for all accounts.'
+                : "Using this client's connected source sheet."}
+            </Text>
+          </Box>
+          <HStack>
+            <Button size="sm" variant="outline" onClick={() => setShowColumnChooser((v) => !v)}>
+              {showColumnChooser ? 'Hide columns' : 'Show/hide columns'}
+            </Button>
+            <Button size="sm" onClick={onBack}>
+              Back
+            </Button>
+          </HStack>
         </Flex>
       </CardHeader>
       <CardBody pt={0} overflow="visible">
@@ -362,6 +387,50 @@ function ContactsBlock({
           <Spinner size="sm" />
         ) : (
           <>
+            {showColumnChooser && (
+              <Box borderWidth="1px" borderRadius="md" p={3} mb={4}>
+                <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap" mb={3}>
+                  <Box>
+                    <Text fontSize="sm" fontWeight="semibold">
+                      Visible columns
+                    </Text>
+                    <Text fontSize="sm" color="gray.600">
+                      Showing {cols.length} of {normalizedColumns.length} source columns on this page.
+                    </Text>
+                  </Box>
+                  <HStack>
+                    <Button size="xs" variant="ghost" onClick={() => setSelectedCols(defaultCols)}>
+                      Recommended
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setSelectedCols(normalizedColumns)}>
+                      Show all
+                    </Button>
+                  </HStack>
+                </Flex>
+                <Wrap spacing={3}>
+                  {normalizedColumns.map((col) => {
+                    const checked = cols.includes(col)
+                    return (
+                      <WrapItem key={col}>
+                        <Checkbox
+                          isChecked={checked}
+                          onChange={(e) => {
+                            const nextChecked = e.target.checked
+                            setSelectedCols((current) => {
+                              if (nextChecked) return current.includes(col) ? current : [...current, col]
+                              if (current.length <= 1) return current
+                              return current.filter((item) => item !== col)
+                            })
+                          }}
+                        >
+                          {displayLabel(col)}
+                        </Checkbox>
+                      </WrapItem>
+                    )
+                  })}
+                </Wrap>
+              </Box>
+            )}
             <TableContainer
               id="lead-sources-contacts-table"
               data-testid="lead-sources-contacts-table"
@@ -443,6 +512,7 @@ export default function LeadSourcesTabNew({
   const [contactsBatchKey, setContactsBatchKey] = useState<{ sourceType: LeadSourceType; batchKey: string } | null>(null)
   const [contacts, setContacts] = useState<Record<string, string>[]>([])
   const [contactsColumns, setContactsColumns] = useState<string[]>([])
+  const [contactsConfigScope, setContactsConfigScope] = useState<'customer' | 'all_accounts' | null>(null)
   const [contactsPage, setContactsPage] = useState(1)
   const [contactsTotal, setContactsTotal] = useState(0)
   const [contactsPageSize] = useState(50)
@@ -563,11 +633,13 @@ export default function LeadSourcesTabNew({
         }
         setContacts(asArray<Record<string, string>>(data?.contacts))
         setContactsColumns(asArray<string>(data?.columns))
+        setContactsConfigScope(data?.configScope ?? null)
         setContactsTotal(Number(data?.total ?? 0))
       } catch {
         if (!opts?.keepPrevious) {
           setContacts([])
           setContactsColumns([])
+          setContactsConfigScope(null)
           setContactsTotal(0)
         }
       } finally {
@@ -593,6 +665,7 @@ export default function LeadSourcesTabNew({
     setCustomerId(id)
     setViewBatchesSource(null)
     setContactsBatchKey(null)
+    setContactsConfigScope(null)
   }
 
   const handlePoll = async (sourceType: LeadSourceType) => {
@@ -722,6 +795,7 @@ export default function LeadSourcesTabNew({
               sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
               contacts={contacts}
               contactsColumns={contactsColumns}
+              contactsConfigScope={contactsConfigScope}
               contactsTotal={contactsTotal}
               contactsLoading={contactsLoading}
               contactsPage={contactsPage}
@@ -732,6 +806,7 @@ export default function LeadSourcesTabNew({
                 setContactsBatchKey(null)
                 setContacts([])
                 setContactsColumns([])
+                setContactsConfigScope(null)
                 setContactsTotal(0)
                 setContactsPage(1)
               }}
@@ -748,6 +823,7 @@ export default function LeadSourcesTabNew({
               onViewContacts={(batchKey) => {
                 setContacts([])
                 setContactsColumns([])
+                setContactsConfigScope(null)
                 setContactsTotal(0)
                 setContactsPage(1)
                 setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })

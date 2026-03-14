@@ -14,6 +14,7 @@ import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
 import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVisibility'
 import { isClientUI } from './platform/mode'
 import { getMe, type MeResponse } from './platform/me'
+import { clearApiAuthToken } from './auth/apiAuthToken'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
@@ -198,6 +199,7 @@ function App() {
   }, [])
 
   const handleSignOut = async () => {
+    clearApiAuthToken()
     await instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
   }
 
