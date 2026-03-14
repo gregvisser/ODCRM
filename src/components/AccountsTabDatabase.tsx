@@ -22,6 +22,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
   const { customers, loading, error, refetch } = useCustomersFromDatabase()
   const [metricsByCustomerId, setMetricsByCustomerId] = useState<Record<string, { week: number; month: number; total: number }>>({})
   const [metricIssuesByCustomerId, setMetricIssuesByCustomerId] = useState<Record<string, { errorCode?: string; message: string }>>({})
+  const [metricWarningsByCustomerId, setMetricWarningsByCustomerId] = useState<Record<string, { statusCode?: string; message: string }>>({})
   const [initialMetricsLoaded, setInitialMetricsLoaded] = useState(false)
 
   const hasSheetBackedCustomers = useMemo(
@@ -43,6 +44,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
     if (scoped.length === 0) {
       setMetricsByCustomerId({})
       setMetricIssuesByCustomerId({})
+      setMetricWarningsByCustomerId({})
       setInitialMetricsLoaded(true)
       return
     }
@@ -64,11 +66,22 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         }
         return acc
       }, {})
+      const nextWarnings = summary.perCustomer.reduce<Record<string, { statusCode?: string; message: string }>>((acc, customer) => {
+        const code = customer.syncState?.code
+        if (!code || code === 'live' || code === 'connected_empty') return acc
+        acc[customer.customerId] = {
+          statusCode: code,
+          message: customer.syncState?.message || 'Lead data is not fully current for this customer.',
+        }
+        return acc
+      }, {})
       setMetricsByCustomerId(next)
       setMetricIssuesByCustomerId(nextIssues)
+      setMetricWarningsByCustomerId(nextWarnings)
     } catch {
       setMetricsByCustomerId({})
       setMetricIssuesByCustomerId({})
+      setMetricWarningsByCustomerId({})
     } finally {
       setInitialMetricsLoaded(true)
     }
@@ -83,14 +96,15 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
       const isSheetBacked = Boolean(customer?.leadsReportingUrl?.trim())
       const metrics = metricsByCustomerId[customerId]
       if (metrics) {
+        const warning = metricWarningsByCustomerId[customerId]
         return {
           ...account,
           leads: metrics.total,
           weeklyActual: metrics.week,
           monthlyActual: metrics.month,
           sheetMetricsUnavailable: false,
-          sheetMetricsErrorCode: undefined,
-          sheetMetricsWarning: undefined,
+          sheetMetricsErrorCode: warning?.statusCode,
+          sheetMetricsWarning: warning?.message,
         }
       }
 
@@ -115,7 +129,7 @@ export default function AccountsTabDatabase({ focusAccountName }: Props) {
         sheetMetricsWarning: issue?.message,
       }
     })
-  }, [customers, metricIssuesByCustomerId, metricsByCustomerId])
+  }, [customers, metricIssuesByCustomerId, metricWarningsByCustomerId, metricsByCustomerId])
 
   useEffect(() => {
     void refreshMetrics()
