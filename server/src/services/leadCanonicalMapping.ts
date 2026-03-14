@@ -35,6 +35,63 @@ export type CanonicalLeadRecord = {
   notes: string | null
 }
 
+const REAL_LEAD_IDENTITY_ALIASES = [
+  'fullname',
+  'name',
+  'contactname',
+  'contact',
+  'firstname',
+  'first',
+  'lastname',
+  'last',
+  'email',
+  'emailaddress',
+  'workemail',
+  'phone',
+  'phonenumber',
+  'mobile',
+  'telephone',
+  'contactinfo',
+]
+
+const REAL_LEAD_COMPANY_ALIASES = ['company', 'account', 'business', 'organization', 'organisation']
+
+const REAL_LEAD_CONTEXT_ALIASES = [
+  'source',
+  'channel',
+  'channeloflead',
+  'leadsource',
+  'campaign',
+  'utmsource',
+  'marketingchannel',
+  'platform',
+  'type',
+  'owner',
+  'odteammember',
+  'odteam',
+  'teammember',
+  'assignedto',
+  'salesperson',
+  'rep',
+  'agent',
+  'jobtitle',
+  'title',
+  'role',
+  'position',
+  'location',
+  'city',
+  'region',
+  'country',
+  'status',
+  'leadstatus',
+  'pipeline',
+  'notes',
+  'note',
+  'comments',
+  'comment',
+  'outcome',
+]
+
 const LEAD_FIELD_ALIASES: Record<CanonicalLeadField, string[]> = {
   occurredAt: ['occurredat', 'date', 'created', 'createdat', 'timestamp', 'leaddate', 'firstmeetingdate'],
   source: ['source', 'channel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type'],
@@ -63,6 +120,12 @@ function asTrimmed(value: unknown): string | null {
   if (value == null) return null
   const text = String(value).trim()
   return text === '' ? null : text
+}
+
+function isWeekMarkerValue(value: string | null): boolean {
+  if (!value) return false
+  const normalized = value.trim().toLowerCase()
+  return normalized.startsWith('w/c') || normalized.startsWith('w/v') || normalized.startsWith('week commencing')
 }
 
 function parseDate(value: string | null): Date | null {
@@ -122,6 +185,50 @@ export function extractCanonicalLeadRecord(raw: Record<string, string>): Canonic
     status: status ? status.toLowerCase() : null,
     notes: findField(raw, 'notes'),
   }
+}
+
+export function isRealLeadRow(raw: Record<string, string>): boolean {
+  const canonical = extractCanonicalLeadRecord(raw)
+  const hasIdentity =
+    Boolean(canonical.fullName) ||
+    Boolean(canonical.firstName) ||
+    Boolean(canonical.lastName) ||
+    Boolean(canonical.email) ||
+    Boolean(canonical.phone)
+
+  let hasCompany = Boolean(canonical.company)
+  let hasSupplementalDetail = false
+
+  for (const [key, value] of Object.entries(raw)) {
+    const normalizedKey = normalizeLeadHeader(key)
+    const cleanedValue = asTrimmed(value)
+    if (!cleanedValue) continue
+
+    if (normalizedKey === 'week' && isWeekMarkerValue(cleanedValue)) {
+      continue
+    }
+
+    if (REAL_LEAD_IDENTITY_ALIASES.includes(normalizedKey)) {
+      if (isWeekMarkerValue(cleanedValue) || parseDate(cleanedValue)) {
+        continue
+      }
+      return true
+    }
+
+    if (REAL_LEAD_COMPANY_ALIASES.includes(normalizedKey)) {
+      if (isWeekMarkerValue(cleanedValue) || parseDate(cleanedValue)) {
+        continue
+      }
+      hasCompany = true
+      continue
+    }
+
+    if (REAL_LEAD_CONTEXT_ALIASES.includes(normalizedKey)) {
+      hasSupplementalDetail = true
+    }
+  }
+
+  return hasIdentity || (hasCompany && hasSupplementalDetail)
 }
 
 export function buildExternalRowFingerprint(input: {
