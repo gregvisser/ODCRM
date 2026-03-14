@@ -35,6 +35,23 @@ export type CanonicalLeadRecord = {
   notes: string | null
 }
 
+export type StoredLeadTruthRow = {
+  data?: unknown
+  externalSourceType?: string | null
+  occurredAt?: Date | null
+  createdAt?: Date | null
+  source?: string | null
+  owner?: string | null
+  company?: string | null
+  fullName?: string | null
+  email?: string | null
+  phone?: string | null
+  jobTitle?: string | null
+  location?: string | null
+  status?: string | null
+  notes?: string | null
+}
+
 const REAL_LEAD_IDENTITY_ALIASES = [
   'fullname',
   'name',
@@ -125,6 +142,14 @@ function asTrimmed(value: unknown): string | null {
   return text === '' ? null : text
 }
 
+export function asLeadRawData(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object') return {}
+  return Object.entries(value as Record<string, unknown>).reduce<Record<string, string>>((acc, [key, raw]) => {
+    acc[key] = String(raw ?? '')
+    return acc
+  }, {})
+}
+
 function isWeekMarkerValue(value: string | null): boolean {
   if (!value) return false
   const normalized = value.trim().toLowerCase()
@@ -159,6 +184,22 @@ function findField(raw: Record<string, string>, field: CanonicalLeadField): stri
     }
   }
   return null
+}
+
+export function buildStoredLeadTruthInput(row: StoredLeadTruthRow): Record<string, string> {
+  return {
+    ...asLeadRawData(row.data),
+    ...(row.fullName ? { Name: row.fullName } : {}),
+    ...(row.email ? { Email: row.email } : {}),
+    ...(row.phone ? { Phone: row.phone } : {}),
+    ...(row.company ? { Company: row.company } : {}),
+    ...(row.jobTitle ? { 'Job Title': row.jobTitle } : {}),
+    ...(row.location ? { Location: row.location } : {}),
+    ...(row.status ? { 'Lead Status': row.status } : {}),
+    ...(row.notes ? { Notes: row.notes } : {}),
+    ...(row.source ? { 'Channel of Lead': row.source } : {}),
+    ...(row.owner ? { 'OD Team Member': row.owner } : {}),
+  }
 }
 
 export function extractCanonicalLeadRecord(raw: Record<string, string>): CanonicalLeadRecord {
@@ -251,6 +292,14 @@ export function isRealLeadRow(raw: Record<string, string>, options?: { sourceTyp
   }
 
   return hasIdentity || (hasCompany && hasSupplementalDetail)
+}
+
+export function isRealStoredLeadRow(row: StoredLeadTruthRow): boolean {
+  return isRealLeadRow(buildStoredLeadTruthInput(row), { sourceType: row.externalSourceType ?? null })
+}
+
+export function extractStoredLeadCanonicalRecord(row: StoredLeadTruthRow): CanonicalLeadRecord {
+  return extractCanonicalLeadRecord(buildStoredLeadTruthInput(row))
 }
 
 export function buildExternalRowFingerprint(input: {
