@@ -18,7 +18,7 @@ export type LiveLeadRow = {
 }
 
 const OCCURRED_AT_ALIASES = ['date', 'created', 'created at', 'added', 'timestamp', 'lead date']
-const SOURCE_ALIASES = ['source', 'channel', 'channel of lead', 'lead source', 'campaign', 'utm source', 'marketing channel', 'platform', 'type']
+const SOURCE_ALIASES = ['source', 'channel', 'lead channel', 'channel of lead', 'lead source', 'campaign', 'utm source', 'marketing channel', 'platform', 'type']
 const OWNER_ALIASES = ['owner', 'od team member', 'od team', 'user', 'rep', 'agent', 'assigned to', 'salesperson']
 const COMPANY_ALIASES = ['company', 'account', 'business', 'organisation', 'organization']
 const NAME_ALIASES = ['name', 'contact', 'lead', 'full name', 'person']

@@ -59,6 +59,7 @@ const REAL_LEAD_COMPANY_ALIASES = ['company', 'account', 'business', 'organizati
 const REAL_LEAD_CONTEXT_ALIASES = [
   'source',
   'channel',
+  'leadchannel',
   'channeloflead',
   'leadsource',
   'campaign',
@@ -92,11 +93,11 @@ const REAL_LEAD_CONTEXT_ALIASES = [
   'outcome',
 ]
 
-const REAL_LEAD_CHANNEL_ALIASES = ['source', 'channel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type']
+const REAL_LEAD_CHANNEL_ALIASES = ['source', 'channel', 'leadchannel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type']
 
 const LEAD_FIELD_ALIASES: Record<CanonicalLeadField, string[]> = {
   occurredAt: ['occurredat', 'date', 'created', 'createdat', 'timestamp', 'leaddate', 'firstmeetingdate'],
-  source: ['source', 'channel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type'],
+  source: ['source', 'channel', 'leadchannel', 'channeloflead', 'leadsource', 'campaign', 'utmsource', 'marketingchannel', 'platform', 'type'],
   owner: ['owner', 'odteammember', 'odteam', 'teammember', 'assignedto', 'salesperson', 'rep', 'agent'],
   externalId: ['externalid', 'leadid', 'id', 'rowid', 'sheetrowid'],
   firstName: ['firstname', 'first'],
