@@ -45,7 +45,12 @@ export type LiveLeadsResponse = {
   customerId: string
   customerName?: string
   rowCount: number
+  total?: number
+  totalPages?: number
+  page?: number
+  pageSize?: number
   leads: LiveLeadRow[]
+  availableChannels?: string[]
   displayColumns?: string[]
   queriedAt: string
   sourceUrl: string | null
@@ -57,6 +62,12 @@ export type LiveLeadsResponse = {
   hint?: string
   errorCode?: string
   sync?: LiveLeadSyncMeta
+}
+
+export type GetLiveLeadsParams = {
+  page?: number
+  pageSize?: number
+  channel?: string
 }
 
 export type LiveLeadMetricsResponse = {
@@ -143,8 +154,18 @@ export type RetryLiveLeadOutboundResponse = CreateLiveLeadResponse
 export type UpdateLiveLeadInput = CreateLiveLeadInput
 export type UpdateLiveLeadResponse = CreateLiveLeadResponse
 
-export async function getLiveLeads(customerId: string): Promise<LiveLeadsResponse> {
-  const res = await fetch(`${API_BASE}/api/live/leads?customerId=${encodeURIComponent(customerId)}`, {
+export async function getLiveLeads(customerId: string, params: GetLiveLeadsParams = {}): Promise<LiveLeadsResponse> {
+  const search = new URLSearchParams({ customerId })
+  if (typeof params.page === 'number' && Number.isFinite(params.page)) {
+    search.set('page', String(params.page))
+  }
+  if (typeof params.pageSize === 'number' && Number.isFinite(params.pageSize)) {
+    search.set('pageSize', String(params.pageSize))
+  }
+  if (params.channel && params.channel.trim()) {
+    search.set('channel', params.channel.trim())
+  }
+  const res = await fetch(`${API_BASE}/api/live/leads?${search.toString()}`, {
     headers: getCustomerHeaders(customerId),
   })
   if (!res.ok) {

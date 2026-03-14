@@ -37,6 +37,14 @@ type SyncMeta = {
 
 const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
 
+function parsePositiveInt(value: unknown, fallback: number, opts?: { min?: number; max?: number }) {
+  const min = opts?.min ?? 1
+  const max = opts?.max ?? Number.MAX_SAFE_INTEGER
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
+}
+
 function classifySheetSyncError(message: string | null | undefined): LiveLeadErrorCode | null {
   const text = String(message || '').toLowerCase()
   if (!text) return null
@@ -386,6 +394,13 @@ function mapDbLeadRows(rows: Array<{
       raw,
     }
   })
+}
+
+function getLeadChannelValue(row: {
+  source: string | null
+  raw: Record<string, string>
+}): string {
+  return String(row.source ?? row.raw['Channel of Lead'] ?? row.raw['Channel'] ?? '').trim()
 }
 
 async function getCustomerTruthContext(customerId: string) {
@@ -893,6 +908,10 @@ router.get('/leads', async (req, res) => {
   if (!customerId) return
 
   try {
+    const requestedPage = parsePositiveInt(req.query.page, 1, { min: 1 })
+    const pageSize = parsePositiveInt(req.query.pageSize, 50, { min: 1, max: 200 })
+    const channelFilter = String(req.query.channel || '').trim().toLowerCase()
+    const paginationRequested = req.query.page != null || req.query.pageSize != null
     const context = await getCustomerTruthContext(customerId)
     if (!context) {
       return res.status(404).json({ error: 'Customer not found' })
@@ -957,7 +976,26 @@ router.get('/leads', async (req, res) => {
       leads = mapDbLeadRows(dbRows)
       sync = await getSyncMeta(customerId, sourceOfTruth)
     }
-    const displayColumns = deriveDisplayColumns(leads)
+    const availableChannels = Array.from(
+      new Set(
+        leads
+          .map((lead) => getLeadChannelValue(lead))
+          .filter((value) => value.length > 0),
+      ),
+    ).sort((a, b) => a.localeCompare(b))
+
+    const filteredLeads = channelFilter
+      ? leads.filter((lead) => getLeadChannelValue(lead).toLowerCase().includes(channelFilter))
+      : leads
+
+    const total = filteredLeads.length
+    const totalPages = paginationRequested ? Math.max(1, Math.ceil(total / pageSize)) : 1
+    const page = paginationRequested ? Math.min(requestedPage, totalPages) : 1
+    const pageSlice = paginationRequested
+      ? filteredLeads.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize)
+      : filteredLeads
+
+    const displayColumns = deriveDisplayColumns(filteredLeads)
 
     const truth = buildSheetTruthStatus({
       sourceOfTruth,
@@ -971,7 +1009,12 @@ router.get('/leads', async (req, res) => {
       customerId,
       customerName: customer.name || '',
       rowCount: leads.length,
-      leads,
+      total,
+      totalPages,
+      page,
+      pageSize,
+      leads: pageSlice,
+      availableChannels,
       displayColumns,
       queriedAt: new Date().toISOString(),
       sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,

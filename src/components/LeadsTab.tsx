@@ -101,13 +101,21 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 
 function LeadsTab() {
+  const DEFAULT_PAGE_SIZE = 50
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [customersLoading, setCustomersLoading] = useState(true)
   const [customersError, setCustomersError] = useState<string | null>(null)
   const activeCustomerId = selectedCustomerId.trim()
+  const [filters, setFilters] = useState({
+    channelOfLead: '',
+  })
+  const [currentPage, setCurrentPage] = useState(1)
   const { data: liveData, loading, error, lastUpdatedAt, refetch } = useLiveLeadsPolling(activeCustomerId || null, {
     enabled: activeCustomerId !== '',
+    page: currentPage,
+    pageSize: DEFAULT_PAGE_SIZE,
+    channel: filters.channelOfLead || undefined,
   })
   const leads = useMemo(
     () => (liveData ? mapLiveLeadsToLead(liveData.leads, liveData.customerName ?? '') : []),
@@ -118,10 +126,11 @@ function LeadsTab() {
   const liveHint = liveData?.hint ?? null
   const sourceOfTruth = liveData?.sourceOfTruth ?? null
   const apiDisplayColumns = liveData?.displayColumns ?? []
-
-  const [filters, setFilters] = useState({
-    channelOfLead: '',
-  })
+  const filteredLeadCount = liveData?.total ?? leads.length
+  const totalLeadCount = liveData?.rowCount ?? leads.length
+  const totalPages = liveData?.totalPages ?? 1
+  const page = liveData?.page ?? currentPage
+  const uniqueChannels = liveData?.availableChannels ?? []
   
   // Default visible columns: Channel/Owner from API (source/owner) or sheet data
   const defaultVisibleColumns = ['Account', 'Date', 'Company', 'Channel', 'Owner', 'Status', 'Score']
@@ -210,12 +219,21 @@ function LeadsTab() {
     setSelectedCustomerId(nextCustomerId)
     setSelectedLeads(new Set())
     setFilters({ channelOfLead: '' })
+    setCurrentPage(1)
     if (nextCustomerId) {
       setCurrentCustomerId(nextCustomerId)
     } else {
       clearCurrentCustomerId()
     }
   }
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [activeCustomerId, filters.channelOfLead])
+
+  useEffect(() => {
+    setSelectedLeads(new Set())
+  }, [activeCustomerId, currentPage, filters.channelOfLead])
 
   const customerSelector = (
     <Box borderWidth="1px" borderRadius="lg" p={3} bg="white" data-testid="leads-tab-customer-selector">
@@ -256,7 +274,7 @@ function LeadsTab() {
 
   // When leads are empty, fetch sync status and validator to show why 0 leads
   useEffect(() => {
-    if (leads.length > 0) {
+    if (totalLeadCount > 0) {
       setSyncStatusForEmpty(null)
       setSheetValidateForEmpty(null)
       return
@@ -269,7 +287,7 @@ function LeadsTab() {
     if (!activeCustomerId) return
     getSyncStatus(activeCustomerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
     getValidateSheetResult(activeCustomerId).then(({ data }) => { if (data) setSheetValidateForEmpty(data) })
-  }, [leads.length, activeCustomerId, sourceOfTruth])
+  }, [totalLeadCount, activeCustomerId, sourceOfTruth])
 
   // Load sequences on mount
   useEffect(() => {
@@ -457,10 +475,10 @@ function LeadsTab() {
 
   // Toggle all leads selection
   const toggleAllLeads = () => {
-    if (selectedLeads.size === filteredLeads.length) {
+    if (selectedLeads.size === leads.length) {
       setSelectedLeads(new Set())
     } else {
-      setSelectedLeads(new Set(filteredLeads.filter(l => l.id).map(l => l.id!)))
+      setSelectedLeads(new Set(leads.filter((lead) => lead.id).map((lead) => lead.id!)))
     }
   }
 
@@ -530,7 +548,7 @@ function LeadsTab() {
     )
   }
 
-  if (leads.length === 0) {
+  if (totalLeadCount === 0) {
     const isConnectedEmptySheet =
       sourceOfTruth === 'google_sheets' &&
       liveData?.authoritative === true &&
@@ -860,53 +878,6 @@ function LeadsTab() {
     }
   }
 
-  // Filter leads based on filter criteria
-  const filteredLeads = leads
-    .filter((lead) => {
-      const channel = getChannelValue(lead)
-      if (filters.channelOfLead && !channel?.toLowerCase().includes(filters.channelOfLead.toLowerCase()))
-        return false
-      return true
-    })
-    .sort((a, b) => {
-      // Sort by date (newest to oldest)
-      const dateA = a['Date'] || ''
-      const dateB = b['Date'] || ''
-      
-      // Try to parse dates in various formats
-      const parseDate = (dateStr: string): Date | null => {
-        if (!dateStr || dateStr.trim() === '') return null
-        
-        // Try DD.MM.YY or DD.MM.YYYY format (from the Google Sheet)
-        const ddmmyy = dateStr.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/)
-        if (ddmmyy) {
-          const day = parseInt(ddmmyy[1], 10)
-          const month = parseInt(ddmmyy[2], 10) - 1
-          const year = parseInt(ddmmyy[3], 10) < 100 ? 2000 + parseInt(ddmmyy[3], 10) : parseInt(ddmmyy[3], 10)
-          return new Date(year, month, day)
-        }
-        
-        // Try standard date parsing
-        const parsed = new Date(dateStr)
-        return isNaN(parsed.getTime()) ? null : parsed
-      }
-
-      const dateAObj = parseDate(dateA)
-      const dateBObj = parseDate(dateB)
-
-      if (!dateAObj && !dateBObj) return 0
-      if (!dateAObj) return 1 // Put dates without valid date at the end
-      if (!dateBObj) return -1
-      
-      // Newest first (descending order)
-      return dateBObj.getTime() - dateAObj.getTime()
-    })
-
-  // Get unique values for filter dropdowns
-  const uniqueChannels = Array.from(
-    new Set(leads.map((lead) => getChannelValue(lead)).filter((c) => c && c.trim() !== '')),
-  ).sort()
-
   // Helper to check if a value is a URL
   const isUrl = (str: string): boolean => {
     if (!str || str === 'Yes' || str === 'No' || str.trim() === '') return false
@@ -963,7 +934,7 @@ function LeadsTab() {
             Leads Generated
           </Heading>
           <Text color="gray.600">
-            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeads.length} of {leads.length} leads)
+            {sourceOfTruth === 'db' ? 'Live ODCRM lead records' : 'Live sheet-backed data via ODCRM'} ({filteredLeadCount} of {totalLeadCount} leads)
           </Text>
           <Text fontSize="xs" color="gray.500" mt={1}>
             Source of truth: {sourceOfTruth === 'db' ? 'ODCRM database (non-sheet-backed client)' : 'Google Sheets (sheet-backed client)'}
@@ -1101,7 +1072,7 @@ function LeadsTab() {
         </SimpleGrid>
       </Box>
 
-      {filteredLeads.length === 0 ? (
+      {filteredLeadCount === 0 ? (
         <Box textAlign="center" py={12} bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200">
           <Text fontSize="lg" color="gray.600">
             No leads match the selected filters
@@ -1126,8 +1097,8 @@ function LeadsTab() {
               <Tr>
                 <Th px={3} py={2} bg="gray.50" position="sticky" left={0} zIndex={11}>
                   <Checkbox
-                    isChecked={selectedLeads.size > 0 && selectedLeads.size === filteredLeads.filter(l => l.id).length}
-                    isIndeterminate={selectedLeads.size > 0 && selectedLeads.size < filteredLeads.filter(l => l.id).length}
+                    isChecked={selectedLeads.size > 0 && selectedLeads.size === leads.filter((lead) => lead.id).length}
+                    isIndeterminate={selectedLeads.size > 0 && selectedLeads.size < leads.filter((lead) => lead.id).length}
                     onChange={toggleAllLeads}
                   />
                 </Th>
@@ -1142,7 +1113,7 @@ function LeadsTab() {
               </Tr>
             </Thead>
             <Tbody>
-              {filteredLeads.map((lead, index) => {
+              {leads.map((lead, index) => {
                 const leadId = lead.id || `${lead.accountName}-${index}`
                 const isSelected = selectedLeads.has(leadId)
                 const isConverted = lead.status === 'converted' || !!lead.convertedToContactId
@@ -1300,6 +1271,30 @@ function LeadsTab() {
           </Table>
         </Box>
       )}
+
+      <HStack justify="space-between" flexWrap="wrap">
+        <Text fontSize="sm" color="gray.600">
+          Page {page} of {totalPages}
+        </Text>
+        <HStack>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            isDisabled={page <= 1 || loading}
+          >
+            Previous
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            isDisabled={page >= totalPages || loading}
+          >
+            Next
+          </Button>
+        </HStack>
+      </HStack>
 
       <Modal isOpen={isAddLeadOpen} onClose={() => setIsAddLeadOpen(false)} size="xl">
         <ModalOverlay />
