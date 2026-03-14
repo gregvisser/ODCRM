@@ -184,7 +184,7 @@ router.get('/', async (req, res) => {
         ...(lead.source ? { 'Channel of Lead': lead.source } : {}),
         ...(lead.owner ? { 'OD Team Member': lead.owner } : {}),
         ...(lead.status ? { 'Lead Status': lead.status } : {}),
-      })
+      }, { sourceType: lead.externalSourceType ?? null })
     })
 
     const leads = filteredLeadRows.map((lead) => {
@@ -296,6 +296,7 @@ router.get('/aggregations', async (req, res) => {
         location: true,
         status: true,
         notes: true,
+        externalSourceType: true,
         data: true,
       },
     })
@@ -318,7 +319,7 @@ router.get('/aggregations', async (req, res) => {
         ...(record.notes ? { Notes: record.notes } : {}),
         ...(record.source ? { 'Channel of Lead': record.source } : {}),
         ...(record.owner ? { 'OD Team Member': record.owner } : {}),
-      })) {
+      }, { sourceType: record.externalSourceType ?? null })) {
         return acc
       }
       if (!acc[record.customerId]) {

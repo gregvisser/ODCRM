@@ -641,7 +641,7 @@ function mapDbLeadRows(rows: Array<{
       ...(row.notes ? { Notes: row.notes } : {}),
       ...(row.source ? { 'Channel of Lead': row.source } : {}),
       ...(row.owner ? { 'OD Team Member': row.owner } : {}),
-    }))
+    }, { sourceType: row.externalSourceType ?? null }))
     .map((row) => {
       const raw = asRawMap(row.data)
       const occurredAt = row.occurredAt ? row.occurredAt.toISOString() : null
@@ -1211,6 +1211,7 @@ router.get('/leads', async (req, res) => {
         id: true,
         occurredAt: true,
         createdAt: true,
+        externalSourceType: true,
         source: true,
         owner: true,
         company: true,
@@ -1243,6 +1244,7 @@ router.get('/leads', async (req, res) => {
           id: true,
           occurredAt: true,
           createdAt: true,
+          externalSourceType: true,
           source: true,
           owner: true,
           company: true,

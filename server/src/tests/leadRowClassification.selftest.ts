@@ -15,33 +15,44 @@ const todayText = formatSheetDate(today)
 
 const markerRow: Record<string, string> = {
   Date: todayText,
+  Week: `W/C ${todayText}`,
   Company: 'OCS Group Holdings Ltd',
   accountName: 'OCS Group Holdings Ltd',
 }
 
-const realNamedLead: Record<string, string> = {
+const companyWithoutChannel: Record<string, string> = {
   Date: todayText,
   Company: 'Acme Ltd',
-  Name: 'Jane Doe',
+  'OD Team Member': 'Alex',
+}
+
+const realCompanyChannelLead: Record<string, string> = {
+  Date: todayText,
+  Company: 'Acme Ltd',
   'Channel of Lead': 'LinkedIn',
   'OD Team Member': 'Alex',
 }
 
-const realCompanyLead: Record<string, string> = {
+const fullLead: Record<string, string> = {
   Date: todayText,
   Company: 'Bright Systems',
-  'Lead Status': 'Qualified',
+  Name: 'Jane Doe',
   'Channel of Lead': 'Referral',
+  'Lead Status': 'Qualified',
+  Email: 'jane@example.com',
+  'OD Team Member': 'Alex',
 }
 
-assert.equal(isRealLeadRow(markerRow), false, 'date + company marker row must not count as a lead')
-assert.equal(isRealLeadRow(realNamedLead), true, 'named lead row must count as a lead')
-assert.equal(isRealLeadRow(realCompanyLead), true, 'company + substantive detail must count as a lead')
+assert.equal(isRealLeadRow(markerRow, { sourceType: 'google_sheets' }), false, 'date/week marker row must not count as a lead')
+assert.equal(isRealLeadRow(companyWithoutChannel, { sourceType: 'google_sheets' }), false, 'date + company without channel must not count as a lead')
+assert.equal(isRealLeadRow(realCompanyChannelLead, { sourceType: 'google_sheets' }), true, 'date + company + channel must count as a lead')
+assert.equal(isRealLeadRow(fullLead, { sourceType: 'google_sheets' }), true, 'normal populated lead row must count as a lead')
 
 const rows: LeadRow[] = [
   { ...markerRow, accountName: 'OCS Group Holdings Ltd' },
-  { ...realNamedLead, accountName: 'OCS Group Holdings Ltd' },
-  { ...realCompanyLead, accountName: 'OCS Group Holdings Ltd' },
+  { ...companyWithoutChannel, accountName: 'OCS Group Holdings Ltd' },
+  { ...realCompanyChannelLead, accountName: 'OCS Group Holdings Ltd' },
+  { ...fullLead, accountName: 'OCS Group Holdings Ltd' },
 ]
 
 const actuals = calculateActualsFromLeads('OCS Group Holdings Ltd', rows)

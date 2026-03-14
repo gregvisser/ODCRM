@@ -442,7 +442,7 @@ async function fetchLeadsFromSheetUrl(
             continue
           }
 
-          if (!isRealLeadRow(normalizedLead)) {
+          if (!isRealLeadRow(normalizedLead, { sourceType: 'google_sheets' })) {
             filteredNonLead++
             dataRowIndex++
             continue
@@ -910,7 +910,7 @@ function calculateActualsFromLeads(accountName: string, leads: LeadRow[]): {
   const platformCounts = new Map<string, number>()
 
   accountLeads.forEach((lead) => {
-    if (!isRealLeadRow(lead)) return
+    if (!isRealLeadRow(lead, { sourceType: 'google_sheets' })) return
 
     let dateValue = lead['Date'] || lead['date'] || lead['Created At'] || lead['createdAt'] || lead['First Meeting Date'] || ''
 
