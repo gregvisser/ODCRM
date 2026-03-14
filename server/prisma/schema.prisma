@@ -336,6 +336,7 @@ model EmailTemplate {
   id               String   @id @default(cuid())
   customerId       String
   name             String
+  category         String   @default("General")
   subjectTemplate  String
   bodyTemplateHtml String
   bodyTemplateText String?

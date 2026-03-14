@@ -90,7 +90,7 @@ export function getClientReadinessInterpretation(signal: ClientReadinessSignal):
       state: 'data-incomplete',
       label: 'Data incomplete',
       reason: 'Required client outreach data is still incomplete.',
-      nextStep: { label: 'Fix client data in OpenDoors Clients', target: 'clients' },
+      nextStep: { label: 'Fix client data in OpensDoors Clients', target: 'clients' },
     }
   }
 

@@ -14,8 +14,8 @@ export type CrmTopTab = {
 }
 
 export const CRM_TOP_TABS: readonly CrmTopTab[] = [
-  { id: 'customers-home', label: 'OpenDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
-  { id: 'marketing-home', label: 'OpenDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
+  { id: 'customers-home', label: 'OpensDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
+  { id: 'marketing-home', label: 'OpensDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
   { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },
   { id: 'settings-home', label: 'Settings', ownerAgent: 'Settings Agent', path: '/settings' },
 ] as const
@@ -55,5 +55,4 @@ assertUnique(
   CRM_TOP_TABS.map((t) => t.path).filter((p): p is string => typeof p === 'string'),
   'tab path',
 )
-
 

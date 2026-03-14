@@ -126,7 +126,7 @@ export default function CustomersHomePage({
         data-testid="customers-marketing-bridge"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
-          OpenDoors Clients is the live workspace for accounts, contacts, and leads.
+          OpensDoors Clients is the live workspace for accounts, contacts, and leads.
         </Text>
         <HStack mt={2} spacing={2}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">

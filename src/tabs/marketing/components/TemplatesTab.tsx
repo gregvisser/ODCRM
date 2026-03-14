@@ -494,6 +494,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     try {
       const payload = {
         name: editingTemplate.name.trim(),
+        category: editingTemplate.category.trim() || 'General',
         subjectTemplate: editingTemplate.subject.trim(),
         bodyTemplateHtml: toHtmlBody(editingTemplate.content),
         bodyTemplateText: editingTemplate.content.trim(),
@@ -543,6 +544,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     try {
       const duplicatedTemplate = {
         name: `${template.name} (Copy)`,
+        category: template.category || 'General',
         subjectTemplate: template.subject.trim(),
         bodyTemplateHtml: toHtmlBody(template.content),
         bodyTemplateText: template.content.trim(),
