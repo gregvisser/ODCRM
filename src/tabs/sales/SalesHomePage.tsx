@@ -5,7 +5,7 @@ import { SALES_PLANNED_AREAS } from './constants'
 export default function SalesHomePage() {
   return (
     <PlaceholderPage
-      title="OpenDoors Sales"
+      title="OpensDoors Sales"
       ownerAgent="Sales Agent"
     >
       <Text fontSize="sm" color="gray.700" mb={2}>

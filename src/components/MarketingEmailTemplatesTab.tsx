@@ -270,7 +270,7 @@ export default function MarketingEmailTemplatesTab() {
           Email Templates
         </Heading>
         <Text color="gray.600">
-          Create customer-specific templates that OpenDoors users can pick for any step in a campaign sequence (up to 10 steps).
+          Create customer-specific templates that OpensDoors users can pick for any step in a campaign sequence (up to 10 steps).
         </Text>
       </Box>
 

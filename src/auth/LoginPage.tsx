@@ -26,7 +26,7 @@ export default function LoginPage({
         <Stack spacing={5} textAlign="center">
           <Heading size="lg">Sign in to ODCRM</Heading>
           <Text color="text.muted">
-            Access is restricted to approved OpenDoors users. Please sign in with your Microsoft
+            Access is restricted to approved OpensDoors users. Please sign in with your Microsoft
             account to continue.
           </Text>
           {showConfigWarning ? (

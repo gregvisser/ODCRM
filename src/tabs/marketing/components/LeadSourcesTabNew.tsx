@@ -790,61 +790,62 @@ export default function LeadSourcesTabNew({
               </Alert>
             )}
             {!loading && customerId && (
-          contactsBatchKey ? (
-            <ContactsBlock
-              sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
-              contacts={contacts}
-              contactsColumns={contactsColumns}
-              contactsConfigScope={contactsConfigScope}
-              contactsTotal={contactsTotal}
-              contactsLoading={contactsLoading}
-              contactsPage={contactsPage}
-              contactsPageSize={contactsPageSize}
-              onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
-              onNextPage={() => setContactsPage((p) => p + 1)}
-              onBack={() => {
-                setContactsBatchKey(null)
-                setContacts([])
-                setContactsColumns([])
-                setContactsConfigScope(null)
-                setContactsTotal(0)
-                setContactsPage(1)
-              }}
-            />
-          ) : viewBatchesSource ? (
-            <BatchesBlock
-              sourceLabel={SOURCE_LABELS[viewBatchesSource]}
-              batches={batches}
-              batchesLoading={batchesLoading}
-              batchesFallback={batchesFallback}
-              batchDate={batchDate}
-              onBatchDateChange={(next) => setBatchDate(next)}
-              onBack={() => setViewBatchesSource(null)}
-              onViewContacts={(batchKey) => {
-                setContacts([])
-                setContactsColumns([])
-                setContactsConfigScope(null)
-                setContactsTotal(0)
-                setContactsPage(1)
-                setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
-              }}
-              onUseInSequence={(batch) => handleUseInSequence(batch)}
-            />
-          ) : (
-            <SourcesOverview
-              sources={sources}
-              customerId={customerId}
-              onViewBatches={(sourceType) => {
-                setViewBatchesSource(sourceType)
-                setContactsBatchKey(null)
-                setBatchDate((prev) => normalizeBatchDate(prev))
-                setBatches([])
-                setBatchesFallback(false)
-              }}
-              onOpenConnect={(sourceType) => openConnect(sourceType)}
-              onPoll={(sourceType) => handlePoll(sourceType)}
-            />
-          )
+              <>
+                <SourcesOverview
+                  sources={sources}
+                  customerId={customerId}
+                  onViewBatches={(sourceType) => {
+                    setViewBatchesSource(sourceType)
+                    setContactsBatchKey(null)
+                    setBatchDate((prev) => normalizeBatchDate(prev))
+                    setBatches([])
+                    setBatchesFallback(false)
+                  }}
+                  onOpenConnect={(sourceType) => openConnect(sourceType)}
+                  onPoll={(sourceType) => handlePoll(sourceType)}
+                />
+                {contactsBatchKey ? (
+                  <ContactsBlock
+                    sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
+                    contacts={contacts}
+                    contactsColumns={contactsColumns}
+                    contactsConfigScope={contactsConfigScope}
+                    contactsTotal={contactsTotal}
+                    contactsLoading={contactsLoading}
+                    contactsPage={contactsPage}
+                    contactsPageSize={contactsPageSize}
+                    onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
+                    onNextPage={() => setContactsPage((p) => p + 1)}
+                    onBack={() => {
+                      setContactsBatchKey(null)
+                      setContacts([])
+                      setContactsColumns([])
+                      setContactsConfigScope(null)
+                      setContactsTotal(0)
+                      setContactsPage(1)
+                    }}
+                  />
+                ) : viewBatchesSource ? (
+                  <BatchesBlock
+                    sourceLabel={SOURCE_LABELS[viewBatchesSource]}
+                    batches={batches}
+                    batchesLoading={batchesLoading}
+                    batchesFallback={batchesFallback}
+                    batchDate={batchDate}
+                    onBatchDateChange={(next) => setBatchDate(next)}
+                    onBack={() => setViewBatchesSource(null)}
+                    onViewContacts={(batchKey) => {
+                      setContacts([])
+                      setContactsColumns([])
+                      setContactsConfigScope(null)
+                      setContactsTotal(0)
+                      setContactsPage(1)
+                      setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
+                    }}
+                    onUseInSequence={(batch) => handleUseInSequence(batch)}
+                  />
+                ) : null}
+              </>
             )}
           </>
         )}

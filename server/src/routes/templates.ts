@@ -34,6 +34,7 @@ const getCustomerId = (req: any): string => {
 
 const createTemplateSchema = z.object({
   name: z.string().min(1),
+  category: z.string().min(1).default('General'),
   subjectTemplate: z.string().min(1),
   bodyTemplateHtml: z.string().min(1),
   bodyTemplateText: z.string().optional(),
@@ -42,6 +43,7 @@ const createTemplateSchema = z.object({
 
 const updateTemplateSchema = z.object({
   name: z.string().min(1).optional(),
+  category: z.string().min(1).optional(),
   subjectTemplate: z.string().min(1).optional(),
   bodyTemplateHtml: z.string().min(1).optional(),
   bodyTemplateText: z.string().optional(),
@@ -82,6 +84,7 @@ router.post('/', requireMarketingMutationAuth, async (req, res, next) => {
         id: randomUUID(),
         customerId: customerId,
         name: data.name,
+        category: data.category,
         subjectTemplate: data.subjectTemplate,
         bodyTemplateHtml: data.bodyTemplateHtml,
         bodyTemplateText: data.bodyTemplateText || null,

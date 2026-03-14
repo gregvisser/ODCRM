@@ -230,7 +230,7 @@ export default function MarketingHomePage({
           Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
         </Text>
         <Text fontSize="xs" color="gray.500" mt={1} data-testid="marketing-module-continuity-guidance">
-          If setup or data blockers appear, switch to Onboarding or OpenDoors Clients, then return here to continue operations.
+          If setup or data blockers appear, switch to Onboarding or OpensDoors Clients, then return here to continue operations.
         </Text>
         <HStack mt={2} flexWrap="wrap">
           <Button size="xs" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="marketing-readiness-next-step">
