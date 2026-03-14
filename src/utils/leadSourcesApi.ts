@@ -49,6 +49,7 @@ export interface LeadSourceContactsResponse {
   page: number
   pageSize: number
   total: number
+  configScope?: 'customer' | 'all_accounts'
 }
 
 function headers(customerId: string): Record<string, string> {
@@ -128,7 +129,16 @@ export async function getLeadSourceContacts(
     { headers: headers(customerId) }
   )
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
-  return res.json()
+  const data = await res.json() as LeadSourceContactsResponse
+  const configScopeHeader = res.headers.get('x-odcrm-leadsource-config-scope')
+  const configScope =
+    configScopeHeader === 'customer' || configScopeHeader === 'all_accounts'
+      ? configScopeHeader
+      : undefined
+  return {
+    ...data,
+    configScope,
+  }
 }
 
 /** Build URL for "Open Sheet" — backend redirect (never exposes spreadsheetId to client). */

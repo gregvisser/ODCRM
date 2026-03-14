@@ -4,6 +4,7 @@ import { InteractionStatus } from '@azure/msal-browser'
 import { useIsAuthenticated, useMsal } from '@azure/msal-react'
 import LoginPage from './LoginPage'
 import { authConfigReady, loginRequest } from './msalConfig'
+import { clearApiAuthToken, setApiAuthToken } from './apiAuthToken'
 
 type AuthGateProps = {
   children: React.ReactNode
@@ -95,6 +96,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     const run = async () => {
       if (!isAuthenticated || inProgress !== InteractionStatus.None) return
       setAuthz({ status: 'checking' })
+      clearApiAuthToken()
       let token: string | null = null
       try {
         const result = await withTimeout(
@@ -169,11 +171,13 @@ export default function AuthGate({ children }: AuthGateProps) {
       if (cancelled) return
 
       if (data?.authorized) {
+        setApiAuthToken(token)
         setAuthz({ status: 'authorized', email: data.email || activeEmail || undefined })
         return
       }
 
       if (lastError?.status === 403) {
+        clearApiAuthToken()
         setAuthz({
           status: 'unauthorized',
           email: data?.email || activeEmail || undefined,
@@ -183,6 +187,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       }
 
       if (lastError?.status === 401) {
+        clearApiAuthToken()
         setAuthz({
           status: 'error',
           email: activeEmail || undefined,
@@ -191,6 +196,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         return
       }
 
+      clearApiAuthToken()
       setAuthz({
         status: 'error',
         email: activeEmail || undefined,
@@ -220,6 +226,7 @@ export default function AuthGate({ children }: AuthGateProps) {
   }
 
   const handleSignOut = async () => {
+    clearApiAuthToken()
     await instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
   }
 
