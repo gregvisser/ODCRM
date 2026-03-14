@@ -5044,18 +5044,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                   onSave={async (v) => {
                                     if (!customerId) return
                                     const next = String(v || '').trim()
-                                    const currentLabel = String(c?.leadsGoogleSheetLabel || '').trim()
-                                    const fallbackLabel = 'Leads Google Sheet'
                                     await applyCustomerPatchAndRefresh({
                                       customerId,
-                                      patch: next
-                                        ? {
-                                            leadsReportingUrl: next,
-                                            ...(currentLabel
-                                              ? {}
-                                              : { leadsGoogleSheetLabel: fallbackLabel }),
-                                          }
-                                        : { leadsReportingUrl: null },
+                                      patch: { leadsReportingUrl: next ? next : null },
                                     })
                                     stopEditing(accountName, 'drawer.details.leadsUrl')
                                   }}
