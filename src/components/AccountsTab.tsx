@@ -336,6 +336,31 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 })
 
+const DEFCON_OPTIONS = [
+  { value: '1', label: '1 - Very Dissatisfied' },
+  { value: '2', label: '2 - Dissatisfied' },
+  { value: '3', label: '3 - Neutral' },
+  { value: '4', label: '4 - Satisfied' },
+  { value: '5', label: '5 - Very Satisfied' },
+]
+
+function formatDefconLabel(defcon: number): string {
+  switch (defcon) {
+    case 1:
+      return '1 - Very Dissatisfied'
+    case 2:
+      return '2 - Dissatisfied'
+    case 3:
+      return '3 - Neutral'
+    case 4:
+      return '4 - Satisfied'
+    case 5:
+      return '5 - Very Satisfied'
+    default:
+      return 'Not set'
+  }
+}
+
 // storage keys (kept as locals to minimize churn across this large file)
 const STORAGE_KEY_ACCOUNTS = OdcrmStorageKeys.accounts
 const STORAGE_KEY_ACCOUNTS_LAST_UPDATED = OdcrmStorageKeys.accountsLastUpdated
@@ -4807,9 +4832,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                             DEFCON {selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
                           </Badge>
                         )}
-                        <Badge colorScheme="purple" variant="outline" px={2} py={1} fontSize="xs" fontFamily="mono" title="Client ID">
-                          ID: {selectedCustomerId || '—'}
-                        </Badge>
                       </HStack>
                     </Stack>
                   </HStack>
@@ -4898,6 +4920,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           const website = typeof c?.website === 'string' ? c.website.trim() : ''
                           const leadsUrl = typeof c?.leadsReportingUrl === 'string' ? c.leadsReportingUrl.trim() : ''
                           const leadsLabel = typeof c?.leadsGoogleSheetLabel === 'string' ? c.leadsGoogleSheetLabel.trim() : ''
+                          const defconValue =
+                            typeof c?.defcon === 'number'
+                              ? c.defcon
+                              : typeof selectedAccount.defcon === 'number'
+                                ? selectedAccount.defcon
+                                : 3
                           const daysPerWeek =
                             typeof details?.daysPerWeek === 'number'
                               ? details.daysPerWeek
@@ -4941,18 +4969,28 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 />
 
                                 <EditableField
-                                  label="Domain"
-                                  value={c?.domain || ''}
-                                  isEditing={isFieldEditing(accountName, 'drawer.details.domain')}
-                                  onEdit={() => startEditing(accountName, 'drawer.details.domain')}
-                                  onCancel={() => stopEditing(accountName, 'drawer.details.domain')}
+                                  label="DEFCON"
+                                  value={String(defconValue)}
+                                  type="select"
+                                  options={DEFCON_OPTIONS}
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.defcon')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.defcon')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.defcon')}
                                   onSave={async (v) => {
                                     if (!customerId) return
-                                    const next = String(v || '').trim()
-                                    await applyCustomerPatchAndRefresh({ customerId, patch: { domain: next ? next : null } })
-                                    stopEditing(accountName, 'drawer.details.domain')
+                                    const next = Math.max(1, Math.min(5, Number.parseInt(String(v || ''), 10) || 3))
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { defcon: next },
+                                      localAccountUpdates: { defcon: next },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.defcon')
                                   }}
-                                  placeholder="Not set"
+                                  renderDisplay={(val) => (
+                                    <Text color="gray.800" fontWeight="medium">
+                                      {formatDefconLabel(Number.parseInt(String(val || ''), 10))}
+                                    </Text>
+                                  )}
                                 />
 
                                 <EditableField
@@ -4997,21 +5035,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 />
 
                                 <EditableField
-                                  label="Leads Google Sheet Label"
-                                  value={leadsLabel || ''}
-                                  isEditing={isFieldEditing(accountName, 'drawer.details.leadsLabel')}
-                                  onEdit={() => startEditing(accountName, 'drawer.details.leadsLabel')}
-                                  onCancel={() => stopEditing(accountName, 'drawer.details.leadsLabel')}
-                                  onSave={async (v) => {
-                                    if (!customerId) return
-                                    const next = String(v || '').trim()
-                                    await applyCustomerPatchAndRefresh({ customerId, patch: { leadsGoogleSheetLabel: next ? next : null } })
-                                    stopEditing(accountName, 'drawer.details.leadsLabel')
-                                  }}
-                                  placeholder="Not set"
-                                />
-
-                                <EditableField
                                   label="Leads Google Sheet URL"
                                   value={leadsUrl || ''}
                                   type="url"
@@ -5022,17 +5045,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                     if (!customerId) return
                                     const next = String(v || '').trim()
                                     const currentLabel = String(c?.leadsGoogleSheetLabel || '').trim()
-                                    if (next && !currentLabel) {
-                                      toast({
-                                        title: 'Leads label required',
-                                        description: 'Set a Google Sheet label before adding a Leads URL.',
-                                        status: 'warning',
-                                        duration: 4000,
-                                        isClosable: true,
-                                      })
-                                      return
-                                    }
-                                    await applyCustomerPatchAndRefresh({ customerId, patch: { leadsReportingUrl: next ? next : null } })
+                                    const fallbackLabel = 'Leads Google Sheet'
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: next
+                                        ? {
+                                            leadsReportingUrl: next,
+                                            ...(currentLabel
+                                              ? {}
+                                              : { leadsGoogleSheetLabel: fallbackLabel }),
+                                          }
+                                        : { leadsReportingUrl: null },
+                                    })
                                     stopEditing(accountName, 'drawer.details.leadsUrl')
                                   }}
                                   renderDisplay={() => (
@@ -5881,19 +5905,25 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       />
                       <FieldRow label="DEFCON Level">
                         <Select
-                          value={selectedAccount.defcon}
-                          onChange={(e) => {
-                            updateAccount(selectedAccount.name, {
-                              defcon: parseInt(e.target.value, 10),
+                          value={selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
+                          onChange={async (e) => {
+                            const customerId = selectedCustomerId
+                            if (!customerId) return
+                            const next = Math.max(1, Math.min(5, Number.parseInt(e.target.value, 10) || 3))
+                            await applyCustomerPatchAndRefresh({
+                              customerId,
+                              patch: { defcon: next },
+                              localAccountUpdates: { defcon: next },
                             })
                           }}
                           size="md"
+                          isDisabled={!selectedCustomerId}
                         >
-                          <option value={1}>1 - Very Dissatisfied</option>
-                          <option value={2}>2 - Dissatisfied</option>
-                          <option value={3}>3 - Neutral</option>
-                          <option value={4}>4 - Satisfied</option>
-                          <option value={5}>5 - Very Satisfied</option>
+                          {DEFCON_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
                         </Select>
                       </FieldRow>
                     </SimpleGrid>
