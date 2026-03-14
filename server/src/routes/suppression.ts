@@ -58,6 +58,14 @@ type ParsedSuppressionRows = {
   sheetTitle: string
 }
 
+function parsePositiveInt(value: unknown, fallback: number, opts?: { min?: number; max?: number }) {
+  const min = opts?.min ?? 1
+  const max = opts?.max ?? Number.MAX_SAFE_INTEGER
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) return fallback
+  return Math.min(max, Math.max(min, parsed))
+}
+
 async function updateSuppressionSheetHealthMeta(
   customerId: string,
   type: 'email' | 'domain',
@@ -260,6 +268,8 @@ router.get('/', async (req, res, next) => {
     const customerId = getCustomerId(req)
     const type = req.query.type as string | undefined
     const q = (req.query.q as string | undefined)?.trim().toLowerCase()
+    const requestedPage = parsePositiveInt(req.query.page, 1, { min: 1 })
+    const pageSize = parsePositiveInt(req.query.pageSize, 50, { min: 1, max: 200 })
 
     const where: any = { customerId }
     if (type === 'domain' || type === 'email') {
@@ -269,12 +279,24 @@ router.get('/', async (req, res, next) => {
       where.value = { contains: q, mode: 'insensitive' }
     }
 
+    const total = await prisma.suppressionEntry.count({ where })
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const page = Math.min(requestedPage, totalPages)
+
     const entries = await prisma.suppressionEntry.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     })
 
-    res.json(entries)
+    res.json({
+      entries,
+      page,
+      pageSize,
+      total,
+      totalPages,
+    })
   } catch (error) {
     next(error)
   }
@@ -549,40 +571,100 @@ async function importSuppressionFromSheet(
   const source = input.sourceLabel?.trim() || `google-sheet:${expectedType}`
   const reason = input.reason?.trim() || null
   const mode = input.mode || 'replace'
-  let replacedCount = 0
+  let inserted = 0
+  let updated = 0
+  let deleted = 0
+  let unchanged = 0
+
+  const existingEntries = await prisma.suppressionEntry.findMany({
+    where: { customerId, type: expectedType },
+    select: {
+      id: true,
+      value: true,
+      reason: true,
+      source: true,
+      sourceFileName: true,
+      emailNormalized: true,
+    },
+  })
+
+  const existingByValue = new Map(existingEntries.map((entry) => [entry.value, entry] as const))
+  const existingSheetManaged = existingEntries.filter((entry) => {
+    const sourceValue = String(entry.source || '').trim().toLowerCase()
+    return sourceValue.startsWith('google-sheet:') || String(entry.sourceFileName || '').trim() === input.sheetUrl
+  })
+  const incomingValues = new Set(parsedRows.values)
+
+  for (const value of parsedRows.values) {
+    const existing = existingByValue.get(value)
+    const nextEmailNormalized = expectedType === 'email' ? value : null
+
+    if (!existing) {
+      await prisma.suppressionEntry.create({
+        data: {
+          id: randomUUID(),
+          customerId,
+          type: expectedType,
+          value,
+          ...(expectedType === 'email' ? { emailNormalized: value } : {}),
+          reason,
+          source,
+          sourceFileName: input.sheetUrl,
+        },
+      })
+      inserted += 1
+      continue
+    }
+
+    const existingSource = String(existing.source || '').trim().toLowerCase()
+    const isSheetManaged = existingSource.startsWith('google-sheet:') || String(existing.sourceFileName || '').trim() === input.sheetUrl
+    if (!isSheetManaged) {
+      unchanged += 1
+      continue
+    }
+
+    const needsUpdate =
+      (existing.reason || null) !== reason ||
+      (existing.source || null) !== source ||
+      (existing.sourceFileName || null) !== input.sheetUrl ||
+      (existing.emailNormalized || null) !== nextEmailNormalized
+
+    if (!needsUpdate) {
+      unchanged += 1
+      continue
+    }
+
+    await prisma.suppressionEntry.update({
+      where: { id: existing.id },
+      data: {
+        reason,
+        source,
+        sourceFileName: input.sheetUrl,
+        ...(expectedType === 'email' ? { emailNormalized: value } : {}),
+      },
+    })
+    updated += 1
+  }
 
   if (mode === 'replace') {
-    const deleted = await prisma.suppressionEntry.deleteMany({
-      where: { customerId, type: expectedType },
-    })
-    replacedCount = deleted.count
+    const staleIds = existingSheetManaged
+      .filter((entry) => !incomingValues.has(entry.value))
+      .map((entry) => entry.id)
+
+    if (staleIds.length > 0) {
+      const deleteResult = await prisma.suppressionEntry.deleteMany({
+        where: {
+          id: { in: staleIds },
+          customerId,
+          type: expectedType,
+        },
+      })
+      deleted = deleteResult.count
+    }
   }
 
-  let inserted = 0
-  let duplicates = 0
-  for (const value of parsedRows.values) {
-    const upserted = await prisma.suppressionEntry.upsert({
-      where: { customerId_type_value: { customerId, type: expectedType, value } },
-      update: {
-        reason,
-        source,
-        sourceFileName: input.sheetUrl,
-        ...(expectedType === 'email' ? { emailNormalized: value } : {}),
-      },
-      create: {
-        id: randomUUID(),
-        customerId,
-        type: expectedType,
-        value,
-        ...(expectedType === 'email' ? { emailNormalized: value } : {}),
-        reason,
-        source,
-        sourceFileName: input.sheetUrl,
-      },
-    })
-    if (upserted.createdAt.getTime() === upserted.updatedAt.getTime()) inserted += 1
-    else duplicates += 1
-  }
+  const duplicates = unchanged + updated
+  const replacedCount = deleted
 
   await updateSuppressionSheetHealthMeta(customerId, expectedType, {
     sheetUrl: input.sheetUrl,
@@ -608,6 +690,9 @@ async function importSuppressionFromSheet(
     gid,
     totalRows: parsedRows.totalRows,
     inserted,
+    updated,
+    deleted,
+    unchanged,
     duplicates,
     replacedCount,
     invalid: parsedRows.invalid.slice(0, 100),

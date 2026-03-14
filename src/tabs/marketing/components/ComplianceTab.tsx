@@ -42,6 +42,14 @@ type SuppressionEntry = {
   createdAt: string
 }
 
+type SuppressionEntriesResponse = {
+  entries: SuppressionEntry[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
 type SheetKind = 'email' | 'domain'
 
 type SheetImportResult = {
@@ -53,6 +61,9 @@ type SheetImportResult = {
   gid?: string | null
   totalRows: number
   inserted: number
+  updated?: number
+  deleted?: number
+  unchanged?: number
   duplicates: number
   replacedCount: number
   invalid: string[]
@@ -71,11 +82,14 @@ type SuppressionSheetHealth = {
 }
 
 export default function ComplianceTab() {
+  const DEFAULT_PAGE_SIZE = 50
   const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState<string>(getCurrentCustomerId())
   const [listTypeFilter, setListTypeFilter] = useState<SheetKind>('email')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pagination, setPagination] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0, totalPages: 1 })
   const [value, setValue] = useState('')
   const [reason, setReason] = useState('')
   const [sheetUrls, setSheetUrls] = useState<Record<SheetKind, string>>({ email: '', domain: '' })
@@ -92,26 +106,38 @@ export default function ComplianceTab() {
     [customerId, customers],
   )
 
-  const filteredEntries = useMemo(
-    () => entries.filter((entry) => entry.type === listTypeFilter),
-    [entries, listTypeFilter],
-  )
-
   const loadEntries = useCallback(async () => {
     if (!customerId) {
       setEntries([])
+      setPagination({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0, totalPages: 1 })
       setLoading(false)
       return
     }
     setLoading(true)
-    const { data, error } = await api.get<SuppressionEntry[]>(`/api/suppression?customerId=${customerId}`)
+    const params = new URLSearchParams({
+      customerId,
+      type: listTypeFilter,
+      page: String(currentPage),
+      pageSize: String(DEFAULT_PAGE_SIZE),
+    })
+    const { data, error } = await api.get<SuppressionEntriesResponse>(`/api/suppression?${params.toString()}`)
     if (error) {
       toast({ title: 'Error loading suppression entries', description: error, status: 'error' })
     } else {
-      setEntries(data || [])
+      const next = data || { entries: [], page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0, totalPages: 1 }
+      setEntries(next.entries || [])
+      setPagination({
+        page: next.page || 1,
+        pageSize: next.pageSize || DEFAULT_PAGE_SIZE,
+        total: next.total || 0,
+        totalPages: next.totalPages || 1,
+      })
+      if (currentPage > (next.totalPages || 1)) {
+        setCurrentPage(next.totalPages || 1)
+      }
     }
     setLoading(false)
-  }, [customerId, toast])
+  }, [customerId, currentPage, listTypeFilter, toast])
 
   const loadSuppressionHealth = useCallback(async () => {
     if (!customerId) {
@@ -150,7 +176,7 @@ export default function ComplianceTab() {
 
   useEffect(() => {
     if (customerId) void loadEntries()
-  }, [customerId, loadEntries])
+  }, [customerId, currentPage, listTypeFilter, loadEntries])
 
   useEffect(() => {
     if (customerId) void loadSuppressionHealth()
@@ -167,6 +193,8 @@ export default function ComplianceTab() {
   const handleCustomerChange = useCallback((nextCustomerId: string) => {
     setCustomerId(nextCustomerId)
     setEntries([])
+    setCurrentPage(1)
+    setPagination({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0, totalPages: 1 })
     setImportResults({})
     setSuppressionSheetHealth(null)
     setDataHealthError(null)
@@ -178,7 +206,11 @@ export default function ComplianceTab() {
       return
     }
     clearCurrentCustomerId()
-  }, [])
+  }, [DEFAULT_PAGE_SIZE])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [listTypeFilter])
 
   const handleAdd = async () => {
     if (!customerId) {
@@ -203,6 +235,11 @@ export default function ComplianceTab() {
     setValue('')
     setReason('')
     toast({ title: 'Suppression entry added', status: 'success' })
+    if (currentPage !== 1) {
+      setCurrentPage(1)
+      await loadSuppressionHealth()
+      return
+    }
     await loadEntries()
     await loadSuppressionHealth()
   }
@@ -221,6 +258,12 @@ export default function ComplianceTab() {
       return
     }
     toast({ title: 'Entry removed', status: 'success' })
+    if (entries.length === 1 && currentPage > 1) {
+      setCurrentPage((prev) => Math.max(1, prev - 1))
+      await loadSuppressionHealth()
+      return
+    }
+    await loadEntries()
     await loadSuppressionHealth()
   }
 
@@ -259,11 +302,21 @@ export default function ComplianceTab() {
     setSheetUrls((prev) => ({ ...prev, [kind]: data?.sheetUrl || prev[kind] }))
     toast({
       title: kind === 'email' ? 'Email DNC synced' : 'Domain DNC synced',
-      description: (data?.inserted ?? 0) > 0
-        ? `Synced ${data?.inserted ?? 0} entries from Google Sheets.`
-        : 'Connected sheet is valid and currently empty.',
+      description:
+        (data?.totalRows ?? 0) > 0
+          ? `Synced ${data?.inserted ?? 0} new, ${data?.updated ?? 0} updated, ${data?.deleted ?? 0} removed.`
+          : 'Connected sheet is valid and currently empty.',
       status: 'success',
     })
+    if (currentPage !== 1) {
+      setCurrentPage(1)
+      await loadSuppressionHealth()
+      if (data?.sheetUrl) {
+        setSheetEditorOpen((prev) => ({ ...prev, [kind]: false }))
+      }
+      setImportingKind(null)
+      return
+    }
     await loadEntries()
     await loadSuppressionHealth()
     if (data?.sheetUrl) {
@@ -366,8 +419,9 @@ export default function ComplianceTab() {
           {result && !awaitingHealth ? (
             <HStack spacing={2} flexWrap="wrap">
               <Badge colorScheme="green">Inserted: {result.inserted}</Badge>
-              <Badge colorScheme="red">Replaced: {result.replacedCount}</Badge>
-              <Badge colorScheme="yellow">Duplicates: {result.duplicates}</Badge>
+              <Badge colorScheme="blue">Updated: {result.updated ?? 0}</Badge>
+              <Badge colorScheme="red">Removed: {result.deleted ?? result.replacedCount}</Badge>
+              <Badge colorScheme="yellow">Unchanged: {result.unchanged ?? result.duplicates}</Badge>
               <Badge colorScheme="blue">Rows: {result.totalRows}</Badge>
             </HStack>
           ) : null}
@@ -485,6 +539,10 @@ export default function ComplianceTab() {
                   </HStack>
                 </HStack>
 
+                <Text fontSize="sm" color="gray.600">
+                  Showing {entries.length} of {pagination.total} {listTypeFilter === 'email' ? 'email' : 'domain'} suppression entries.
+                </Text>
+
                 <HStack spacing={3} align="flex-end" flexWrap="wrap">
                   <FormControl flex="1" minW={{ base: '100%', md: '220px' }}>
                     <FormLabel fontSize="sm">Value</FormLabel>
@@ -522,7 +580,7 @@ export default function ComplianceTab() {
                     </Tr>
                   </Thead>
                   <Tbody>
-                    {filteredEntries.length === 0 ? (
+                    {entries.length === 0 ? (
                       <Tr>
                         <Td colSpan={5} textAlign="center" py={8}>
                           <Text color="gray.500">
@@ -531,7 +589,7 @@ export default function ComplianceTab() {
                         </Td>
                       </Tr>
                     ) : (
-                      filteredEntries.map((entry) => (
+                      entries.map((entry) => (
                         <Tr key={entry.id}>
                           <Td>{entry.value}</Td>
                           <Td>{entry.reason || '—'}</Td>
@@ -554,6 +612,30 @@ export default function ComplianceTab() {
                 </Table>
               )}
             </Box>
+
+            <HStack justify="space-between" flexWrap="wrap">
+              <Text fontSize="sm" color="gray.600">
+                Page {pagination.page} of {pagination.totalPages}
+              </Text>
+              <HStack>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  isDisabled={pagination.page <= 1 || loading}
+                >
+                  Previous
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentPage((prev) => Math.min(pagination.totalPages, prev + 1))}
+                  isDisabled={pagination.page >= pagination.totalPages || loading}
+                >
+                  Next
+                </Button>
+              </HStack>
+            </HStack>
           </>
         )}
       </VStack>
