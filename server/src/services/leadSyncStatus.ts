@@ -21,6 +21,7 @@ export type LeadSyncStateSeverity = 'info' | 'warning' | 'error'
 export type LeadSyncMetaInput = {
   mode: 'sheet_backed' | 'db_backed'
   status: string | null
+  isRunning?: boolean | null
   lastSyncAt: string | null
   lastSuccessAt: string | null
   lastInboundSyncAt: string | null
@@ -110,7 +111,7 @@ export function resolveLeadSyncViewState(params: {
     bootstrap = { started: false, error: null },
   } = params
 
-  const syncInProgress = sync.status === 'syncing'
+  const syncInProgress = isSyncActuallyRunning(sync)
   const classifiedError = classifySheetSyncError(bootstrap.error || sync.lastError)
   const hasLastSuccess = Boolean(sync.lastSuccessAt)
   const lastSuccessMs = sync.lastSuccessAt ? Date.parse(sync.lastSuccessAt) : Number.NaN
@@ -261,6 +262,16 @@ function parseIsoMs(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function isSyncActuallyRunning(sync: Pick<LeadSyncMetaInput, 'status' | 'isRunning' | 'lastSyncAt'>): boolean {
+  if (sync.status !== 'syncing') return false
+  if (sync.isRunning === true) return true
+  if (sync.isRunning === false) return false
+
+  const lastSyncMs = parseIsoMs(sync.lastSyncAt)
+  if (lastSyncMs == null) return true
+  return Date.now() - lastSyncMs < 2 * 60 * 1000
+}
+
 export function shouldAutoRefreshLeadSyncState(params: {
   sourceOfTruth: TruthSource
   configuredSheetUrl: string
@@ -280,7 +291,7 @@ export function shouldAutoRefreshLeadSyncState(params: {
 
   if (sourceOfTruth !== 'google_sheets') return false
   if (!configuredSheetUrl.trim()) return false
-  if (sync.status === 'syncing') return false
+  if (isSyncActuallyRunning(sync)) return false
 
   const viewState = resolveLeadSyncViewState({
     sourceOfTruth,

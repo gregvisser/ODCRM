@@ -480,6 +480,7 @@ function buildLeadSyncStatusPayload(params: {
   const syncMeta = {
     mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
     status: syncState?.syncStatus ?? null,
+    isRunning: syncState?.isRunning ?? null,
     lastSyncAt: syncState?.lastSyncAt?.toISOString() ?? null,
     lastSuccessAt: syncState?.lastSuccessAt?.toISOString() ?? null,
     lastInboundSyncAt: syncState?.lastInboundSyncAt?.toISOString() ?? null,
@@ -525,6 +526,7 @@ function toLeadSyncMeta(params: {
   sourceOfTruth: TruthSource
   syncState?: {
     syncStatus?: string | null
+    isRunning?: boolean | null
     lastSyncAt?: Date | null
     lastSuccessAt?: Date | null
     lastInboundSyncAt?: Date | null
@@ -537,6 +539,7 @@ function toLeadSyncMeta(params: {
   return {
     mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
     status: syncState?.syncStatus ?? null,
+    isRunning: syncState?.isRunning ?? null,
     lastSyncAt: syncState?.lastSyncAt?.toISOString() ?? null,
     lastSuccessAt: syncState?.lastSuccessAt?.toISOString() ?? null,
     lastInboundSyncAt: syncState?.lastInboundSyncAt?.toISOString() ?? null,
