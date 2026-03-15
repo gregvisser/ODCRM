@@ -3278,11 +3278,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         // Account doesn't exist in database, just remove from local storage
         setAccountsData((prev) => {
           const updated = prev.filter((acc) => acc.name !== accountName)
-          saveAccountsToStorage(updated)
-          const newDeletedAccounts = new Set(deletedAccounts)
-          newDeletedAccounts.add(accountName)
-          setDeletedAccounts(newDeletedAccounts)
-          saveDeletedAccountsToStorage(newDeletedAccounts)
+          if (!isServerSourceOfTruth) {
+            saveAccountsToStorage(updated)
+            const newDeletedAccounts = new Set(deletedAccounts)
+            newDeletedAccounts.add(accountName)
+            setDeletedAccounts(newDeletedAccounts)
+            saveDeletedAccountsToStorage(newDeletedAccounts)
+          }
           emit('accountsUpdated', updated)
           return updated
         })
@@ -3318,11 +3320,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       // Successfully deleted from database, now update local state
       setAccountsData((prev) => {
         const updated = prev.filter((acc) => acc.name !== accountName)
-        saveAccountsToStorage(updated)
-        const newDeletedAccounts = new Set(deletedAccounts)
-        newDeletedAccounts.add(accountName)
-        setDeletedAccounts(newDeletedAccounts)
-        saveDeletedAccountsToStorage(newDeletedAccounts)
+        if (!isServerSourceOfTruth) {
+          saveAccountsToStorage(updated)
+          const newDeletedAccounts = new Set(deletedAccounts)
+          newDeletedAccounts.add(accountName)
+          setDeletedAccounts(newDeletedAccounts)
+          saveDeletedAccountsToStorage(newDeletedAccounts)
+        }
         emit('accountsUpdated', updated)
         return updated
       })
@@ -3667,7 +3671,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     
     setAccountsData((prev) => {
       const updated = [...prev, accountWithDbId]
-      saveAccountsToStorage(updated)
+      if (!isServerSourceOfTruth) {
+        saveAccountsToStorage(updated)
+      }
       // Dispatch event so LeadsTab can get updated accounts and refresh leads
       emit('accountsUpdated', updated)
       return updated
@@ -3682,7 +3688,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       [accountWithDbId.name]: accountWithDbId.sector,
     }
     setSectorsMap(updatedSectorsMap)
-    saveSectorsToStorage(updatedSectorsMap)
+    if (!isServerSourceOfTruth) {
+      saveSectorsToStorage(updatedSectorsMap)
+    }
     setTargetLocationsMap((prev) => ({
       ...prev,
       [accountWithDbId.name]: accountWithDbId.targetLocation,
