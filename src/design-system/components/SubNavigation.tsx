@@ -26,6 +26,7 @@ import {
   useBreakpointValue,
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { useI18n } from '../../contexts/I18nContext'
 import { spacing, semanticColor, radius, shadow, fontSize } from '../tokens'
 import type { IconType } from 'react-icons'
 
@@ -71,6 +72,7 @@ export function SubNavigation({
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const isMobile = useBreakpointValue({ base: true, md: false })
   const useMobileLayout = !forceDesktopLayout && isMobile
+  const { dir, isRTL } = useI18n()
 
   const activeIndex = activeId ? items.findIndex((item) => item.id === activeId) : 0
 
@@ -86,6 +88,7 @@ export function SubNavigation({
         isLazy
         lazyBehavior="unmount"
         variant="unstyled"
+        dir={dir}
       >
         <Box
           overflowX="auto"
@@ -95,7 +98,7 @@ export function SubNavigation({
           css={{
             '&::-webkit-scrollbar': { height: '4px' },
             '&::-webkit-scrollbar-track': { background: 'transparent' },
-            '&::-webkit-scrollbar-thumb': { background: '#CBD5E0', borderRadius: '2px' },
+            '&::-webkit-scrollbar-thumb': { background: 'rgba(227,179,65,0.45)', borderRadius: '999px' },
           }}
         >
           <TabList gap={spacing[2]} flexWrap="nowrap" borderBottom="none">
@@ -107,17 +110,17 @@ export function SubNavigation({
                 py={spacing[2]}
                 fontSize={fontSize.sm}
                 fontWeight="600"
-                borderRadius={radius.md}
+                borderRadius="xl"
                 color={semanticColor.textMuted}
-                bg={semanticColor.bgSurface}
+                bg="rgba(255,255,255,0.035)"
                 border="1px solid"
                 borderColor={semanticColor.borderSubtle}
-                _hover={{ bg: semanticColor.bgSubtle, color: semanticColor.textPrimary }}
+                _hover={{ bg: 'rgba(255,255,255,0.06)', color: semanticColor.textPrimary }}
                 _selected={{
-                  bg: semanticColor.bgSurface,
-                  color: semanticColor.textPrimary,
+                  bg: 'rgba(227,179,65,0.14)',
+                  color: 'accent.100',
                   borderColor: 'accent.500',
-                  boxShadow: shadow.sm,
+                  boxShadow: shadow.md,
                 }}
               >
                 <HStack spacing={spacing[2]}>
@@ -169,22 +172,24 @@ export function SubNavigation({
       variant="unstyled"
       orientation="vertical"
     >
-      <Flex direction="row" gap={spacing[4]} align="flex-start">
+      <Flex direction={{ base: 'column', md: isRTL ? 'row-reverse' : 'row' }} gap={spacing[4]} align="flex-start">
         {/* Desktop Sidebar - Expanded */}
         {isPanelOpen ? (
           <Box
             position="sticky"
             top={16}
             alignSelf="flex-start"
-            bg={semanticColor.bgSubtle}
+            bg={semanticColor.bgPanel}
             border="1px solid"
-            borderColor={semanticColor.borderSubtle}
-            borderRadius={radius.xl}
+            borderColor={semanticColor.borderStrong}
+            borderRadius="2xl"
             p={spacing[3]}
-            boxShadow={shadow.sm}
+            boxShadow={shadow.md}
+            backdropFilter="blur(18px)"
             minW="200px"
             maxW="200px"
             w="200px"
+            dir={dir}
           >
             {/* Header */}
             <Flex align="center" justify="space-between" mb={spacing[2]}>
@@ -208,13 +213,20 @@ export function SubNavigation({
                   justifyContent="flex-start"
                   fontSize={fontSize.sm}
                   fontWeight="600"
-                  borderRadius={radius.md}
+                borderRadius="xl"
                   color={semanticColor.textMuted}
                   px={spacing[3]}
                   py={spacing[2]}
                   cursor="pointer"
-                  _hover={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary }}
-                  _selected={{ bg: semanticColor.bgSurface, color: semanticColor.textPrimary, boxShadow: shadow.sm }}
+                _hover={{ bg: 'rgba(255,255,255,0.06)', color: semanticColor.textPrimary }}
+                _selected={{
+                  bg: 'rgba(227,179,65,0.14)',
+                  color: 'accent.100',
+                  boxShadow: shadow.sm,
+                  borderColor: 'accent.500',
+                }}
+                border="1px solid"
+                borderColor="transparent"
                   onClick={() => onChange?.(item.id)}
                 >
                   <HStack spacing={spacing[2]} w="100%">
@@ -247,12 +259,13 @@ export function SubNavigation({
             position="sticky"
             top={16}
             alignSelf="flex-start"
-            bg={semanticColor.bgSubtle}
+            bg={semanticColor.bgPanel}
             border="1px solid"
-            borderColor={semanticColor.borderSubtle}
-            borderRadius={radius.xl}
+            borderColor={semanticColor.borderStrong}
+            borderRadius="2xl"
             p={spacing[1]}
-            boxShadow={shadow.sm}
+            boxShadow={shadow.md}
+            backdropFilter="blur(18px)"
           >
             <IconButton
               aria-label={`Show ${title.toLowerCase()} panel`}

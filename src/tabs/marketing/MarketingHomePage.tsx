@@ -18,6 +18,7 @@ import {
 } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
+import { useI18n } from '../../contexts/I18nContext'
 import SequencesTab from './components/SequencesTab'
 import LeadSourcesTabNew from './components/LeadSourcesTabNew'
 import EmailAccountsTab from './components/EmailAccountsTab'
@@ -80,6 +81,7 @@ export default function MarketingHomePage({
   onNavigate?: (view: OpenDoorsViewId) => void
   focusAccountName?: string
 }) {
+  const { t } = useI18n()
   const activeView = coerceViewId(view)
   const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
   const customerId = useEffectiveCustomerId()
@@ -122,68 +124,68 @@ export default function MarketingHomePage({
   const defaultNavItems: SubNavItem[] = useMemo(() => [
     {
       id: 'readiness',
-      label: 'Readiness',
+      label: t('marketing.readiness'),
       icon: CheckCircleIcon,
       content: <ReadinessTab />,
       sortOrder: 0,
     },
     {
       id: 'reports',
-      label: 'Reports',
+      label: t('marketing.reports'),
       icon: SearchIcon,
       content: <ReportsTab />,
       sortOrder: 1,
     },
     {
       id: 'lists',
-      label: 'Lead Sources',
+      label: t('marketing.leadSources'),
       icon: ViewIcon,
       content: <LeadSourcesTabNew onNavigateToSequences={onNavigate ? () => onNavigate('sequences') : undefined} />,
       sortOrder: 2,
     },
     {
       id: 'compliance',
-      label: 'Suppression List',
+      label: t('marketing.compliance'),
       icon: WarningIcon,
       content: <ComplianceTab />,
       sortOrder: 3,
     },
     {
       id: 'email-accounts',
-      label: 'Email Accounts',
+      label: t('marketing.emailAccounts'),
       icon: SettingsIcon,
       content: <EmailAccountsTab />,
       sortOrder: 4,
     },
     {
       id: 'templates',
-      label: 'Templates',
+      label: t('marketing.templates'),
       icon: CopyIcon,
       content: <TemplatesTab />,
       sortOrder: 5,
     },
     {
       id: 'sequences',
-      label: 'Sequences',
+      label: t('marketing.sequences'),
       icon: RepeatIcon,
       content: <SequencesTab />,
       sortOrder: 6,
     },
     {
       id: 'schedules',
-      label: 'Schedules',
+      label: t('marketing.schedules'),
       icon: CalendarIcon,
       content: <SchedulesTab />,
       sortOrder: 7,
     },
     {
       id: 'inbox',
-      label: 'Inbox',
+      label: t('marketing.inbox'),
       icon: ChatIcon,
       content: <InboxTab />,
       sortOrder: 8,
     },
-  ], [onNavigate])
+  ], [onNavigate, t])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
@@ -219,28 +221,38 @@ export default function MarketingHomePage({
 
   return (
     <div data-testid="marketing-home-panel">
-      <Box mb={3} data-testid="marketing-home-operator-guidance">
+      <Box
+        mb={3}
+        p={4}
+        borderRadius="2xl"
+        border="1px solid"
+        borderColor="border.subtle"
+        bg="bg.surface"
+        boxShadow="sm"
+        backdropFilter="blur(18px)"
+        data-testid="marketing-home-operator-guidance"
+      >
         <HStack spacing={2} mb={1}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="marketing-client-readiness-state">
             {readiness.label}
           </Badge>
-          <Text fontSize="sm" color="gray.600">{readiness.reason}</Text>
+          <Text fontSize="sm" color="text.secondary">{readiness.reason}</Text>
         </HStack>
-        <Text fontSize="sm" color="gray.600">
-          Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
+        <Text fontSize="sm" color="text.secondary">
+          {t('marketing.guidance')}
         </Text>
-        <Text fontSize="xs" color="gray.500" mt={1} data-testid="marketing-module-continuity-guidance">
-          If setup or data blockers appear, switch to Onboarding or OpensDoors Clients, then return here to continue operations.
+        <Text fontSize="xs" color="text.muted" mt={1} data-testid="marketing-module-continuity-guidance">
+          {t('marketing.guidanceSecondary')}
         </Text>
         <HStack mt={2} flexWrap="wrap">
           <Button size="xs" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="marketing-readiness-next-step">
             {readiness.nextStep.label}
           </Button>
           <Button size="xs" variant="ghost" colorScheme="purple" onClick={goToOnboarding} data-testid="marketing-go-onboarding-setup">
-            Open Onboarding setup
+            {t('marketing.openOnboarding')}
           </Button>
           <Button size="xs" variant="ghost" colorScheme="gray" onClick={goToClients} data-testid="marketing-go-clients-data-health">
-            Open Clients data health
+            {t('marketing.openClients')}
           </Button>
         </HStack>
       </Box>
@@ -249,7 +261,7 @@ export default function MarketingHomePage({
         activeId={activeView}
         onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
         onReorder={handleNavReorder}
-        title="Marketing"
+        title={t('marketing.sectionTitle')}
         enableDragDrop={true}
       />
     </div>

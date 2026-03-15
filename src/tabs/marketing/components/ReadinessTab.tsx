@@ -27,6 +27,7 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
+import { useI18n } from '../../../contexts/I18nContext'
 import { useEffectiveCustomerId } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
@@ -127,6 +128,7 @@ type RunHistoryData = {
 }
 
 const ReadinessTab: React.FC = () => {
+  const { t } = useI18n()
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -278,7 +280,7 @@ const ReadinessTab: React.FC = () => {
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Readiness: Is this sequence ready to run?</Heading>
+                  <Heading size="md">{t('readiness.title')}: Is this sequence ready to run?</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="readiness-tab-operator-cue">
                     Start with launch status, blockers, and the first-batch preview. Troubleshooting and follow-up details are kept lower down.
                   </Text>

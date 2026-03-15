@@ -30,9 +30,9 @@ export function PageHeader({
   return (
     <Box mb={spacing[6]}>
       {/* Title + Actions Row */}
-      <HStack justify="space-between" align="flex-start" mb={description ? spacing[2] : 0}>
+      <HStack justify="space-between" align="flex-start" mb={description ? spacing[2] : 0} flexWrap="wrap" spacing={spacing[3]}>
         <Box flex="1">
-          <Heading size={titleSize} color={semanticColor.textPrimary}>
+          <Heading size={titleSize} color={semanticColor.textPrimary} letterSpacing="-0.03em">
             {title}
           </Heading>
         </Box>
@@ -45,7 +45,7 @@ export function PageHeader({
 
       {/* Description */}
       {description && (
-        <Text fontSize={fontSize.sm} color={semanticColor.textSecondary}>
+        <Text fontSize={fontSize.sm} color={semanticColor.textSecondary} maxW="4xl">
           {description}
         </Text>
       )}

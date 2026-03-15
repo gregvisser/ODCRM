@@ -55,6 +55,7 @@ import {
 } from '@chakra-ui/icons'
 import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
+import { useI18n } from '../../../contexts/I18nContext'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
@@ -192,6 +193,7 @@ const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
 </html>`
 
 const TemplatesTab: React.FC = () => {
+  const { t } = useI18n()
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
@@ -657,7 +659,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Email Templates</Heading>
+          <Heading size="lg">{t('templates.title')}</Heading>
           <Text color="gray.600">
             Find reusable outreach copy, preview how it renders, and update the templates this client relies on.
           </Text>
@@ -761,7 +763,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder="Search templates..."
+            placeholder={t('search.templates')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
