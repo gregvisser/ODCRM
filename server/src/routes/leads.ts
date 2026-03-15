@@ -1,9 +1,9 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { triggerManualSync, validateSheetUrl } from '../workers/leadsSync.js'
+import { triggerManualSync, triggerRuntimeSync, validateSheetUrl } from '../workers/leadsSync.js'
 import { asLeadRawData, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
 import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
-import { resolveLeadSyncViewState } from '../services/leadSyncStatus.js'
+import { resolveLeadSyncViewState, shouldAutoRefreshLeadSyncState, type LeadSyncMetaInput, type TruthSource } from '../services/leadSyncStatus.js'
 import { LeadRow, calculateActualsFromLeads } from '../types/leads.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -521,6 +521,51 @@ function buildLeadSyncStatusPayload(params: {
   }
 }
 
+function toLeadSyncMeta(params: {
+  sourceOfTruth: TruthSource
+  syncState?: {
+    syncStatus?: string | null
+    lastSyncAt?: Date | null
+    lastSuccessAt?: Date | null
+    lastInboundSyncAt?: Date | null
+    lastOutboundSyncAt?: Date | null
+    lastError?: string | null
+    rowCount?: number | null
+  } | null
+}): LeadSyncMetaInput {
+  const { sourceOfTruth, syncState } = params
+  return {
+    mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
+    status: syncState?.syncStatus ?? null,
+    lastSyncAt: syncState?.lastSyncAt?.toISOString() ?? null,
+    lastSuccessAt: syncState?.lastSuccessAt?.toISOString() ?? null,
+    lastInboundSyncAt: syncState?.lastInboundSyncAt?.toISOString() ?? null,
+    lastOutboundSyncAt: syncState?.lastOutboundSyncAt?.toISOString() ?? null,
+    lastError: syncState?.lastError ?? null,
+    rowCount: syncState?.rowCount ?? 0,
+  }
+}
+
+async function maybeEnsureFreshLeadSync(params: {
+  customerId: string
+  configuredSheetUrl: string
+  sourceOfTruth: TruthSource
+  rowCount: number
+  sync: LeadSyncMetaInput
+}): Promise<boolean> {
+  const { customerId, configuredSheetUrl, sourceOfTruth, rowCount, sync } = params
+  if (!shouldAutoRefreshLeadSyncState({
+    sourceOfTruth,
+    configuredSheetUrl,
+    sync,
+    rowCount,
+  })) {
+    return false
+  }
+
+  return triggerRuntimeSync(prisma, customerId)
+}
+
 /**
  * GET /api/leads/metrics
  * Customer: prefer x-customer-id header; use query customerId only when header absent. Always verify customer exists.
@@ -559,11 +604,11 @@ router.get('/metrics', async (req, res) => {
   }
 
   try {
-    let customer: { id: string } | null = null
+    let customer: { id: string; name: string | null; leadsReportingUrl: string | null } | null = null
     try {
       customer = await prisma.customer.findUnique({
         where: { id: customerId },
-        select: { id: true },
+        select: { id: true, name: true, leadsReportingUrl: true },
       })
     } catch (err) {
       logErr('customer.exists', err)
@@ -573,9 +618,11 @@ router.get('/metrics', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' })
     }
 
+    const sourceOfTruth: TruthSource = customer.leadsReportingUrl?.trim() ? 'google_sheets' : 'db'
+    const configuredSheetUrl = customer.leadsReportingUrl?.trim() || ''
     const { todayStart, todayEnd, weekStart, weekEnd, monthStart, monthEnd } = getMetricsTimeRangesUtcSafe()
 
-    const [leadRows, syncState] = await Promise.all([
+    let [leadRows, syncState] = await Promise.all([
       prisma.leadRecord.findMany({
         where: { customerId },
         select: {
@@ -599,6 +646,41 @@ router.get('/metrics', async (req, res) => {
         .catch(err => { logErr('lastSyncState', err); throw err }),
     ])
 
+    const initialRowCount = leadRows.reduce((count, row) => count + (isRealStoredLeadRow(row) ? 1 : 0), 0)
+    const refreshed = await maybeEnsureFreshLeadSync({
+      customerId,
+      configuredSheetUrl,
+      sourceOfTruth,
+      rowCount: initialRowCount,
+      sync: toLeadSyncMeta({ sourceOfTruth, syncState }),
+    })
+
+    if (refreshed) {
+      ;[leadRows, syncState] = await Promise.all([
+        prisma.leadRecord.findMany({
+          where: { customerId },
+          select: {
+            occurredAt: true,
+            createdAt: true,
+            externalSourceType: true,
+            source: true,
+            owner: true,
+            company: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            jobTitle: true,
+            location: true,
+            status: true,
+            notes: true,
+            data: true,
+          },
+        }).catch((err) => { logErr('leadRows.findMany.refreshed', err); throw err }),
+        prisma.leadSyncState.findUnique({ where: { customerId } })
+          .catch(err => { logErr('lastSyncState.refreshed', err); throw err }),
+      ])
+    }
+
     const metrics = calculateStoredLeadMetrics(leadRows, {
       todayStart,
       todayEnd,
@@ -618,11 +700,18 @@ router.get('/metrics', async (req, res) => {
           rowCount: syncState.rowCount ?? null,
         }
       : null
+    const syncViewState = resolveLeadSyncViewState({
+      sourceOfTruth,
+      configuredSheetUrl,
+      sync: toLeadSyncMeta({ sourceOfTruth, syncState }),
+      rowCount: metrics.total,
+    })
 
     console.log(JSON.stringify({ tag: 'leadsMetricsOk', reqId, customerId, total: metrics.total }))
 
     res.json({
       customerId,
+      customerName: customer.name || '',
       timezone: METRICS_TIMEZONE,
       weekDefinition: 'Monday–Sunday (week boundaries in the timezone above)',
       counts: {
@@ -634,6 +723,14 @@ router.get('/metrics', async (req, res) => {
       breakdownBySource: metrics.breakdownBySource,
       breakdownByOwner: metrics.breakdownByOwner,
       lastSync,
+      sourceOfTruth,
+      sourceUrl: sourceOfTruth === 'google_sheets' ? configuredSheetUrl : null,
+      authoritative: syncViewState.authoritative,
+      dataFreshness: syncViewState.dataFreshness,
+      warning: syncViewState.warning,
+      hint: syncViewState.hint,
+      errorCode: syncViewState.errorCode,
+      syncState: syncViewState,
     })
   } catch (error: unknown) {
     const err = error && typeof error === 'object' && error instanceof Error ? error : new Error(String(error))
@@ -1314,7 +1411,7 @@ router.get('/sync/status', async (req, res) => {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
 
-    const syncState = await prisma.leadSyncState.findUnique({
+    let syncState = await prisma.leadSyncState.findUnique({
       where: { customerId },
       include: {
         customer: {
@@ -1338,6 +1435,32 @@ router.get('/sync/status', async (req, res) => {
 
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
+    }
+
+    const sourceOfTruth: TruthSource = customer.leadsReportingUrl?.trim() ? 'google_sheets' : 'db'
+    const configuredSheetUrl = customer.leadsReportingUrl?.trim() || ''
+    const rowCount = await prisma.leadRecord.count({ where: { customerId } })
+    const refreshed = await maybeEnsureFreshLeadSync({
+      customerId,
+      configuredSheetUrl,
+      sourceOfTruth,
+      rowCount,
+      sync: toLeadSyncMeta({ sourceOfTruth, syncState }),
+    })
+
+    if (refreshed) {
+      syncState = await prisma.leadSyncState.findUnique({
+        where: { customerId },
+        include: {
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              leadsReportingUrl: true,
+            },
+          },
+        },
+      })
     }
 
     res.json(

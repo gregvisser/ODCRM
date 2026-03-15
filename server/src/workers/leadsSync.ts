@@ -1604,8 +1604,17 @@ async function runBatchSyncCycle(prisma: PrismaClient, trigger: 'startup' | 'cro
  * Manual sync trigger for a specific customer.
  * Always upserts LeadSyncState (lastSyncAt) so metrics show lastSync even when 0 rows or no sheet.
  */
-export async function triggerManualSync(prisma: PrismaClient, customerId: string) {
+async function triggerCustomerSync(prisma: PrismaClient, customerId: string, forceSync: boolean): Promise<boolean> {
   const now = new Date()
+
+  const existingState = await prisma.leadSyncState.findUnique({
+    where: { customerId },
+    select: { isRunning: true },
+  })
+
+  if (existingState?.isRunning) {
+    return false
+  }
 
   // Ensure LeadSyncState exists and mark sync started (tenant-safe, so metrics can show lastSync)
   await prisma.leadSyncState.upsert({
@@ -1657,9 +1666,17 @@ export async function triggerManualSync(prisma: PrismaClient, customerId: string
     throw new Error('Customer has no leads reporting URL configured')
   }
 
-  console.log(`🔧 MANUAL SYNC TRIGGERED - ${customer.name} (FORCE=true)`)
-  // Force sync bypasses checksum comparison - always updates database
-  await syncCustomerLeads(prisma, customer, undefined, true)
+  console.log(`🔧 ${forceSync ? 'MANUAL' : 'RUNTIME'} SYNC TRIGGERED - ${customer.name} (FORCE=${forceSync})`)
+  await syncCustomerLeads(prisma, customer, undefined, forceSync)
+  return true
+}
+
+export async function triggerManualSync(prisma: PrismaClient, customerId: string) {
+  return triggerCustomerSync(prisma, customerId, true)
+}
+
+export async function triggerRuntimeSync(prisma: PrismaClient, customerId: string) {
+  return triggerCustomerSync(prisma, customerId, false)
 }
 
 export function startLeadsSyncWorker(prisma: PrismaClient) {

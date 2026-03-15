@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict'
-import { resolveLeadSyncViewState } from '../services/leadSyncStatus.js'
+import {
+  LEAD_SHEET_AUTO_REFRESH_COOLDOWN_MS,
+  SHEET_METRICS_FRESH_MS,
+  resolveLeadSyncViewState,
+  shouldAutoRefreshLeadSyncState,
+} from '../services/leadSyncStatus.js'
 
 const now = Date.now()
 const minutesAgo = (minutes: number) => new Date(now - minutes * 60 * 1000).toISOString()
@@ -136,5 +141,125 @@ const legacyZeroRows = resolveLeadSyncViewState({
 })
 assert.equal(legacyZeroRows.code, 'connected_empty')
 assert.equal(legacyZeroRows.canUseLeadData, true)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 29,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'success',
+      lastSyncAt: minutesAgo(45),
+      lastSuccessAt: minutesAgo(45),
+      lastInboundSyncAt: minutesAgo(45),
+      lastOutboundSyncAt: null,
+      lastError: null,
+      rowCount: 29,
+    },
+    nowMs: now,
+  }),
+  true,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 0,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'success',
+      lastSyncAt: new Date(now - SHEET_METRICS_FRESH_MS - 60_000).toISOString(),
+      lastSuccessAt: new Date(now - SHEET_METRICS_FRESH_MS - 60_000).toISOString(),
+      lastInboundSyncAt: new Date(now - SHEET_METRICS_FRESH_MS - 60_000).toISOString(),
+      lastOutboundSyncAt: null,
+      lastError: null,
+      rowCount: 0,
+    },
+    nowMs: now,
+  }),
+  true,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 29,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'error',
+      lastSyncAt: minutesAgo(30),
+      lastSuccessAt: minutesAgo(45),
+      lastInboundSyncAt: minutesAgo(30),
+      lastOutboundSyncAt: null,
+      lastError: 'HTTP 500 during sheet fetch',
+      rowCount: 29,
+    },
+    nowMs: now,
+  }),
+  true,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 29,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'success',
+      lastSyncAt: minutesAgo(2),
+      lastSuccessAt: minutesAgo(2),
+      lastInboundSyncAt: minutesAgo(2),
+      lastOutboundSyncAt: null,
+      lastError: null,
+      rowCount: 29,
+    },
+    nowMs: now,
+  }),
+  false,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 0,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'error',
+      lastSyncAt: minutesAgo(3),
+      lastSuccessAt: null,
+      lastInboundSyncAt: minutesAgo(3),
+      lastOutboundSyncAt: null,
+      lastError: 'Sheet is not publicly accessible',
+      rowCount: 0,
+    },
+    nowMs: now,
+  }),
+  false,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 29,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'success',
+      lastSyncAt: new Date(now - LEAD_SHEET_AUTO_REFRESH_COOLDOWN_MS + 30_000).toISOString(),
+      lastSuccessAt: minutesAgo(45),
+      lastInboundSyncAt: new Date(now - LEAD_SHEET_AUTO_REFRESH_COOLDOWN_MS + 30_000).toISOString(),
+      lastOutboundSyncAt: null,
+      lastError: null,
+      rowCount: 29,
+    },
+    nowMs: now,
+  }),
+  false,
+)
 
 console.log('leadSyncStatus.selftest passed')
