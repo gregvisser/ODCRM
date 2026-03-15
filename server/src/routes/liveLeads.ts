@@ -550,6 +550,7 @@ async function getSyncMeta(customerId: string, sourceOfTruth: TruthSource): Prom
   return {
     mode: sourceOfTruth === 'google_sheets' ? 'sheet_backed' : 'db_backed',
     status: state?.syncStatus ?? null,
+    isRunning: state?.isRunning ?? null,
     lastSyncAt: state?.lastSyncAt ? state.lastSyncAt.toISOString() : null,
     lastSuccessAt: state?.lastSuccessAt ? state.lastSuccessAt.toISOString() : null,
     lastInboundSyncAt: state?.lastInboundSyncAt ? state.lastInboundSyncAt.toISOString() : null,

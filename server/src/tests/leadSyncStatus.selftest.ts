@@ -142,6 +142,25 @@ const legacyZeroRows = resolveLeadSyncViewState({
 assert.equal(legacyZeroRows.code, 'connected_empty')
 assert.equal(legacyZeroRows.canUseLeadData, true)
 
+const staleSyncingFlag = resolveLeadSyncViewState({
+  sourceOfTruth: 'google_sheets',
+  configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+  rowCount: 29,
+  sync: {
+    mode: 'sheet_backed',
+    status: 'syncing',
+    isRunning: false,
+    lastSyncAt: minutesAgo(45),
+    lastSuccessAt: minutesAgo(45),
+    lastInboundSyncAt: minutesAgo(45),
+    lastOutboundSyncAt: null,
+    lastError: null,
+    rowCount: 29,
+  },
+})
+assert.equal(staleSyncingFlag.code, 'stale_last_good')
+assert.equal(staleSyncingFlag.syncInProgress, false)
+
 assert.equal(
   shouldAutoRefreshLeadSyncState({
     sourceOfTruth: 'google_sheets',
@@ -260,6 +279,27 @@ assert.equal(
     nowMs: now,
   }),
   false,
+)
+
+assert.equal(
+  shouldAutoRefreshLeadSyncState({
+    sourceOfTruth: 'google_sheets',
+    configuredSheetUrl: 'https://docs.google.com/spreadsheets/d/example/edit#gid=0',
+    rowCount: 29,
+    sync: {
+      mode: 'sheet_backed',
+      status: 'syncing',
+      isRunning: false,
+      lastSyncAt: minutesAgo(45),
+      lastSuccessAt: minutesAgo(45),
+      lastInboundSyncAt: minutesAgo(45),
+      lastOutboundSyncAt: null,
+      lastError: null,
+      rowCount: 29,
+    },
+    nowMs: now,
+  }),
+  true,
 )
 
 console.log('leadSyncStatus.selftest passed')
