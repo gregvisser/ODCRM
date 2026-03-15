@@ -81,6 +81,54 @@ type SuppressionSheetHealth = {
   totalEntries: number
 }
 
+type ProtectionStatus = {
+  colorScheme: 'blue' | 'green' | 'orange'
+  label: string
+  description: string
+}
+
+function getProtectionStatus(kind: SheetKind, health: SuppressionSheetHealth | null | undefined, awaitingHealth: boolean): ProtectionStatus {
+  const protectionLabel = kind === 'email' ? 'email suppression' : 'domain suppression'
+
+  if (awaitingHealth) {
+    return {
+      colorScheme: 'blue',
+      label: 'Checking',
+      description: `Checking whether ${protectionLabel} is connected and current for this client.`,
+    }
+  }
+
+  if (!health?.configured) {
+    return {
+      colorScheme: 'orange',
+      label: 'Not connected',
+      description: `No source is connected yet. Connect a source before relying on ${protectionLabel}.`,
+    }
+  }
+
+  if (health.lastImportStatus === 'error') {
+    return {
+      colorScheme: 'orange',
+      label: 'Needs attention',
+      description: `The connected source needs review${health.lastError ? `: ${health.lastError}` : '.'}`,
+    }
+  }
+
+  if ((health.totalEntries ?? 0) === 0) {
+    return {
+      colorScheme: 'green',
+      label: 'Connected',
+      description: 'The connected source is current and the protection list is live, but it is currently empty.',
+    }
+  }
+
+  return {
+    colorScheme: 'green',
+    label: 'Protected',
+    description: `The connected source is current and actively protecting this client's ${kind === 'email' ? 'email' : 'domain'} sends.`,
+  }
+}
+
 export default function ComplianceTab() {
   const DEFAULT_PAGE_SIZE = 50
   const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
@@ -105,6 +153,20 @@ export default function ComplianceTab() {
     () => (Array.isArray(customers) ? customers.find((customer) => customer.id === customerId) ?? null : null),
     [customerId, customers],
   )
+
+  const protectionOverview = useMemo(() => {
+    const emailHealth = suppressionSheetHealth?.email
+    const domainHealth = suppressionSheetHealth?.domain
+    const connectedCount = [emailHealth, domainHealth].filter((health) => Boolean(health?.configured)).length
+    const attentionCount = [emailHealth, domainHealth].filter((health) => !health?.configured || health?.lastImportStatus === 'error').length
+
+    return {
+      connectedCount,
+      attentionCount,
+      emailEntries: emailHealth?.totalEntries ?? 0,
+      domainEntries: domainHealth?.totalEntries ?? 0,
+    }
+  }, [suppressionSheetHealth])
 
   const loadEntries = useCallback(async () => {
     if (!customerId) {
@@ -315,19 +377,19 @@ export default function ComplianceTab() {
   const renderSheetCard = (kind: SheetKind) => {
     const health = suppressionSheetHealth?.[kind]
     const result = importResults[kind]
-    const label = kind === 'email' ? 'Email DNC' : 'Domain DNC'
+    const label = kind === 'email' ? 'Email suppression source' : 'Domain suppression source'
     const awaitingHealth = dataHealthLoading && !suppressionSheetHealth
     const isConnected = Boolean(health?.configured)
     const editorOpen = sheetEditorOpen[kind]
     const statusText = awaitingHealth
       ? 'Checking the linked Google Sheet for this client.'
       : !health?.configured
-      ? 'Connect the Google Sheet for this client.'
+      ? 'Add the Google Sheet URL used for this protection source.'
       : health?.lastImportStatus === 'error'
-        ? `Last sync failed${health.lastError ? `: ${health.lastError}` : '.'}`
+        ? `Last source sync failed${health.lastError ? `: ${health.lastError}` : '.'}`
         : (health.totalEntries ?? 0) === 0
-          ? 'Connected. The linked Google Sheet is live and currently empty.'
-          : 'Connected. Changes from the linked Google Sheet sync into this client list.'
+          ? 'Linked source is connected and currently empty.'
+          : 'Linked source is connected. Use it to refresh or replace this protection list when needed.'
 
     return (
       <Box key={kind} borderWidth="1px" borderRadius="lg" p={4} bg="white">
@@ -354,7 +416,7 @@ export default function ComplianceTab() {
 
           {health?.sheetUrl ? (
             <Link fontSize="sm" color="blue.600" href={health.sheetUrl} isExternal>
-              Open linked sheet
+              Open linked source
             </Link>
           ) : null}
 
@@ -366,14 +428,14 @@ export default function ComplianceTab() {
               isDisabled={awaitingHealth}
               loadingText={isConnected ? 'Syncing' : 'Connecting'}
             >
-              {isConnected ? 'Sync now' : 'Connect sheet'}
+              {isConnected ? 'Sync source now' : 'Connect source'}
             </Button>
             {isConnected ? (
               <Button
                 variant="outline"
                 onClick={() => setSheetEditorOpen((prev) => ({ ...prev, [kind]: !prev[kind] }))}
               >
-                {editorOpen ? 'Hide advanced sheet settings' : 'Show advanced sheet settings'}
+                {editorOpen ? 'Hide source settings' : 'Show source settings'}
               </Button>
             ) : null}
           </HStack>
@@ -399,7 +461,7 @@ export default function ComplianceTab() {
               isLoading={importingKind === kind}
               loadingText="Updating"
             >
-              Update linked sheet
+              Replace linked source
             </Button>
           ) : null}
 
@@ -417,14 +479,95 @@ export default function ComplianceTab() {
     )
   }
 
+  const renderProtectionCard = (kind: SheetKind) => {
+    const health = suppressionSheetHealth?.[kind]
+    const awaitingHealth = dataHealthLoading && !suppressionSheetHealth
+    const status = getProtectionStatus(kind, health, awaitingHealth)
+    const title = kind === 'email' ? 'Email suppression' : 'Domain suppression'
+    const entryLabel = kind === 'email' ? 'Protected emails' : 'Protected domains'
+
+    return (
+      <Box key={kind} borderWidth="1px" borderRadius="lg" p={4} bg="white">
+        <VStack align="stretch" spacing={3}>
+          <HStack justify="space-between" flexWrap="wrap">
+            <Heading size="sm">{title}</Heading>
+            <Badge colorScheme={status.colorScheme}>{status.label}</Badge>
+          </HStack>
+
+          <SimpleGrid columns={{ base: 2 }} spacing={3}>
+            <Box>
+              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">
+                {entryLabel}
+              </Text>
+              <Text fontSize="xl" fontWeight="semibold">
+                {health?.totalEntries ?? 0}
+              </Text>
+            </Box>
+            <Box>
+              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="wide">
+                Last checked
+              </Text>
+              <Text fontSize="sm" color="gray.700">
+                {health?.lastImportedAt ? new Date(health.lastImportedAt).toLocaleString() : 'Not yet'}
+              </Text>
+            </Box>
+          </SimpleGrid>
+
+          <Text fontSize="sm" color="gray.600">
+            {status.description}
+          </Text>
+
+          <HStack spacing={3} flexWrap="wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setListTypeFilter(kind)
+                setCurrentPage(1)
+              }}
+            >
+              {kind === 'email' ? 'Review protected emails' : 'Review protected domains'}
+            </Button>
+            <Button
+              size="sm"
+              colorScheme={health?.configured ? 'teal' : 'blue'}
+              variant={health?.configured ? 'outline' : 'solid'}
+              isDisabled={awaitingHealth}
+              isLoading={importingKind === kind}
+              loadingText={health?.configured ? 'Syncing' : 'Opening'}
+              onClick={() => {
+                if (health?.configured && health.sheetUrl) {
+                  void handleSheetSync(kind, health.sheetUrl)
+                  return
+                }
+                setSheetEditorOpen((prev) => ({ ...prev, [kind]: true }))
+              }}
+            >
+              {health?.configured ? 'Re-sync source' : 'Connect source'}
+            </Button>
+            {health?.configured ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setSheetEditorOpen((prev) => ({ ...prev, [kind]: true }))}
+              >
+                Replace source
+              </Button>
+            ) : null}
+          </HStack>
+        </VStack>
+      </Box>
+    )
+  }
+
   return (
     <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
       <VStack align="stretch" spacing={6}>
         <Box>
-          <Heading size="lg" mb={2}>Suppression List</Heading>
-                <Text fontSize="sm" color="gray.600">
-                  Connect each client&apos;s Email DNC and Domain DNC sheet once, then sync from the linked sheet when needed.
-                </Text>
+          <Heading size="lg" mb={2}>Compliance</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Check whether email and domain suppression protections are connected, current, and safe for this client.
+          </Text>
         </Box>
 
         <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
@@ -470,34 +613,53 @@ export default function ComplianceTab() {
           <Alert status="warning">
             <AlertIcon />
             <AlertDescription fontSize="sm">
-              Select a client before connecting sheets or reviewing suppression entries.
+              Select a client before reviewing protection status or changing suppression entries.
             </AlertDescription>
           </Alert>
         ) : (
           <>
             <Box borderWidth="1px" borderRadius="lg" p={4} bg="white">
               <VStack align="stretch" spacing={4}>
-                <HStack justify="space-between" flexWrap="wrap">
-                  <Heading size="sm">Google Sheets</Heading>
-                  <Button size="xs" variant="outline" onClick={() => void loadSuppressionHealth()} isLoading={dataHealthLoading}>
-                    Refresh status
-                  </Button>
-                </HStack>
-
-                <Text fontSize="sm" color="gray.600">
-                  Connected sheets stay linked to this client. Sync from the linked sheet without re-pasting URLs.
-                </Text>
-
-                {dataHealthError ? (
-                  <Alert status="error">
+                {dataHealthLoading && !suppressionSheetHealth ? (
+                  <Alert status="info">
                     <AlertIcon />
-                    <AlertDescription fontSize="sm">{dataHealthError}</AlertDescription>
+                    <AlertDescription fontSize="sm">
+                      Checking this client&apos;s suppression protections.
+                    </AlertDescription>
                   </Alert>
-                ) : null}
+                ) : dataHealthError ? (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">
+                      Protection status could not be checked right now. Use the follow-up section below to refresh and review source details.
+                    </AlertDescription>
+                  </Alert>
+                ) : protectionOverview.attentionCount > 0 ? (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">
+                      {protectionOverview.connectedCount} of 2 protection sources are connected. Review any source that is missing or needs attention before relying on suppression coverage.
+                    </AlertDescription>
+                  </Alert>
+                ) : (
+                  <Alert status="success">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">
+                      Email and domain suppression protections are connected for this client.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                <Box>
+                  <Heading size="sm" mb={1}>Protection status</Heading>
+                  <Text fontSize="sm" color="gray.600">
+                    Start here to see whether email and domain protections are connected, current, and ready to use.
+                  </Text>
+                </Box>
 
                 <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
-                  {renderSheetCard('email')}
-                  {renderSheetCard('domain')}
+                  {renderProtectionCard('email')}
+                  {renderProtectionCard('domain')}
                 </SimpleGrid>
               </VStack>
             </Box>
@@ -505,7 +667,12 @@ export default function ComplianceTab() {
             <Box id="suppression-tab-manual-panel" data-testid="suppression-tab-manual-panel" borderWidth="1px" borderRadius="lg" p={4} bg="white">
               <VStack align="stretch" spacing={4}>
                 <HStack justify="space-between" flexWrap="wrap">
-                  <Heading size="sm">Manual Entries</Heading>
+                  <Box>
+                    <Heading size="sm">Add protected email or domain</Heading>
+                    <Text fontSize="sm" color="gray.600">
+                      Use manual entries for quick removals or corrections. Source setup and refresh detail stay lower down.
+                    </Text>
+                  </Box>
                   <HStack>
                     <Button
                       size="sm"
@@ -513,7 +680,7 @@ export default function ComplianceTab() {
                       colorScheme="blue"
                       onClick={() => setListTypeFilter('email')}
                     >
-                      Email DNC
+                      Email suppression
                     </Button>
                     <Button
                       size="sm"
@@ -521,13 +688,13 @@ export default function ComplianceTab() {
                       colorScheme="purple"
                       onClick={() => setListTypeFilter('domain')}
                     >
-                      Domain DNC
+                      Domain suppression
                     </Button>
                   </HStack>
                 </HStack>
 
                 <Text fontSize="sm" color="gray.600">
-                  Showing {entries.length} of {pagination.total} {listTypeFilter === 'email' ? 'email' : 'domain'} suppression entries.
+                  Showing {entries.length} of {pagination.total} protected {listTypeFilter === 'email' ? 'emails' : 'domains'}.
                 </Text>
 
                 <HStack spacing={3} align="flex-end" flexWrap="wrap">
@@ -544,60 +711,70 @@ export default function ComplianceTab() {
                     <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Requested removal" />
                   </FormControl>
                   <Button id="suppression-tab-manual-add-btn" data-testid="suppression-tab-manual-add-btn" colorScheme="teal" onClick={handleAdd}>
-                    Add
+                    Add protection
                   </Button>
                 </HStack>
               </VStack>
             </Box>
 
             <Box id="suppression-tab-entries-table" data-testid="suppression-tab-entries-table" bg="white" borderRadius="lg" borderWidth="1px" overflowX="auto">
-              {loading ? (
-                <Box textAlign="center" py={10}>
-                  <Spinner size="lg" />
+              <VStack align="stretch" spacing={0}>
+                <Box p={4} borderBottomWidth="1px">
+                  <Heading size="sm" mb={1}>
+                    {listTypeFilter === 'email' ? 'Protected emails' : 'Protected domains'}
+                  </Heading>
+                  <Text fontSize="sm" color="gray.600">
+                    Review the current protection list and remove entries that should no longer block sending.
+                  </Text>
                 </Box>
-              ) : (
-                <Table size="sm">
-                  <Thead bg="gray.50">
-                    <Tr>
-                      <Th>Value</Th>
-                      <Th>Reason</Th>
-                      <Th>Source</Th>
-                      <Th>Added</Th>
-                      <Th>Actions</Th>
-                    </Tr>
-                  </Thead>
-                  <Tbody>
-                    {entries.length === 0 ? (
+                {loading ? (
+                  <Box textAlign="center" py={10}>
+                    <Spinner size="lg" />
+                  </Box>
+                ) : (
+                  <Table size="sm">
+                    <Thead bg="gray.50">
                       <Tr>
-                        <Td colSpan={5} textAlign="center" py={8}>
-                          <Text color="gray.500">
-                            {`No suppressed ${listTypeFilter}s found for ${selectedCustomer?.name || 'the selected client'}.`}
-                          </Text>
-                        </Td>
+                        <Th>Value</Th>
+                        <Th>Reason</Th>
+                        <Th>Added by</Th>
+                        <Th>Added</Th>
+                        <Th>Actions</Th>
                       </Tr>
-                    ) : (
-                      entries.map((entry) => (
-                        <Tr key={entry.id}>
-                          <Td>{entry.value}</Td>
-                          <Td>{entry.reason || '—'}</Td>
-                          <Td>{entry.source || 'manual'}</Td>
-                          <Td>{new Date(entry.createdAt).toLocaleString()}</Td>
-                          <Td>
-                            <IconButton
-                              aria-label="Delete suppression entry"
-                              icon={<DeleteIcon />}
-                              size="sm"
-                              variant="ghost"
-                              colorScheme="red"
-                              onClick={() => void handleDelete(entry.id)}
-                            />
+                    </Thead>
+                    <Tbody>
+                      {entries.length === 0 ? (
+                        <Tr>
+                          <Td colSpan={5} textAlign="center" py={8}>
+                            <Text color="gray.500">
+                              {`No protected ${listTypeFilter === 'email' ? 'emails' : 'domains'} found for ${selectedCustomer?.name || 'the selected client'}.`}
+                            </Text>
                           </Td>
                         </Tr>
-                      ))
-                    )}
-                  </Tbody>
-                </Table>
-              )}
+                      ) : (
+                        entries.map((entry) => (
+                          <Tr key={entry.id}>
+                            <Td>{entry.value}</Td>
+                            <Td>{entry.reason || '—'}</Td>
+                            <Td>{entry.source || 'manual'}</Td>
+                            <Td>{new Date(entry.createdAt).toLocaleString()}</Td>
+                            <Td>
+                              <IconButton
+                                aria-label="Delete suppression entry"
+                                icon={<DeleteIcon />}
+                                size="sm"
+                                variant="ghost"
+                                colorScheme="red"
+                                onClick={() => void handleDelete(entry.id)}
+                              />
+                            </Td>
+                          </Tr>
+                        ))
+                      )}
+                    </Tbody>
+                  </Table>
+                )}
+              </VStack>
             </Box>
 
             <HStack justify="space-between" flexWrap="wrap">
@@ -623,6 +800,34 @@ export default function ComplianceTab() {
                 </Button>
               </HStack>
             </HStack>
+
+            <Box borderWidth="1px" borderRadius="lg" p={4} bg="gray.50">
+              <VStack align="stretch" spacing={4}>
+                <HStack justify="space-between" flexWrap="wrap">
+                  <Box>
+                    <Heading size="sm">Source setup & troubleshooting</Heading>
+                    <Text fontSize="sm" color="gray.600">
+                      Secondary detail for Google Sheet links, refresh checks, sync results, and source replacement.
+                    </Text>
+                  </Box>
+                  <Button size="xs" variant="outline" onClick={() => void loadSuppressionHealth()} isLoading={dataHealthLoading}>
+                    Refresh protection status
+                  </Button>
+                </HStack>
+
+                {dataHealthError ? (
+                  <Alert status="error">
+                    <AlertIcon />
+                    <AlertDescription fontSize="sm">{dataHealthError}</AlertDescription>
+                  </Alert>
+                ) : null}
+
+                <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                  {renderSheetCard('email')}
+                  {renderSheetCard('domain')}
+                </SimpleGrid>
+              </VStack>
+            </Box>
           </>
         )}
       </VStack>
