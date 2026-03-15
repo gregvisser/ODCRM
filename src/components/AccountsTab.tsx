@@ -864,18 +864,6 @@ function normalizeClientProfile(raw?: Partial<ClientProfile> | null): ClientProf
   }
 }
 
-function computeAccountsSyncHash(accountsData: Account[]): string {
-  const normalized = accountsData
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((account) => ({
-      name: account.name,
-      website: account.website,
-      snapshot: sanitizeAccountForStorage(account),
-    }))
-  return JSON.stringify(normalized)
-}
-
 type CustomerPayload = {
   name: string
   domain?: string
@@ -942,164 +930,6 @@ function buildCustomerPayloadFromAccount(account: Account): CustomerPayload {
   if (account.socialMedia.length > 0) payload.socialPresence = account.socialMedia
 
   return payload
-}
-
-function hasSyncableCustomerFields(payload: ReturnType<typeof buildCustomerPayloadFromAccount>): boolean {
-  return Object.entries(payload).some(
-    ([key, value]) => key !== 'name' && value !== undefined && value !== null && value !== '',
-  )
-}
-
-function diffCustomerPayload(
-  customer: CustomerApi,
-  payload: ReturnType<typeof buildCustomerPayloadFromAccount>,
-): Record<string, string | number | null | Record<string, unknown> | Array<{ label: string; url: string }>> {
-  const updates: Record<string, string | number | null | Record<string, unknown> | Array<{ label: string; url: string }>> = {}
-  const normalizeValue = (value: unknown) => String(value ?? '').trim().toLowerCase()
-  const normalizeNumber = (value: unknown) => {
-    if (value === null || value === undefined || value === '') return null
-    const parsed = Number(value)
-    return Number.isNaN(parsed) ? null : parsed
-  }
-  const normalizeJson = (value: unknown) => {
-    try {
-      return JSON.stringify(value ?? null)
-    } catch {
-      return ''
-    }
-  }
-
-  if (payload.name && normalizeValue(payload.name) !== normalizeValue(customer.name)) {
-    updates.name = payload.name
-  }
-  if (payload.domain && normalizeValue(payload.domain) !== normalizeValue(customer.domain)) {
-    updates.domain = payload.domain
-  }
-  if (payload.website && normalizeValue(payload.website) !== normalizeValue(customer.website)) {
-    updates.website = payload.website
-  }
-  if (payload.leadsReportingUrl !== undefined) {
-    const normalizedPayload =
-      payload.leadsReportingUrl === null ? null : normalizeValue(payload.leadsReportingUrl)
-    const normalizedCustomer = customer.leadsReportingUrl
-      ? normalizeValue(customer.leadsReportingUrl)
-      : null
-    if (normalizedPayload !== normalizedCustomer) {
-      updates.leadsReportingUrl = payload.leadsReportingUrl
-    }
-  }
-  if (payload.sector && normalizeValue(payload.sector) !== normalizeValue(customer.sector)) {
-    updates.sector = payload.sector
-  }
-  if (payload.clientStatus && normalizeValue(payload.clientStatus) !== normalizeValue(customer.clientStatus)) {
-    updates.clientStatus = payload.clientStatus
-  }
-  if (
-    payload.targetJobTitle &&
-    normalizeValue(payload.targetJobTitle) !== normalizeValue(customer.targetJobTitle)
-  ) {
-    updates.targetJobTitle = payload.targetJobTitle
-  }
-  if (
-    payload.prospectingLocation &&
-    normalizeValue(payload.prospectingLocation) !== normalizeValue(customer.prospectingLocation)
-  ) {
-    updates.prospectingLocation = payload.prospectingLocation
-  }
-  if (
-    payload.accountData &&
-    normalizeJson(payload.accountData) !== normalizeJson(customer.accountData)
-  ) {
-    updates.accountData = payload.accountData
-  }
-
-  if (payload.whatTheyDo && normalizeValue(payload.whatTheyDo) !== normalizeValue(customer.whatTheyDo)) {
-    updates.whatTheyDo = payload.whatTheyDo
-  }
-  if (
-    payload.accreditations &&
-    normalizeValue(payload.accreditations) !== normalizeValue(customer.accreditations)
-  ) {
-    updates.accreditations = payload.accreditations
-  }
-  if (payload.keyLeaders && normalizeValue(payload.keyLeaders) !== normalizeValue(customer.keyLeaders)) {
-    updates.keyLeaders = payload.keyLeaders
-  }
-  if (
-    payload.companyProfile &&
-    normalizeValue(payload.companyProfile) !== normalizeValue(customer.companyProfile)
-  ) {
-    updates.companyProfile = payload.companyProfile
-  }
-  if (payload.recentNews && normalizeValue(payload.recentNews) !== normalizeValue(customer.recentNews)) {
-    updates.recentNews = payload.recentNews
-  }
-  if (payload.companySize && normalizeValue(payload.companySize) !== normalizeValue(customer.companySize)) {
-    updates.companySize = payload.companySize
-  }
-  if (
-    payload.headquarters &&
-    normalizeValue(payload.headquarters) !== normalizeValue(customer.headquarters)
-  ) {
-    updates.headquarters = payload.headquarters
-  }
-  if (
-    payload.foundingYear &&
-    normalizeValue(payload.foundingYear) !== normalizeValue(customer.foundingYear)
-  ) {
-    updates.foundingYear = payload.foundingYear
-  }
-  if (
-    payload.socialPresence &&
-    normalizeJson(payload.socialPresence) !== normalizeJson(customer.socialPresence)
-  ) {
-    updates.socialPresence = payload.socialPresence
-  }
-
-  const monthlyIntake = normalizeNumber(payload.monthlyIntakeGBP)
-  if (monthlyIntake !== null && monthlyIntake !== normalizeNumber(customer.monthlyIntakeGBP)) {
-    updates.monthlyIntakeGBP = monthlyIntake
-  }
-  if (payload.defcon && payload.defcon !== customer.defcon) updates.defcon = payload.defcon
-  if (
-    payload.weeklyLeadTarget &&
-    payload.weeklyLeadTarget !== normalizeNumber(customer.weeklyLeadTarget)
-  ) {
-    updates.weeklyLeadTarget = payload.weeklyLeadTarget
-  }
-  if (
-    payload.weeklyLeadActual &&
-    payload.weeklyLeadActual !== normalizeNumber(customer.weeklyLeadActual)
-  ) {
-    updates.weeklyLeadActual = payload.weeklyLeadActual
-  }
-  if (
-    payload.monthlyLeadTarget &&
-    payload.monthlyLeadTarget !== normalizeNumber(customer.monthlyLeadTarget)
-  ) {
-    updates.monthlyLeadTarget = payload.monthlyLeadTarget
-  }
-  if (
-    payload.monthlyLeadActual &&
-    payload.monthlyLeadActual !== normalizeNumber(customer.monthlyLeadActual)
-  ) {
-    updates.monthlyLeadActual = payload.monthlyLeadActual
-  }
-
-  return updates
-}
-
-function findCustomerForAccount(account: Account, customers: CustomerApi[]): CustomerApi | undefined {
-  const accountKey = normalizeName(account.name)
-  const accountDomain = normalizeDomain(account.website)
-
-  return customers.find((customer) => {
-    const customerKey = normalizeName(customer.name)
-    const customerDomain = normalizeDomain(customer.domain ?? '')
-    if (accountKey && customerKey && accountKey === customerKey) return true
-    if (accountDomain && customerDomain && accountDomain === customerDomain) return true
-    return false
-  })
 }
 
 function normalizeAccountDefaults(raw: Partial<Account>): Account {
@@ -2553,13 +2383,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const { userEmail } = useUserPreferencesContext()
   const { isOpen: isCreateModalOpen, onOpen: onCreateModalOpen, onClose: onCreateModalClose } = useDisclosure()
   const { isOpen: isDeleteModalOpen, onOpen: onDeleteModalOpen, onClose: onDeleteModalClose } = useDisclosure()
-  const hasSyncedCustomersRef = useRef(false)
-  const hasHydratedFromServerRef = useRef(false)
   const isServerSourceOfTruth = dataSource === 'DB'
-  const syncInFlightRef = useRef(false)
-  const pendingSyncRef = useRef(false)
-  const lastSyncedHashRef = useRef<string | null>(null)
-  const latestAccountsRef = useRef<Account[]>([])
   const hasAutoEnrichedRef = useRef(false)
   const [newAccountForm, setNewAccountForm] = useState<Partial<Account>>({
     name: '',
@@ -2706,116 +2530,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     console.log('[AccountsTab] DB accounts updated, syncing:', dbAccounts.length)
     setAccountsData(sanitizeAccountsList(dbAccounts))
   }, [dbAccounts])
-
-  // DISABLED: Auto-backup and autosave effect
-  // This was causing localStorage write storms and backup key proliferation.
-  // Individual update functions (updateAccount, handleCreateAccount, etc.) already save.
-  // DO NOT re-enable automatic backups during hydration.
-  const accountsLastSavedJsonRef = useRef<string>('')
-
-  useEffect(() => {
-    if (isServerSourceOfTruth) return
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY_ACCOUNTS && e.key !== STORAGE_KEY_ACCOUNTS_LAST_UPDATED) return
-      if (!hasHydratedFromServerRef.current) return
-
-      // CRITICAL: Only use stored data, never merge with defaults
-      // This prevents old accounts from coming back
-      const loaded = loadAccountsFromStorage()
-      if (loaded && Array.isArray(loaded) && loaded.length > 0) {
-        const deletedAccountsSet = loadDeletedAccountsFromStorage()
-        setAccountsData(loaded.filter((acc) => !deletedAccountsSet.has(acc.name)))
-      }
-    }
-
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [isServerSourceOfTruth])
-
-  useEffect(() => {
-    latestAccountsRef.current = accountsData
-  }, [accountsData])
-
-  useEffect(() => {
-    if (!hasSyncedCustomersRef.current) return
-    if (!hasHydratedFromServerRef.current) return
-    if (!isStorageAvailable()) return
-    const syncVersion = 'v2-account-data'
-    const storedVersion = getItem(OdcrmStorageKeys.accountsBackendSyncVersion)
-    if (storedVersion !== syncVersion) {
-      setItem(OdcrmStorageKeys.accountsBackendSyncHash, '')
-      setItem(OdcrmStorageKeys.accountsBackendSyncVersion, syncVersion)
-      lastSyncedHashRef.current = null
-    }
-    if (lastSyncedHashRef.current === null) {
-      lastSyncedHashRef.current = getItem(OdcrmStorageKeys.accountsBackendSyncHash) || null
-    }
-
-    const nextHash = computeAccountsSyncHash(accountsData)
-    if (nextHash === lastSyncedHashRef.current) return
-
-    const syncAccountsToBackend = async (accountsToSync: Account[], hash: string) => {
-      if (syncInFlightRef.current) {
-        pendingSyncRef.current = true
-        return
-      }
-      syncInFlightRef.current = true
-      let needsLeadsRefresh = false
-
-      try {
-        const { data: rawData, error } = await api.get('/api/customers')
-        if (error || !rawData) return
-        
-        const data = normalizeCustomersListResponse(rawData) as CustomerApi[]
-        if (data.length === 0) return
-
-        for (const account of accountsToSync) {
-          const payload = buildCustomerPayloadFromAccount(account)
-          if (!hasSyncableCustomerFields(payload)) continue
-
-          const customer = findCustomerForAccount(account, data)
-          if (customer) {
-            const updates = diffCustomerPayload(customer, payload)
-            if (Object.keys(updates).length > 0) {
-              if ('leadsReportingUrl' in updates) {
-                needsLeadsRefresh = true
-              }
-              await api.put(`/api/customers/${customer.id}`, { ...updates, name: payload.name })
-            }
-          } else {
-            if (payload.leadsReportingUrl !== undefined) {
-              needsLeadsRefresh = true
-            }
-            await api.post('/api/customers', payload)
-          }
-        }
-
-        setItem(OdcrmStorageKeys.accountsBackendSyncHash, hash)
-        lastSyncedHashRef.current = hash
-        if (needsLeadsRefresh) {
-          emit('accountsUpdated', accountsToSync)
-        }
-      } catch (err) {
-        console.warn('Failed to sync accounts to backend:', err)
-      } finally {
-        syncInFlightRef.current = false
-        if (pendingSyncRef.current) {
-          pendingSyncRef.current = false
-          const latest = latestAccountsRef.current
-          const latestHash = computeAccountsSyncHash(latest)
-          if (latestHash !== lastSyncedHashRef.current) {
-            void syncAccountsToBackend(latest, latestHash)
-          }
-        }
-      }
-    }
-
-    const timer = window.setTimeout(() => {
-      void syncAccountsToBackend(accountsData, nextHash)
-    }, 1200)
-
-    return () => window.clearTimeout(timer)
-  }, [accountsData])
 
   const [targetTitlesList, setTargetTitlesList] = useState<string[]>(sharedTargetTitles)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
@@ -4213,7 +3927,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Restore Google Sheets + account details from latest backup (if available).
   useEffect(() => {
     if (isServerSourceOfTruth) return
-    if (hasSyncedCustomersRef.current) return
     if (!isStorageAvailable()) return
     const current = loadAccountsFromStorage()
     const hasSheets = current.some((acc) => acc.clientLeadsSheetUrl)
