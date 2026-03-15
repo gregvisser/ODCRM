@@ -6,11 +6,16 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
-import { triggerManualSync } from '../workers/leadsSync.js'
+import { triggerManualSync, triggerRuntimeSync } from '../workers/leadsSync.js'
 import { buildManualLeadCreatePayload } from '../services/leadCreateContract.js'
 import { asLeadRawData, extractStoredLeadCanonicalRecord, isRealStoredLeadRow } from '../services/leadCanonicalMapping.js'
 import { calculateStoredLeadMetrics } from '../services/leadMetrics.js'
-import { resolveLeadSyncViewState, type LeadSyncMetaInput, type TruthSource } from '../services/leadSyncStatus.js'
+import {
+  resolveLeadSyncViewState,
+  shouldAutoRefreshLeadSyncState,
+  type LeadSyncMetaInput,
+  type TruthSource,
+} from '../services/leadSyncStatus.js'
 import { retryLeadOutboundSync, syncManualLeadEditOutbound, syncManualLeadOutbound } from '../services/leadOutboundSync.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 
@@ -554,23 +559,30 @@ async function getSyncMeta(customerId: string, sourceOfTruth: TruthSource): Prom
   }
 }
 
-async function maybeBootstrapSheetBackedLeads(params: {
+async function maybeEnsureFreshSheetBackedLeads(params: {
   customerId: string
+  configuredSheetUrl: string
   sourceOfTruth: TruthSource
   rowCount: number
   sync: SyncMeta
 }): Promise<{ started: boolean; error: string | null }> {
-  const { customerId, sourceOfTruth, rowCount, sync } = params
+  const { customerId, configuredSheetUrl, sourceOfTruth, rowCount, sync } = params
   if (sourceOfTruth !== 'google_sheets') return { started: false, error: null }
-  if (rowCount > 0) return { started: false, error: null }
-  if (sync.lastSyncAt || sync.lastInboundSyncAt || sync.lastSuccessAt) return { started: false, error: null }
 
   try {
-    // First-access bootstrap for sheet-backed clients that have never synced.
-    await triggerManualSync(prisma, customerId)
-    return { started: true, error: null }
+    if (!shouldAutoRefreshLeadSyncState({
+      sourceOfTruth,
+      configuredSheetUrl,
+      sync,
+      rowCount,
+    })) {
+      return { started: false, error: null }
+    }
+
+    const started = await triggerRuntimeSync(prisma, customerId)
+    return { started, error: null }
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Failed to bootstrap sheet sync'
+    const message = e instanceof Error ? e.message : 'Failed to refresh sheet sync'
     return { started: false, error: message }
   }
 }
@@ -1080,8 +1092,9 @@ router.get('/leads', async (req, res) => {
 
     let leads = mapDbLeadRows(dbRows)
     let sync = await getSyncMeta(customerId, sourceOfTruth)
-    const bootstrap = await maybeBootstrapSheetBackedLeads({
+    const bootstrap = await maybeEnsureFreshSheetBackedLeads({
       customerId,
+      configuredSheetUrl,
       sourceOfTruth,
       rowCount: leads.length,
       sync,
@@ -1232,8 +1245,9 @@ router.get('/leads/metrics', async (req, res) => {
     })
 
     let sync = await getSyncMeta(customerId, sourceOfTruth)
-    const bootstrap = await maybeBootstrapSheetBackedLeads({
+    const bootstrap = await maybeEnsureFreshSheetBackedLeads({
       customerId,
+      configuredSheetUrl,
       sourceOfTruth,
       rowCount: leads.length,
       sync,

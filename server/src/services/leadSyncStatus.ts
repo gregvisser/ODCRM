@@ -44,7 +44,8 @@ export type LeadSyncViewState = {
   lastSuccessfulSyncAgeMs: number | null
 }
 
-const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
+export const SHEET_METRICS_FRESH_MS = 15 * 60 * 1000
+export const LEAD_SHEET_AUTO_REFRESH_COOLDOWN_MS = 5 * 60 * 1000
 
 export function classifySheetSyncError(message: string | null | undefined): LeadSyncErrorCode | null {
   const text = String(message || '').toLowerCase()
@@ -252,4 +253,62 @@ export function resolveLeadSyncViewState(params: {
     authoritative: true,
     lastSuccessfulSyncAgeMs,
   })
+}
+
+function parseIsoMs(value: string | null | undefined): number | null {
+  if (!value) return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export function shouldAutoRefreshLeadSyncState(params: {
+  sourceOfTruth: TruthSource
+  configuredSheetUrl: string
+  sync: LeadSyncMetaInput
+  rowCount: number
+  bootstrap?: { started: boolean; error: string | null }
+  nowMs?: number
+}): boolean {
+  const {
+    sourceOfTruth,
+    configuredSheetUrl,
+    sync,
+    rowCount,
+    bootstrap,
+    nowMs = Date.now(),
+  } = params
+
+  if (sourceOfTruth !== 'google_sheets') return false
+  if (!configuredSheetUrl.trim()) return false
+  if (sync.status === 'syncing') return false
+
+  const viewState = resolveLeadSyncViewState({
+    sourceOfTruth,
+    configuredSheetUrl,
+    sync,
+    rowCount,
+    bootstrap,
+  })
+
+  const lastSyncMs = parseIsoMs(sync.lastSyncAt)
+  const sinceLastSyncMs = lastSyncMs == null ? null : Math.max(0, nowMs - lastSyncMs)
+
+  if (sinceLastSyncMs != null && sinceLastSyncMs < LEAD_SHEET_AUTO_REFRESH_COOLDOWN_MS) {
+    return false
+  }
+
+  if (viewState.code === 'never_synced') return true
+
+  if (viewState.code === 'stale_last_good') return true
+
+  if (viewState.code === 'sync_failed') {
+    return viewState.canUseLeadData
+  }
+
+  if (viewState.code === 'connected_empty') {
+    if (viewState.lastSuccessfulSyncAgeMs == null) return true
+    return viewState.lastSuccessfulSyncAgeMs > SHEET_METRICS_FRESH_MS
+  }
+
+  return false
 }
