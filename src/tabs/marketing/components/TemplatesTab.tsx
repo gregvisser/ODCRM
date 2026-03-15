@@ -319,6 +319,16 @@ const TemplatesTab: React.FC = () => {
     return templates.filter(t => t.isFavorite)
   }, [templates])
 
+  const templateSummary = useMemo(() => {
+    const recentWindowStart = Date.now() - 30 * 24 * 60 * 60 * 1000
+    return {
+      total: templates.length,
+      favorites: favoriteTemplates.length,
+      categories: categories.length,
+      recentlyUpdated: templates.filter((template) => new Date(template.updatedAt).getTime() >= recentWindowStart).length,
+    }
+  }, [categories.length, favoriteTemplates.length, templates])
+
   const resetAiAssist = () => {
     setAiLoading(false)
     setAiError(null)
@@ -649,7 +659,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Email Templates</Heading>
           <Text color="gray.600">
-            Create and manage reusable email content for your outreach campaigns
+            Find reusable outreach copy, preview how it renders, and update the templates this client relies on.
           </Text>
         </VStack>
         <HStack spacing={3}>
@@ -668,14 +678,6 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             </Select>
           </FormControl>
           <Button 
-            id="templates-tab-refresh-btn"
-            data-testid="templates-tab-refresh-btn"
-            variant="outline"
-            onClick={loadData}
-          >
-            Refresh
-          </Button>
-          <Button 
             id="templates-tab-create-btn"
             data-testid="templates-tab-create-btn"
             leftIcon={<AddIcon />} 
@@ -683,17 +685,10 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             onClick={handleCreateTemplate}
             isDisabled={!selectedCustomerId}
           >
-            New Template
+            Create template
           </Button>
         </HStack>
       </Flex>
-
-      <Alert id="templates-tab-compliance-banner" data-testid="templates-tab-compliance-banner" status="info" mb={4}>
-        <AlertIcon />
-        <AlertDescription>
-          Preview and send use the same placeholder rendering contract. Unsubscribe links remain enforced at send time.
-        </AlertDescription>
-      </Alert>
 
       {/* Error Display */}
       {error && (
@@ -709,32 +704,52 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         </Alert>
       )}
 
+      {templates.length === 0 ? (
+        <Alert status="info" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>No templates ready yet</AlertTitle>
+            <AlertDescription>
+              Create the first reusable template for this client, then preview and edit it from the library below.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      ) : (
+        <Alert status="success" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Template library ready</AlertTitle>
+            <AlertDescription>
+              Start with the template library below to preview, edit, duplicate, or create reusable outreach copy for this client.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
+
       {/* Quick Stats */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
         <Card>
           <CardBody>
-            <Text fontSize="2xl" fontWeight="bold">{templates.length}</Text>
-            <Text fontSize="sm" color="gray.600">Total Templates</Text>
+            <Text fontSize="2xl" fontWeight="bold">{templateSummary.total}</Text>
+            <Text fontSize="sm" color="gray.600">Templates</Text>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
-            <Text fontSize="2xl" fontWeight="bold">{categories.length}</Text>
-            <Text fontSize="sm" color="gray.600">Categories</Text>
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <Text fontSize="2xl" fontWeight="bold">{favoriteTemplates.length}</Text>
+            <Text fontSize="2xl" fontWeight="bold">{templateSummary.favorites}</Text>
             <Text fontSize="sm" color="gray.600">Favorites</Text>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
-            <Text fontSize="2xl" fontWeight="bold">
-              {templates.reduce((sum, t) => sum + t.usageCount, 0)}
-            </Text>
-            <Text fontSize="sm" color="gray.600">Total Uses</Text>
+            <Text fontSize="2xl" fontWeight="bold">{templateSummary.recentlyUpdated}</Text>
+            <Text fontSize="sm" color="gray.600">Updated this month</Text>
+          </CardBody>
+        </Card>
+        <Card>
+          <CardBody>
+            <Text fontSize="2xl" fontWeight="bold">{templateSummary.categories}</Text>
+            <Text fontSize="sm" color="gray.600">Categories</Text>
           </CardBody>
         </Card>
       </SimpleGrid>
@@ -776,11 +791,20 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
           </Text>
           {templates.length === 0 && (
             <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateTemplate}>
-              Create First Template
+              Create first template
             </Button>
           )}
         </Box>
       )}
+
+      {filteredTemplates.length > 0 ? (
+        <Box mb={4}>
+          <Heading size="sm" mb={1}>Template library</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Review reusable copy, then open the action menu on any template to preview, edit, duplicate, or delete it.
+          </Text>
+        </Box>
+      ) : null}
 
       {/* Templates Grid */}
       <SimpleGrid id="templates-tab-grid" data-testid="templates-tab-grid" columns={{ base: 1, md: 2, lg: 3 }} spacing={4}>
@@ -807,13 +831,13 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                   />
                   <MenuList>
                     <MenuItem icon={<ViewIcon />} onClick={() => handlePreviewTemplate(template)}>
-                      Preview
+                      Preview render
                     </MenuItem>
                     <MenuItem icon={<EditIcon />} onClick={() => handleEditTemplate(template)}>
-                      Edit
+                      Edit template
                     </MenuItem>
                     <MenuItem icon={<CopyIcon />} onClick={() => handleDuplicateTemplate(template)}>
-                      Duplicate
+                      Duplicate template
                     </MenuItem>
                     <MenuItem
                       icon={<StarIcon />}
@@ -823,7 +847,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                     </MenuItem>
                     <MenuDivider />
                     <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteTemplate(template.id)}>
-                      Delete
+                      Delete template
                     </MenuItem>
                   </MenuList>
                 </Menu>
@@ -873,6 +897,33 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
           </Card>
         ))}
       </SimpleGrid>
+
+      <Card id="templates-tab-followup" data-testid="templates-tab-followup" mt={6} variant="outline" borderColor="gray.200" bg="gray.50">
+        <CardBody>
+          <Flex justify="space-between" align="center" gap={3} wrap="wrap" mb={3}>
+            <VStack align="start" spacing={1}>
+              <Heading size="sm">Template setup & troubleshooting</Heading>
+              <Text fontSize="sm" color="gray.600">
+                Secondary detail for refresh, placeholder rendering rules, and send-time compliance behavior.
+              </Text>
+            </VStack>
+            <Button
+              id="templates-tab-refresh-btn"
+              data-testid="templates-tab-refresh-btn"
+              variant="outline"
+              onClick={loadData}
+            >
+              Refresh templates
+            </Button>
+          </Flex>
+          <Alert id="templates-tab-compliance-banner" data-testid="templates-tab-compliance-banner" status="info">
+            <AlertIcon />
+            <AlertDescription>
+              Preview and send use the same placeholder rendering contract. Unsubscribe links remain enforced at send time.
+            </AlertDescription>
+          </Alert>
+        </CardBody>
+      </Card>
 
       {/* Create/Edit Template Modal */}
       <Modal isOpen={isOpen} onClose={handleCloseEditor} size="4xl">
@@ -932,75 +983,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                 </FormControl>
 
                 <FormControl>
-                  <Flex justify="space-between" align="center" mb={2} gap={3}>
-                    <FormLabel mb={0}>Email Content</FormLabel>
-                    <HStack spacing={2}>
-                      {templateHasOriginalSnapshot ? (
-                        <Button size="sm" variant="ghost" onClick={restoreOriginalTemplate}>
-                          Restore original
-                        </Button>
-                      ) : null}
-                      <Select
-                        size="sm"
-                        value={aiTone}
-                        onChange={(e) => setAiTone(e.target.value as AITone)}
-                        w="160px"
-                      >
-                        <option value="professional">Professional</option>
-                        <option value="friendly">Friendly</option>
-                        <option value="casual">Conversational</option>
-                      </Select>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        leftIcon={<Icon as={RiSparkling2Line} />}
-                        onClick={handleRewriteWithAI}
-                        isLoading={aiLoading}
-                        loadingText="Rewriting"
-                      >
-                        Improve with AI
-                      </Button>
-                    </HStack>
-                  </Flex>
-                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3} mb={3}>
-                    <HStack spacing={2} flexWrap="wrap">
-                      {aiSuggestion ? (
-                        <Badge colorScheme="blue" variant="subtle">
-                          AI suggestion ready
-                        </Badge>
-                      ) : null}
-                      {aiAppliedLocally ? (
-                        <>
-                          <Badge colorScheme="purple" variant="subtle">
-                            AI changes applied locally
-                          </Badge>
-                          <Badge colorScheme="orange" variant="subtle">
-                            Not saved yet
-                          </Badge>
-                        </>
-                      ) : (
-                        <Badge colorScheme="gray" variant="subtle">
-                          Original
-                        </Badge>
-                      )}
-                    </HStack>
-                    <Text mt={2} fontSize="xs" color="gray.600">
-                      AI suggestions do not save automatically. Your original template stays unchanged until you click Save.
-                    </Text>
-                  </Box>
-                  <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="gray.50" p={3} mb={3}>
-                    <Text fontSize="sm" fontWeight="semibold">Supported placeholders</Text>
-                    <Flex mt={2} gap={2} wrap="wrap">
-                      {TEMPLATE_PLACEHOLDER_HELP.map((token) => (
-                        <Tag key={token} size="sm" variant="subtle" colorScheme="blue">
-                          <TagLabel>{`{{${token}}}`}</TagLabel>
-                        </Tag>
-                      ))}
-                    </Flex>
-                    <Text mt={2} fontSize="xs" color="gray.600">
-                      Use {`{{email_signature}}`} to insert the sending signature. Existing camelCase placeholders still work.
-                    </Text>
-                  </Box>
+                  <FormLabel mb={2}>Email Content</FormLabel>
                   <Textarea
                     value={editingTemplate.content}
                     onChange={(e) => setEditingTemplate({...editingTemplate, content: e.target.value})}
@@ -1008,6 +991,87 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                     minH="200px"
                   />
                 </FormControl>
+
+                <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="gray.50" p={4}>
+                  <VStack align="stretch" spacing={3}>
+                    <Flex justify="space-between" align="center" gap={3} wrap="wrap">
+                      <Box>
+                        <Text fontSize="sm" fontWeight="semibold">Writing help & placeholders</Text>
+                        <Text fontSize="xs" color="gray.600">
+                          Secondary tools for AI rewrite help and placeholder reference while editing.
+                        </Text>
+                      </Box>
+                      <HStack spacing={2}>
+                        {templateHasOriginalSnapshot ? (
+                          <Button size="sm" variant="ghost" onClick={restoreOriginalTemplate}>
+                            Restore original
+                          </Button>
+                        ) : null}
+                        <Select
+                          size="sm"
+                          value={aiTone}
+                          onChange={(e) => setAiTone(e.target.value as AITone)}
+                          w="160px"
+                        >
+                          <option value="professional">Professional</option>
+                          <option value="friendly">Friendly</option>
+                          <option value="casual">Conversational</option>
+                        </Select>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          leftIcon={<Icon as={RiSparkling2Line} />}
+                          onClick={handleRewriteWithAI}
+                          isLoading={aiLoading}
+                          loadingText="Rewriting"
+                        >
+                          Improve with AI
+                        </Button>
+                      </HStack>
+                    </Flex>
+
+                    <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                      <HStack spacing={2} flexWrap="wrap">
+                        {aiSuggestion ? (
+                          <Badge colorScheme="blue" variant="subtle">
+                            AI suggestion ready
+                          </Badge>
+                        ) : null}
+                        {aiAppliedLocally ? (
+                          <>
+                            <Badge colorScheme="purple" variant="subtle">
+                              AI changes applied locally
+                            </Badge>
+                            <Badge colorScheme="orange" variant="subtle">
+                              Not saved yet
+                            </Badge>
+                          </>
+                        ) : (
+                          <Badge colorScheme="gray" variant="subtle">
+                            Original
+                          </Badge>
+                        )}
+                      </HStack>
+                      <Text mt={2} fontSize="xs" color="gray.600">
+                        AI suggestions do not save automatically. Your original template stays unchanged until you click Save.
+                      </Text>
+                    </Box>
+
+                    <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
+                      <Text fontSize="sm" fontWeight="semibold">Supported placeholders</Text>
+                      <Flex mt={2} gap={2} wrap="wrap">
+                        {TEMPLATE_PLACEHOLDER_HELP.map((token) => (
+                          <Tag key={token} size="sm" variant="subtle" colorScheme="blue">
+                            <TagLabel>{`{{${token}}}`}</TagLabel>
+                          </Tag>
+                        ))}
+                      </Flex>
+                      <Text mt={2} fontSize="xs" color="gray.600">
+                        Use {`{{email_signature}}`} to insert the sending signature. Existing camelCase placeholders still work.
+                      </Text>
+                    </Box>
+                  </VStack>
+                </Box>
 
                 {aiError ? (
                   <Alert status="warning">
