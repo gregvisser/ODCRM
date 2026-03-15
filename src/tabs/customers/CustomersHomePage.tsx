@@ -7,7 +7,7 @@ import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
 import ContactsTab from '../../components/ContactsTab'
 import LeadsTab from '../../components/LeadsTab'
-import { getCurrentCustomerId } from '../../platform/stores/settings'
+import { useEffectiveCustomerId } from '../../hooks/useCustomerScope'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
@@ -31,7 +31,7 @@ export default function CustomersHomePage({
 }) {
   const activeView = coerceCustomersViewId(view)
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
-  const customerId = getCurrentCustomerId()
+  const customerId = useEffectiveCustomerId()
   const { interpretation: readiness } = useClientReadinessState(customerId)
 
   const goToMarketingReadiness = () => {

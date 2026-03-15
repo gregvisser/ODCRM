@@ -30,7 +30,7 @@ import {
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
 import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
-import { getCurrentCustomerId } from '../platform/stores/settings'
+import { useEffectiveCustomerId } from '../hooks/useCustomerScope'
 import RequireActiveClient from './RequireActiveClient'
 import { useLiveLeadsPolling } from '../hooks/useLiveLeadsPolling'
 import type { LiveLeadRow } from '../utils/liveLeadsApi'
@@ -52,7 +52,7 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 function LeadsReportingTab() {
   const DEFAULT_PAGE_SIZE = 50
-  const customerId = getCurrentCustomerId()
+  const customerId = useEffectiveCustomerId()
   const [filters, setFilters] = useState({
     account: '',
     channelOfLead: '',

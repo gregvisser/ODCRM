@@ -21,6 +21,7 @@ import {
 import { api } from '../../utils/api'
 import { emit, on } from '../../platform/events'
 import { useCustomersFromDatabase } from '../../hooks/useCustomersFromDatabase'
+import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 
 // Stable keys for checklist items (NEVER change these - they're persisted in DB)
@@ -118,7 +119,7 @@ export default function ProgressTrackerTab() {
   const toast = useToast()
   const { customers, loading, error } = useCustomersFromDatabase()
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+  const { canSelectCustomer, customerId: selectedCustomerId, setCustomerId: setSelectedCustomerId } = useScopedCustomerSelection()
   const [showCompleted, setShowCompleted] = useState(false)
   const [salesChecklist, setSalesChecklist] = useState<ChecklistState>({})
   const [opsChecklist, setOpsChecklist] = useState<ChecklistState>({})
@@ -201,7 +202,7 @@ export default function ProgressTrackerTab() {
       duration: 5000,
       isClosable: true,
     })
-  }, [amChecklist, filteredCustomers, linkedEmailCount, opsChecklist, salesChecklist, selectedCustomerId, showCompleted, toast])
+  }, [amChecklist, filteredCustomers, linkedEmailCount, opsChecklist, salesChecklist, selectedCustomerId, setSelectedCustomerId, showCompleted, toast])
 
   const saveChecklistState = useCallback(
     async (group: 'sales' | 'ops' | 'am', itemKey: string, checked: boolean) => {
@@ -302,6 +303,7 @@ export default function ProgressTrackerTab() {
               placeholder={filteredCustomers.length || showCompleted ? 'Select client' : 'No incomplete onboardings'}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               size="sm"
+              isDisabled={!canSelectCustomer}
             >
               {(showCompleted ? customers : filteredCustomers).map((c: any) => (
                 <option key={c.id} value={c.id}>

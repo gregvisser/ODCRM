@@ -55,7 +55,7 @@ import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
-import { getCurrentCustomerId } from '../platform/stores/settings'
+import { useEffectiveCustomerId } from '../hooks/useCustomerScope'
 import RequireActiveClient from './RequireActiveClient'
 import { getSyncStatus, type SyncStatus } from '../utils/leadsApi'
 import { fetchAllCustomers, type AggregateMetricsResult, type CustomerForAggregate } from '../utils/leadsAggregate'
@@ -172,7 +172,7 @@ const DEFAULT_FILTERS: FilterState = {
 }
 
 function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountName?: string; enabled?: boolean }) {
-  const customerId = getCurrentCustomerId()
+  const customerId = useEffectiveCustomerId()
 
   const [performanceAccountFilter, setPerformanceAccountFilter] = useState<string>('')
   const [aggregateMetrics, setAggregateMetrics] = useState<AggregateMetricsResult | null>(null)
@@ -354,10 +354,9 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
   // When leads are empty, fetch sync status so we can show lastError / lastSyncAt
   useEffect(() => {
     if (totalLeadCount > 0 || sourceOfTruth === 'db') { setSyncStatusForEmpty(null); return }
-    const customerId = getCurrentCustomerId()
     if (!customerId) return
     getSyncStatus(customerId).then(({ data }) => { if (data) setSyncStatusForEmpty(data) })
-  }, [totalLeadCount, sourceOfTruth])
+  }, [customerId, totalLeadCount, sourceOfTruth])
 
   const allColumns = new Set<string>(liveData?.allDisplayColumns ?? [])
 

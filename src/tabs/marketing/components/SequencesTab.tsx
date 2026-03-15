@@ -87,7 +87,7 @@ import {
 import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { isAgencyUI } from '../../../platform/mode'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
@@ -282,7 +282,12 @@ type Customer = {
 const SequencesTab: React.FC = () => {
   const [sequences, setSequences] = useState<SequenceCampaign[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+  const {
+    canSelectCustomer,
+    customerHeaders,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [snapshots, setSnapshots] = useState<SnapshotOption[]>([])
   const [leadBatches, setLeadBatches] = useState<LeadSourceBatchOption[]>([])
@@ -2524,19 +2529,11 @@ const SequencesTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      const storeCustomerId = getCurrentCustomerId()
-      const currentCustomer = customerList.find(c => c.id === storeCustomerId)
-      if (currentCustomer) {
-        setSelectedCustomerId(currentCustomer.id)
-      } else {
-        setSelectedCustomerId('')
-      }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in SequencesTab:', err)
       setCustomers([])
-      setSelectedCustomerId('')
     }
-  }, [])
+  }, [setSelectedCustomerId])
 
   const loadData = useCallback(async (): Promise<SequenceCampaign[] | null> => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
@@ -2549,7 +2546,7 @@ const SequencesTab: React.FC = () => {
     }
     setLoading(true)
     setError(null)
-    const headers = { 'X-Customer-Id': selectedCustomerId }
+    const headers = customerHeaders!
     const [sequencesRes, campaignsRes] = await Promise.all([
       api.get<Array<{
         id: string
@@ -2624,7 +2621,7 @@ const SequencesTab: React.FC = () => {
     setSequences(rows)
     setLoading(false)
     return rows
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, customerHeaders])
 
   const loadSnapshots = useCallback(async () => {
     const results = await Promise.all(
@@ -4258,12 +4255,10 @@ const SequencesTab: React.FC = () => {
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => {
-                  const newCustomerId = e.target.value
-                  setSelectedCustomerId(newCustomerId)
-                  // Update the global settings store so API calls use the correct customer
-                  setCurrentCustomerId(newCustomerId)
+                  setSelectedCustomerId(e.target.value)
                 }}
                 placeholder="Select client"
+                isDisabled={!canSelectCustomer}
               >
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>

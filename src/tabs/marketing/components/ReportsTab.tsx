@@ -27,7 +27,7 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type WindowDays = 7 | 30 | 90
@@ -166,7 +166,12 @@ function humanizeReason(reason?: string | null): string {
 
 const ReportsTab: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
+  const {
+    canSelectCustomer,
+    customerHeaders,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -191,14 +196,6 @@ const ReportsTab: React.FC = () => {
     window.location.search = params.toString()
   }, [])
 
-  useEffect(() => {
-    const unsubscribe = onSettingsUpdated((detail) => {
-      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId || ''
-      setSelectedCustomerId(next)
-    })
-    return () => unsubscribe()
-  }, [])
-
   const loadCustomers = useCallback(async () => {
     const { data, error: apiError } = await api.get('/api/customers')
     if (apiError) {
@@ -209,14 +206,10 @@ const ReportsTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      const storedCustomerId = getCurrentCustomerId()
-      if (!selectedCustomerId && storedCustomerId && customerList.some((customer) => customer.id === storedCustomerId)) {
-        setSelectedCustomerId(storedCustomerId)
-      }
     } catch {
       setCustomers([])
     }
-  }, [selectedCustomerId])
+  }, [])
 
   useEffect(() => {
     void loadCustomers()
@@ -233,14 +226,12 @@ const ReportsTab: React.FC = () => {
     setError(null)
 
     const sinceHours = Math.min(windowDays * 24, 168)
-    const headers = { 'X-Customer-Id': selectedCustomerId }
-
     const [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes] = await Promise.all([
-      api.get<{ data?: OutreachReportResponse }>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers }),
-      api.get<{ success?: boolean; data?: RunHistoryResponse }>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers }),
-      api.get<{ success?: boolean; data?: IdentityCapacityResponse }>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers }),
-      api.get<{ success?: boolean; data?: OperatorConsoleResponse }>(`/api/send-worker/console?sinceHours=${sinceHours}`, { headers }),
-      api.get<{ success?: boolean; data?: QueueWorkbenchResponse }>(`/api/send-worker/queue-workbench?state=scheduled&limit=5&sinceHours=${sinceHours}`, { headers }),
+      api.get<{ data?: OutreachReportResponse }>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers: customerHeaders }),
+      api.get<{ success?: boolean; data?: RunHistoryResponse }>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers: customerHeaders }),
+      api.get<{ success?: boolean; data?: IdentityCapacityResponse }>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers: customerHeaders }),
+      api.get<{ success?: boolean; data?: OperatorConsoleResponse }>(`/api/send-worker/console?sinceHours=${sinceHours}`, { headers: customerHeaders }),
+      api.get<{ success?: boolean; data?: QueueWorkbenchResponse }>(`/api/send-worker/queue-workbench?state=scheduled&limit=5&sinceHours=${sinceHours}`, { headers: customerHeaders }),
     ])
 
     const firstErr = [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes].find((row) => row.error)
@@ -259,7 +250,7 @@ const ReportsTab: React.FC = () => {
     setLastUpdatedAt(new Date().toISOString())
     setLoading(false)
     setRefreshing(false)
-  }, [selectedCustomerId, windowDays])
+  }, [selectedCustomerId, windowDays, customerHeaders])
 
   useEffect(() => {
     void loadData(false)
@@ -343,12 +334,9 @@ const ReportsTab: React.FC = () => {
                     data-testid="reports-tab-customer-select"
                     size="sm"
                     value={selectedCustomerId}
-                    onChange={(event) => {
-                      const nextCustomerId = event.target.value
-                      setSelectedCustomerId(nextCustomerId)
-                      setCurrentCustomerId(nextCustomerId)
-                    }}
+                    onChange={(event) => setSelectedCustomerId(event.target.value)}
                     minW="220px"
+                    isDisabled={!canSelectCustomer}
                   >
                     <option value="">Select client</option>
                     {customers.map((customer) => (

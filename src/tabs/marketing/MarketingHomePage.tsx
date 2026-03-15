@@ -27,7 +27,7 @@ import InboxTab from './components/InboxTab'
 import ComplianceTab from './components/ComplianceTab'
 import SchedulesTab from './components/SchedulesTab'
 import ReadinessTab from './components/ReadinessTab'
-import { getCurrentCustomerId } from '../../platform/stores/settings'
+import { useEffectiveCustomerId } from '../../hooks/useCustomerScope'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 
@@ -82,7 +82,7 @@ export default function MarketingHomePage({
 }) {
   const activeView = coerceViewId(view)
   const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
-  const customerId = getCurrentCustomerId()
+  const customerId = useEffectiveCustomerId()
   const { interpretation: readiness } = useClientReadinessState(customerId)
 
   const runReadinessNextStep = () => {

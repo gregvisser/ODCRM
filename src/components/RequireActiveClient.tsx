@@ -1,5 +1,5 @@
 import React from 'react'
-import { getCurrentCustomerId } from '../platform/stores/settings'
+import { useEffectiveCustomerId } from '../hooks/useCustomerScope'
 import NoActiveClientEmptyState from './NoActiveClientEmptyState'
 
 /**
@@ -7,7 +7,8 @@ import NoActiveClientEmptyState from './NoActiveClientEmptyState'
  * Otherwise renders children. No behavior change from previous per-screen guards.
  */
 export default function RequireActiveClient({ children }: { children: React.ReactNode }) {
-  if (!getCurrentCustomerId()) {
+  const customerId = useEffectiveCustomerId()
+  if (!customerId) {
     return <NoActiveClientEmptyState />
   }
   return <>{children}</>

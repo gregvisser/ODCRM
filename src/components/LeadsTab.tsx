@@ -46,7 +46,7 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, DownloadIcon, AddIcon, EditIcon } from '@chakra-ui/icons'
 import { emit, on } from '../platform/events'
-import { clearCurrentCustomerId, getCurrentCustomerId, setCurrentCustomerId } from '../platform/stores/settings'
+import { useScopedCustomerSelection } from '../hooks/useCustomerScope'
 import {
   convertLeadToContact,
   bulkConvertLeads,
@@ -102,7 +102,11 @@ function mapLiveLeadsToLead(rows: LiveLeadRow[], accountName: string): Lead[] {
 
 function LeadsTab() {
   const DEFAULT_PAGE_SIZE = 50
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>(getCurrentCustomerId() || '')
+  const {
+    canSelectCustomer,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [customersLoading, setCustomersLoading] = useState(true)
   const [customersError, setCustomersError] = useState<string | null>(null)
@@ -190,7 +194,6 @@ function LeadsTab() {
       setCustomers(list)
       if (selectedCustomerId && !list.some((customer) => customer.id === selectedCustomerId)) {
         setSelectedCustomerId('')
-        clearCurrentCustomerId()
       }
     } catch (e) {
       setCustomersError(e instanceof Error ? e.message : 'Failed to load clients')
@@ -198,7 +201,7 @@ function LeadsTab() {
     } finally {
       setCustomersLoading(false)
     }
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, setSelectedCustomerId])
 
   useEffect(() => {
     loadCustomers()
@@ -216,15 +219,10 @@ function LeadsTab() {
   )
 
   const handleCustomerChange = (nextCustomerId: string) => {
-    setSelectedCustomerId(nextCustomerId)
     setSelectedLeads(new Set())
     setFilters({ channelOfLead: '' })
     setCurrentPage(1)
-    if (nextCustomerId) {
-      setCurrentCustomerId(nextCustomerId)
-    } else {
-      clearCurrentCustomerId()
-    }
+    setSelectedCustomerId(nextCustomerId)
   }
 
   useEffect(() => {
@@ -257,6 +255,7 @@ function LeadsTab() {
         value={selectedCustomerId}
         onChange={(e) => handleCustomerChange(e.target.value)}
         data-testid="leads-tab-customer-select"
+        isDisabled={!canSelectCustomer}
       >
         {customers.map((customer) => (
           <option key={customer.id} value={customer.id}>
