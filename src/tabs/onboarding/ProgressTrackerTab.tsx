@@ -28,6 +28,7 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../../utils/api'
 import { emit, on } from '../../platform/events'
+import { useI18n } from '../../contexts/I18nContext'
 import { useCustomersFromDatabase } from '../../hooks/useCustomersFromDatabase'
 import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
@@ -124,6 +125,7 @@ function computeOverallComplete(progressTracker: any): boolean {
 }
 
 export default function ProgressTrackerTab() {
+  const { t } = useI18n()
   const toast = useToast()
   const { customers, loading, error } = useCustomersFromDatabase()
 
@@ -315,7 +317,7 @@ export default function ProgressTrackerTab() {
   return (
     <Box>
       <Stack spacing={4} mb={4}>
-        <Heading size="md">Onboarding progress</Heading>
+        <Heading size="md">{t('progress.title')}</Heading>
         <Text color="gray.600" fontSize="sm">
           See which client is still onboarding, how far they have progressed, and update the remaining checklist items.
         </Text>
@@ -324,9 +326,9 @@ export default function ProgressTrackerTab() {
           <Alert status="info">
             <AlertIcon />
             <Box>
-              <AlertTitle>Select a client to continue onboarding</AlertTitle>
+              <AlertTitle>{t('progress.alertSelectTitle')}</AlertTitle>
               <AlertDescription>
-                Choose a client below to review progress and finish the remaining onboarding work.
+                {t('progress.alertSelectBody')}
               </AlertDescription>
             </Box>
           </Alert>
@@ -386,7 +388,7 @@ export default function ProgressTrackerTab() {
             </Text>
             <Select
               value={selectedCustomerId}
-              placeholder={filteredCustomers.length || showCompleted ? 'Select client' : 'No incomplete onboardings'}
+              placeholder={filteredCustomers.length || showCompleted ? t('common.selectClient') : 'No incomplete onboardings'}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               size="sm"
               isDisabled={!canSelectCustomer}
@@ -402,9 +404,9 @@ export default function ProgressTrackerTab() {
       </Stack>
 
       {!selectedCustomerId ? (
-        <Box p={6} border="1px solid" borderColor="gray.200" borderRadius="xl" bg="white">
-          <Text color="gray.600" fontSize="sm">
-            Select a client to view and update progress.
+        <Box p={6} border="1px solid" borderColor="border.subtle" borderRadius="2xl" bg="bg.surface" boxShadow="sm" backdropFilter="blur(18px)">
+          <Text color="text.secondary" fontSize="sm">
+            {t('progress.alertSelectBody')}
           </Text>
         </Box>
       ) : isLoadingProgress ? (
@@ -413,14 +415,14 @@ export default function ProgressTrackerTab() {
         </Box>
       ) : (
         <>
-        <Box mb={4} p={4} border="1px solid" borderColor="gray.200" borderRadius="xl" bg="gray.50">
+        <Box mb={4} p={4} border="1px solid" borderColor="border.subtle" borderRadius="2xl" bg="bg.surface" boxShadow="sm" backdropFilter="blur(18px)">
           <VStack align="start" spacing={2}>
             <HStack spacing={2} flexWrap="wrap">
               <Badge colorScheme={salesComplete ? 'green' : 'orange'}>Sales {salesComplete ? 'ready' : 'in progress'}</Badge>
               <Badge colorScheme={opsComplete ? 'green' : 'orange'}>Operations {opsComplete ? 'ready' : 'in progress'}</Badge>
               <Badge colorScheme={amComplete ? 'green' : 'orange'}>Account manager {amComplete ? 'ready' : 'in progress'}</Badge>
             </HStack>
-            <Text fontSize="sm" color="gray.700">
+            <Text fontSize="sm" color="text.secondary">
               Some checklist items update automatically when related setup is completed elsewhere, such as linked mailboxes.
             </Text>
           </VStack>

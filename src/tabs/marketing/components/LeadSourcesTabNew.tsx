@@ -53,6 +53,7 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, AddIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
+import { useI18n } from '../../../contexts/I18nContext'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import {
@@ -128,10 +129,12 @@ function SourcesOverview({
   sources,
   onViewBatches,
   onOpenConnect,
+  reviewBatchesLabel,
 }: {
   sources: Awaited<ReturnType<typeof getLeadSources>>['sources']
   onViewBatches: (sourceType: LeadSourceType) => void
   onOpenConnect: (sourceType: LeadSourceType) => void
+  reviewBatchesLabel: string
 }) {
   return (
     <SimpleGrid id="lead-sources-overview-grid" data-testid="lead-sources-overview-grid" columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
@@ -169,7 +172,7 @@ function SourcesOverview({
                   isDisabled={!src?.connected}
                   onClick={() => onViewBatches(sourceType)}
                 >
-                  Review batches
+                  {reviewBatchesLabel}
                 </Button>
                 <Button id="lead-sources-connect-btn" data-testid="lead-sources-connect-btn" size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => onOpenConnect(sourceType)}>
                   {src?.connected ? 'Replace source' : 'Connect source'}
@@ -190,6 +193,7 @@ function BatchesBlock({
   sourceLabel,
   activeBatchKey,
   batchDate,
+  reviewContactsLabel,
   onBatchDateChange,
   onBack,
   onViewContacts,
@@ -201,6 +205,7 @@ function BatchesBlock({
   sourceLabel: string
   activeBatchKey?: string | null
   batchDate: string
+  reviewContactsLabel: string
   onBatchDateChange: (date: string) => void
   onBack: () => void
   onViewContacts: (batchKey: string) => void
@@ -286,7 +291,7 @@ function BatchesBlock({
                           colorScheme={activeBatchKey === b.batchKey ? 'blue' : undefined}
                           onClick={() => onViewContacts(b.batchKey)}
                         >
-                          {activeBatchKey === b.batchKey ? 'Reviewing contacts' : 'Review contacts'}
+                          {activeBatchKey === b.batchKey ? `${reviewContactsLabel}...` : reviewContactsLabel}
                         </Button>
                         <Button size="xs" variant="outline" onClick={() => onUseInSequence(b)}>
                           Use in sequence
@@ -495,6 +500,7 @@ export default function LeadSourcesTabNew({
 }: {
   onNavigateToSequences?: () => void
 } = {}) {
+  const { t } = useI18n()
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([])
   const { canSelectCustomer, customerId, setCustomerId } = useScopedCustomerSelection()
   const [sources, setSources] = useState<Awaited<ReturnType<typeof getLeadSources>>['sources']>([])
@@ -757,9 +763,9 @@ export default function LeadSourcesTabNew({
       <VStack align="stretch" spacing={6}>
         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
           <Box>
-            <Heading size="lg">Lead Sources</Heading>
+            <Heading size="lg">{t('leadSources.title')}</Heading>
             <Text fontSize="sm" color="gray.600" mt={1}>
-              See which lead sources are ready, review the latest batches for a client, and pass the right batch into Sequences.
+              {t('leadSources.description')}
             </Text>
             {import.meta.env.DEV && (
               <Text fontSize="xs" color="gray.500" mt={0.5}>
@@ -773,7 +779,7 @@ export default function LeadSourcesTabNew({
             maxW="280px"
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
-            placeholder="Select client"
+            placeholder={t('common.selectClient')}
             isDisabled={!canSelectCustomer}
           >
             {customers.map((c) => (
@@ -836,7 +842,7 @@ export default function LeadSourcesTabNew({
                     <Box>
                       <AlertTitle>Lead sources are ready to review</AlertTitle>
                       <AlertDescription>
-                        Start with the source cards below to open the latest batches and choose which batch should move into Sequences.
+                    Start with the source cards below to open the latest batches and choose which batch should move into Sequences.
                       </AlertDescription>
                     </Box>
                   </Alert>
@@ -875,6 +881,7 @@ export default function LeadSourcesTabNew({
                 </Box>
                 <SourcesOverview
                   sources={sources}
+                  reviewBatchesLabel={t('actions.reviewBatches')}
                   onViewBatches={(sourceType) => {
                     setViewBatchesSource(sourceType)
                     setContactsBatchKey(null)
@@ -892,6 +899,7 @@ export default function LeadSourcesTabNew({
                     batchesFallback={batchesFallback}
                     activeBatchKey={contactsBatchKey?.batchKey ?? null}
                     batchDate={batchDate}
+                    reviewContactsLabel={t('actions.reviewContacts')}
                     onBatchDateChange={(next) => setBatchDate(next)}
                     onBack={() => {
                       setViewBatchesSource(null)

@@ -41,6 +41,7 @@ import {
   NotAllowedIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
+import { useI18n } from '../../../contexts/I18nContext'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
@@ -123,6 +124,7 @@ type RepliesResponse = {
 }
 
 const InboxTab: React.FC = () => {
+  const { t } = useI18n()
   const toast = useToast()
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
@@ -433,9 +435,9 @@ const InboxTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Inbox</Heading>
+          <Heading size="lg">{t('inbox.title')}</Heading>
           <Text color="gray.600">
-            Review conversations, handle replies, and keep operator follow-up moving across connected mailboxes.
+            {t('inbox.description')}
           </Text>
         </VStack>
         <HStack>
@@ -794,7 +796,7 @@ const InboxTab: React.FC = () => {
               <SearchIcon color="gray.300" />
             </InputLeftElement>
             <Input
-              placeholder="Search contacts, companies, campaigns, or reply text..."
+              placeholder={t('search.inbox')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />

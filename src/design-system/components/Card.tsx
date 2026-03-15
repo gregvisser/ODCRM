@@ -30,11 +30,14 @@ export function Card({
       border: '1px solid',
       borderColor: semanticColor.borderSubtle,
       boxShadow: shadow.sm,
+      backdropFilter: 'blur(18px)',
     },
     elevated: {
-      bg: semanticColor.bgSurface,
-      border: 'none',
+      bg: semanticColor.bgElevated,
+      border: '1px solid',
+      borderColor: semanticColor.borderStrong,
       boxShadow: shadow.md,
+      backdropFilter: 'blur(20px)',
     },
     outlined: {
       bg: 'transparent',
@@ -59,6 +62,7 @@ export function Card({
           ? {
               boxShadow: shadow.md,
               transform: 'translateY(-2px)',
+              borderColor: semanticColor.borderStrong,
             }
           : undefined
       }

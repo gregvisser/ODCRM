@@ -28,18 +28,18 @@ interface EmptyStateProps {
 export function EmptyState({ icon, title, description, action, minH = '300px' }: EmptyStateProps) {
   return (
     <Box w="100%" minH={minH} display="flex" alignItems="center" justifyContent="center" py={spacing[8]}>
-      <VStack spacing={spacing[4]} maxW="400px" textAlign="center">
+      <VStack spacing={spacing[4]} maxW="460px" textAlign="center" px={6} py={8} borderRadius="2xl" border="1px solid" borderColor={semanticColor.borderSubtle} bg={semanticColor.bgPanel} boxShadow="md" backdropFilter="blur(18px)">
         {icon && (
           <Box
             w="64px"
             h="64px"
             borderRadius="full"
-            bg={semanticColor.bgSubtle}
+            bg="rgba(227,179,65,0.14)"
             display="flex"
             alignItems="center"
             justifyContent="center"
           >
-            <Icon as={icon} boxSize={8} color={semanticColor.textMuted} />
+            <Icon as={icon} boxSize={8} color="accent.300" />
           </Box>
         )}
         <Heading size="md" color={semanticColor.textPrimary}>

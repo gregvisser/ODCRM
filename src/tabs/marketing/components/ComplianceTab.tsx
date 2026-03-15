@@ -28,6 +28,7 @@ import {
 import { DeleteIcon } from '@chakra-ui/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../utils/api'
+import { useI18n } from '../../../contexts/I18nContext'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
 
@@ -130,6 +131,7 @@ function getProtectionStatus(kind: SheetKind, health: SuppressionSheetHealth | n
 }
 
 export default function ComplianceTab() {
+  const { t } = useI18n()
   const DEFAULT_PAGE_SIZE = 50
   const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
@@ -564,7 +566,7 @@ export default function ComplianceTab() {
     <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
       <VStack align="stretch" spacing={6}>
         <Box>
-          <Heading size="lg" mb={2}>Compliance</Heading>
+          <Heading size="lg" mb={2}>{t('compliance.title')}</Heading>
           <Text fontSize="sm" color="gray.600">
             Check whether email and domain suppression protections are connected, current, and safe for this client.
           </Text>

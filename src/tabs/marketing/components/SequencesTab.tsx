@@ -86,6 +86,7 @@ import {
 } from '@chakra-ui/icons'
 import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
+import { useI18n } from '../../../contexts/I18nContext'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { isAgencyUI } from '../../../platform/mode'
@@ -280,6 +281,7 @@ type Customer = {
 }
 
 const SequencesTab: React.FC = () => {
+  const { t } = useI18n()
   const [sequences, setSequences] = useState<SequenceCampaign[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
@@ -4185,7 +4187,7 @@ const SequencesTab: React.FC = () => {
 
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Sequences</Heading>
+          <Heading size="lg">{t('sequences.title')}</Heading>
           <Text color="gray.600">
             Choose a sequence, confirm who it will send to, then test or start it.
           </Text>
@@ -4257,7 +4259,7 @@ const SequencesTab: React.FC = () => {
                 onChange={(e) => {
                   setSelectedCustomerId(e.target.value)
                 }}
-                placeholder="Select client"
+                placeholder={t('common.selectClient')}
                 isDisabled={!canSelectCustomer}
               >
                 {customers.map((customer) => (
@@ -6611,7 +6613,7 @@ const SequencesTab: React.FC = () => {
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder="Search sequences..."
+            placeholder={`${t('common.search')} sequences...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />

@@ -8,6 +8,7 @@ import AuthGate from './auth/AuthGate'
 import LoginPage from './auth/LoginPage'
 import { msalConfig } from './auth/msalConfig'
 import ErrorBoundary from './components/ErrorBoundary'
+import { I18nProvider } from './contexts/I18nContext'
 import { UserPreferencesProvider } from './contexts/UserPreferencesContext'
 import { BUILD_SHA, BUILD_TIME } from './version'
 import './index.css'
@@ -74,7 +75,9 @@ try {
     createRoot(rootElement).render(
       <StrictMode>
         <ChakraProvider theme={theme}>
-          <DiagPage />
+          <I18nProvider>
+            <DiagPage />
+          </I18nProvider>
         </ChakraProvider>
       </StrictMode>,
     )
@@ -91,21 +94,23 @@ try {
     createRoot(rootElement).render(
       <StrictMode>
         <ChakraProvider theme={theme}>
-          <ErrorBoundary>
-            <BootFlag>
-              {msalInstance ? (
-                <MsalProvider instance={msalInstance}>
-                  <AuthGate>
-                    <UserPreferencesProvider>
-                      <App />
-                    </UserPreferencesProvider>
-                  </AuthGate>
-                </MsalProvider>
-              ) : (
-                <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
-              )}
-            </BootFlag>
-          </ErrorBoundary>
+          <I18nProvider>
+            <ErrorBoundary>
+              <BootFlag>
+                {msalInstance ? (
+                  <MsalProvider instance={msalInstance}>
+                    <AuthGate>
+                      <UserPreferencesProvider>
+                        <App />
+                      </UserPreferencesProvider>
+                    </AuthGate>
+                  </MsalProvider>
+                ) : (
+                  <LoginPage onSignIn={() => undefined} showConfigWarning disableSignIn />
+                )}
+              </BootFlag>
+            </ErrorBoundary>
+          </I18nProvider>
         </ChakraProvider>
       </StrictMode>,
     )

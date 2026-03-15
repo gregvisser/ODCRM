@@ -178,10 +178,13 @@ export const semanticColor = {
   bgCanvas: 'bg.canvas',
   bgSurface: 'bg.surface',
   bgSubtle: 'bg.subtle',
+  bgElevated: 'bg.elevated',
+  bgPanel: 'bg.panel',
   bgTransparent: 'bg.transparent',
   
   // Borders
   borderSubtle: 'border.subtle',
+  borderStrong: 'border.strong',
   
   // Text
   textPrimary: 'text.primary',
