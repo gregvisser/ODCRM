@@ -225,6 +225,18 @@ type CustomerApi = {
   foundingYear?: string | null
   socialPresence?: Array<{ label: string; url: string }> | null
   lastEnrichedAt?: string | null
+  customerContacts?: Array<{
+    id: string
+    customerId: string
+    name: string
+    email?: string | null
+    phone?: string | null
+    title?: string | null
+    isPrimary: boolean
+    notes?: string | null
+    createdAt: string
+    updatedAt: string
+  }>
 }
 
 type CustomerContactApi = {
@@ -2095,10 +2107,23 @@ const renderAboutField = (
 
 type FieldConfig = {
   label: string
-  render: (account: Account, onContactClick?: (contact: Contact) => void) => ReactNode
+  render: (
+    account: Account,
+    onContactClick?: (contact: Contact) => void,
+    onCustomerContactClick?: (contact: CustomerContactApi) => void
+  ) => ReactNode
 }
 
-function getFieldConfig(contactsData: StoredContact[]): FieldConfig[] {
+function getFieldConfig(
+  contactsData: StoredContact[],
+  options?: {
+    isServerSourceOfTruth?: boolean
+    customerContactsByAccountKey?: Record<string, CustomerContactApi[]>
+  },
+): FieldConfig[] {
+  const isServerSourceOfTruth = options?.isServerSourceOfTruth === true
+  const customerContactsByAccountKey = options?.customerContactsByAccountKey ?? {}
+
   return [
   {
     label: 'Account',
@@ -2161,7 +2186,44 @@ function getFieldConfig(contactsData: StoredContact[]): FieldConfig[] {
   },
   {
     label: 'Contacts',
-    render: (account, onContactClick) => {
+    render: (account, onContactClick, onCustomerContactClick) => {
+      if (isServerSourceOfTruth) {
+        const accountKey = account._databaseId || account.id || account.name
+        const accountContacts = customerContactsByAccountKey[accountKey] || []
+
+        if (accountContacts.length === 0) {
+          return <Text fontSize="sm" color="gray.500">No contacts</Text>
+        }
+
+        return (
+          <Stack spacing={2}>
+            <Text fontSize="sm" fontWeight="medium">
+              {accountContacts.length} contact{accountContacts.length !== 1 ? 's' : ''}
+            </Text>
+            <Stack spacing={1}>
+              {accountContacts.map((contact) => (
+                <Box
+                  key={contact.id}
+                  fontSize="sm"
+                  p={2}
+                  borderRadius="md"
+                  border="1px solid"
+                  borderColor="gray.200"
+                  cursor="pointer"
+                  _hover={{ bg: 'gray.50', borderColor: 'teal.300' }}
+                  onClick={() => onCustomerContactClick?.(contact)}
+                >
+                  <Text fontWeight="medium">{contact.name}</Text>
+                  <Text fontSize="xs" color="gray.500">
+                    {contact.title || '—'} • {contact.email || '—'}
+                  </Text>
+                </Box>
+              ))}
+            </Stack>
+          </Stack>
+        )
+      }
+
       // Filter out deleted contacts to ensure they don't show in the account card
       const deletedContactsSet = loadDeletedContactsFromStorage()
       const accountContacts = contactsData.filter((contact) => {
@@ -2509,9 +2571,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   
   // Seed contacts (from screenshots) only if the user has no contacts saved yet.
   useEffect(() => {
+    if (isServerSourceOfTruth) {
+      setContactsData([])
+      return
+    }
+
     seedContactsIfEmpty()
     setContactsData(loadContactsFromStorage())
-  }, [])
+  }, [isServerSourceOfTruth])
 
   // Load initial data from dbAccounts prop (REQUIRED - no localStorage fallback)
   const [accountsData, setAccountsData] = useState<Account[]>(() => {
@@ -2612,7 +2679,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const [connectedEmails, setConnectedEmails] = useState<ConnectedEmailIdentity[]>([])
   const [loadingEmails, setLoadingEmails] = useState(false)
   const [emailFetchError, setEmailFetchError] = useState<string | null>(null)
-  const [contactsData, setContactsData] = useState<StoredContact[]>(() => loadContactsFromStorage())
+  const [contactsData, setContactsData] = useState<StoredContact[]>(() => (
+    isServerSourceOfTruth ? [] : loadContactsFromStorage()
+  ))
+
+  const customerContactsByAccountKey = useMemo(() => {
+    return customers.reduce<Record<string, CustomerContactApi[]>>((acc, customer) => {
+      const contactRows = Array.isArray(customer.customerContacts) ? customer.customerContacts : []
+      acc[customer.id] = contactRows
+      acc[customer.name] = contactRows
+      return acc
+    }, {})
+  }, [customers])
 
   // Load job taxonomy once (used to render onboarding-stored IDs as labels in the Account Card)
   useEffect(() => {
@@ -2700,6 +2778,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Sync contact counts when contactsData changes (initial load and updates)
   // Note: contactsData already excludes deleted contacts since loadContactsFromStorage filters them
   useEffect(() => {
+    if (isServerSourceOfTruth) return
     if (contactsData.length === 0 && accountsData.length === 0) return // Wait for data to load
     
     // Double-check: filter out any deleted contacts that might have slipped through
@@ -3776,6 +3855,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
   // Keep contact counts/details live (ContactsTab dispatches contactsUpdated).
   useEffect(() => {
+    if (isServerSourceOfTruth) return undefined
+
     const off = on<StoredContact[]>('contactsUpdated', (detail) => {
       // Load contacts and filter out deleted ones
       const updatedContacts = Array.isArray(detail) ? detail : loadContactsFromStorage()
@@ -3997,7 +4078,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   })()
 
   const accountNames = (accountsData ?? []).map((a) => a.name).slice().sort((a, b) => a.localeCompare(b))
-  const fieldConfig = getFieldConfig(contactsData)
+  const fieldConfig = getFieldConfig(contactsData, {
+    isServerSourceOfTruth,
+    customerContactsByAccountKey,
+  })
 
   return (
     <>
@@ -6559,7 +6643,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                             key={`${selectedAccount.name}-${field.label}`}
                             label={field.label}
                           >
-                            {field.render(selectedAccount, setSelectedContact)}
+                            {field.render(selectedAccount, setSelectedContact, setSelectedCustomerContact)}
                           </FieldRow>
                         )
                       })}
