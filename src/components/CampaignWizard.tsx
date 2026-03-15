@@ -32,7 +32,6 @@ import {
 import { api } from '../utils/api'
 import { getItem, setItem } from '../platform/storage'
 import { getCognismProspects, type CognismProspect } from '../platform/stores/cognismProspects'
-import { getAccounts } from '../platform/stores/accounts'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import RequireActiveClient from './RequireActiveClient'
 
@@ -67,6 +66,11 @@ interface Contact {
   lastName: string
   companyName: string
   email: string
+}
+
+interface CustomerAccountOption {
+  id: string
+  name: string
 }
 
 type SequenceEmailStepDraft = {
@@ -111,6 +115,7 @@ export default function CampaignWizard({
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [schedules, setSchedules] = useState<EmailSendSchedule[]>([])
   const [, setContacts] = useState<Contact[]>([])
+  const [availableAccounts, setAvailableAccounts] = useState<string[]>([])
   const toast = useToast()
   const [prospectSearch, setProspectSearch] = useState('')
 
@@ -170,6 +175,21 @@ export default function CampaignWizard({
     setContacts([])
   }, [])
 
+  const fetchAvailableAccounts = useCallback(async () => {
+    const { data, error } = await api.get<CustomerAccountOption[]>('/api/customers')
+    if (error) {
+      console.error('Failed to fetch customer accounts:', error)
+      setAvailableAccounts([])
+      return
+    }
+    const names = Array.isArray(data)
+      ? data
+          .map((customer) => customer?.name?.trim())
+          .filter((name): name is string => Boolean(name))
+      : []
+    setAvailableAccounts(Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)))
+  }, [])
+
   const fetchCampaign = useCallback(async (id: string) => {
     const { data } = await api.get<any>(`/api/campaigns/${id}`)
     if (data) {
@@ -211,6 +231,7 @@ export default function CampaignWizard({
     fetchIdentities()
     fetchSchedules()
     fetchContacts()
+    fetchAvailableAccounts()
     if (campaignId) {
       fetchCampaign(campaignId)
     } else {
@@ -223,13 +244,7 @@ export default function CampaignWizard({
         customerAccountName: prev.customerAccountName || lastAccount,
       }))
     }
-  }, [campaignId, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules])
-
-  const availableAccounts = useMemo(() => {
-    const accounts = getAccounts<{ name: string }>()
-    const names = accounts.map((a) => a?.name).filter(Boolean)
-    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
-  }, [])
+  }, [campaignId, fetchAvailableAccounts, fetchCampaign, fetchContacts, fetchIdentities, fetchSchedules])
 
   const [templatesFromApi, setTemplatesFromApi] = useState<WizardEmailTemplate[]>([])
   const [templatesLoading, setTemplatesLoading] = useState(true)
