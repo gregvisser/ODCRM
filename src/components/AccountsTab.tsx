@@ -2410,7 +2410,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   })
 
   // Load deleted accounts to prevent re-adding them
-  const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => loadDeletedAccountsFromStorage())
+  const [deletedAccounts, setDeletedAccounts] = useState<Set<string>>(() => (
+    isServerSourceOfTruth ? new Set() : loadDeletedAccountsFromStorage()
+  ))
   
   // Customers data for displaying labels and agreement info (CANONICAL SOURCE ONLY)
   // Defensive guard: ensure always array, but log error if not
@@ -2728,29 +2730,41 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   }, [accountsData.length, contactsData, isServerSourceOfTruth]) // Sync whenever contacts change
   const [expandedAbout, setExpandedAbout] = useState<Record<string, boolean>>({})
   const [sectorsMap, setSectorsMap] = useState<Record<string, string>>(() => {
+    if (isServerSourceOfTruth) {
+      return sanitizeAccountsList(dbAccounts).reduce<Record<string, string>>((acc, account) => {
+        acc[account.name] = account.sector
+        return acc
+      }, {})
+    }
+
     const stored = loadSectorsFromStorage()
-    const loadedAccounts = isServerSourceOfTruth ? sanitizeAccountsList(dbAccounts) : loadAccountsFromStorage()
+    const loadedAccounts = loadAccountsFromStorage()
     const deletedAccountsSet = loadDeletedAccountsFromStorage()
-    // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string> = {}
-    const allAccounts = [...loadedAccounts, ...accounts.filter(a => 
-      !loadedAccounts.some(la => la.name === a.name) && !deletedAccountsSet.has(a.name)
+    const allAccounts = [...loadedAccounts, ...accounts.filter(a =>
+      !loadedAccounts.some((la) => la.name === a.name) && !deletedAccountsSet.has(a.name)
     )]
-    allAccounts.forEach(account => {
+    allAccounts.forEach((account) => {
       merged[account.name] = stored[account.name] || account.sector
     })
     return merged
   })
   const [targetLocationsMap, setTargetLocationsMap] = useState<Record<string, string[]>>(() => {
+    if (isServerSourceOfTruth) {
+      return sanitizeAccountsList(dbAccounts).reduce<Record<string, string[]>>((acc, account) => {
+        acc[account.name] = account.targetLocation
+        return acc
+      }, {})
+    }
+
     const stored = loadTargetLocationsFromStorage()
-    const loadedAccounts = isServerSourceOfTruth ? sanitizeAccountsList(dbAccounts) : loadAccountsFromStorage()
+    const loadedAccounts = loadAccountsFromStorage()
     const deletedAccountsSet = loadDeletedAccountsFromStorage()
-    // Merge with account defaults, excluding deleted accounts
     const merged: Record<string, string[]> = {}
-    const allAccounts = [...loadedAccounts, ...accounts.filter(a => 
-      !loadedAccounts.some(la => la.name === a.name) && !deletedAccountsSet.has(a.name)
+    const allAccounts = [...loadedAccounts, ...accounts.filter(a =>
+      !loadedAccounts.some((la) => la.name === a.name) && !deletedAccountsSet.has(a.name)
     )]
-    allAccounts.forEach(account => {
+    allAccounts.forEach((account) => {
       merged[account.name] = stored[account.name] || account.targetLocation
     })
     return merged
@@ -4577,7 +4591,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       </Heading>
                       <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="gray" variant="subtle" px={3} py={1} fontSize="sm">
-                          {(selectedCustomerDetail?.sector ?? sectorsMap[selectedAccount.name] ?? selectedAccount.sector) || 'No sector'}
+                          {(selectedCustomerDetail?.sector ?? selectedAccount.sector) || 'No sector'}
                         </Badge>
                         <Badge
                           colorScheme={selectedAccount.status === 'Active' ? 'green' : selectedAccount.status === 'Inactive' ? 'red' : 'orange'}
