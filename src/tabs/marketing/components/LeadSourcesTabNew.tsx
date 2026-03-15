@@ -4,7 +4,7 @@
  * Wide table for contacts.
  */
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   Alert,
   AlertDescription,
@@ -96,100 +96,84 @@ function isoYesterday(): string {
   return d.toISOString().slice(0, 10)
 }
 
+function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>['sources'][number] | undefined): {
+  colorScheme: 'green' | 'orange' | 'gray'
+  label: string
+  description: string
+} {
+  if (!src?.connected) {
+    return {
+      colorScheme: 'gray',
+      label: 'Not connected',
+      description: 'Connect a lead source before this source can provide new batches.',
+    }
+  }
+  if (src.lastError) {
+    return {
+      colorScheme: 'orange',
+      label: 'Needs attention',
+      description: `The latest source refresh needs review: ${src.lastError}`,
+    }
+  }
+  return {
+    colorScheme: 'green',
+    label: 'Ready',
+    description: src.lastFetchAt
+      ? `Last refreshed ${new Date(src.lastFetchAt).toLocaleString()}.`
+      : 'Connected and ready to review batches.',
+  }
+}
+
 function SourcesOverview({
   sources,
-  customerId,
   onViewBatches,
   onOpenConnect,
-  onPoll,
 }: {
   sources: Awaited<ReturnType<typeof getLeadSources>>['sources']
-  customerId: string
   onViewBatches: (sourceType: LeadSourceType) => void
   onOpenConnect: (sourceType: LeadSourceType) => void
-  onPoll: (sourceType: LeadSourceType) => void
 }) {
   return (
     <SimpleGrid id="lead-sources-overview-grid" data-testid="lead-sources-overview-grid" columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
       {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
         const src = sources.find((s) => s.sourceType === sourceType)
         const connected = !!src?.connected
+        const operatorStatus = getSourceOperatorStatus(src)
         return (
           <Card key={sourceType} id="lead-sources-source-card" data-testid="lead-sources-source-card">
             <CardHeader>
               <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
                 <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
                 <HStack spacing={2}>
-                  {connected ? (
-                    <Badge colorScheme="green">Connected</Badge>
-                  ) : (
-                    <Badge colorScheme="gray">Not connected</Badge>
-                  )}
+                  <Badge colorScheme={operatorStatus.colorScheme}>{operatorStatus.label}</Badge>
                   {connected && src?.usingGlobalConfig && (
-                    <Tooltip label="This sheet is shared across all accounts." hasArrow>
-                      <Badge colorScheme="blue" cursor="help">Using global config</Badge>
+                    <Tooltip label="This source is shared across accounts that do not have their own sheet." hasArrow>
+                      <Badge colorScheme="blue" cursor="help">Shared source</Badge>
                     </Tooltip>
                   )}
                 </HStack>
               </Flex>
             </CardHeader>
             <CardBody pt={0}>
-              {src?.lastError && (
-                <Text fontSize="xs" color="red.600" mb={2}>
-                  {src.lastError}
-                </Text>
-              )}
-              {src?.lastFetchAt && (
-                <Text fontSize="xs" color="gray.600" mb={2}>
-                  Last fetch: {new Date(src.lastFetchAt).toLocaleString()}
-                </Text>
-              )}
+              <Text fontSize="sm" color="gray.700" mb={3}>
+                {operatorStatus.description}
+              </Text>
               <VStack align="stretch" spacing={2}>
                 <Button
                   id="lead-sources-view-batches-btn"
                   data-testid="lead-sources-view-batches-btn"
                   size="sm"
                   leftIcon={<ViewIcon />}
-                  isDisabled={!connected}
+                  colorScheme={src?.connected ? 'blue' : 'gray'}
+                  variant={src?.connected ? 'solid' : 'outline'}
+                  isDisabled={!src?.connected}
                   onClick={() => onViewBatches(sourceType)}
                 >
-                  View Batches
+                  Review batches
                 </Button>
-                {connected && (
-                  <Link
-                    id="lead-sources-open-sheet-link"
-                    data-testid="lead-sources-open-sheet-link"
-                    href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
-                    isExternal
-                    _hover={{ textDecoration: 'none' }}
-                  >
-                    <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="outline">
-                      Open Sheet
-                    </Button>
-                  </Link>
-                )}
-                <Button
-                  id="lead-sources-connect-btn"
-                  data-testid="lead-sources-connect-btn"
-                  size="sm"
-                  leftIcon={<AddIcon />}
-                  variant="outline"
-                  onClick={() => onOpenConnect(sourceType)}
-                >
-                  Connect
+                <Button id="lead-sources-connect-btn" data-testid="lead-sources-connect-btn" size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => onOpenConnect(sourceType)}>
+                  {src?.connected ? 'Replace source' : 'Connect source'}
                 </Button>
-                {connected && (
-                  <Button
-                    id="lead-sources-poll-now-btn"
-                    data-testid="lead-sources-poll-now-btn"
-                    size="sm"
-                    leftIcon={<RepeatIcon />}
-                    variant="ghost"
-                    onClick={() => onPoll(sourceType)}
-                  >
-                    Poll now
-                  </Button>
-                )}
               </VStack>
             </CardBody>
           </Card>
@@ -226,7 +210,12 @@ function BatchesBlock({
   return (
     <Box mt={6} id="lead-sources-batches-panel" data-testid="lead-sources-batches-panel">
       <Flex justify="space-between" align="center" mb={3}>
-        <Heading size="md">Batches — {sourceLabel}</Heading>
+        <Box>
+          <Heading size="md">Lead batches — {sourceLabel}</Heading>
+          <Text fontSize="sm" color="gray.600" mt={1}>
+            Review the available batches for this source, then open contacts or pass the right batch into Sequences.
+          </Text>
+        </Box>
         <HStack>
           <FormControl width="auto">
             <FormLabel fontSize="sm">Date</FormLabel>
@@ -249,7 +238,7 @@ function BatchesBlock({
         <>
           {batchesFallback && (
             <Text fontSize="sm" color="gray.600" mb={2}>
-              No batches for selected date; showing most recent batches.
+              No batches were found for that date, so the most recent batches are shown instead.
             </Text>
           )}
           <Box id="lead-sources-batches-table" data-testid="lead-sources-batches-table" overflowX="auto" borderWidth="1px" borderRadius="md">
@@ -269,7 +258,7 @@ function BatchesBlock({
                   <Td colSpan={5} color="gray.500">
                     <VStack align="stretch" spacing={2} py={2}>
                       <Text>
-                        No batches for this date. Try selecting yesterday&apos;s date or click Poll now on the source.
+                        No batches were found for this date. Try yesterday&apos;s date, or use the setup section below to refresh the source.
                       </Text>
                       <Button
                         size="sm"
@@ -297,7 +286,7 @@ function BatchesBlock({
                           colorScheme={activeBatchKey === b.batchKey ? 'blue' : undefined}
                           onClick={() => onViewContacts(b.batchKey)}
                         >
-                          {activeBatchKey === b.batchKey ? 'Viewing contacts' : 'View contacts'}
+                          {activeBatchKey === b.batchKey ? 'Reviewing contacts' : 'Review contacts'}
                         </Button>
                         <Button size="xs" variant="outline" onClick={() => onUseInSequence(b)}>
                           Use in sequence
@@ -372,16 +361,16 @@ function ContactsBlock({
       <CardHeader>
         <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap">
           <Box>
-            <Heading size="md">Contacts — {sourceLabel}</Heading>
+            <Heading size="md">Batch contacts preview — {sourceLabel}</Heading>
             <Text fontSize="sm" color="gray.600" mt={1}>
               {contactsConfigScope === 'all_accounts'
-                ? 'Using the shared source sheet for all accounts.'
+                ? 'Using the shared source sheet for accounts that do not have their own source.'
                 : "Using this client's connected source sheet."}
             </Text>
           </Box>
           <HStack>
             <Button size="sm" variant="outline" onClick={() => setShowColumnChooser((v) => !v)}>
-              {showColumnChooser ? 'Hide columns' : 'Show/hide columns'}
+              {showColumnChooser ? 'Hide columns' : 'Choose columns'}
             </Button>
             <Button size="sm" onClick={onBack}>
               Back
@@ -402,7 +391,7 @@ function ContactsBlock({
                       Visible columns
                     </Text>
                     <Text fontSize="sm" color="gray.600">
-                      Showing {cols.length} of {normalizedColumns.length} source columns on this page.
+                      Showing {cols.length} of {normalizedColumns.length} source columns in this preview.
                     </Text>
                   </Box>
                   <HStack>
@@ -748,6 +737,20 @@ export default function LeadSourcesTabNew({
   }
 
   const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
+  const sourceSummary = useMemo(() => {
+    const connected = sources.filter((source) => source.connected).length
+    const needsAttention = sources.filter((source) => source.connected && !!source.lastError).length
+    const shared = sources.filter((source) => source.connected && source.usingGlobalConfig).length
+    const ready = sources.filter((source) => source.connected && !source.lastError).length
+
+    return {
+      total: sources.length,
+      connected,
+      ready,
+      needsAttention,
+      shared,
+    }
+  }, [sources])
 
   return (
     <Box p={4} id="lead-sources-tab-panel" data-testid="lead-sources-tab-panel">
@@ -755,6 +758,9 @@ export default function LeadSourcesTabNew({
         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
           <Box>
             <Heading size="lg">Lead Sources</Heading>
+            <Text fontSize="sm" color="gray.600" mt={1}>
+              See which lead sources are ready, review the latest batches for a client, and pass the right batch into Sequences.
+            </Text>
             {import.meta.env.DEV && (
               <Text fontSize="xs" color="gray.500" mt={0.5}>
                 build: {buildVersion}
@@ -779,26 +785,17 @@ export default function LeadSourcesTabNew({
         </Flex>
 
         {!customerId ? (
-          <Card id="lead-sources-no-customer-state" data-testid="lead-sources-no-customer-state">
-            <CardBody>
-              <VStack py={8} spacing={2}>
-                <Text color="gray.600" fontSize="md">
-                  Select a client to view Lead Sources
-                </Text>
-                <Text fontSize="sm" color="gray.500">
-                  Choose a customer from the dropdown above to connect sheets and view batches and contacts.
-                </Text>
-              </VStack>
-            </CardBody>
-          </Card>
+          <Alert status="info" id="lead-sources-no-customer-state" data-testid="lead-sources-no-customer-state">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Select a client to review lead sources</AlertTitle>
+              <AlertDescription>
+                Choose a client above to see which sources are ready, review batches, and send the right batch into Sequences.
+              </AlertDescription>
+            </Box>
+          </Alert>
         ) : (
           <>
-            <Alert id="lead-sources-sheet-truth-banner" data-testid="lead-sources-sheet-truth-banner" status="info">
-              <AlertIcon />
-              <AlertDescription fontSize="sm">
-                Lead Sources are Google Sheets-linked. The linked sheet remains the source of truth for this tab.
-              </AlertDescription>
-            </Alert>
             {loading && (
               <Flex justify="center" py={8}>
                 <Spinner size="lg" />
@@ -813,9 +810,71 @@ export default function LeadSourcesTabNew({
             )}
             {!loading && customerId && (
               <>
+                {sourceSummary.connected === 0 ? (
+                  <Alert status="info">
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle>No lead sources connected yet</AlertTitle>
+                      <AlertDescription>
+                        Connect at least one source below, then review its batches to choose which contacts should move into Sequences.
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
+                ) : sourceSummary.needsAttention > 0 ? (
+                  <Alert status="warning">
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle>Some lead sources need attention</AlertTitle>
+                      <AlertDescription>
+                        {sourceSummary.needsAttention} connected source{sourceSummary.needsAttention === 1 ? '' : 's'} reported a refresh issue. Review the source status first, then use the setup section below if you need to refresh or reconnect.
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
+                ) : (
+                  <Alert status="success">
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle>Lead sources are ready to review</AlertTitle>
+                      <AlertDescription>
+                        Start with the source cards below to open the latest batches and choose which batch should move into Sequences.
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
+                )}
+                <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+                  <Card>
+                    <CardBody>
+                      <Text fontSize="2xl" fontWeight="bold">{sourceSummary.connected}</Text>
+                      <Text fontSize="sm" color="gray.600">Connected sources</Text>
+                    </CardBody>
+                  </Card>
+                  <Card>
+                    <CardBody>
+                      <Text fontSize="2xl" fontWeight="bold">{sourceSummary.ready}</Text>
+                      <Text fontSize="sm" color="gray.600">Ready to use</Text>
+                    </CardBody>
+                  </Card>
+                  <Card>
+                    <CardBody>
+                      <Text fontSize="2xl" fontWeight="bold">{sourceSummary.needsAttention}</Text>
+                      <Text fontSize="sm" color="gray.600">Need attention</Text>
+                    </CardBody>
+                  </Card>
+                  <Card>
+                    <CardBody>
+                      <Text fontSize="2xl" fontWeight="bold">{sourceSummary.shared}</Text>
+                      <Text fontSize="sm" color="gray.600">Using shared source</Text>
+                    </CardBody>
+                  </Card>
+                </SimpleGrid>
+                <Box>
+                  <Heading size="md" mb={1}>Source status</Heading>
+                  <Text fontSize="sm" color="gray.600">
+                    Start here to see which lead sources are ready and open the batch you want to review next.
+                  </Text>
+                </Box>
                 <SourcesOverview
                   sources={sources}
-                  customerId={customerId}
                   onViewBatches={(sourceType) => {
                     setViewBatchesSource(sourceType)
                     setContactsBatchKey(null)
@@ -824,7 +883,6 @@ export default function LeadSourcesTabNew({
                     setBatchesFallback(false)
                   }}
                   onOpenConnect={(sourceType) => openConnect(sourceType)}
-                  onPoll={(sourceType) => handlePoll(sourceType)}
                 />
                 {viewBatchesSource ? (
                   <BatchesBlock
@@ -877,6 +935,89 @@ export default function LeadSourcesTabNew({
                     }}
                   />
                 ) : null}
+                <Card>
+                  <CardHeader pb={2}>
+                    <Heading size="md">Source setup & troubleshooting</Heading>
+                    <Text fontSize="sm" color="gray.600" mt={1}>
+                      Use these secondary actions when you need to reconnect a source, open the linked sheet, refresh from Google Sheets, or review source-specific issues.
+                    </Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <Alert id="lead-sources-sheet-truth-banner" data-testid="lead-sources-sheet-truth-banner" status="info" mb={4}>
+                      <AlertIcon />
+                      <AlertDescription fontSize="sm">
+                        The linked Google Sheet remains the source of truth for this tab. Source setup and refresh controls live here so the main view can stay focused on status and batch choice.
+                      </AlertDescription>
+                    </Alert>
+                    <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} spacing={4}>
+                      {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
+                        const src = sources.find((source) => source.sourceType === sourceType)
+                        const connected = !!src?.connected
+                        return (
+                          <Box key={sourceType} borderWidth="1px" borderRadius="md" p={4}>
+                            <VStack align="stretch" spacing={3}>
+                              <Box>
+                                <HStack justify="space-between" align="start" spacing={3}>
+                                  <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
+                                  <Badge colorScheme={connected ? 'green' : 'gray'}>
+                                    {connected ? 'Connected' : 'Not connected'}
+                                  </Badge>
+                                </HStack>
+                                <Text fontSize="sm" color="gray.600" mt={2}>
+                                  {src?.usingGlobalConfig
+                                    ? 'This source currently uses a shared sheet.'
+                                    : connected
+                                      ? 'This client has its own connected source sheet.'
+                                      : 'No source sheet is connected yet.'}
+                                </Text>
+                                <Text fontSize="xs" color="gray.500" mt={2}>
+                                  {src?.lastFetchAt
+                                    ? `Last refresh: ${new Date(src.lastFetchAt).toLocaleString()}`
+                                    : 'No refresh recorded yet.'}
+                                </Text>
+                                {src?.lastError ? (
+                                  <Text fontSize="xs" color="red.600" mt={2}>
+                                    Latest issue: {src.lastError}
+                                  </Text>
+                                ) : null}
+                              </Box>
+                              <VStack align="stretch" spacing={2}>
+                                <Button size="sm" variant="outline" leftIcon={<AddIcon />} onClick={() => openConnect(sourceType)}>
+                                  {connected ? 'Replace source' : 'Connect source'}
+                                </Button>
+                                {connected ? (
+                                  <Link
+                                    id="lead-sources-open-sheet-link"
+                                    data-testid="lead-sources-open-sheet-link"
+                                    href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
+                                    isExternal
+                                    _hover={{ textDecoration: 'none' }}
+                                  >
+                                    <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="outline">
+                                      Open linked sheet
+                                    </Button>
+                                  </Link>
+                                ) : null}
+                                {connected ? (
+                                  <Button
+                                    id="lead-sources-poll-now-btn"
+                                    data-testid="lead-sources-poll-now-btn"
+                                    size="sm"
+                                    leftIcon={<RepeatIcon />}
+                                    variant="ghost"
+                                    onClick={() => handlePoll(sourceType)}
+                                  >
+                                    Refresh from sheet
+                                  </Button>
+                                ) : null}
+                              </VStack>
+                            </VStack>
+                          </Box>
+                        )
+                      })}
+                    </SimpleGrid>
+                  </CardBody>
+                </Card>
               </>
             )}
           </>
