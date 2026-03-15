@@ -256,6 +256,8 @@ const ReadinessTab: React.FC = () => {
   const runHistoryRows = runHistoryData?.rows ?? []
   const previewCandidates = launchPreviewData?.firstBatch ?? []
   const previewExcluded = launchPreviewData?.excluded ?? []
+  const preflightBlockers = preflightData?.blockers ?? []
+  const preflightWarnings = preflightData?.warnings ?? []
   const hasSelectedSequence = selectedSequenceId.trim().length > 0
 
   if (!customerId || !customerId.startsWith('cust_')) {
@@ -276,9 +278,9 @@ const ReadinessTab: React.FC = () => {
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Readiness: What Needs Attention</Heading>
+                  <Heading size="md">Readiness: Is this sequence ready to run?</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="readiness-tab-operator-cue">
-                    Use this view to decide what to fix first, then move to Sequences, Inbox, or Reports.
+                    Start with launch status, blockers, and the first-batch preview. Troubleshooting and follow-up details are kept lower down.
                   </Text>
                 </VStack>
                 <HStack>
@@ -313,7 +315,7 @@ const ReadinessTab: React.FC = () => {
             </CardHeader>
             <CardBody>
               {loading ? (
-                <HStack><Spinner size="sm" /><Text>Loading readiness cockpit…</Text></HStack>
+                <HStack><Spinner size="sm" /><Text>Loading readiness checks…</Text></HStack>
               ) : null}
               {error ? (
                 <Alert status="error" mb={3}>
@@ -322,7 +324,7 @@ const ReadinessTab: React.FC = () => {
                 </Alert>
               ) : null}
 
-              <SimpleGrid id="readiness-tab-summary-cards" data-testid="readiness-tab-summary-cards" columns={{ base: 2, md: 3, lg: 6 }} spacing={3}>
+              <SimpleGrid id="readiness-tab-summary-cards" data-testid="readiness-tab-summary-cards" columns={{ base: 2, md: 2, lg: 4 }} spacing={3}>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
                   <StatLabel>Launch Status</StatLabel>
                   <StatNumber id="readiness-tab-launch-status" data-testid="readiness-tab-launch-status">
@@ -330,26 +332,41 @@ const ReadinessTab: React.FC = () => {
                   </StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Open Exceptions</StatLabel>
+                  <StatLabel>Issues to Review</StatLabel>
                   <StatNumber>{exceptionCenterData?.statusSummary?.openGroups ?? 0}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Usable Identities</StatLabel>
+                  <StatLabel>Ready Mailboxes</StatLabel>
                   <StatNumber>{identityCapacityData?.summary?.usable ?? 0}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>First-Batch Candidates</StatLabel>
+                  <StatLabel>Ready in First Batch</StatLabel>
                   <StatNumber>{launchPreviewData?.summary?.firstBatchCount ?? previewCandidates.length}</StatNumber>
                 </Stat>
-                <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Matched Outcomes</StatLabel>
-                  <StatNumber>{comparisonData?.summary?.matched ?? 0}</StatNumber>
-                </Stat>
-                <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Recent Failures</StatLabel>
-                  <StatNumber>{runHistoryData?.summary?.SEND_FAILED ?? 0}</StatNumber>
-                </Stat>
               </SimpleGrid>
+
+              {hasSelectedSequence && !error && !loading ? (
+                <HStack mt={3} spacing={3} flexWrap="wrap" align="stretch">
+                  <Alert status={preflightBlockers.length > 0 ? 'error' : preflightWarnings.length > 0 ? 'warning' : 'success'} variant="left-accent" flex="1" minW="280px">
+                    <AlertIcon />
+                    <AlertDescription>
+                      {preflightBlockers.length > 0
+                        ? `${preflightBlockers.length} blocker${preflightBlockers.length === 1 ? '' : 's'} must be cleared before launch.`
+                        : preflightWarnings.length > 0
+                          ? `${preflightWarnings.length} warning${preflightWarnings.length === 1 ? '' : 's'} should be reviewed before launch.`
+                          : 'No launch blockers are showing for the selected sequence.'}
+                    </AlertDescription>
+                  </Alert>
+                  <Alert status={(launchPreviewData?.summary?.notReadyCount ?? 0) > 0 ? 'warning' : 'info'} variant="left-accent" flex="1" minW="280px">
+                    <AlertIcon />
+                    <AlertDescription>
+                      {(launchPreviewData?.summary?.notReadyCount ?? 0) > 0
+                        ? `${launchPreviewData?.summary?.notReadyCount ?? 0} recipient${(launchPreviewData?.summary?.notReadyCount ?? 0) === 1 ? '' : 's'} are still not ready in the current launch preview.`
+                        : `${launchPreviewData?.summary?.firstBatchCount ?? previewCandidates.length} recipient${(launchPreviewData?.summary?.firstBatchCount ?? previewCandidates.length) === 1 ? '' : 's'} are currently lined up in the first batch preview.`}
+                    </AlertDescription>
+                  </Alert>
+                </HStack>
+              ) : null}
 
               {!hasSelectedSequence && (
                 <Alert status="info" mt={3} id="readiness-tab-no-sequence" data-testid="readiness-tab-no-sequence">
@@ -368,12 +385,12 @@ const ReadinessTab: React.FC = () => {
 
           <Card id="readiness-tab-next-actions" data-testid="readiness-tab-next-actions">
             <CardHeader>
-              <Heading size="sm">Top Next Actions</Heading>
+              <Heading size="sm">What to fix first</Heading>
             </CardHeader>
             <CardBody>
               {topExceptionGroups.length === 0 ? (
                 <VStack align="stretch" spacing={2}>
-                  <Text color="gray.500">No priority issues were found in this window.</Text>
+                  <Text color="gray.500">No priority issues were found in this window. If the checks below also look clear, continue in Sequences or review recent results.</Text>
                   <HStack>
                     <Button size="xs" variant="outline" data-testid="readiness-tab-go-reports" onClick={() => openMarketingTab('reports')}>
                       Open Reports
@@ -412,19 +429,19 @@ const ReadinessTab: React.FC = () => {
 
           <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
             <Card id="readiness-tab-preflight" data-testid="readiness-tab-preflight">
-              <CardHeader><Heading size="sm">Preflight Blockers / Warnings</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Check before launch</Heading></CardHeader>
               <CardBody>
                 <VStack align="stretch" spacing={2}>
                   <Text fontSize="sm" color="gray.600">
-                    Check blockers before launch. If this section is clear, continue to Launch Preview.
+                    Review launch blockers first. If this section is clear, move on to the launch preview.
                   </Text>
                   <Box>
                     <Text fontWeight="semibold">Blockers</Text>
-                    {(preflightData?.blockers ?? []).length === 0 ? <Text color="gray.500">None</Text> : (preflightData?.blockers ?? []).slice(0, 5).map((row, idx) => <Text key={`b-${idx}`}>• {row}</Text>)}
+                    {preflightBlockers.length === 0 ? <Text color="gray.500">None</Text> : preflightBlockers.slice(0, 5).map((row, idx) => <Text key={`b-${idx}`}>• {row}</Text>)}
                   </Box>
                   <Box>
                     <Text fontWeight="semibold">Warnings</Text>
-                    {(preflightData?.warnings ?? []).length === 0 ? <Text color="gray.500">None</Text> : (preflightData?.warnings ?? []).slice(0, 5).map((row, idx) => <Text key={`w-${idx}`}>• {row}</Text>)}
+                    {preflightWarnings.length === 0 ? <Text color="gray.500">None</Text> : preflightWarnings.slice(0, 5).map((row, idx) => <Text key={`w-${idx}`}>• {row}</Text>)}
                   </Box>
                   <Button
                     size="sm"
@@ -435,18 +452,18 @@ const ReadinessTab: React.FC = () => {
                     isDisabled={!hasSelectedSequence}
                     onClick={() => openSequencesTab('preflight')}
                   >
-                    Open Sequence Preflight
+                    Review full preflight
                   </Button>
                 </VStack>
               </CardBody>
             </Card>
 
             <Card id="readiness-tab-launch-preview" data-testid="readiness-tab-launch-preview">
-              <CardHeader><Heading size="sm">Launch Preview Snapshot</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Who would send next</Heading></CardHeader>
               <CardBody>
                 <VStack align="stretch" spacing={2}>
                   <Text fontSize="sm" color="gray.600">
-                    Confirm who would send first and which rows are excluded before running any tick.
+                    Confirm who is up first and which rows are excluded before you run anything.
                   </Text>
                   <HStack>
                     <Badge>Candidates {launchPreviewData?.summary?.firstBatchCount ?? previewCandidates.length}</Badge>
@@ -471,91 +488,129 @@ const ReadinessTab: React.FC = () => {
                     isDisabled={!hasSelectedSequence}
                     onClick={() => openSequencesTab('launch-preview')}
                   >
-                    Open Launch Preview
+                    Review full launch preview
                   </Button>
                 </VStack>
               </CardBody>
             </Card>
-
-            <Card id="readiness-tab-preview-vs-outcome" data-testid="readiness-tab-preview-vs-outcome">
-              <CardHeader><Heading size="sm">Preview vs Outcome Snapshot</Heading></CardHeader>
-              <CardBody>
-                <Text fontSize="sm" color="gray.600" mb={2}>
-                  Compare expected recipients versus actual outcomes to spot surprises quickly.
-                </Text>
-                <SimpleGrid columns={3} spacing={2}>
-                  <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Matched</StatLabel><StatNumber>{comparisonData?.summary?.matched ?? 0}</StatNumber></Stat>
-                  <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Preview Only</StatLabel><StatNumber>{comparisonData?.summary?.previewOnly ?? 0}</StatNumber></Stat>
-                  <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Outcome Only</StatLabel><StatNumber>{comparisonData?.summary?.outcomeOnly ?? 0}</StatNumber></Stat>
-                </SimpleGrid>
-                <Button
-                  mt={3}
-                  size="sm"
-                  variant="outline"
-                  id="readiness-tab-open-comparison"
-                  data-testid="readiness-tab-open-comparison"
-                  data-focus-target="preview-vs-outcome-panel"
-                  isDisabled={!hasSelectedSequence}
-                  onClick={() => openSequencesTab('preview-vs-outcome')}
-                >
-                  Open Preview vs Outcome
-                </Button>
-              </CardBody>
-            </Card>
-
-            <Card id="readiness-tab-run-history" data-testid="readiness-tab-run-history">
-              <CardHeader><Heading size="sm">Recent Run Outcomes</Heading></CardHeader>
-              <CardBody>
-                <Text fontSize="sm" color="gray.600" mb={2}>
-                  Use recent outcomes to verify send quality and decide whether to continue or pause.
-                </Text>
-                <Box overflowX="auto">
-                  <Table size="sm">
-                    <Thead>
-                      <Tr>
-                        <Th>Recipient</Th>
-                        <Th>Outcome</Th>
-                        <Th>Reason</Th>
-                      </Tr>
-                    </Thead>
-                    <Tbody>
-                      {runHistoryRows.length === 0 ? (
-                        <Tr><Td colSpan={3} color="gray.500">No recent outcome rows.</Td></Tr>
-                      ) : (
-                        runHistoryRows.slice(0, 6).map((row, idx) => (
-                          <Tr key={`rh-${idx}`}>
-                            <Td>{row.recipientEmail || 'unknown'}</Td>
-                            <Td>{row.decision || '—'}</Td>
-                            <Td>{row.reason || '—'}</Td>
-                          </Tr>
-                        ))
-                      )}
-                    </Tbody>
-                  </Table>
-                </Box>
-                <Button
-                  mt={3}
-                  size="sm"
-                  variant="outline"
-                  id="readiness-tab-open-run-history"
-                  data-testid="readiness-tab-open-run-history"
-                  data-focus-target="run-history-panel"
-                  isDisabled={!hasSelectedSequence}
-                  onClick={() => openSequencesTab('run-history')}
-                >
-                  Open Run History
-                </Button>
-                <HStack mt={2}>
-                  <Button size="xs" variant="ghost" onClick={() => openMarketingTab('reports')} data-testid="readiness-tab-open-reports-followup">
-                    Review Reports
-                  </Button>
-                  <Button size="xs" variant="ghost" onClick={() => openMarketingTab('inbox')} data-testid="readiness-tab-open-inbox-followup">
-                    Review Inbox
-                  </Button>
-                </HStack>
-              </CardBody>
-            </Card>
           </SimpleGrid>
+
+          <Card
+            id="readiness-tab-troubleshooting"
+            data-testid="readiness-tab-troubleshooting"
+            variant="outline"
+            borderColor="gray.200"
+            bg="gray.50"
+          >
+            <CardHeader>
+              <VStack align="start" spacing={1}>
+                <Heading size="sm">Troubleshooting & follow-up</Heading>
+                <Text fontSize="sm" color="gray.600">
+                  Secondary checks for explaining unexpected results, reviewing recent send outcomes, and deciding where to investigate next.
+                </Text>
+              </VStack>
+            </CardHeader>
+            <CardBody pt={0}>
+              <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                <Card id="readiness-tab-preview-vs-outcome" data-testid="readiness-tab-preview-vs-outcome">
+                  <CardHeader><Heading size="sm">Did actual sends match the preview?</Heading></CardHeader>
+                  <CardBody>
+                    <Text fontSize="sm" color="gray.600" mb={2}>
+                      Use this after a run when the outcome looks different from what the launch preview suggested.
+                    </Text>
+                    <SimpleGrid columns={3} spacing={2}>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Matched</StatLabel><StatNumber>{comparisonData?.summary?.matched ?? 0}</StatNumber></Stat>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Preview Only</StatLabel><StatNumber>{comparisonData?.summary?.previewOnly ?? 0}</StatNumber></Stat>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}><StatLabel>Outcome Only</StatLabel><StatNumber>{comparisonData?.summary?.outcomeOnly ?? 0}</StatNumber></Stat>
+                    </SimpleGrid>
+                    <Button
+                      mt={3}
+                      size="sm"
+                      variant="outline"
+                      id="readiness-tab-open-comparison"
+                      data-testid="readiness-tab-open-comparison"
+                      data-focus-target="preview-vs-outcome-panel"
+                      isDisabled={!hasSelectedSequence}
+                      onClick={() => openSequencesTab('preview-vs-outcome')}
+                    >
+                      Open preview comparison
+                    </Button>
+                  </CardBody>
+                </Card>
+
+                <Card id="readiness-tab-run-history" data-testid="readiness-tab-run-history">
+                  <CardHeader><Heading size="sm">Recent send outcomes</Heading></CardHeader>
+                  <CardBody>
+                    <Text fontSize="sm" color="gray.600" mb={2}>
+                      Use recent outcomes to review failures, skipped sends, or follow-up work after a run.
+                    </Text>
+                    <SimpleGrid columns={{ base: 2, md: 4 }} spacing={2} mb={3}>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}>
+                        <StatLabel>Recent failures</StatLabel>
+                        <StatNumber>{runHistoryData?.summary?.SEND_FAILED ?? 0}</StatNumber>
+                      </Stat>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}>
+                        <StatLabel>Matched preview</StatLabel>
+                        <StatNumber>{comparisonData?.summary?.matched ?? 0}</StatNumber>
+                      </Stat>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}>
+                        <StatLabel>Suppressed</StatLabel>
+                        <StatNumber>{runHistoryData?.summary?.SKIP_SUPPRESSED ?? 0}</StatNumber>
+                      </Stat>
+                      <Stat borderWidth="1px" borderRadius="md" p={2}>
+                        <StatLabel>Reply stopped</StatLabel>
+                        <StatNumber>{runHistoryData?.summary?.SKIP_REPLIED_STOP ?? 0}</StatNumber>
+                      </Stat>
+                    </SimpleGrid>
+                    <Box overflowX="auto">
+                      <Table size="sm">
+                        <Thead>
+                          <Tr>
+                            <Th>Recipient</Th>
+                            <Th>Outcome</Th>
+                            <Th>Reason</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {runHistoryRows.length === 0 ? (
+                            <Tr><Td colSpan={3} color="gray.500">No recent outcome rows.</Td></Tr>
+                          ) : (
+                            runHistoryRows.slice(0, 6).map((row, idx) => (
+                              <Tr key={`rh-${idx}`}>
+                                <Td>{row.recipientEmail || 'unknown'}</Td>
+                                <Td>{row.decision || '—'}</Td>
+                                <Td>{row.reason || '—'}</Td>
+                              </Tr>
+                            ))
+                          )}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                    <Button
+                      mt={3}
+                      size="sm"
+                      variant="outline"
+                      id="readiness-tab-open-run-history"
+                      data-testid="readiness-tab-open-run-history"
+                      data-focus-target="run-history-panel"
+                      isDisabled={!hasSelectedSequence}
+                      onClick={() => openSequencesTab('run-history')}
+                    >
+                      Open run history
+                    </Button>
+                    <HStack mt={2}>
+                      <Button size="xs" variant="ghost" onClick={() => openMarketingTab('reports')} data-testid="readiness-tab-open-reports-followup">
+                        Review Reports
+                      </Button>
+                      <Button size="xs" variant="ghost" onClick={() => openMarketingTab('inbox')} data-testid="readiness-tab-open-inbox-followup">
+                        Review Inbox
+                      </Button>
+                    </HStack>
+                  </CardBody>
+                </Card>
+              </SimpleGrid>
+            </CardBody>
+          </Card>
         </VStack>
       </Box>
     </RequireActiveClient>
