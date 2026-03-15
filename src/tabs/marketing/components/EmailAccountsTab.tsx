@@ -140,6 +140,35 @@ type IdentityCapacityData = {
 
 const MAX_DAILY_SEND_LIMIT = 30
 
+function formatMailboxState(state?: IdentityCapacityRow['state'] | null): string {
+  if (state === 'usable') return 'Ready to send'
+  if (state === 'risky') return 'Needs attention'
+  if (state === 'unavailable') return 'Unavailable'
+  return 'Status unknown'
+}
+
+function mailboxStateColor(state?: IdentityCapacityRow['state'] | null): string {
+  if (state === 'usable') return 'green'
+  if (state === 'risky') return 'orange'
+  if (state === 'unavailable') return 'red'
+  return 'gray'
+}
+
+function describeMailboxReason(reason: string): string {
+  switch (reason) {
+    case 'identity_inactive':
+      return 'Mailbox is turned off.'
+    case 'recent_failure_rate_high':
+      return 'Recent sending failures are above the safe range.'
+    case 'recent_send_failures_detected':
+      return 'Recent sending failures need review.'
+    case 'daily_limit_reached_in_window':
+      return 'Mailbox has already reached its daily send limit.'
+    default:
+      return reason.replace(/_/g, ' ').replace(/^\w/, (char) => char.toUpperCase()) + '.'
+  }
+}
+
 const EmailAccountsTab: React.FC = () => {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
@@ -258,6 +287,7 @@ const EmailAccountsTab: React.FC = () => {
   }
 
   const filteredIdentities = useMemo(() => {
+    const capacityById = new Map((identityCapacity?.rows ?? []).map((row) => [row.identityId, row]))
     return identities
       .filter((identity) => identity.provider !== 'outlook_app_only')
       .filter(identity => {
@@ -265,22 +295,36 @@ const EmailAccountsTab: React.FC = () => {
         identity.emailAddress.toLowerCase().includes(searchQuery.toLowerCase()) ||
         identity.displayName?.toLowerCase().includes(searchQuery.toLowerCase())
 
-      const matchesStatus = statusFilter === 'all' || 
-        (statusFilter === 'active' && identity.isActive) ||
-        (statusFilter === 'inactive' && !identity.isActive)
+      const matchesStatus = statusFilter === 'all' ||
+        (statusFilter === 'ready' && capacityById.get(identity.id)?.state === 'usable') ||
+        (statusFilter === 'attention' && ['risky', 'unavailable'].includes(capacityById.get(identity.id)?.state || ''))
 
       return matchesSearch && matchesStatus
     })
-  }, [identities, searchQuery, statusFilter])
+  }, [identities, identityCapacity?.rows, searchQuery, statusFilter])
 
-  const stats = useMemo(() => {
+  const mailboxSummary = useMemo(() => {
+    const readyMailboxes = identityCapacity?.summary.usable ?? 0
+    const needsAttention = (identityCapacity?.summary.risky ?? 0) + (identityCapacity?.summary.unavailable ?? 0)
     return {
-      totalAccounts: identities.length,
-      activeAccounts: identities.filter(a => a.isActive).length,
-      outlookAccounts: identities.filter(a => a.provider === 'outlook').length,
-      smtpAccounts: identities.filter(a => a.provider === 'smtp').length,
+      connectedMailboxes: identities.length,
+      readyMailboxes,
+      needsAttention,
+      outlookMailboxes: identities.filter((identity) => identity.provider === 'outlook').length,
     }
-  }, [identities])
+  }, [identities, identityCapacity])
+
+  const identityCapacityById = useMemo(
+    () => new Map((identityCapacity?.rows ?? []).map((row) => [row.identityId, row])),
+    [identityCapacity?.rows]
+  )
+
+  const recommendedMailboxLabel = useMemo(() => {
+    const recommendedId = identityCapacity?.summary.recommendedIdentityId
+    if (!recommendedId) return '—'
+    const recommendedRow = identityCapacity?.rows.find((row) => row.identityId === recommendedId)
+    return recommendedRow?.label ? `${recommendedRow.label} (${recommendedRow.email})` : recommendedRow?.email || recommendedId
+  }, [identityCapacity])
 
   const handleConnectOutlook = () => {
     if (!selectedCustomerId) {
@@ -459,7 +503,7 @@ const EmailAccountsTab: React.FC = () => {
       <Box id="email-accounts-tab-panel" data-testid="email-accounts-tab-panel">
         <VStack align="start" spacing={1} mb={4}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
-          <Text color="gray.600">Connect Outlook accounts to send campaigns (max 5 per client)</Text>
+          <Text color="gray.600">See which mailboxes are connected, ready to send, or need attention for this client.</Text>
           <FormControl w="300px" mt={2}>
             <FormLabel fontSize="sm">Client</FormLabel>
             <Select
@@ -484,9 +528,9 @@ const EmailAccountsTab: React.FC = () => {
         <Card id="email-accounts-tab-no-customer" data-testid="email-accounts-tab-no-customer">
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
-            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to view email accounts</Text>
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to review mailbox status</Text>
             <Text color="gray.600">
-              Choose a client from the dropdown above to see their connected email accounts, or connect new ones.
+              Choose a client to review connected mailboxes, see which ones are ready, and manage mailbox actions.
             </Text>
           </CardBody>
         </Card>
@@ -528,7 +572,7 @@ const EmailAccountsTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
-            Connect Outlook accounts to send campaigns (max 5 per client)
+            Review connected mailboxes, see which ones are usable, and manage what needs attention next.
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
@@ -553,15 +597,6 @@ const EmailAccountsTab: React.FC = () => {
         </VStack>
         <HStack>
           <Button
-            id="email-accounts-tab-refresh-btn"
-            data-testid="email-accounts-tab-refresh-btn"
-            variant="outline"
-            onClick={() => void handleRefreshAll()}
-            isLoading={loading || capacityLoading}
-          >
-            Refresh
-          </Button>
-          <Button
             id="email-accounts-tab-connect-outlook-btn"
             data-testid="email-accounts-tab-connect-outlook-btn"
             leftIcon={<ExternalLinkIcon />}
@@ -574,150 +609,99 @@ const EmailAccountsTab: React.FC = () => {
         </HStack>
       </Flex>
 
-      <Alert status="info" mb={4}>
-        <AlertIcon />
-        <Box>
-          <AlertTitle>Mailbox safety cap</AlertTitle>
-          <AlertDescription>
-            Every sending address is strictly capped at {MAX_DAILY_SEND_LIMIT} emails per day. Higher values are reduced automatically in backend truth.
-          </AlertDescription>
-        </Box>
-      </Alert>
+      {identities.length === 0 ? (
+        <Alert status="info" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>No mailbox connected yet</AlertTitle>
+            <AlertDescription>
+              Connect a mailbox to start sending and to see mailbox health on this page.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      ) : mailboxSummary.readyMailboxes < 1 ? (
+        <Alert status="warning" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>No mailbox is ready to send</AlertTitle>
+            <AlertDescription>
+              Review the mailbox list below first. The follow-up section contains the deeper guardrail detail.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      ) : mailboxSummary.needsAttention > 0 ? (
+        <Alert status="warning" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Some mailboxes need attention</AlertTitle>
+            <AlertDescription>
+              {mailboxSummary.readyMailboxes} mailbox{mailboxSummary.readyMailboxes === 1 ? '' : 'es'} are ready to send, and {mailboxSummary.needsAttention} need review.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      ) : (
+        <Alert status="success" mb={4}>
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Mailboxes look ready</AlertTitle>
+            <AlertDescription>
+              Connected mailboxes are currently available for normal sending within their configured limits.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
 
-      {/* Stats */}
       <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={6}>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Total Accounts</StatLabel>
-              <StatNumber>{stats.totalAccounts}</StatNumber>
+              <StatLabel>Connected mailboxes</StatLabel>
+              <StatNumber>{mailboxSummary.connectedMailboxes}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Active</StatLabel>
-              <StatNumber>{stats.activeAccounts}</StatNumber>
+              <StatLabel>Ready to send</StatLabel>
+              <StatNumber>{mailboxSummary.readyMailboxes}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>Outlook</StatLabel>
-              <StatNumber>{stats.outlookAccounts}</StatNumber>
+              <StatLabel>Need attention</StatLabel>
+              <StatNumber>{mailboxSummary.needsAttention}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>SMTP</StatLabel>
-              <StatNumber>{stats.smtpAccounts}</StatNumber>
+              <StatLabel>Outlook mailboxes</StatLabel>
+              <StatNumber>{mailboxSummary.outlookMailboxes}</StatNumber>
             </Stat>
           </CardBody>
         </Card>
       </SimpleGrid>
 
-      <Card id="email-accounts-identity-capacity-panel" data-testid="email-accounts-identity-capacity-panel" mb={6}>
-        <CardBody>
-          <Flex justify="space-between" align="center" mb={4}>
-            <Text fontSize="lg" fontWeight="semibold">Identity Capacity Guardrails</Text>
-            {capacityLoading && <Spinner size="sm" />}
-          </Flex>
-
-          {capacityError ? (
-            <Alert status="warning" mb={3}>
-              <AlertIcon />
-              <AlertDescription>{capacityError}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <SimpleGrid id="email-accounts-identity-summary" data-testid="email-accounts-identity-summary" columns={{ base: 2, md: 5 }} spacing={3} mb={4}>
-            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Total</StatLabel><StatNumber>{identityCapacity?.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
-            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Usable</StatLabel><StatNumber>{identityCapacity?.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
-            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Unavailable</StatLabel><StatNumber>{identityCapacity?.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
-            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Risky</StatLabel><StatNumber>{identityCapacity?.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
-            <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Recommended</StatLabel><StatNumber fontSize="md">{identityCapacity?.summary.recommendedIdentityId ?? '—'}</StatNumber></Stat></CardBody></Card>
-          </SimpleGrid>
-
-          {!capacityError && identityCapacity && identityCapacity.rows.length === 0 ? (
-            <Alert status="info" mb={4}>
-              <AlertIcon />
-              <Box>
-                <AlertTitle>No sending mailbox connected</AlertTitle>
-                <AlertDescription>Connect an active mailbox for this client to see capacity and guardrail status here.</AlertDescription>
-              </Box>
-            </Alert>
-          ) : null}
-
-          {!!identityCapacity?.guardrails?.warnings?.length && (
-            <Alert id="email-accounts-identity-guardrails" data-testid="email-accounts-identity-guardrails" status="warning" mb={4}>
-              <AlertIcon />
-              <Box>
-                <AlertTitle>Identity launch warning</AlertTitle>
-                <AlertDescription>{identityCapacity.guardrails.warnings.join(' ')}</AlertDescription>
-              </Box>
-            </Alert>
-          )}
-
-          <Box id="email-accounts-identity-rows" data-testid="email-accounts-identity-rows" overflowX="auto">
-            <Table size="sm">
-              <Thead>
-                <Tr>
-                  <Th>Email</Th>
-                  <Th>Provider</Th>
-                  <Th>State</Th>
-                  <Th isNumeric>Sent</Th>
-                  <Th isNumeric>Failed</Th>
-                  <Th>Queue</Th>
-                  <Th>Reason</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {(identityCapacity?.rows ?? []).map((row) => (
-                  <Tr key={row.identityId}>
-                    <Td>{row.label ? `${row.label} (${row.email})` : row.email}</Td>
-                    <Td>{row.provider}</Td>
-                    <Td>
-                      <Badge id="email-accounts-identity-state" data-testid="email-accounts-identity-state" colorScheme={row.state === 'usable' ? 'green' : row.state === 'risky' ? 'orange' : 'red'}>
-                        {row.state}
-                      </Badge>
-                    </Td>
-                    <Td isNumeric>{row.recent?.sent ?? 0}</Td>
-                    <Td isNumeric>{row.recent?.sendFailed ?? 0}</Td>
-                    <Td fontSize="xs">{row.queuePressure?.queuedNow ?? 0} queued now</Td>
-                    <Td fontSize="xs">{row.reasons?.join('; ') || 'No current guardrail issues'}</Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
-          </Box>
-          <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
-            Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'}
-          </Text>
-        </CardBody>
-      </Card>
-
-      {/* Limit warning */}
       {identities.filter(i => i.isActive).length >= 5 && (
         <Alert status="warning" mb={4}>
           <AlertIcon />
           <AlertDescription>
-            You've reached the maximum of 5 active sender accounts. Deactivate one to connect another.
+            You've reached the maximum of 5 active sender accounts. Disconnect one before connecting another mailbox.
           </AlertDescription>
         </Alert>
       )}
 
-      {/* Controls */}
       <Flex gap={4} mb={6} align="center">
         <InputGroup maxW="300px">
           <InputLeftElement>
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder="Search accounts..."
+            placeholder="Search mailboxes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -726,11 +710,11 @@ const EmailAccountsTab: React.FC = () => {
         <Select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          maxW="150px"
+          maxW="180px"
         >
-          <option value="all">All Status</option>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
+          <option value="all">All mailboxes</option>
+          <option value="ready">Ready to send</option>
+          <option value="attention">Needs attention</option>
         </Select>
 
         <Spacer />
@@ -738,119 +722,235 @@ const EmailAccountsTab: React.FC = () => {
         {loading && <Spinner size="sm" />}
       </Flex>
 
-      {/* Empty state */}
       {identities.length === 0 && !error && (
-        <Card>
+        <Card mb={6}>
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
-            <Text fontSize="lg" fontWeight="semibold" mb={2}>No email accounts connected</Text>
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>No mailboxes connected</Text>
             <Text color="gray.600" mb={4}>
-              Connect an Outlook account to start sending campaigns.
+              Connect an Outlook mailbox to start sending and reviewing mailbox health for this client.
             </Text>
             <Button colorScheme="blue" onClick={handleConnectOutlook}>
-              Connect Outlook Account
+              Connect Outlook mailbox
             </Button>
           </CardBody>
         </Card>
       )}
 
-      {/* Accounts Table */}
       {identities.length > 0 && (
-        <Card>
+        <Card mb={6}>
           <CardBody p={0}>
             <Box overflowX="auto">
               <Table size="sm">
                 <Thead>
                   <Tr>
-                    <Th>Account</Th>
-                    <Th>Provider</Th>
-                    <Th>Status</Th>
-                    <Th isNumeric>Daily Limit</Th>
+                    <Th>Mailbox</Th>
+                    <Th>Health</Th>
+                    <Th>Sending limits</Th>
                     <Th>Connected</Th>
                     <Th w="50px"></Th>
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {filteredIdentities.map((identity) => (
-                    <Tr key={identity.id}>
-                      <Td>
-                        <VStack align="start" spacing={0}>
-                          <HStack>
-                            <Icon as={EmailIcon} boxSize={4} color="blue.500" />
-                            <Text fontWeight="semibold">{identity.displayName || identity.emailAddress}</Text>
-                          </HStack>
-                          {identity.displayName && (
+                  {filteredIdentities.map((identity) => {
+                    const capacityRow = identityCapacityById.get(identity.id)
+                    const state = capacityRow?.state ?? (identity.isActive ? 'usable' : 'unavailable')
+                    const reasonText = capacityRow?.reasons?.length
+                      ? capacityRow.reasons.map(describeMailboxReason).join(' ')
+                      : identity.isActive
+                        ? 'Mailbox is available with no current warnings.'
+                        : 'Mailbox is turned off.'
+
+                    return (
+                      <Tr key={identity.id}>
+                        <Td>
+                          <VStack align="start" spacing={1}>
+                            <HStack>
+                              <Icon as={EmailIcon} boxSize={4} color="blue.500" />
+                              <Text fontWeight="semibold">{identity.displayName || identity.emailAddress}</Text>
+                            </HStack>
                             <Text fontSize="sm" color="gray.600">{identity.emailAddress}</Text>
-                          )}
-                        </VStack>
-                      </Td>
-                      <Td>
-                        <Badge variant="outline" size="sm">
-                          {identity.provider.toUpperCase()}
-                        </Badge>
-                      </Td>
-                      <Td>
-                        <HStack>
-                          <Badge colorScheme={identity.isActive ? 'green' : 'gray'} size="sm">
-                            {identity.isActive ? 'Active' : 'Inactive'}
-                          </Badge>
-                          {identity.isActive && identity.provider === 'outlook' && (
-                            <Icon as={CheckCircleIcon} color="green.500" boxSize={4} />
-                          )}
-                        </HStack>
-                      </Td>
-                      <Td isNumeric>
-                        <VStack align="end" spacing={0}>
-                          <Text>{identity.dailySendLimit}/day</Text>
-                        </VStack>
-                      </Td>
-                      <Td>
-                        <Text fontSize="xs" color="gray.600">
-                          {new Date(identity.createdAt).toLocaleDateString()}
-                        </Text>
-                      </Td>
-                      <Td>
-                        <Menu>
-                          <MenuButton
-                            as={IconButton}
-                            icon={<SettingsIcon />}
-                            size="sm"
-                            variant="ghost"
-                          />
-                          <MenuList>
-                            <MenuItem icon={<EditIcon />} onClick={() => handleEditIdentity(identity)}>
-                              Edit Settings
-                            </MenuItem>
-                            {identity.provider === 'outlook' && (
-                              <MenuItem icon={<EmailIcon />} onClick={() => handleTestSend(identity)}>
-                                Send Test Email
+                            <Badge variant="outline" size="sm">
+                              {identity.provider.toUpperCase()}
+                            </Badge>
+                          </VStack>
+                        </Td>
+                        <Td>
+                          <VStack align="start" spacing={1}>
+                            <Badge colorScheme={mailboxStateColor(state)} size="sm">
+                              {formatMailboxState(state)}
+                            </Badge>
+                            <Text fontSize="xs" color="gray.600" maxW="260px">
+                              {reasonText}
+                            </Text>
+                          </VStack>
+                        </Td>
+                        <Td>
+                          <VStack align="start" spacing={0}>
+                            <Text>{identity.dailySendLimit}/day</Text>
+                            <Text fontSize="xs" color="gray.600">
+                              {identity.sendWindowHoursStart}:00 to {identity.sendWindowHoursEnd}:00 {identity.sendWindowTimeZone || 'UTC'}
+                            </Text>
+                          </VStack>
+                        </Td>
+                        <Td>
+                          <Text fontSize="xs" color="gray.600">
+                            {new Date(identity.createdAt).toLocaleDateString()}
+                          </Text>
+                        </Td>
+                        <Td>
+                          <Menu>
+                            <MenuButton
+                              as={IconButton}
+                              icon={<SettingsIcon />}
+                              size="sm"
+                              variant="ghost"
+                            />
+                            <MenuList>
+                              <MenuItem icon={<EditIcon />} onClick={() => handleEditIdentity(identity)}>
+                                Manage mailbox
                               </MenuItem>
-                            )}
-                            <MenuItem
-                              icon={identity.isActive ? <WarningIcon /> : <CheckCircleIcon />}
-                              onClick={() => handleToggleActive(identity)}
-                            >
-                              {identity.isActive ? 'Deactivate' : 'Activate'}
-                            </MenuItem>
-                            <MenuDivider />
-                            <MenuItem 
-                              icon={<DeleteIcon />} 
-                              color="red.500" 
-                              onClick={() => handleDeleteIdentity(identity)}
-                            >
-                              Disconnect
-                            </MenuItem>
-                          </MenuList>
-                        </Menu>
-                      </Td>
-                    </Tr>
-                  ))}
+                              {identity.provider === 'outlook' && (
+                                <MenuItem icon={<EmailIcon />} onClick={() => handleTestSend(identity)}>
+                                  Send test email
+                                </MenuItem>
+                              )}
+                              <MenuItem
+                                icon={identity.isActive ? <WarningIcon /> : <CheckCircleIcon />}
+                                onClick={() => handleToggleActive(identity)}
+                              >
+                                {identity.isActive ? 'Turn off mailbox' : 'Turn on mailbox'}
+                              </MenuItem>
+                              <MenuDivider />
+                              <MenuItem
+                                icon={<DeleteIcon />}
+                                color="red.500"
+                                onClick={() => handleDeleteIdentity(identity)}
+                              >
+                                Disconnect mailbox
+                              </MenuItem>
+                            </MenuList>
+                          </Menu>
+                        </Td>
+                      </Tr>
+                    )
+                  })}
                 </Tbody>
               </Table>
             </Box>
           </CardBody>
         </Card>
       )}
+
+      <Card id="email-accounts-followup" data-testid="email-accounts-followup" mb={6} variant="outline" borderColor="gray.200" bg="gray.50">
+        <CardBody>
+          <Flex justify="space-between" align="center" mb={4} wrap="wrap" gap={3}>
+            <VStack align="start" spacing={1}>
+              <Text fontSize="lg" fontWeight="semibold">Follow-up & troubleshooting</Text>
+              <Text fontSize="sm" color="gray.600">
+                Secondary detail for deeper mailbox checks, technical guardrails, and refresh actions.
+              </Text>
+            </VStack>
+            <Button
+              id="email-accounts-tab-refresh-btn"
+              data-testid="email-accounts-tab-refresh-btn"
+              variant="outline"
+              onClick={() => void handleRefreshAll()}
+              isLoading={loading || capacityLoading}
+            >
+              Refresh mailbox status
+            </Button>
+          </Flex>
+
+          <Alert status="info" mb={4}>
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Mailbox safety cap</AlertTitle>
+              <AlertDescription>
+                Every sending address is strictly capped at {MAX_DAILY_SEND_LIMIT} emails per day. Higher values are reduced automatically in backend truth.
+              </AlertDescription>
+            </Box>
+          </Alert>
+
+          <Card id="email-accounts-identity-capacity-panel" data-testid="email-accounts-identity-capacity-panel">
+            <CardBody>
+              <Flex justify="space-between" align="center" mb={4}>
+                <Text fontSize="lg" fontWeight="semibold">Mailbox health details</Text>
+                {capacityLoading && <Spinner size="sm" />}
+              </Flex>
+
+              {capacityError ? (
+                <Alert status="warning" mb={3}>
+                  <AlertIcon />
+                  <AlertDescription>{capacityError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <SimpleGrid id="email-accounts-identity-summary" data-testid="email-accounts-identity-summary" columns={{ base: 2, md: 5 }} spacing={3} mb={4}>
+                <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Connected</StatLabel><StatNumber>{identityCapacity?.summary.total ?? 0}</StatNumber></Stat></CardBody></Card>
+                <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Ready</StatLabel><StatNumber>{identityCapacity?.summary.usable ?? 0}</StatNumber></Stat></CardBody></Card>
+                <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Unavailable</StatLabel><StatNumber>{identityCapacity?.summary.unavailable ?? 0}</StatNumber></Stat></CardBody></Card>
+                <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Needs attention</StatLabel><StatNumber>{identityCapacity?.summary.risky ?? 0}</StatNumber></Stat></CardBody></Card>
+                <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Recommended mailbox</StatLabel><StatNumber fontSize="md">{recommendedMailboxLabel}</StatNumber></Stat></CardBody></Card>
+              </SimpleGrid>
+
+              {!capacityError && identityCapacity && identityCapacity.rows.length === 0 ? (
+                <Alert status="info" mb={4}>
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>No sending mailbox connected</AlertTitle>
+                    <AlertDescription>Connect an active mailbox for this client to see deeper mailbox health detail here.</AlertDescription>
+                  </Box>
+                </Alert>
+              ) : null}
+
+              {!!identityCapacity?.guardrails?.warnings?.length && (
+                <Alert id="email-accounts-identity-guardrails" data-testid="email-accounts-identity-guardrails" status="warning" mb={4}>
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>Sending guardrail warning</AlertTitle>
+                    <AlertDescription>{identityCapacity.guardrails.warnings.join(' ')}</AlertDescription>
+                  </Box>
+                </Alert>
+              )}
+
+              <Box id="email-accounts-identity-rows" data-testid="email-accounts-identity-rows" overflowX="auto">
+                <Table size="sm">
+                  <Thead>
+                    <Tr>
+                      <Th>Mailbox</Th>
+                      <Th>Status</Th>
+                      <Th isNumeric>Recent sends</Th>
+                      <Th isNumeric>Recent failures</Th>
+                      <Th>Queued now</Th>
+                      <Th>Technical detail</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {(identityCapacity?.rows ?? []).map((row) => (
+                      <Tr key={row.identityId}>
+                        <Td>{row.label ? `${row.label} (${row.email})` : row.email}</Td>
+                        <Td>
+                          <Badge id="email-accounts-identity-state" data-testid="email-accounts-identity-state" colorScheme={mailboxStateColor(row.state)}>
+                            {formatMailboxState(row.state)}
+                          </Badge>
+                        </Td>
+                        <Td isNumeric>{row.recent?.sent ?? 0}</Td>
+                        <Td isNumeric>{row.recent?.sendFailed ?? 0}</Td>
+                        <Td fontSize="xs">{row.queuePressure?.queuedNow ?? 0} queued</Td>
+                        <Td fontSize="xs">{row.reasons?.length ? row.reasons.map(describeMailboxReason).join(' ') : 'No current guardrail issues.'}</Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </Box>
+              <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
+                Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'}
+              </Text>
+            </CardBody>
+          </Card>
+        </CardBody>
+      </Card>
 
       {/* Edit Identity Modal */}
       <Modal isOpen={isOpen} onClose={onClose} size="xl">
