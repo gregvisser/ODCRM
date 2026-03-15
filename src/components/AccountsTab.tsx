@@ -2986,25 +2986,26 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
-      // Create backup before updating (critical data protection)
-      try {
-        const currentAccounts = loadAccountsFromStorage()
-        if (currentAccounts && currentAccounts.length > 0) {
-          const backupKey = `odcrm_accounts_backup_${Date.now()}`
-          setJson(backupKey, currentAccounts)
-          // Keep only last 5 backups
-          const backupKeys = Object.keys(localStorage).filter(k => k.startsWith('odcrm_accounts_backup_')).sort()
-          if (backupKeys.length > 5) {
-            backupKeys.slice(0, backupKeys.length - 5).forEach(k => localStorage.removeItem(k))
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to create backup before update:', e)
-      }
-      
       const updated = prev.map((acc) => (acc.name === accountName ? { ...acc, ...updates } : acc))
-      // Save to localStorage
-      saveAccountsToStorage(updated)
+      if (!isServerSourceOfTruth) {
+        // Create backup before updating (critical data protection for storage-backed mode)
+        try {
+          const currentAccounts = loadAccountsFromStorage()
+          if (currentAccounts && currentAccounts.length > 0) {
+            const backupKey = `odcrm_accounts_backup_${Date.now()}`
+            setJson(backupKey, currentAccounts)
+            // Keep only last 5 backups
+            const backupKeys = Object.keys(localStorage).filter(k => k.startsWith('odcrm_accounts_backup_')).sort()
+            if (backupKeys.length > 5) {
+              backupKeys.slice(0, backupKeys.length - 5).forEach(k => localStorage.removeItem(k))
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to create backup before update:', e)
+        }
+
+        saveAccountsToStorage(updated)
+      }
       // Dispatch event so LeadsTab can get updated accounts
       emit('accountsUpdated', updated)
       return updated
@@ -3018,19 +3019,21 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       duration: 2000,
       isClosable: true,
     })
-  }, [selectedAccount?.name, toast])
+  }, [isServerSourceOfTruth, selectedAccount?.name, toast])
 
   const updateAccountSilent = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
       const updated = prev.map((acc) => (acc.name === accountName ? { ...acc, ...updates } : acc))
-      saveAccountsToStorage(updated)
+      if (!isServerSourceOfTruth) {
+        saveAccountsToStorage(updated)
+      }
       emit('accountsUpdated', updated)
       return updated
     })
     if (selectedAccount?.name === accountName) {
       setSelectedAccount((prev) => (prev ? { ...prev, ...updates } : null))
     }
-  }, [selectedAccount?.name])
+  }, [isServerSourceOfTruth, selectedAccount?.name])
 
   const applyCustomerPatchAndRefresh = useCallback(
     async (opts: {
