@@ -51,7 +51,6 @@ import {
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, ChevronUpIcon, ChevronDownIcon, SettingsIcon, StarIcon } from '@chakra-ui/icons'
 import { type Account } from './AccountsTab'
-import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { OdcrmStorageKeys } from '../platform/keys'
 import { getItem, getJson, setItem } from '../platform/storage'
@@ -322,12 +321,6 @@ function MarketingLeadsTab({ focusAccountName, enabled = true }: { focusAccountN
     const off = on('accountsUpdated', handleAccountsUpdated)
     return () => off()
   }, [refetch])
-
-  useEffect(() => {
-    if (customerName && totalLeadCount > 0) {
-      syncSingleAccountLeadCount(customerName, totalLeadCount)
-    }
-  }, [customerName, totalLeadCount])
 
   // Aggregate metrics for "All Accounts Combined" — live metrics, 30s polling
   const loadAggregate = useCallback(async () => {

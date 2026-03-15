@@ -28,7 +28,6 @@ import {
   Button,
 } from '@chakra-ui/react'
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons'
-import { syncSingleAccountLeadCount } from '../utils/accountsLeadsSync'
 import { on } from '../platform/events'
 import { useEffectiveCustomerId } from '../hooks/useCustomerScope'
 import RequireActiveClient from './RequireActiveClient'
@@ -86,12 +85,6 @@ function LeadsReportingTab() {
     if (diff < 3600) return `${Math.floor(diff / 60)} minutes ago`
     return date.toLocaleTimeString()
   }
-
-  useEffect(() => {
-    if (customerName) {
-      syncSingleAccountLeadCount(customerName, totalLeadCount)
-    }
-  }, [customerName, totalLeadCount])
 
   useEffect(() => {
     setCurrentPage(1)
