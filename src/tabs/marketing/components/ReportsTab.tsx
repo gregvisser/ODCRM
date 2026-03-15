@@ -316,16 +316,16 @@ const ReportsTab: React.FC = () => {
           <Alert status="info" data-testid="reports-retrospective-role-separation">
             <AlertIcon />
             <AlertDescription>
-              Open Reports to see what sent, what stopped, what failed, and what needs attention next.
+              Review what sent, what failed, who replied, and who opted out for the selected client. Operational follow-up is shown separately below when action is needed.
             </AlertDescription>
           </Alert>
           <Card id="reports-tab-controls" data-testid="reports-tab-controls">
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">Outreach Results</Heading>
+                  <Heading size="md">Outreach reporting</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
-                    Check recent results, see what is queued next, and follow up from Sequences or Inbox only when needed.
+                    Review send volume, replies, opt-outs, mailbox performance, and recent outcomes. Queue detail and follow-up tools are kept in a secondary section.
                   </Text>
                 </VStack>
                 <HStack>
@@ -394,19 +394,19 @@ const ReportsTab: React.FC = () => {
                   <StatNumber>{sequenceTotals.sent}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Failed</StatLabel>
+                  <StatLabel>Send failures</StatLabel>
                   <StatNumber>{sequenceTotals.failed}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Blocked now</StatLabel>
+                  <StatLabel>Blocked right now</StatLabel>
                   <StatNumber>{queueSummary.blocked ?? 0}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Suppressed</StatLabel>
+                  <StatLabel>Suppressed or unsubscribed</StatLabel>
                   <StatNumber>{(queueSummary.suppressed ?? 0) || sequenceTotals.suppressed}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Replies</StatLabel>
+                  <StatLabel>Replies received</StatLabel>
                   <StatNumber>{sequenceTotals.replies}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
@@ -414,7 +414,7 @@ const ReportsTab: React.FC = () => {
                   <StatNumber>{sequenceTotals.optOuts}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
-                  <StatLabel>Pending</StatLabel>
+                  <StatLabel>Still queued</StatLabel>
                   <StatNumber>{queueSummary.totalQueued ?? 0}</StatNumber>
                 </Stat>
                 <Stat borderWidth="1px" borderRadius="md" p={3}>
@@ -429,89 +429,8 @@ const ReportsTab: React.FC = () => {
           </Card>
 
           <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
-            <Card id="reports-tab-next-up" data-testid="reports-tab-next-up">
-              <CardHeader><Heading size="sm">What Happens Next</Heading></CardHeader>
-              <CardBody>
-                <VStack align="stretch" spacing={3}>
-                  <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
-                    <Stat borderWidth="1px" borderRadius="md" p={3}>
-                      <StatLabel>Ready now</StatLabel>
-                      <StatNumber>{queueSummary.readyNow ?? 0}</StatNumber>
-                    </Stat>
-                    <Stat borderWidth="1px" borderRadius="md" p={3}>
-                      <StatLabel>Queued later</StatLabel>
-                      <StatNumber>{queueSummary.scheduledLater ?? 0}</StatNumber>
-                    </Stat>
-                    <Stat borderWidth="1px" borderRadius="md" p={3}>
-                      <StatLabel>Active mailboxes</StatLabel>
-                      <StatNumber>{identityData?.summary?.usable ?? 0}</StatNumber>
-                    </Stat>
-                  </SimpleGrid>
-                  {queueSummary.readyNow ? (
-                    <Alert status="success" variant="left-accent">
-                      <AlertIcon />
-                      <AlertDescription>{queueSummary.readyNow} recipient{queueSummary.readyNow === 1 ? '' : 's'} can send now in the active window.</AlertDescription>
-                    </Alert>
-                  ) : nextScheduled ? (
-                    <Alert status="info" variant="left-accent">
-                      <AlertIcon />
-                      <AlertDescription>
-                        Next queued send: {formatDateTime(nextScheduled.scheduledFor)} to {nextScheduled.recipientEmail || 'unknown recipient'}
-                        {nextScheduled.sequenceName ? ` for ${nextScheduled.sequenceName}` : ''}{nextScheduled.identityEmail ? ` via ${nextScheduled.identityEmail}` : ''}.
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <Alert status="info" variant="left-accent">
-                      <AlertIcon />
-                      <AlertDescription>No pending recipients are due now.</AlertDescription>
-                    </Alert>
-                  )}
-                </VStack>
-              </CardBody>
-            </Card>
-
-            <Card id="reports-tab-attention-needed" data-testid="reports-tab-attention-needed">
-              <CardHeader><Heading size="sm">Needs Attention</Heading></CardHeader>
-              <CardBody>
-                {attentionItems.length === 0 ? (
-                  <Text color="gray.600">No immediate operator issues from the current reporting window.</Text>
-                ) : (
-                  <VStack align="stretch" spacing={2}>
-                    {attentionItems.map((item) => (
-                      <Alert key={item} status="warning" variant="left-accent">
-                        <AlertIcon />
-                        <AlertDescription>{item}</AlertDescription>
-                      </Alert>
-                    ))}
-                  </VStack>
-                )}
-              </CardBody>
-            </Card>
-          </SimpleGrid>
-
-          <Card id="reports-tab-next-steps" data-testid="reports-tab-next-steps">
-            <CardHeader><Heading size="sm">Operator Follow-Up</Heading></CardHeader>
-            <CardBody>
-              <Text fontSize="sm" color="gray.600" mb={3}>
-                Open Sequences when you need to fix sending or pending items. Open Inbox when you need to handle replies.
-              </Text>
-              <HStack flexWrap="wrap">
-                <Button size="sm" variant="outline" data-testid="reports-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'run-history-panel')}>
-                  Open Sequences
-                </Button>
-                <Button size="sm" variant="outline" data-testid="reports-tab-open-inbox" onClick={() => openMarketingTab('inbox')}>
-                  Open Inbox
-                </Button>
-                <Button size="sm" variant="ghost" data-testid="reports-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
-                  Back to Readiness
-                </Button>
-              </HStack>
-            </CardBody>
-          </Card>
-
-          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
             <Card id="reports-tab-recent-attempts" data-testid="reports-tab-recent-attempts">
-              <CardHeader><Heading size="sm">Recent Outcomes</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Latest send outcomes</Heading></CardHeader>
               <CardBody>
                 <Box overflowX="auto">
                   <Table size="sm">
@@ -547,7 +466,7 @@ const ReportsTab: React.FC = () => {
             </Card>
 
             <Card id="reports-tab-by-sequence" data-testid="reports-tab-by-sequence">
-              <CardHeader><Heading size="sm">Results By Sequence</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Results by sequence</Heading></CardHeader>
               <CardBody>
                 <Box overflowX="auto">
                   <Table size="sm">
@@ -583,7 +502,7 @@ const ReportsTab: React.FC = () => {
             </Card>
 
             <Card id="reports-tab-by-identity" data-testid="reports-tab-by-identity">
-              <CardHeader><Heading size="sm">Results By Mailbox</Heading></CardHeader>
+              <CardHeader><Heading size="sm">Results by mailbox</Heading></CardHeader>
               <CardBody>
                 <Box overflowX="auto">
                   <Table size="sm">
@@ -616,6 +535,105 @@ const ReportsTab: React.FC = () => {
               </CardBody>
             </Card>
           </SimpleGrid>
+
+          <Card
+            id="reports-tab-operations-context"
+            data-testid="reports-tab-operations-context"
+            variant="outline"
+            borderColor="gray.200"
+            bg="gray.50"
+          >
+            <CardHeader>
+              <VStack align="start" spacing={1}>
+                <Heading size="sm">Operational follow-up</Heading>
+                <Text fontSize="sm" color="gray.600">
+                  Secondary queue and follow-up context for operators. Use this section when the reporting results above need explanation or action.
+                </Text>
+              </VStack>
+            </CardHeader>
+            <CardBody pt={0}>
+              <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                <Card id="reports-tab-next-up" data-testid="reports-tab-next-up">
+                  <CardHeader><Heading size="sm">Queue outlook</Heading></CardHeader>
+                  <CardBody>
+                    <VStack align="stretch" spacing={3}>
+                      <SimpleGrid columns={{ base: 2, md: 3 }} spacing={3}>
+                        <Stat borderWidth="1px" borderRadius="md" p={3}>
+                          <StatLabel>Ready now</StatLabel>
+                          <StatNumber>{queueSummary.readyNow ?? 0}</StatNumber>
+                        </Stat>
+                        <Stat borderWidth="1px" borderRadius="md" p={3}>
+                          <StatLabel>Queued later</StatLabel>
+                          <StatNumber>{queueSummary.scheduledLater ?? 0}</StatNumber>
+                        </Stat>
+                        <Stat borderWidth="1px" borderRadius="md" p={3}>
+                          <StatLabel>Active mailboxes</StatLabel>
+                          <StatNumber>{identityData?.summary?.usable ?? 0}</StatNumber>
+                        </Stat>
+                      </SimpleGrid>
+                      {queueSummary.readyNow ? (
+                        <Alert status="success" variant="left-accent">
+                          <AlertIcon />
+                          <AlertDescription>{queueSummary.readyNow} recipient{queueSummary.readyNow === 1 ? '' : 's'} can send now in the active window.</AlertDescription>
+                        </Alert>
+                      ) : nextScheduled ? (
+                        <Alert status="info" variant="left-accent">
+                          <AlertIcon />
+                          <AlertDescription>
+                            Next queued send: {formatDateTime(nextScheduled.scheduledFor)} to {nextScheduled.recipientEmail || 'unknown recipient'}
+                            {nextScheduled.sequenceName ? ` for ${nextScheduled.sequenceName}` : ''}{nextScheduled.identityEmail ? ` via ${nextScheduled.identityEmail}` : ''}.
+                          </AlertDescription>
+                        </Alert>
+                      ) : (
+                        <Alert status="info" variant="left-accent">
+                          <AlertIcon />
+                          <AlertDescription>No pending recipients are due now.</AlertDescription>
+                        </Alert>
+                      )}
+                    </VStack>
+                  </CardBody>
+                </Card>
+
+                <Card id="reports-tab-attention-needed" data-testid="reports-tab-attention-needed">
+                  <CardHeader><Heading size="sm">Needs follow-up</Heading></CardHeader>
+                  <CardBody>
+                    {attentionItems.length === 0 ? (
+                      <Text color="gray.600">No immediate operator issues from the current reporting window.</Text>
+                    ) : (
+                      <VStack align="stretch" spacing={2}>
+                        {attentionItems.map((item) => (
+                          <Alert key={item} status="warning" variant="left-accent">
+                            <AlertIcon />
+                            <AlertDescription>{item}</AlertDescription>
+                          </Alert>
+                        ))}
+                      </VStack>
+                    )}
+                  </CardBody>
+                </Card>
+              </SimpleGrid>
+
+              <Card id="reports-tab-next-steps" data-testid="reports-tab-next-steps" mt={4}>
+                <CardHeader><Heading size="sm">Open another workspace</Heading></CardHeader>
+                <CardBody>
+                  <Text fontSize="sm" color="gray.600" mb={3}>
+                    Open Sequences to fix sending or queued items. Open Inbox to handle replies. Return to Readiness for client-level checks.
+                  </Text>
+                  <HStack flexWrap="wrap">
+                    <Button size="sm" variant="outline" data-testid="reports-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'run-history-panel')}>
+                      Open Sequences
+                    </Button>
+                    <Button size="sm" variant="outline" data-testid="reports-tab-open-inbox" onClick={() => openMarketingTab('inbox')}>
+                      Open Inbox
+                    </Button>
+                    <Button size="sm" variant="ghost" data-testid="reports-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
+                      Back to Readiness
+                    </Button>
+                  </HStack>
+                </CardBody>
+              </Card>
+            </CardBody>
+          </Card>
         </VStack>
       </Box>
     </RequireActiveClient>
