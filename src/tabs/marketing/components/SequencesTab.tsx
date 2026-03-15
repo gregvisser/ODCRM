@@ -4199,7 +4199,7 @@ const SequencesTab: React.FC = () => {
           ) : null}
           <HStack spacing={2} mt={1} data-testid="sequences-tab-view-toggle">
             <Badge colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}>
-              {isDiagnosticsOpen ? 'Troubleshooting tools visible' : 'Primary workflow'}
+              {isDiagnosticsOpen ? 'Troubleshooting open' : 'Operator workflow'}
             </Badge>
             <Button
               id="sequences-tab-toggle-diagnostics"
@@ -4209,7 +4209,7 @@ const SequencesTab: React.FC = () => {
               colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}
               onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
             >
-              {isDiagnosticsOpen ? 'Hide troubleshooting tools' : 'Show troubleshooting tools'}
+              {isDiagnosticsOpen ? 'Hide troubleshooting & audits' : 'Open troubleshooting & audits'}
             </Button>
           </HStack>
           {isDiagnosticsOpen ? (
@@ -4332,14 +4332,41 @@ const SequencesTab: React.FC = () => {
         </Card>
       </SimpleGrid>
 
+      <Card
+        mb={6}
+        variant="outline"
+        borderColor={isDiagnosticsOpen ? 'purple.200' : 'gray.200'}
+        bg={isDiagnosticsOpen ? 'purple.50' : 'gray.50'}
+      >
+        <CardBody>
+          <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} flexWrap="wrap">
+            <VStack align="start" spacing={1} maxW="3xl">
+              <Heading size="sm">Troubleshooting & audits</Heading>
+              <Text fontSize="sm" color="gray.600">
+                Secondary tools for queue inspection, audit history, dry-run previews, and backend launch diagnostics.
+                Use these when the normal sequence workflow needs explanation or recovery.
+              </Text>
+            </VStack>
+            <Button
+              size="sm"
+              variant={isDiagnosticsOpen ? 'outline' : 'solid'}
+              colorScheme="purple"
+              onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
+            >
+              {isDiagnosticsOpen ? 'Hide troubleshooting' : 'Open troubleshooting'}
+            </Button>
+          </Flex>
+        </CardBody>
+      </Card>
+
       <Collapse in={isDiagnosticsOpen} animateOpacity>
       <Card mb={6}>
         <CardBody>
           <HStack mb={3} align="start" spacing={3} id="sequences-tab-core-workflow" data-testid="sequences-tab-core-workflow">
             <InfoIcon color="blue.500" mt={1} />
             <VStack align="start" spacing={0}>
-              <Text fontSize="sm" fontWeight="semibold">Advanced details</Text>
-              <Text fontSize="xs" color="gray.600">Refresh backend launch data, inspect recent queue health, and open deeper diagnostics only when needed.</Text>
+              <Text fontSize="sm" fontWeight="semibold">Troubleshooting: backend launch state</Text>
+              <Text fontSize="xs" color="gray.600">Refresh backend launch data, inspect queue health, and open deeper troubleshooting only when the main workflow needs explanation.</Text>
             </VStack>
           </HStack>
           <Heading
@@ -4350,7 +4377,7 @@ const SequencesTab: React.FC = () => {
             cursor="pointer"
             onClick={isOperatorConsolePanelOpen ? onOperatorConsolePanelClose : onOperatorConsolePanelOpen}
           >
-            Advanced launch details {isOperatorConsolePanelOpen ? '▼' : '▶'}
+            Backend launch diagnostics {isOperatorConsolePanelOpen ? '▼' : '▶'}
           </Heading>
           <Collapse in={isOperatorConsolePanelOpen}>
             <VStack align="stretch" spacing={4}>
@@ -6107,7 +6134,7 @@ const SequencesTab: React.FC = () => {
         <Card mb={6}>
           <CardBody>
             <Heading size="sm" mb={3} cursor="pointer" onClick={isQueuePreviewPanelOpen ? onQueuePreviewPanelClose : onQueuePreviewPanelOpen}>
-              Send Queue Preview (Dry Run) {isQueuePreviewPanelOpen ? '▼' : '▶'}
+              Queue preview (troubleshooting) {isQueuePreviewPanelOpen ? '▼' : '▶'}
             </Heading>
             <Collapse in={isQueuePreviewPanelOpen}>
               <Box>
@@ -6470,7 +6497,7 @@ const SequencesTab: React.FC = () => {
         <Card mb={6}>
           <CardBody>
             <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
-              Troubleshooting audit log {isAuditPanelOpen ? '▼' : '▶'}
+              Audit log (troubleshooting) {isAuditPanelOpen ? '▼' : '▶'}
             </Heading>
             <Collapse in={isAuditPanelOpen}>
               <Box>
@@ -7205,23 +7232,31 @@ const SequencesTab: React.FC = () => {
                         <Text fontSize="sm" color="gray.600">
                           Send test batch now uses test recipients only. It does not send to the live recipients used by Start live sequence.
                         </Text>
-                        {isDiagnosticsOpen ? (
-                          <Text fontSize="xs" color="gray.500" mt={1}>
-                            Troubleshooting tools let you preview test runs, inspect queue and audit details, or rebuild the queue without changing live-send policy.
-                          </Text>
-                        ) : null}
                       </Box>
                     <HStack spacing={2}>
-                      {isDiagnosticsOpen ? (
-                        <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
-                          {isSequenceLaunchAdvancedOpen ? 'Hide troubleshooting tools' : 'Show troubleshooting tools'}
-                        </Button>
-                      ) : null}
                       <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
                         Add test audience
                       </Button>
                     </HStack>
                   </Flex>
+                  {isDiagnosticsOpen ? (
+                    <Card variant="outline" borderColor="purple.200" bg="purple.50" mb={4}>
+                      <CardBody py={4}>
+                        <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} flexWrap="wrap">
+                          <Box maxW="3xl">
+                            <Heading size="sm" mb={1}>Troubleshooting for test sends</Heading>
+                            <Text fontSize="sm" color="gray.600">
+                              Preview a test run, inspect queue and audit details, or rebuild a test queue only when the normal
+                              test-send path needs investigation. These tools do not change live-send policy.
+                            </Text>
+                          </Box>
+                          <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'solid'} colorScheme="purple" onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
+                            {isSequenceLaunchAdvancedOpen ? 'Hide troubleshooting' : 'Open troubleshooting'}
+                          </Button>
+                        </Flex>
+                      </CardBody>
+                    </Card>
+                  ) : null}
                   {lastCreatedEnrollment?.id && (
                     <Alert status="success" mb={4} borderRadius="md">
                       <AlertIcon />
@@ -7336,33 +7371,36 @@ const SequencesTab: React.FC = () => {
                                     Cancel
                                   </Button>
                                   <Collapse in={isDiagnosticsOpen && isSequenceLaunchAdvancedOpen} animateOpacity>
-                                    <HStack gap={2} wrap="wrap">
-                                      <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        leftIcon={<RepeatIcon />}
-                                        onClick={() => openDryRunModal(e.id)}
-                                      >
-                                        Preview test run
-                                      </Button>
-                                      <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        leftIcon={<InfoIcon />}
-                                        onClick={() => openAuditModal(e.id)}
-                                      >
-                                        Open audit
-                                      </Button>
-                                      <Button
-                                        size="xs"
-                                        variant="ghost"
-                                        leftIcon={<TimeIcon />}
-                                        onClick={() => handleEnqueue(e.id)}
-                                        isLoading={queueActionId === e.id}
-                                      >
-                                        Rebuild queue
-                                      </Button>
-                                    </HStack>
+                                    <VStack align="start" spacing={1}>
+                                      <Text fontSize="xs" color="gray.500">Troubleshooting</Text>
+                                      <HStack gap={2} wrap="wrap">
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          leftIcon={<RepeatIcon />}
+                                          onClick={() => openDryRunModal(e.id)}
+                                        >
+                                          Preview test run
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          leftIcon={<InfoIcon />}
+                                          onClick={() => openAuditModal(e.id)}
+                                        >
+                                          Open audit
+                                        </Button>
+                                        <Button
+                                          size="xs"
+                                          variant="ghost"
+                                          leftIcon={<TimeIcon />}
+                                          onClick={() => handleEnqueue(e.id)}
+                                          isLoading={queueActionId === e.id}
+                                        >
+                                          Rebuild queue
+                                        </Button>
+                                      </HStack>
+                                    </VStack>
                                   </Collapse>
                                 </HStack>
                               </Td>
