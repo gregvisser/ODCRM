@@ -1076,7 +1076,11 @@ async function syncCustomerLeads(
           data: {
             lastSyncAt: syncStartedAt,
             lastSuccessAt: syncStartedAt,
+            syncStatus: 'success',
+            lastError: null,
             isRunning: false,
+            rowCount: leads.length,
+            lastChecksum: checksum,
             progressPercent: 100,
             progressMessage: 'Complete - no changes',
             syncDuration: Date.now() - syncStartedAt.getTime(),
