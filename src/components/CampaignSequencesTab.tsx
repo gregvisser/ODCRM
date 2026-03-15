@@ -51,8 +51,6 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { MdEmail } from 'react-icons/md'
-import { accounts } from './AccountsTab'
-import { getAccounts, onAccountsUpdated } from '../platform/stores/accounts'
 import { getCampaignWorkflows, setCampaignWorkflows } from '../platform/stores/campaignWorkflows'
 import { getCurrentCustomerId } from '../platform/stores/settings'
 import { api } from '../utils/api'
@@ -89,6 +87,11 @@ type CampaignWorkflow = {
   status: 'Active' | 'Paused' | 'Draft'
   createdAt: string
   updatedAt: string
+}
+
+type CustomerAccountOption = {
+  id: string
+  name: string
 }
 
 // Default email templates
@@ -232,21 +235,27 @@ function CampaignSequencesTab() {
   const [isTemplateEditMode, setIsTemplateEditMode] = useState(false)
   const templateCancelRef = useRef<HTMLButtonElement>(null)
 
-  // Load accounts from store (and keep in sync across tabs)
+  // Load account names from the DB-backed customers list.
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([])
 
-  useEffect(() => {
-    const compute = () => {
-      const storedAccounts = getAccounts<{ name: string }>()
-      const storedNames = storedAccounts.map((a) => a?.name).filter(Boolean) as string[]
-      const defaultNames = accounts.map((acc) => acc.name)
-      return Array.from(new Set([...storedNames, ...defaultNames])).sort((a, b) => a.localeCompare(b))
+  const fetchAvailableAccounts = useCallback(async () => {
+    const { data, error } = await api.get<CustomerAccountOption[]>('/api/customers')
+    if (error) {
+      console.error('Failed to fetch customer accounts:', error)
+      setAvailableAccounts([])
+      return
     }
-
-    setAvailableAccounts(compute())
-    const off = onAccountsUpdated(() => setAvailableAccounts(compute()))
-    return () => off()
+    const names = Array.isArray(data)
+      ? data
+          .map((customer) => customer?.name?.trim())
+          .filter((name): name is string => Boolean(name))
+      : []
+    setAvailableAccounts(Array.from(new Set(names)).sort((a, b) => a.localeCompare(b)))
   }, [])
+
+  useEffect(() => {
+    void fetchAvailableAccounts()
+  }, [fetchAvailableAccounts])
 
   // Persist workflows immediately (and broadcast cross-tab)
   useEffect(() => {
