@@ -1840,7 +1840,7 @@ const SequencesTab: React.FC = () => {
         const enrollmentId = data?.data?.id || data?.data?.enrollmentId
         const count = data?.data?.recipientCount ?? 0
         if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: count })
-        toast({ title: 'Test recipients saved', description: count ? `${count} recipients from the linked lead batch.` : undefined, status: 'success' })
+        toast({ title: 'Test audience saved', description: count ? `${count} recipients from the linked lead batch.` : undefined, status: 'success' })
         onCreateEnrollmentClose()
         setCreateEnrollmentName('')
         setCreateEnrollmentRecipients('')
@@ -1868,7 +1868,7 @@ const SequencesTab: React.FC = () => {
       }
       const enrollmentId = data?.data?.id || data?.data?.enrollmentId
       if (enrollmentId) setLastCreatedEnrollment({ id: enrollmentId, recipientCount: data?.data?.recipientCount ?? emails.length })
-      toast({ title: 'Test recipients saved', description: `${emails.length} manual test recipient${emails.length === 1 ? '' : 's'} queued.`, status: 'success' })
+      toast({ title: 'Test audience saved', description: `${emails.length} manual test recipient${emails.length === 1 ? '' : 's'} queued.`, status: 'success' })
       onCreateEnrollmentClose()
       setCreateEnrollmentName('')
       setCreateEnrollmentRecipients('')
@@ -2863,7 +2863,7 @@ const SequencesTab: React.FC = () => {
     if (!editingSequence?.listId) {
       return {
         label: 'No lead batch linked',
-        detail: 'Start Sequence is blocked until a linked lead batch is selected.',
+        detail: 'Start live sequence is blocked until a linked lead batch is selected.',
       }
     }
     if (linkedListSummaryLoading) {
@@ -2875,12 +2875,12 @@ const SequencesTab: React.FC = () => {
     if (linkedListSummary) {
       return {
         label: `Using lead batch: ${linkedListSummary.name}`,
-        detail: `${linkedListSummary.contactCount} recipients are currently linked for Start Sequence.`,
+        detail: `${linkedListSummary.contactCount} recipients are currently linked for Start live sequence.`,
       }
     }
     return {
       label: 'Using linked lead batch',
-      detail: 'Start Sequence uses the linked live recipients.',
+      detail: 'Start live sequence uses the linked live recipients.',
     }
   }, [editingSequence?.listId, linkedListSummary, linkedListSummaryLoading])
 
@@ -3006,7 +3006,7 @@ const SequencesTab: React.FC = () => {
     return {
       tone: 'info' as const,
       title: 'Ready to start',
-      detail: 'Start Sequence uses the linked live recipients. Test recipients are not used by this action.',
+      detail: 'Start live sequence uses the linked live recipients. Test audience is not used by this action.',
     }
   }, [editingSequence?.status, sequenceStartBlockedReason])
 
@@ -3085,7 +3085,7 @@ const SequencesTab: React.FC = () => {
     if (!sequence.listId) {
       return {
         label: 'No live recipients linked',
-        detail: 'Start Sequence is blocked until live recipients are linked.',
+        detail: 'Start live sequence is blocked until live recipients are linked.',
       }
     }
     const snapshot = snapshots.find((row) => row.id === sequence.listId)
@@ -3099,7 +3099,7 @@ const SequencesTab: React.FC = () => {
     if (recipientCount > 0) {
       return {
         label: 'Linked live recipients',
-        detail: `${recipientCount.toLocaleString()} recipient${recipientCount === 1 ? '' : 's'} linked for Start Sequence.`,
+        detail: `${recipientCount.toLocaleString()} recipient${recipientCount === 1 ? '' : 's'} linked for Start live sequence.`,
       }
     }
     return {
@@ -3152,7 +3152,7 @@ const SequencesTab: React.FC = () => {
     }
     return {
       label: 'Ready to start',
-      detail: 'Start Sequence will use the linked live recipients.',
+      detail: 'Start live sequence will use the linked live recipients.',
     }
   }
 
@@ -3202,7 +3202,7 @@ const SequencesTab: React.FC = () => {
       return 'View status'
     }
     if (sequence.status === 'sending' || sequence.status === 'running') {
-      return 'View results'
+      return 'Monitor results'
     }
     return 'Open sequence'
   }
@@ -3760,7 +3760,7 @@ const SequencesTab: React.FC = () => {
 
   function validateStartRequirements(sequence: SequenceCampaign) {
     if (!sequence.name.trim()) return 'Name this sequence before starting.'
-    if (!sequence.listId) return leadBatches.length === 0 ? 'No live recipients are ready yet. Go to Lead Sources and sync a batch first.' : 'Choose the live recipients for Start Sequence.'
+    if (!sequence.listId) return leadBatches.length === 0 ? 'No live recipients are ready yet. Go to Lead Sources and sync a batch first.' : 'Choose the live recipients for Start live sequence.'
     if (templates.length === 0) return 'Add at least one template before starting.'
     if (senderIdentities.length === 0) return 'No sending mailbox is available yet.'
     if (!sequence.senderIdentityId) return 'Choose the mailbox that will send this sequence.'
@@ -4190,7 +4190,7 @@ const SequencesTab: React.FC = () => {
             Choose a sequence, confirm who it will send to, then test or start it.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            Operator view keeps live recipients, test recipients, current state, and the next action in focus.
+            The main workflow keeps live audience, test audience, readiness, and the next operator action in focus.
           </Text>
           {activeFocusPanel && isDiagnosticsOpen ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
@@ -4199,7 +4199,7 @@ const SequencesTab: React.FC = () => {
           ) : null}
           <HStack spacing={2} mt={1} data-testid="sequences-tab-view-toggle">
             <Badge colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}>
-              {isDiagnosticsOpen ? 'Advanced diagnostics' : 'Operator view'}
+              {isDiagnosticsOpen ? 'Troubleshooting tools visible' : 'Primary workflow'}
             </Badge>
             <Button
               id="sequences-tab-toggle-diagnostics"
@@ -4209,7 +4209,7 @@ const SequencesTab: React.FC = () => {
               colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}
               onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
             >
-              {isDiagnosticsOpen ? 'Hide diagnostics' : 'Show diagnostics'}
+              {isDiagnosticsOpen ? 'Hide troubleshooting tools' : 'Show troubleshooting tools'}
             </Button>
           </HStack>
           {isDiagnosticsOpen ? (
@@ -4380,7 +4380,7 @@ const SequencesTab: React.FC = () => {
                   </Select>
                 </FormControl>
                 <Text fontSize="xs" color="gray.500">
-                  Operator view refreshes from backend truth.
+                  Troubleshooting data refreshes from backend truth.
                 </Text>
                 <Text id="sending-console-last-updated" data-testid="sending-console-last-updated" fontSize="xs" color="gray.500">
                   Last updated: {operatorConsoleLastUpdatedAt ? new Date(operatorConsoleLastUpdatedAt).toLocaleString() : '—'}
@@ -6470,7 +6470,7 @@ const SequencesTab: React.FC = () => {
         <Card mb={6}>
           <CardBody>
             <Heading size="sm" mb={3} cursor="pointer" onClick={isAuditPanelOpen ? onAuditPanelClose : onAuditPanelOpen}>
-              Dry-run Audit {isAuditPanelOpen ? '▼' : '▶'}
+              Troubleshooting audit log {isAuditPanelOpen ? '▼' : '▶'}
             </Heading>
             <Collapse in={isAuditPanelOpen}>
               <Box>
@@ -6614,10 +6614,10 @@ const SequencesTab: React.FC = () => {
                 <Tr>
                   <Th>Sequence</Th>
                   <Th>Status</Th>
-                  <Th>Live recipients</Th>
-                  <Th>Test recipients</Th>
-                  <Th>Last result</Th>
-                  <Th w="220px">Next action</Th>
+                  <Th>Live audience</Th>
+                  <Th>Test audience</Th>
+                  <Th>Latest send result</Th>
+                  <Th w="220px">Next operator action</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -7081,7 +7081,7 @@ const SequencesTab: React.FC = () => {
                     {/* Save-first notice — only shown for new (unsaved) sequences */}
                     {!editingSequence.id && (
                       <Text fontSize="sm" color="gray.600">
-                        Save this sequence first, then use Start Sequence to launch the linked live recipients.
+                        Save this sequence first, then use Start live sequence to launch the linked live recipients.
                       </Text>
                     )}
                   </VStack>
@@ -7092,24 +7092,30 @@ const SequencesTab: React.FC = () => {
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
                   <VStack align="stretch" spacing={4} mb={6}>
+                    <Box>
+                      <Heading size="sm">Launch workflow</Heading>
+                      <Text fontSize="sm" color="gray.600">
+                        Review the sender mailbox, live audience, test audience, and readiness, then send a test batch or start the live sequence.
+                      </Text>
+                    </Box>
                     <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={3}>
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Sender</StatLabel>
+                            <StatLabel>Sender mailbox</StatLabel>
                             <StatNumber fontSize="sm">
                               {editingSequence.senderIdentityId
                                 ? senderIdentities.find((sender) => sender.id === editingSequence.senderIdentityId)?.emailAddress || editingSequence.senderIdentity?.emailAddress || 'Selected mailbox'
                                 : 'No mailbox selected'}
                             </StatNumber>
-                            <StatHelpText>{editingSequence.senderIdentityId ? 'Used for Start Sequence and test sends.' : 'Choose a mailbox before sending.'}</StatHelpText>
+                            <StatHelpText>{editingSequence.senderIdentityId ? 'Used for the live sequence and test sends.' : 'Choose a mailbox before sending.'}</StatHelpText>
                           </Stat>
                         </CardBody>
                       </Card>
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Live recipients</StatLabel>
+                            <StatLabel>Live audience</StatLabel>
                             <StatNumber fontSize="sm">{liveAudienceSummary.label}</StatNumber>
                             <StatHelpText>{liveAudienceSummary.detail}</StatHelpText>
                           </Stat>
@@ -7118,7 +7124,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Test recipients</StatLabel>
+                            <StatLabel>Test audience</StatLabel>
                             <StatNumber fontSize="sm">{testAudienceSummary.label}</StatNumber>
                             <StatHelpText>{testAudienceSummary.detail}</StatHelpText>
                           </Stat>
@@ -7127,7 +7133,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Current state</StatLabel>
+                            <StatLabel>Live sequence state</StatLabel>
                             <StatNumber fontSize="sm">{humanizeSequenceStatus(editingSequence.status)}</StatNumber>
                             <StatHelpText>{launchStatusSummary.title}</StatHelpText>
                           </Stat>
@@ -7136,7 +7142,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Next action</StatLabel>
+                            <StatLabel>Next operator action</StatLabel>
                             <StatNumber fontSize="sm">{nextActionSummary.label}</StatNumber>
                             <StatHelpText>{nextActionSummary.detail}</StatHelpText>
                           </Stat>
@@ -7145,7 +7151,7 @@ const SequencesTab: React.FC = () => {
                       <Card variant="outline">
                         <CardBody py={3}>
                           <Stat>
-                            <StatLabel>Last result</StatLabel>
+                            <StatLabel>Latest send result</StatLabel>
                             <StatNumber fontSize="sm">{lastSequenceOutcomeSummary.label}</StatNumber>
                             <StatHelpText>{lastSequenceOutcomeSummary.detail}</StatHelpText>
                           </Stat>
@@ -7157,7 +7163,7 @@ const SequencesTab: React.FC = () => {
                       <Alert status={launchStatusSummary.tone} borderRadius="md" alignItems="flex-start">
                         <AlertIcon mt={1} />
                         <Box>
-                          <AlertTitle fontSize="sm">Start Sequence</AlertTitle>
+                          <AlertTitle fontSize="sm">Start live sequence</AlertTitle>
                           <AlertDescription fontSize="sm">{launchStatusSummary.detail}</AlertDescription>
                         </Box>
                       </Alert>
@@ -7186,28 +7192,33 @@ const SequencesTab: React.FC = () => {
                         onClick={() => editingSequence && handleRequestStart(editingSequence)}
                         isDisabled={!!sequenceStartBlockedReason}
                       >
-                        Start Sequence
+                        Start live sequence
                       </Button>
                       <Text fontSize="xs" color="gray.600">
-                        Send test batch now uses active test recipients only. Start Sequence uses the linked live recipients immediately after you start it.
+                        Send test batch now uses active test recipients only. Start live sequence uses the linked live recipients immediately after you start it.
                       </Text>
                     </Flex>
                   </VStack>
                     <Flex justify="space-between" align="center" mb={4} gap={3} flexWrap="wrap">
                       <Box>
-                        <Heading size="sm">Test recipients</Heading>
+                        <Heading size="sm">Test audience</Heading>
                         <Text fontSize="sm" color="gray.600">
-                          Send test batch now uses test recipients only. It does not send to the live recipients used by Start Sequence.
+                          Send test batch now uses test recipients only. It does not send to the live recipients used by Start live sequence.
                         </Text>
+                        {isDiagnosticsOpen ? (
+                          <Text fontSize="xs" color="gray.500" mt={1}>
+                            Troubleshooting tools let you preview test runs, inspect queue and audit details, or rebuild the queue without changing live-send policy.
+                          </Text>
+                        ) : null}
                       </Box>
                     <HStack spacing={2}>
                       {isDiagnosticsOpen ? (
                         <Button size="sm" variant={isSequenceLaunchAdvancedOpen ? 'outline' : 'ghost'} onClick={() => setIsSequenceLaunchAdvancedOpen((current) => !current)}>
-                          {isSequenceLaunchAdvancedOpen ? 'Hide diagnostics' : 'Show diagnostics'}
+                          {isSequenceLaunchAdvancedOpen ? 'Hide troubleshooting tools' : 'Show troubleshooting tools'}
                         </Button>
                       ) : null}
                       <Button size="sm" leftIcon={<AddIcon />} onClick={onCreateEnrollmentOpen}>
-                        Add test recipients
+                        Add test audience
                       </Button>
                     </HStack>
                   </Flex>
@@ -7215,13 +7226,13 @@ const SequencesTab: React.FC = () => {
                     <Alert status="success" mb={4} borderRadius="md">
                       <AlertIcon />
                       <Box flex="1">
-                        <AlertTitle fontSize="sm">Test recipients ready</AlertTitle>
+                        <AlertTitle fontSize="sm">Test audience ready</AlertTitle>
                         <AlertDescription fontSize="xs">
-                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} test recipient${lastCreatedEnrollment.recipientCount === 1 ? '' : 's'} ready. ` : ''}Use View results to confirm what sent, failed, or was blocked.
+                          {lastCreatedEnrollment.recipientCount != null ? `${lastCreatedEnrollment.recipientCount} test recipient${lastCreatedEnrollment.recipientCount === 1 ? '' : 's'} ready. ` : ''}Use View send results to confirm what sent, failed, or was blocked.
                         </AlertDescription>
                       </Box>
                       <Button size="xs" variant="outline" ml={3} onClick={() => openQueueModal(lastCreatedEnrollment.id)}>
-                        View results
+                        View send results
                       </Button>
                     </Alert>
                   )}
@@ -7234,7 +7245,7 @@ const SequencesTab: React.FC = () => {
                   {enrollmentsLoading ? (
                     <Text color="gray.500" fontSize="sm">Loading enrollments…</Text>
                   ) : enrollments.length === 0 && !enrollmentsError ? (
-                    <Text color="gray.500" fontSize="sm">No test recipients yet. Add a private test recipient before sending to the live recipients.</Text>
+                    <Text color="gray.500" fontSize="sm">No test recipients yet. Add a private test recipient before sending to the live audience.</Text>
                   ) : (
                     <Box overflowX="auto">
                       <Table size="sm">
@@ -7284,7 +7295,7 @@ const SequencesTab: React.FC = () => {
                                     leftIcon={<ViewIcon />}
                                     onClick={() => openRecipientsModal(e.id)}
                                   >
-                                    View recipients
+                                    View test audience
                                   </Button>
                                   <Button
                                     size="xs"
@@ -7292,7 +7303,7 @@ const SequencesTab: React.FC = () => {
                                     leftIcon={<ViewIcon />}
                                     onClick={() => openQueueModal(e.id)}
                                   >
-                                    View results
+                                    View send results
                                   </Button>
                                   <Button
                                     size="xs"
@@ -7332,7 +7343,7 @@ const SequencesTab: React.FC = () => {
                                         leftIcon={<RepeatIcon />}
                                         onClick={() => openDryRunModal(e.id)}
                                       >
-                                        Dry run
+                                        Preview test run
                                       </Button>
                                       <Button
                                         size="xs"
@@ -7340,7 +7351,7 @@ const SequencesTab: React.FC = () => {
                                         leftIcon={<InfoIcon />}
                                         onClick={() => openAuditModal(e.id)}
                                       >
-                                        Audit
+                                        Open audit
                                       </Button>
                                       <Button
                                         size="xs"
@@ -7349,7 +7360,7 @@ const SequencesTab: React.FC = () => {
                                         onClick={() => handleEnqueue(e.id)}
                                         isLoading={queueActionId === e.id}
                                       >
-                                        Refresh queue
+                                        Rebuild queue
                                       </Button>
                                     </HStack>
                                   </Collapse>
@@ -7390,7 +7401,7 @@ const SequencesTab: React.FC = () => {
       <Modal isOpen={isCreateEnrollmentOpen} onClose={onCreateEnrollmentClose} size="md">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Add test recipients</ModalHeader>
+          <ModalHeader>Add test audience</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
             <Alert status="info" mb={4} borderRadius="md">
@@ -7398,7 +7409,7 @@ const SequencesTab: React.FC = () => {
               <Box>
                 <AlertTitle fontSize="sm">Choose test recipients</AlertTitle>
                 <AlertDescription fontSize="xs">
-                  Test recipients help you verify a send now without changing the live recipients used by Start Sequence.
+                  Test recipients help you verify a send now without changing the live recipients used by Start live sequence.
                 </AlertDescription>
               </Box>
             </Alert>
@@ -7429,7 +7440,7 @@ const SequencesTab: React.FC = () => {
                   <Box>
                     <AlertTitle fontSize="sm">From the linked lead batch</AlertTitle>
                     <AlertDescription fontSize="xs">
-                      Creates a test group from the linked live recipients. Start Sequence still uses the live recipients directly.
+                      Creates a test group from the linked live recipients. Start live sequence still uses the live recipients directly.
                     </AlertDescription>
                   </Box>
                 </Alert>
@@ -7734,7 +7745,7 @@ const SequencesTab: React.FC = () => {
                     onClick={() => queueEnrollmentId && refreshQueue(queueEnrollmentId)}
                     isLoading={queueRefreshing}
                   >
-                    Refresh queue
+                    Rebuild queue
                   </Button>
                   <Button
                     size="sm"
@@ -8007,7 +8018,7 @@ const SequencesTab: React.FC = () => {
                   </Text>
                 </Box>
                 <Box>
-                  <Text fontWeight="semibold">Live recipients</Text>
+                  <Text fontWeight="semibold">Live audience</Text>
                   <Text fontSize="sm" color="gray.600">
                     {startPreview?.snapshot?.name || '—'}
                     {typeof startPreview?.snapshot?.memberCount === 'number'
@@ -8018,7 +8029,7 @@ const SequencesTab: React.FC = () => {
                 <Alert status="info" size="sm">
                   <AlertIcon />
                   <AlertDescription>
-                    Start Sequence uses the linked live recipients. Use &quot;Send test batch now&quot; in the sequence view when you want to send only to active test recipients.
+                    Start live sequence uses the linked live recipients. Use &quot;Send test batch now&quot; in the sequence view when you want to send only to active test recipients.
                   </AlertDescription>
                 </Alert>
                 <Box>
@@ -8066,7 +8077,7 @@ const SequencesTab: React.FC = () => {
               isLoading={startPreview?.loading}
               isDisabled={!!startPreview?.error}
             >
-              Start Sequence
+              Start live sequence
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
