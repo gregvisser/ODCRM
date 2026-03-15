@@ -42,7 +42,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Customer type
@@ -125,7 +125,12 @@ type RepliesResponse = {
 const InboxTab: React.FC = () => {
   const toast = useToast()
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+  const {
+    canSelectCustomer,
+    customerHeaders,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [replies, setReplies] = useState<ReplyItem[]>([])
   const [threads, setThreads] = useState<EmailThread[]>([])
   const [selectedThread, setSelectedThread] = useState<EmailMessage[] | null>(null)
@@ -169,10 +174,9 @@ const InboxTab: React.FC = () => {
         break
     }
 
-    const headers = { 'X-Customer-Id': selectedCustomerId }
     const { data, error: apiError } = await api.get<RepliesResponse>(
       `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}`,
-      { headers }
+      { headers: customerHeaders }
     )
     
     if (apiError) {
@@ -183,7 +187,7 @@ const InboxTab: React.FC = () => {
     }
     
     setLoading(false)
-  }, [selectedCustomerId, dateRange])
+  }, [selectedCustomerId, dateRange, customerHeaders])
 
   const loadCustomers = useCallback(async () => {
     setLoading(true)
@@ -202,19 +206,13 @@ const InboxTab: React.FC = () => {
       if (customerList.length === 0) {
         setSelectedCustomerId('')
       }
-
-      const storedCustomerId = getCurrentCustomerId()
-      const currentCustomer = customerList.find((c) => c.id === storedCustomerId)
-      if (currentCustomer) {
-        setSelectedCustomerId(storedCustomerId)
-      }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in InboxTab:', err)
       setCustomers([])
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [setSelectedCustomerId])
 
   const loadThreads = useCallback(async () => {
     if (!selectedCustomerId) return
@@ -222,10 +220,9 @@ const InboxTab: React.FC = () => {
     setThreadsLoading(true)
     setError(null)
 
-    const headers = { 'X-Customer-Id': selectedCustomerId }
     const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
       `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
-      { headers }
+      { headers: customerHeaders }
     )
 
     if (apiError) {
@@ -237,7 +234,7 @@ const InboxTab: React.FC = () => {
 
     setThreadsLoading(false)
     setLoading(false)
-  }, [selectedCustomerId, unreadOnly])
+  }, [selectedCustomerId, unreadOnly, customerHeaders])
 
   useEffect(() => {
     void loadCustomers()
@@ -262,8 +259,7 @@ const InboxTab: React.FC = () => {
 
   const loadThreadMessages = async (threadId: string) => {
     if (!selectedCustomerId) return
-    const headers = { 'X-Customer-Id': selectedCustomerId }
-    const { data, error: apiError } = await api.get<{ threadId: string; messages: EmailMessage[] }>(`/api/inbox/threads/${threadId}/messages`, { headers })
+    const { data, error: apiError } = await api.get<{ threadId: string; messages: EmailMessage[] }>(`/api/inbox/threads/${threadId}/messages`, { headers: customerHeaders })
 
     if (apiError) {
       toast({
@@ -287,13 +283,12 @@ const InboxTab: React.FC = () => {
     if (!selectedThreadId || !replyContent.trim() || !selectedCustomerId) return
     setIsSendingReply(true)
 
-    const headers = { 'X-Customer-Id': selectedCustomerId }
     const { error: apiError } = await api.post(
       `/api/inbox/threads/${selectedThreadId}/reply`,
       {
         content: replyContent,
       },
-      { headers }
+      { headers: customerHeaders }
     )
 
     if (apiError) {
@@ -324,8 +319,7 @@ const InboxTab: React.FC = () => {
     if (!selectedCustomerId) return
     setIsRefreshing(true)
     try {
-      const headers = { 'X-Customer-Id': selectedCustomerId }
-      const { data, error } = await api.post('/api/inbox/refresh', {}, { headers })
+      const { data, error } = await api.post('/api/inbox/refresh', {}, { headers: customerHeaders })
       if (error) {
         toast({ title: 'Refresh failed', description: error, status: 'error', duration: 3000 })
       } else {
@@ -347,11 +341,10 @@ const InboxTab: React.FC = () => {
 
   const markThreadRead = async (messages: EmailMessage[]) => {
     if (!selectedCustomerId) return
-    const headers = { 'X-Customer-Id': selectedCustomerId }
     const inbound = messages.filter((m) => m.direction === 'inbound')
     for (const msg of inbound) {
       if (msg.isRead === false) {
-        await api.post(`/api/inbox/messages/${msg.id}/read`, { isRead: true }, { headers })
+        await api.post(`/api/inbox/messages/${msg.id}/read`, { isRead: true }, { headers: customerHeaders })
       }
     }
   }
@@ -424,11 +417,9 @@ const InboxTab: React.FC = () => {
             data-testid="inbox-tab-customer-select"
             size="sm"
             value={selectedCustomerId}
-            onChange={(e) => {
-              setSelectedCustomerId(e.target.value)
-              setCurrentCustomerId(e.target.value)
-            }}
+            onChange={(e) => setSelectedCustomerId(e.target.value)}
             w="200px"
+            isDisabled={!canSelectCustomer}
           >
             <option value="">Select customer</option>
             {customers.map(customer => (

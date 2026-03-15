@@ -1,8 +1,7 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useMemo, useCallback, useEffect } from 'react'
 import { Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
-import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../platform/stores/settings'
 import { isClientUI } from '../../platform/mode'
 import CustomerSelector from './components/CustomerSelector'
 import ProgressTrackerTab from './ProgressTrackerTab'
@@ -10,6 +9,7 @@ import CustomerOnboardingTab from './CustomerOnboardingTab'
 import { onboardingDebug } from './utils/debug'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
+import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
 
 export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'
 
@@ -26,32 +26,20 @@ interface OnboardingHomePageProps {
 
 export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
   const activeView = coerceViewId(view)
-  // Use canonical settingsStore for customer selection (SINGLE SOURCE OF TRUTH)
-  const [selectedCustomerId, setSelectedCustomerId] = useState(() => getCurrentCustomerId() ?? '')
+  const { customerId: selectedCustomerId, setCustomerId: setSelectedCustomerId } = useScopedCustomerSelection()
   const { signal, interpretation: readiness } = useClientReadinessState(selectedCustomerId || null)
 
-  // Sync with settingsStore on mount and when settings change globally
   useEffect(() => {
     onboardingDebug('🔄 OnboardingHomePage: Initial customerId from settingsStore:', selectedCustomerId)
-    
-    const unsubscribe = onSettingsUpdated((detail: any) => {
-      if (detail && typeof detail.currentCustomerId === 'string') {
-        onboardingDebug('🔄 OnboardingHomePage: Customer changed via settingsStore:', detail.currentCustomerId)
-        setSelectedCustomerId(detail.currentCustomerId)
-      }
-    })
-    return unsubscribe
   }, [selectedCustomerId])
 
-  // Handler when customer changes via selector - update canonical store
   const handleCustomerChange = useCallback((customerId: string) => {
     onboardingDebug('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
-    setCurrentCustomerId(customerId) // Update canonical store
-    setSelectedCustomerId(customerId) // Update local state
+    setSelectedCustomerId(customerId)
 
     // UX: after selecting/creating a customer, keep user in the unified onboarding form.
     onNavigate?.('customer-onboarding')
-  }, [onNavigate])
+  }, [onNavigate, setSelectedCustomerId])
 
   const handleContinueToMarketingReadiness = useCallback(() => {
     window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))

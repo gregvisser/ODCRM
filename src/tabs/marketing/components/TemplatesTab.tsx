@@ -56,7 +56,7 @@ import {
 import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type EmailTemplate = {
@@ -194,7 +194,12 @@ const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
 const TemplatesTab: React.FC = () => {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+  const {
+    canSelectCustomer,
+    customerHeaders,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [loading, setLoading] = useState(true)
@@ -232,20 +237,11 @@ const TemplatesTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      // Only use customer IDs that exist in the API response (real cust_*). No silent default tenant.
-      const storeCustomerId = getCurrentCustomerId()
-      const currentCustomer = customerList.find(c => c.id === storeCustomerId)
-      if (currentCustomer) {
-        setSelectedCustomerId(currentCustomer.id)
-      } else {
-        setSelectedCustomerId('')
-      }
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in TemplatesTab:', err)
       setCustomers([])
-      setSelectedCustomerId('')
     }
-  }, [])
+  }, [setSelectedCustomerId])
 
   useEffect(() => {
     void loadCustomers()
@@ -376,7 +372,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     setPreviewError(null)
     setPreviewRendered(null)
     onPreviewOpen()
-    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : undefined
+    const headers = customerHeaders
     void api.post<{ subject?: string; body?: string }>(
       '/api/templates/preview',
       {
@@ -414,7 +410,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     setAiError(null)
     setAiSuggestion(null)
 
-    const headers = selectedCustomerId ? { 'X-Customer-Id': selectedCustomerId } : undefined
+    const headers = customerHeaders
     const response = await api.post<{ tweakedBody?: string; tweakedSubject?: string }>(
       '/api/templates/ai/tweak',
       {
@@ -500,7 +496,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         bodyTemplateText: editingTemplate.content.trim(),
         stepNumber: 1,
       }
-      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const headers = customerHeaders!
       
       if (editingTemplate.id) {
         const res = await api.patch(`/api/templates/${editingTemplate.id}`, payload, { headers })
@@ -550,7 +546,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         bodyTemplateText: template.content.trim(),
         stepNumber: 1,
       }
-      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const headers = customerHeaders!
       const res = await api.post('/api/templates', duplicatedTemplate, { headers })
       if (res.error) {
         throw new Error(res.error)
@@ -573,7 +569,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
 
   const handleToggleFavorite = async (template: EmailTemplate) => {
     try {
-      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const headers = customerHeaders!
       await api.patch(`/api/templates/${template.id}`, {
         isFavorite: !template.isFavorite
       }, { headers })
@@ -593,7 +589,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       return
     }
     try {
-      const headers = { 'X-Customer-Id': selectedCustomerId }
+      const headers = customerHeaders!
       const { error: deleteError } = await api.delete(`/api/templates/${templateId}`, { headers })
       if (deleteError) {
         toast({
@@ -662,6 +658,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               placeholder="Select Client"
+              isDisabled={!canSelectCustomer}
             >
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>

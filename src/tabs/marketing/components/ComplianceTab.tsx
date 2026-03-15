@@ -28,7 +28,7 @@ import {
 import { DeleteIcon } from '@chakra-ui/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../utils/api'
-import { clearCurrentCustomerId, getCurrentCustomerId, onSettingsUpdated, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
 
 type SuppressionEntry = {
@@ -86,7 +86,7 @@ export default function ComplianceTab() {
   const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [customerId, setCustomerId] = useState<string>(getCurrentCustomerId())
+  const { customerHeaders, customerId, setCustomerId } = useScopedCustomerSelection()
   const [listTypeFilter, setListTypeFilter] = useState<SheetKind>('email')
   const [currentPage, setCurrentPage] = useState(1)
   const [pagination, setPagination] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE, total: 0, totalPages: 1 })
@@ -182,14 +182,6 @@ export default function ComplianceTab() {
     if (customerId) void loadSuppressionHealth()
   }, [customerId, loadSuppressionHealth])
 
-  useEffect(() => {
-    const unsubscribe = onSettingsUpdated((detail) => {
-      const next = (detail as { currentCustomerId?: string } | null)?.currentCustomerId
-      setCustomerId(next || '')
-    })
-    return () => unsubscribe()
-  }, [])
-
   const handleCustomerChange = useCallback((nextCustomerId: string) => {
     setCustomerId(nextCustomerId)
     setEntries([])
@@ -201,12 +193,7 @@ export default function ComplianceTab() {
     setSheetUrls({ email: '', domain: '' })
     setSheetEditorOpen({ email: false, domain: false })
     setLoading(Boolean(nextCustomerId))
-    if (nextCustomerId) {
-      setCurrentCustomerId(nextCustomerId)
-      return
-    }
-    clearCurrentCustomerId()
-  }, [DEFAULT_PAGE_SIZE])
+  }, [setCustomerId])
 
   useEffect(() => {
     setCurrentPage(1)
@@ -227,7 +214,7 @@ export default function ComplianceTab() {
       value: normalized,
       reason: reason.trim() || undefined,
       source: 'manual',
-    })
+    }, { headers: customerHeaders })
     if (error) {
       toast({ title: 'Failed to add entry', description: error, status: 'error' })
       return
@@ -251,7 +238,7 @@ export default function ComplianceTab() {
     }
     const snapshot = entries
     setEntries((prev) => prev.filter((entry) => entry.id !== id))
-    const { error } = await api.delete(`/api/suppression/${id}?customerId=${customerId}`)
+    const { error } = await api.delete(`/api/suppression/${id}?customerId=${customerId}`, { headers: customerHeaders })
     if (error) {
       setEntries(snapshot)
       toast({ title: 'Delete failed', description: error, status: 'error' })
@@ -289,7 +276,7 @@ export default function ComplianceTab() {
       sheetUrl: nextSheetUrl,
       mode: 'replace',
       sourceLabel: kind === 'email' ? 'google-sheet:email-dnc' : 'google-sheet:domain-dnc',
-    })
+    }, { headers: customerHeaders })
 
     if (error) {
       toast({ title: 'Sheet sync failed', description: error, status: 'error', duration: 6000 })

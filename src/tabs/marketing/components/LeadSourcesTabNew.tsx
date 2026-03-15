@@ -53,8 +53,8 @@ import {
 import { ExternalLinkIcon, RepeatIcon, ViewIcon, AddIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, setCurrentCustomerId, onSettingsUpdated } from '../../../platform/stores/settings'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import {
   getLeadSources,
   connectLeadSource,
@@ -507,7 +507,7 @@ export default function LeadSourcesTabNew({
   onNavigateToSequences?: () => void
 } = {}) {
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([])
-  const [customerId, setCustomerId] = useState('')
+  const { canSelectCustomer, customerId, setCustomerId } = useScopedCustomerSelection()
   const [sources, setSources] = useState<Awaited<ReturnType<typeof getLeadSources>>['sources']>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -550,8 +550,6 @@ export default function LeadSourcesTabNew({
     try {
       const list = normalizeCustomersListResponse(res.data) as Array<{ id: string; name: string }>
       setCustomers(list.map((c) => ({ id: c.id, name: c.name })))
-      const current = getCurrentCustomerId()
-      if (current && list.some((c: { id: string }) => c.id === current)) setCustomerId(current)
     } catch {
       setCustomers([])
     }
@@ -574,11 +572,6 @@ export default function LeadSourcesTabNew({
 
   useEffect(() => {
     loadCustomers()
-    const unsub = onSettingsUpdated((d) => {
-      const id = (d as { currentCustomerId?: string })?.currentCustomerId
-      if (typeof id === 'string') setCustomerId(id)
-    })
-    return () => unsub()
   }, [loadCustomers])
 
   useEffect(() => {
@@ -690,7 +683,6 @@ export default function LeadSourcesTabNew({
   }, [customerId, contactsBatchKey, contactsPage, contactsPageSize, loadContacts])
 
   const handleCustomerChange = (id: string) => {
-    setCurrentCustomerId(id)
     setCustomerId(id)
     setViewBatchesSource(null)
     setContactsBatchKey(null)
@@ -776,6 +768,7 @@ export default function LeadSourcesTabNew({
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
             placeholder="Select client"
+            isDisabled={!canSelectCustomer}
           >
             {customers.map((c) => (
               <option key={c.id} value={c.id}>

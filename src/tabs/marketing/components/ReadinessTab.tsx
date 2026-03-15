@@ -27,7 +27,7 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
-import { getCurrentCustomerId } from '../../../platform/stores/settings'
+import { useEffectiveCustomerId } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type SequenceOption = {
@@ -140,7 +140,7 @@ const ReadinessTab: React.FC = () => {
   const [runHistoryData, setRunHistoryData] = useState<RunHistoryData | null>(null)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('')
 
-  const customerId = getCurrentCustomerId()
+  const customerId = useEffectiveCustomerId()
 
   const openSequencesTab = useCallback((target?: string) => {
     const focusPanelByTarget: Record<string, string> = {

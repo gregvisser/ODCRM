@@ -64,7 +64,7 @@ import {
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
-import { getCurrentCustomerId, setCurrentCustomerId } from '../../../platform/stores/settings'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Backend EmailIdentity shape from /api/outlook/identities
@@ -144,7 +144,12 @@ const EmailAccountsTab: React.FC = () => {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string>('')
+  const {
+    canSelectCustomer,
+    customerHeaders,
+    customerId: selectedCustomerId,
+    setCustomerId: setSelectedCustomerId,
+  } = useScopedCustomerSelection()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [capacityLoading, setCapacityLoading] = useState(false)
@@ -167,7 +172,8 @@ const EmailAccountsTab: React.FC = () => {
     setError(null)
 
     const { data, error: apiError } = await api.get<EmailIdentity[]>(
-      `/api/outlook/identities?customerId=${encodeURIComponent(requestedCustomerId)}`
+      `/api/outlook/identities?customerId=${encodeURIComponent(requestedCustomerId)}`,
+      { headers: { 'X-Customer-Id': requestedCustomerId } },
     )
 
     // Ignore stale response: user may have changed customer while request was in flight
@@ -193,7 +199,7 @@ const EmailAccountsTab: React.FC = () => {
     setCapacityError(null)
     const { data, error: apiError } = await api.get<IdentityCapacityData>(
       '/api/send-worker/identity-capacity?sinceHours=72',
-      { headers: { 'X-Customer-Id': selectedCustomerId } },
+      { headers: customerHeaders },
     )
     if (apiError) {
       setCapacityError(apiError)
@@ -207,7 +213,7 @@ const EmailAccountsTab: React.FC = () => {
     }
     setIdentityCapacity(data)
     setCapacityLoading(false)
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, customerHeaders])
 
   const handleRefreshAll = useCallback(async () => {
     await Promise.all([loadIdentities(), loadIdentityCapacity()])
@@ -245,10 +251,6 @@ const EmailAccountsTab: React.FC = () => {
     try {
       const customerList = normalizeCustomersListResponse(data) as Customer[]
       setCustomers(customerList)
-      const storedId = getCurrentCustomerId()
-      // PR2: No implicit default client selection.
-      const current = storedId != null ? customerList.find(c => c.id === storedId) : undefined
-      setSelectedCustomerId(current ? (storedId as string) : '')
     } catch (err: any) {
       console.error('❌ Failed to normalize customers in EmailAccountsTab:', err)
       setCustomers([])
@@ -343,11 +345,11 @@ const EmailAccountsTab: React.FC = () => {
         sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
         sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
         isActive: editingIdentity.isActive,
-      }),
+      }, { headers: customerHeaders }),
       api.put(
         `/api/outlook/identities/${editingIdentity.id}/signature`,
         { signatureHtml: editingIdentity.signatureHtml || null },
-        { headers: { 'X-Customer-Id': selectedCustomerId } },
+        { headers: customerHeaders },
       ),
     ])
 
@@ -382,7 +384,7 @@ const EmailAccountsTab: React.FC = () => {
 
     const { error: apiError } = await api.post(`/api/outlook/identities/${identity.id}/test-send`, {
       toEmail: testEmail,
-    })
+    }, { headers: customerHeaders })
 
     if (apiError) {
       toast({
@@ -405,7 +407,7 @@ const EmailAccountsTab: React.FC = () => {
   const handleToggleActive = async (identity: EmailIdentity) => {
     const { error: apiError } = await api.patch(`/api/outlook/identities/${identity.id}`, {
       isActive: !identity.isActive,
-    })
+    }, { headers: customerHeaders })
 
     if (apiError) {
       toast({
@@ -430,7 +432,7 @@ const EmailAccountsTab: React.FC = () => {
       return
     }
 
-    const { error: apiError } = await api.delete(`/api/outlook/identities/${identity.id}`)
+    const { error: apiError } = await api.delete(`/api/outlook/identities/${identity.id}`, { headers: customerHeaders })
 
     if (apiError) {
       toast({
@@ -466,10 +468,10 @@ const EmailAccountsTab: React.FC = () => {
                 const id = e.target.value
                 if (id) {
                   setSelectedCustomerId(id)
-                  setCurrentCustomerId(id)
                 }
               }}
               placeholder="Select client"
+              isDisabled={!canSelectCustomer}
             >
               {customers.map((customer) => (
                 <option key={customer.id} value={customer.id}>
@@ -536,9 +538,9 @@ const EmailAccountsTab: React.FC = () => {
                 onChange={(e) => {
                   const id = e.target.value
                   setSelectedCustomerId(id)
-                  setCurrentCustomerId(id)
                 }}
                 placeholder="Select client"
+                isDisabled={!canSelectCustomer}
               >
                 {customers.map((customer) => (
                   <option key={customer.id} value={customer.id}>
