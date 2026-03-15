@@ -377,6 +377,32 @@ const InboxTab: React.FC = () => {
     }).length,
   }), [replies])
 
+  const threadStats = useMemo(() => {
+    const mailboxKeys = new Set<string>()
+    threads.forEach((thread) => {
+      const key = (thread.mailboxEmail || thread.mailboxName || '').trim().toLowerCase()
+      if (key) mailboxKeys.add(key)
+    })
+
+    const recentWindowStart = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return {
+      total: threads.length,
+      unread: threads.filter((thread) => (thread.unreadCount || 0) > 0).length,
+      recent: threads.filter((thread) => new Date(thread.latestMessageAt).getTime() >= recentWindowStart).length,
+      mailboxes: mailboxKeys.size,
+    }
+  }, [threads])
+
+  const replySummary = useMemo(() => {
+    const campaigns = new Set<string>()
+    replies.forEach((reply) => {
+      if (reply.campaignId?.trim()) campaigns.add(reply.campaignId.trim())
+    })
+    return {
+      campaigns: campaigns.size,
+    }
+  }, [replies])
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString)
     const now = new Date()
@@ -409,7 +435,7 @@ const InboxTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Inbox</Heading>
           <Text color="gray.600">
-            Handle inbound replies and thread conversations from connected mailboxes.
+            Review conversations, handle replies, and keep operator follow-up moving across connected mailboxes.
           </Text>
         </VStack>
         <HStack>
@@ -435,8 +461,8 @@ const InboxTab: React.FC = () => {
             }}
             w="120px"
           >
-            <option value="threads">Threads</option>
-            <option value="replies">Replies</option>
+            <option value="threads">Conversations</option>
+            <option value="replies">Recent replies</option>
           </Select>
           <Select
             size="sm"
@@ -448,9 +474,6 @@ const InboxTab: React.FC = () => {
             <option value="30d">Last 30 days</option>
             <option value="90d">Last 90 days</option>
           </Select>
-          <Button data-testid="inbox-tab-refresh-btn" size="sm" isLoading={isRefreshing} onClick={handleRefresh} isDisabled={!selectedCustomerId}>
-            Refresh
-          </Button>
         </HStack>
       </Flex>
 
@@ -467,31 +490,6 @@ const InboxTab: React.FC = () => {
         </Alert>
       )}
 
-      <Text fontSize="xs" color="gray.500" mb={4} data-testid="inbox-tab-last-updated">
-        Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : 'Not loaded yet'}
-      </Text>
-
-      <Alert status="info" mb={4} data-testid="inbox-tab-operator-guidance">
-        <AlertIcon />
-        <Box>
-          <AlertTitle fontSize="sm">Operator flow: What to do here</AlertTitle>
-          <AlertDescription fontSize="sm">
-            Review replies and unread threads here, then go to Sequences for remediation or Reports for trend verification.
-          </AlertDescription>
-          <HStack mt={2}>
-            <Button size="xs" variant="outline" data-testid="inbox-tab-open-sequences" onClick={() => openMarketingTab('sequences', 'queue-workbench-panel')}>
-              Open Sequences
-            </Button>
-            <Button size="xs" variant="outline" data-testid="inbox-tab-open-reports" onClick={() => openMarketingTab('reports')}>
-              Open Reports
-            </Button>
-            <Button size="xs" variant="ghost" data-testid="inbox-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
-              Back to Readiness
-            </Button>
-          </HStack>
-        </Box>
-      </Alert>
-
       {/* Error Display */}
       {error && (
         <Alert status="error" mb={4}>
@@ -507,19 +505,68 @@ const InboxTab: React.FC = () => {
       )}
 
       {selectedCustomerId && view === 'threads' ? (
+        <>
+          <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={4} data-testid="inbox-tab-thread-stats">
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Conversations</StatLabel>
+                  <StatNumber>{threadStats.total}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Needs action</StatLabel>
+                  <StatNumber>{threadStats.unread}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Recent this week</StatLabel>
+                  <StatNumber>{threadStats.recent}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Mailboxes in view</StatLabel>
+                  <StatNumber>{threadStats.mailboxes}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          <Alert status="info" mb={4} data-testid="inbox-tab-main-guidance">
+            <AlertIcon />
+            <Box>
+              <AlertTitle fontSize="sm">Main inbox path</AlertTitle>
+              <AlertDescription fontSize="sm">
+                Start with unread conversations, open the thread you need, then reply or record an opt-out from the conversation itself.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        </>
+      ) : null}
+
+      {selectedCustomerId && view === 'threads' ? (
         <Grid templateColumns={{ base: '1fr', lg: '300px 1fr' }} gap={6} data-testid="inbox-tab-threads-view">
           {/* Thread List */}
           <Card data-testid="inbox-tab-thread-list">
             <CardHeader>
               <Flex justify="space-between" align="center">
-                <Heading size="md">Email Threads</Heading>
+                <Heading size="md">Conversations</Heading>
                 <Button
                   size="xs"
                   variant={unreadOnly ? 'solid' : 'outline'}
                   colorScheme="blue"
                   onClick={() => setUnreadOnly((v) => !v)}
                 >
-                  {unreadOnly ? 'Unread only' : 'All'}
+                  {unreadOnly ? 'Needs action only' : 'All conversations'}
                 </Button>
               </Flex>
             </CardHeader>
@@ -531,14 +578,11 @@ const InboxTab: React.FC = () => {
                 </VStack>
               ) : threads.length === 0 ? (
                 <VStack py={8}>
-                  <Text color="gray.500">No email threads found for this client yet.</Text>
-                  <Text fontSize="sm" color="gray.500">Try Refresh, switch to Replies, or verify connected email accounts.</Text>
+                  <Text color="gray.500">No conversations were found for this client yet.</Text>
+                  <Text fontSize="sm" color="gray.500">Try the recent replies view, or use the follow-up tools below to pull in newer mailbox activity.</Text>
                   <HStack>
-                    <Button size="xs" variant="outline" onClick={handleRefresh} isDisabled={!selectedCustomerId}>
-                      Refresh Inbox
-                    </Button>
                     <Button size="xs" variant="ghost" onClick={() => setView('replies')}>
-                      View Replies
+                      Open recent replies
                     </Button>
                   </HStack>
                 </VStack>
@@ -591,7 +635,7 @@ const InboxTab: React.FC = () => {
           <Card data-testid="inbox-tab-thread-detail">
             <CardHeader>
               <Heading size="md">
-                {selectedThread ? 'Thread Messages' : 'Select a thread'}
+                {selectedThread ? 'Conversation' : 'Select a conversation'}
               </Heading>
             </CardHeader>
             <CardBody>
@@ -628,7 +672,7 @@ const InboxTab: React.FC = () => {
 
                   {/* Reply Form */}
                   <Box borderTop="1px" borderColor="gray.200" pt={4} data-testid="inbox-tab-reply-composer">
-                    <Heading size="sm" mb={3}>Reply</Heading>
+                    <Heading size="sm" mb={3}>Reply to this conversation</Heading>
                     <Textarea
                       placeholder="Type your reply..."
                       value={replyContent}
@@ -690,8 +734,8 @@ const InboxTab: React.FC = () => {
                 </VStack>
               ) : (
                 <VStack align="start" spacing={2}>
-                  <Text color="gray.500">Select a thread from the list to review conversation history and send a reply.</Text>
-                  <Text fontSize="sm" color="gray.500">Use Unread only to prioritize inbound items that still need action.</Text>
+                  <Text color="gray.500">Select a conversation from the list to review the history and send a reply.</Text>
+                  <Text fontSize="sm" color="gray.500">Use Needs action only to focus on inbound items that still need review.</Text>
                 </VStack>
               )}
             </CardBody>
@@ -699,12 +743,11 @@ const InboxTab: React.FC = () => {
         </Grid>
       ) : selectedCustomerId ? (
         <>
-          {/* Stats */}
-          <SimpleGrid columns={{ base: 2, md: 3 }} spacing={4} mb={6} data-testid="inbox-tab-replies-stats">
+          <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={4} data-testid="inbox-tab-replies-stats">
             <Card>
               <CardBody>
                 <Stat>
-                  <StatLabel>Total Replies</StatLabel>
+                  <StatLabel>Replies in range</StatLabel>
                   <StatNumber>{stats.total}</StatNumber>
                 </Stat>
               </CardBody>
@@ -720,12 +763,30 @@ const InboxTab: React.FC = () => {
             <Card>
               <CardBody>
                 <Stat>
-                  <StatLabel>This Week</StatLabel>
+                  <StatLabel>This week</StatLabel>
                   <StatNumber>{stats.thisWeek}</StatNumber>
                 </Stat>
               </CardBody>
             </Card>
+            <Card>
+              <CardBody>
+                <Stat>
+                  <StatLabel>Campaigns with replies</StatLabel>
+                  <StatNumber>{replySummary.campaigns}</StatNumber>
+                </Stat>
+              </CardBody>
+            </Card>
           </SimpleGrid>
+
+          <Alert status="info" mb={4} data-testid="inbox-tab-main-guidance">
+            <AlertIcon />
+            <Box>
+              <AlertTitle fontSize="sm">Main inbox path</AlertTitle>
+              <AlertDescription fontSize="sm">
+                Use recent replies to spot who responded, then open conversations when you need the full thread and next reply action.
+              </AlertDescription>
+            </Box>
+          </Alert>
 
           {/* Search */}
           <InputGroup mb={6} data-testid="inbox-tab-search">
@@ -733,7 +794,7 @@ const InboxTab: React.FC = () => {
               <SearchIcon color="gray.300" />
             </InputLeftElement>
             <Input
-              placeholder="Search by name, email, company, or campaign..."
+              placeholder="Search contacts, companies, campaigns, or reply text..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -755,11 +816,8 @@ const InboxTab: React.FC = () => {
               Replies will appear here when prospects respond to your campaigns.
             </Text>
             <HStack mt={3} justify="center">
-              <Button size="sm" variant="outline" onClick={handleRefresh} isDisabled={!selectedCustomerId}>
-                Refresh Inbox
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => openMarketingTab('reports')}>
-                Open Reports
+              <Button size="sm" variant="ghost" onClick={() => setView('threads')}>
+                Open conversations
               </Button>
             </HStack>
           </CardBody>
@@ -831,6 +889,50 @@ const InboxTab: React.FC = () => {
       )}
         </>
       )}
+
+      {selectedCustomerId ? (
+        <Card
+          mt={6}
+          data-testid="inbox-tab-followup"
+          variant="outline"
+          borderColor="gray.200"
+          bg="gray.50"
+        >
+          <CardHeader>
+            <VStack align="start" spacing={1}>
+              <Heading size="sm">Follow-up & troubleshooting</Heading>
+              <Text fontSize="sm" color="gray.600">
+                Secondary tools for refreshing mailbox data and continuing operator follow-up in other marketing workspaces.
+              </Text>
+            </VStack>
+          </CardHeader>
+          <CardBody pt={0}>
+            <HStack flexWrap="wrap" spacing={3} mb={3}>
+              <Button
+                data-testid="inbox-tab-refresh-btn"
+                size="sm"
+                isLoading={isRefreshing}
+                onClick={handleRefresh}
+                isDisabled={!selectedCustomerId}
+              >
+                Check for new messages
+              </Button>
+              <Button size="sm" variant="outline" data-testid="inbox-tab-open-sequences" onClick={() => openMarketingTab('sequences')}>
+                Open Sequences
+              </Button>
+              <Button size="sm" variant="outline" data-testid="inbox-tab-open-reports" onClick={() => openMarketingTab('reports')}>
+                Open Reports
+              </Button>
+              <Button size="sm" variant="ghost" data-testid="inbox-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
+                Back to Readiness
+              </Button>
+            </HStack>
+            <Text fontSize="xs" color="gray.500" data-testid="inbox-tab-last-updated">
+              Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : 'Not loaded yet'}
+            </Text>
+          </CardBody>
+        </Card>
+      ) : null}
     </Box>
     </RequireActiveClient>
   )
