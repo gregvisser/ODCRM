@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
+  Badge,
   Box,
+  Card,
+  CardBody,
   Checkbox,
   Flex,
   Heading,
   HStack,
   Select,
+  SimpleGrid,
   Stack,
   Switch,
   Tab,
@@ -97,7 +105,7 @@ const AUTO_TICK_KEY_SET = new Set<string>([
 ])
 
 function withManualTickSuffix(group: 'sales' | 'ops' | 'am', itemKey: string, label: string): string {
-  return AUTO_TICK_KEY_SET.has(`${group}.${itemKey}`) ? label : `${label} (ManualTick)`
+  return label
 }
 
 function isGroupComplete(items: { key: string }[], state: ChecklistState): boolean {
@@ -261,6 +269,25 @@ export default function ProgressTrackerTab() {
     [opsChecklist, linkedEmailCount],
   )
   const amComplete = useMemo(() => isGroupComplete(AM_ITEMS, amChecklist), [amChecklist])
+  const completeTeamCount = useMemo(
+    () => [salesComplete, opsComplete, amComplete].filter(Boolean).length,
+    [amComplete, opsComplete, salesComplete],
+  )
+  const selectedProgressCounts = useMemo(() => {
+    const countCompleted = (items: { key: string }[], state: ChecklistState) =>
+      items.filter((item) => state[item.key] === true).length
+
+    const opsState = {
+      ...opsChecklist,
+      ops_emails_linked: (linkedEmailCount ?? 0) >= 5,
+    }
+
+    return {
+      completed: countCompleted(SALES_TEAM_ITEMS, salesChecklist) + countCompleted(OPS_TEAM_ITEMS, opsState) + countCompleted(AM_ITEMS, amChecklist),
+      total: SALES_TEAM_ITEMS.length + OPS_TEAM_ITEMS.length + AM_ITEMS.length,
+    }
+  }, [amChecklist, linkedEmailCount, opsChecklist, salesChecklist])
+  const clientsStillOnboarding = useMemo(() => filteredCustomers.length, [filteredCustomers.length])
 
   // Color for sub-tab: light red by default, green when complete
   const getTabBg = (isComplete: boolean) => (isComplete ? 'green.100' : 'red.50')
@@ -288,10 +315,69 @@ export default function ProgressTrackerTab() {
   return (
     <Box>
       <Stack spacing={4} mb={4}>
-        <Heading size="md">Progress Tracker</Heading>
+        <Heading size="md">Onboarding progress</Heading>
         <Text color="gray.600" fontSize="sm">
-          Track onboarding progress across Sales, Operations, and Account Management teams. Checklist state is saved per client.
+          See which client is still onboarding, how far they have progressed, and update the remaining checklist items.
         </Text>
+
+        {!selectedCustomerId ? (
+          <Alert status="info">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Select a client to continue onboarding</AlertTitle>
+              <AlertDescription>
+                Choose a client below to review progress and finish the remaining onboarding work.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        ) : completeTeamCount === 3 ? (
+          <Alert status="success">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Onboarding checklist complete</AlertTitle>
+              <AlertDescription>
+                All three onboarding sections are complete for this client. Use the follow-up section below to review completed clients if needed.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        ) : (
+          <Alert status="warning">
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Onboarding still in progress</AlertTitle>
+              <AlertDescription>
+                {completeTeamCount} of 3 sections are complete for this client. Finish the remaining checklist items below.
+              </AlertDescription>
+            </Box>
+          </Alert>
+        )}
+
+        <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4}>
+          <Card>
+            <CardBody>
+              <Text fontSize="2xl" fontWeight="bold">{clientsStillOnboarding}</Text>
+              <Text fontSize="sm" color="gray.600">Clients still onboarding</Text>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Text fontSize="2xl" fontWeight="bold">{selectedCustomerId ? completeTeamCount : 0}</Text>
+              <Text fontSize="sm" color="gray.600">Sections complete</Text>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Text fontSize="2xl" fontWeight="bold">{selectedCustomerId ? selectedProgressCounts.completed : 0}</Text>
+              <Text fontSize="sm" color="gray.600">Checklist items done</Text>
+            </CardBody>
+          </Card>
+          <Card>
+            <CardBody>
+              <Text fontSize="2xl" fontWeight="bold">{selectedCustomerId ? linkedEmailCount ?? 0 : 0}</Text>
+              <Text fontSize="sm" color="gray.600">Linked outreach mailboxes</Text>
+            </CardBody>
+          </Card>
+        </SimpleGrid>
 
         <Flex gap={4} align="center" wrap="wrap">
           <Box minW={{ base: '100%', md: '360px' }}>
@@ -312,13 +398,6 @@ export default function ProgressTrackerTab() {
               ))}
             </Select>
           </Box>
-
-          <HStack spacing={2}>
-            <Switch isChecked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
-            <Text fontSize="sm" color="gray.700">
-              Show completed
-            </Text>
-          </HStack>
         </Flex>
       </Stack>
 
@@ -333,6 +412,19 @@ export default function ProgressTrackerTab() {
           <Text>Loading progress tracker…</Text>
         </Box>
       ) : (
+        <>
+        <Box mb={4} p={4} border="1px solid" borderColor="gray.200" borderRadius="xl" bg="gray.50">
+          <VStack align="start" spacing={2}>
+            <HStack spacing={2} flexWrap="wrap">
+              <Badge colorScheme={salesComplete ? 'green' : 'orange'}>Sales {salesComplete ? 'ready' : 'in progress'}</Badge>
+              <Badge colorScheme={opsComplete ? 'green' : 'orange'}>Operations {opsComplete ? 'ready' : 'in progress'}</Badge>
+              <Badge colorScheme={amComplete ? 'green' : 'orange'}>Account manager {amComplete ? 'ready' : 'in progress'}</Badge>
+            </HStack>
+            <Text fontSize="sm" color="gray.700">
+              Some checklist items update automatically when related setup is completed elsewhere, such as linked mailboxes.
+            </Text>
+          </VStack>
+        </Box>
         <Tabs index={activeSubTab} onChange={setActiveSubTab} variant="unstyled">
           <TabList gap={2} mb={4} flexWrap="wrap">
             <Tab
@@ -352,7 +444,7 @@ export default function ProgressTrackerTab() {
                 bg: salesComplete ? 'green.150' : 'red.75',
               }}
             >
-              Sales Team {salesComplete ? '✓' : ''}
+              Sales {salesComplete ? '✓' : ''}
             </Tab>
             <Tab
               bg={getTabBg(opsComplete)}
@@ -371,7 +463,7 @@ export default function ProgressTrackerTab() {
                 bg: opsComplete ? 'green.150' : 'red.75',
               }}
             >
-              Operations Team {opsComplete ? '✓' : ''}
+              Operations {opsComplete ? '✓' : ''}
             </Tab>
             <Tab
               bg={getTabBg(amComplete)}
@@ -390,7 +482,7 @@ export default function ProgressTrackerTab() {
                 bg: amComplete ? 'green.150' : 'red.75',
               }}
             >
-              Account Manager {amComplete ? '✓' : ''}
+              Account manager {amComplete ? '✓' : ''}
             </Tab>
           </TabList>
 
@@ -486,6 +578,25 @@ export default function ProgressTrackerTab() {
             </TabPanel>
           </TabPanels>
         </Tabs>
+        <Card mt={6} variant="outline" borderColor="gray.200" bg="gray.50">
+          <CardBody>
+            <Flex justify="space-between" align="center" gap={3} wrap="wrap">
+              <Box>
+                <Text fontSize="sm" fontWeight="semibold">Follow-up & completed clients</Text>
+                <Text fontSize="sm" color="gray.600">
+                  Use this when you need to review finished onboardings instead of the active client workflow above.
+                </Text>
+              </Box>
+              <HStack spacing={2}>
+                <Switch isChecked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} />
+                <Text fontSize="sm" color="gray.700">
+                  Show completed clients
+                </Text>
+              </HStack>
+            </Flex>
+          </CardBody>
+        </Card>
+        </>
       )}
     </Box>
   )

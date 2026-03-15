@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useEffect } from 'react'
-import { Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
+import { Alert, AlertDescription, AlertIcon, AlertTitle, Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { isClientUI } from '../../platform/mode'
@@ -12,6 +12,26 @@ import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
 
 export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'
+
+function getNextStepButtonLabel(target: OnboardingViewId | 'onboarding' | 'clients' | 'marketing-readiness' | 'marketing-inbox' | 'marketing-reports' | 'marketing-sequences'): string {
+  switch (target) {
+    case 'clients':
+      return 'Open client details'
+    case 'marketing-inbox':
+      return 'Open inbox'
+    case 'marketing-reports':
+      return 'Open reports'
+    case 'marketing-sequences':
+      return 'Open sequences'
+    case 'marketing-readiness':
+      return 'Review marketing readiness'
+    case 'customer-onboarding':
+    case 'progress-tracker':
+    case 'onboarding':
+    default:
+      return 'Continue onboarding'
+  }
+}
 
 function coerceViewId(view?: string): OnboardingViewId {
   if (view === 'progress-tracker' || view === 'customer-onboarding') return view
@@ -112,6 +132,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
 
   const canProceedToOperations = readiness.state === 'ready-for-outreach' || readiness.state === 'outreach-active'
   const blockersCount = activationChecks.filter((item) => !item.complete).length
+  const readyCheckCount = activationChecks.filter((item) => item.complete).length
   const effectiveActiveView: OnboardingViewId = selectedCustomerId ? activeView : 'progress-tracker'
 
   return (
@@ -132,40 +153,20 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           borderColor="blue.100"
           data-testid="onboarding-marketing-bridge"
         >
+          <VStack align="start" spacing={1}>
+            <Text fontSize="sm" fontWeight="semibold" color="blue.900">
+              Onboarding status
+            </Text>
+            <Text fontSize="sm" color="blue.800">
+              See whether this client should stay in onboarding or move on to the next workflow.
+            </Text>
+          </VStack>
           <HStack mt={2} spacing={2}>
             <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="onboarding-client-readiness-state">
               {readiness.label}
             </Badge>
             <Text fontSize="sm" color="blue.900">{readiness.reason}</Text>
           </HStack>
-          <VStack
-            align="start"
-            spacing={1}
-            mt={3}
-            p={2}
-            borderRadius="md"
-            border="1px solid"
-            borderColor="blue.200"
-            bg="white"
-            data-testid="onboarding-blocker-vs-proceed"
-          >
-            <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="blue.700">Activation checkpoint status</Text>
-            <HStack spacing={2} flexWrap="wrap">
-              <Badge colorScheme={canProceedToOperations ? 'green' : 'orange'} data-testid="onboarding-activation-state">
-                {canProceedToOperations ? 'Done enough to proceed' : `${blockersCount} checkpoint(s) still blocking`}
-              </Badge>
-            </HStack>
-            <SimpleGrid columns={{ base: 1, md: 2 }} spacing={1} width="100%">
-              {activationChecks.map((item) => (
-                <HStack key={item.label} spacing={2}>
-                  <Badge colorScheme={item.complete ? 'green' : item.unknown ? 'gray' : 'red'} minW="90px" textAlign="center">
-                    {item.complete ? 'Ready' : item.unknown ? 'Pending' : 'Missing'}
-                  </Badge>
-                  <Text fontSize="xs" color="blue.900">{item.label}</Text>
-                </HStack>
-              ))}
-            </SimpleGrid>
-          </VStack>
           <HStack mt={3}>
             <Button
               size="sm"
@@ -175,7 +176,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               isDisabled={!selectedCustomerId}
               data-testid="onboarding-readiness-next-step"
             >
-              {readiness.nextStep.label}
+              {getNextStepButtonLabel(readiness.nextStep.target)}
             </Button>
             <Button
               size="sm"
@@ -184,7 +185,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               isDisabled={!selectedCustomerId}
               data-testid="onboarding-go-marketing-readiness"
             >
-              Continue in Marketing Readiness
+              Review marketing readiness
             </Button>
             {!selectedCustomerId ? (
               <Text fontSize="xs" color="blue.700">
@@ -192,14 +193,54 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               </Text>
             ) : null}
           </HStack>
+          <Box
+            mt={3}
+            p={3}
+            borderRadius="md"
+            border="1px solid"
+            borderColor="blue.200"
+            bg="white"
+            data-testid="onboarding-blocker-vs-proceed"
+          >
+            <VStack align="start" spacing={2}>
+              <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="blue.700">
+                Go-live follow-up
+              </Text>
+              <HStack spacing={2} flexWrap="wrap">
+                <Badge colorScheme={canProceedToOperations ? 'green' : 'orange'} data-testid="onboarding-activation-state">
+                  {canProceedToOperations ? 'Ready to move forward' : `${blockersCount} follow-up item${blockersCount === 1 ? '' : 's'} left`}
+                </Badge>
+                <Badge colorScheme="blue">
+                  {readyCheckCount} of {activationChecks.length} checks ready
+                </Badge>
+              </HStack>
+              <Text fontSize="sm" color="blue.900">
+                These checks help confirm the client can move safely from onboarding into live outreach.
+              </Text>
+              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={1} width="100%">
+                {activationChecks.map((item) => (
+                  <HStack key={item.label} spacing={2}>
+                    <Badge colorScheme={item.complete ? 'green' : item.unknown ? 'gray' : 'red'} minW="90px" textAlign="center">
+                      {item.complete ? 'Ready' : item.unknown ? 'Pending' : 'Missing'}
+                    </Badge>
+                    <Text fontSize="xs" color="blue.900">{item.label}</Text>
+                  </HStack>
+                ))}
+              </SimpleGrid>
+            </VStack>
+          </Box>
         </Box>
 
         {!selectedCustomerId ? (
-          <Box mb={4} p={4} bg="gray.50" borderRadius="md" border="1px solid" borderColor="gray.200">
-            <Text fontSize="sm" color="gray.700">
-              Select a client (or create one from the dropdown) to begin onboarding.
-            </Text>
-          </Box>
+          <Alert status="info" mb={4}>
+            <AlertIcon />
+            <Box>
+              <AlertTitle>Select a client to begin</AlertTitle>
+              <AlertDescription>
+                Choose an existing client, or create one from the selector above, to continue onboarding.
+              </AlertDescription>
+            </Box>
+          </Alert>
         ) : null}
 
         <SubNavigation
