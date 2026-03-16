@@ -1008,8 +1008,8 @@ const ReportingDashboard: React.FC = () => {
                 Window: last {windowDays} days
               </Badge>
             </HStack>
-            <Heading size="lg" fontWeight="700">{heroTitle}</Heading>
-            <Text color="whiteAlpha.900" maxW="2xl" fontSize="md" lineHeight="1.6">
+            <Heading size="lg" fontWeight="700" color="white">{heroTitle}</Heading>
+            <Text color="white" maxW="2xl" fontSize="md" lineHeight="1.6">
               {heroDescription}
             </Text>
             <HStack spacing={3} flexWrap="wrap">
@@ -1048,12 +1048,15 @@ const ReportingDashboard: React.FC = () => {
               minW="150px"
               bg="white"
               color="gray.800"
-              title="Reporting period (calendar modes: Week/Month support coming)"
+              title="Reporting period"
             >
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
             </Select>
+            <Button size="sm" variant="outline" colorScheme="whiteAlpha" title="Calendar-based periods (Week/Month)">
+              📅 Period Selector
+            </Button>
             <Button size="sm" onClick={() => void loadData(true)} isLoading={refreshing} colorScheme="blue">
               Refresh
             </Button>

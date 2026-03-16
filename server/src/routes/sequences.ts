@@ -41,13 +41,20 @@ const createStepSchema = z.object({
 })
 
 // GET /api/sequences - Get all sequences for a customer
+// Query param: includeArchived=true to include archived sequences
 router.get('/', async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
+    const includeArchived = String(req.query?.includeArchived || '').toLowerCase() === 'true'
+
+    const whereClause: any = { customerId }
+    if (!includeArchived) {
+      whereClause.isArchived = false
+    }
 
     const sequences = await prisma.emailSequence.findMany({
-      where: { customerId },
+      where: whereClause,
       include: {
         _count: {
           select: { steps: true },
@@ -72,6 +79,8 @@ router.get('/', async (req, res) => {
       name: seq.name,
       description: seq.description,
       stepCount: seq._count.steps,
+      isArchived: seq.isArchived || false,
+      archivedAt: seq.archivedAt ? seq.archivedAt.toISOString() : null,
       createdAt: seq.createdAt.toISOString(),
       updatedAt: seq.updatedAt.toISOString(),
     }))
@@ -358,21 +367,93 @@ router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
         status: true,
       },
     })
+
     if (linkedCampaigns.length > 0) {
+      // Enrich campaigns with counts to determine disposable vs historical
+      const enriched = await Promise.all(
+        linkedCampaigns.map(async (c) => {
+          const [emailEventCount, prospectCount, prospectStepSentCount] = await Promise.all([
+            prisma.emailEvent.count({ where: { campaignId: c.id, customerId } }),
+            prisma.emailCampaignProspect.count({ where: { campaignId: c.id } }),
+            prisma.emailCampaignProspectStep.count({ where: { campaignId: c.id, sentAt: { not: null } } }),
+          ])
+          return {
+            id: c.id,
+            name: c.name,
+            status: c.status,
+            emailEventCount,
+            prospectCount,
+            prospectStepSentCount,
+          }
+        })
+      )
+
+      const details = buildSequenceDeleteBlockerDetails(enriched as any)
+
+      // If ALL linked campaigns are disposable, allow deletion and cleanup
+      const allDisposable = details.campaigns.every((cc) => cc.blockerReason === 'disposable_campaign_cleanup_possible')
+      if (allDisposable) {
+        // Delete disposable campaigns first (tenant-scoped)
+        const disposableIds = details.campaigns.map((c) => c.id)
+        await prisma.emailCampaign.deleteMany({ where: { id: { in: disposableIds }, customerId } })
+        // Then delete sequence
+        await prisma.emailSequence.delete({ where: { id } })
+        res.setHeader('x-odcrm-customer-id', customerId)
+        return res.json({ data: { success: true, deletedCampaigns: disposableIds.length } })
+      }
+
+      // Otherwise return structured blocker details
       return res.status(409).json({
         error: 'This sequence is still linked to one or more campaigns.',
-        details: buildSequenceDeleteBlockerDetails(linkedCampaigns),
+        details,
       })
     }
 
-    await prisma.emailSequence.delete({
-      where: { id },
-    })
+    await prisma.emailSequence.delete({ where: { id } })
     res.setHeader('x-odcrm-customer-id', customerId)
     return res.json({ data: { success: true } })
   } catch (error) {
     console.error('Error deleting sequence:', error)
     return res.status(500).json({ error: 'Failed to delete sequence' })
+  }
+})
+
+
+// POST /api/sequences/:id/archive - Archive a sequence (preserve for reporting)
+router.post('/:id/archive', requireMarketingMutationAuth, async (req, res) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const { id } = req.params
+
+    const sequence = await prisma.emailSequence.findFirst({ where: { id, customerId } })
+    if (!sequence) return res.status(404).json({ error: 'Sequence not found' })
+
+    await prisma.emailSequence.update({ where: { id }, data: { isArchived: true, archivedAt: new Date() } })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: { success: true } })
+  } catch (err) {
+    console.error('Error archiving sequence:', err)
+    return res.status(500).json({ error: 'Failed to archive sequence' })
+  }
+})
+
+// POST /api/sequences/:id/unarchive - Unarchive a sequence
+router.post('/:id/unarchive', requireMarketingMutationAuth, async (req, res) => {
+  try {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    const { id } = req.params
+
+    const sequence = await prisma.emailSequence.findFirst({ where: { id, customerId } })
+    if (!sequence) return res.status(404).json({ error: 'Sequence not found' })
+
+    await prisma.emailSequence.update({ where: { id }, data: { isArchived: false, archivedAt: null } })
+    res.setHeader('x-odcrm-customer-id', customerId)
+    return res.json({ data: { success: true } })
+  } catch (err) {
+    console.error('Error unarchiving sequence:', err)
+    return res.status(500).json({ error: 'Failed to unarchive sequence' })
   }
 })
 
