@@ -3,17 +3,37 @@
 ## Purpose
 Use `Readiness` to answer the operator question: "What needs attention before or during outreach right now?"
 
-This tab is a compact operational cockpit. It does not replace the setup tabs. It tells you what to check next and links you into the right place.
+This is the shortest route to:
+- current blockers,
+- launch risk,
+- next safe action,
+- links into `Sequences`, `Inbox`, and `Reports`.
+
+## You are here in the workflow
+Use this tab:
+- after setup work,
+- before live launch,
+- during daily operations when you want the fastest current-state summary.
+
+What should already be done before this tab is most useful:
+- the correct client is selected,
+- the client has at least some setup in place,
+- ideally a sequence already exists.
+
+Where users usually go next:
+- `Sequences` if launch/test issues need fixing,
+- `Inbox` if replies need attention,
+- `Reports` if performance review is the real task.
 
 ## When a user should use this tab
 Use `Readiness` when you want to:
 - check whether a client is ready for outreach,
 - review sequence-specific launch blockers,
 - see who would send next,
-- compare recent outcomes with the preview path,
-- jump into `Sequences`, `Inbox`, or `Reports` based on what the system finds.
+- compare recent outcomes with the expected preview path,
+- jump into the correct follow-up tab.
 
-## Prerequisites
+## Before you start
 - A client must be selected.
 - A sequence is needed for sequence-specific preflight and launch-preview views.
 
@@ -32,8 +52,20 @@ Main areas:
 - `Did actual sends match the preview?`
 - `Recent send outcomes`
 
+## What each area is for
+| Area | What it tells the operator |
+|---|---|
+| `Launch Status` | The best quick summary of whether the selected sequence looks ready, blocked, or risky. |
+| `Issues to Review` | How many warnings or blockers still need attention. |
+| `Ready Mailboxes` | Whether usable sending identities appear to be available. |
+| `Ready in First Batch` | Whether the first live batch appears to have usable recipients. |
+| `What to fix first` | The most operator-useful next issue to deal with. |
+| `Check before launch` | The deeper launch-preflight path. |
+| `Who would send next` | Which mailbox/sender path appears most relevant next. |
+| `Recent send outcomes` | What ODCRM has observed recently, not just what it predicted. |
+
 ## Main actions available
-Buttons you will commonly see:
+Common buttons you will see:
 - `Refresh`
 - `Open Reports`
 - `Open Inbox`
@@ -49,72 +81,83 @@ Buttons you will commonly see:
 - `Open preview comparison`
 - `Open run history`
 
-## Field-by-field explanation
-### Sequence selector
-Use this to choose which sequence you want the readiness tab to evaluate. If no usable sequence exists, the tab will tell you that no sequence is available.
-
-### Launch Status
-The overall current state for the selected sequence. This is the best quick signal, but it is not the same thing as every deeper diagnostic panel.
-
-### Issues to Review
-A count of blockers or warnings that still need operator attention.
-
-### Ready Mailboxes
-How many mailboxes appear usable for the next send path.
-
-### Ready in First Batch
-How many recipients look ready in the first send batch.
-
-## Step-by-step common workflows
-### Check whether a client is ready to move forward
-1. Click `Readiness`.
-2. Select the client if needed.
+## Recommended operator path
+1. Open `Readiness`.
+2. Select the correct client.
 3. Choose the sequence you care about.
 4. Click `Refresh`.
-5. Read the summary cards first.
-6. Open `Review full preflight` if there are blockers or warnings.
-7. Use the next-step button to move into `Sequences`, `Inbox`, or `Reports`.
+5. Read the top summary cards first.
+6. Read `What to fix first`.
+7. Use the most relevant next-step button.
 
-### Check whether the predicted next send matches reality
+## Advanced or diagnostic path
+Use the deeper follow-up actions only when needed:
+- `Review full preflight`
+- `Review full launch preview`
+- `Open preview comparison`
+- `Open run history`
+- queue-workbench-style follow-up actions
+
+These are useful, but they are not the first thing to teach a new operator.
+
+## Click-by-click workflows
+### Check whether a client is ready to move forward
+1. Click `Readiness`.
+2. Confirm the correct client is selected.
+3. Use the sequence selector.
+4. Click `Refresh`.
+5. Read `Launch Status`.
+6. Read `Issues to Review`.
+7. Read `What to fix first`.
+8. Use the suggested next-step action.
+
+Expected result:
+- you know whether the selected sequence is blocked, ready, or still risky.
+
+### Check whether predicted sending matches actual results
 1. Open `Readiness`.
 2. Choose the sequence.
 3. Click `Review full launch preview`.
 4. Click `Open preview comparison`.
-5. Review `Recent send outcomes`.
-6. If the preview and real results do not line up, move into `Sequences` for deeper troubleshooting.
+5. Read `Recent send outcomes`.
+6. If there is a mismatch, go to `Sequences` for follow-up.
 
-### Use readiness as a quick starting point for daily work
+Expected result:
+- you know whether live behavior matched what ODCRM expected.
+
+### Use readiness as the daily starting point
 1. Open `Readiness`.
-2. Read the status and blocker message.
-3. If you need reply work, click `Open Inbox`.
-4. If you need performance review, click `Open Reports`.
-5. If you need launch/test changes, click the relevant `Sequences` action.
+2. Read the current status and blocker message.
+3. Click `Open Inbox` if replies are the real task.
+4. Click `Open Reports` if performance review is the real task.
+5. Click the `Sequences`-related action if launch/test/setup work is the real task.
 
 ## What happens after each action
 - `Refresh` reloads readiness, exception-center, identity-capacity, run-history, and sequence-specific launch checks.
-- `Review full preflight` and related actions show deeper diagnostic panels or route you into the sequence troubleshooting path.
-- `Open Inbox` and `Open Reports` are navigation actions. They do not mutate data.
+- `Open Inbox` and `Open Reports` navigate to those tabs.
+- `Review full preflight` and related actions expose deeper launch analysis rather than changing live state directly.
 
 ## How this tab connects to other tabs
-- `Readiness` points back into `Onboarding` when the client is still incomplete.
-- `Readiness` points into `Email Accounts`, `Lead Sources`, `Suppression List`, and `Templates` indirectly by revealing which prerequisite is still weak.
-- `Readiness` points directly into `Sequences`, `Inbox`, and `Reports` for actual action.
+- `Readiness` points back into [Onboarding](./ONBOARDING.md) when client setup still looks incomplete.
+- It points indirectly to [Email Accounts](./EMAIL_ACCOUNTS.md), [Lead Sources](./LEAD_SOURCES.md), [Compliance and Suppression](./COMPLIANCE_AND_SUPPRESSION.md), and [Templates](./TEMPLATES.md) when prerequisites are weak.
+- It points directly into [Sequences](./SEQUENCES.md), [Inbox](./INBOX.md), and [Reports](./REPORTS.md) for action.
 
 ## Common mistakes / failure states / confusion points
-- Treating the page-level client readiness badge as identical to sequence preflight. They are related, but not the same calculation.
-- Assuming every button here fixes the problem directly. Many of them only route you to the tab where the fix lives.
-- Forgetting to select the correct sequence before trusting the summary.
+- Treating the broad client readiness badge as identical to sequence preflight.
+- Assuming every button here fixes the issue directly. Many route you to the place where the fix lives.
+- Skipping the sequence selector and trusting the summary anyway.
 
-## Operational tips
-- Read the summary cards first. Do not start in the lower troubleshooting blocks unless the top row already tells you there is a problem.
-- Use this tab as the first stop for already-live clients.
+## How to verify success
+You are done with this tab when:
+- you know the current launch/operational state,
+- you know what the next tab should be,
+- you know whether the issue is setup, launch, inbox, or reporting related.
+
+## What to do next
+- Go to [Sequences](./SEQUENCES.md) if launch/test changes are needed.
+- Go to [Inbox](./INBOX.md) if reply work is next.
+- Go to [Reports](./REPORTS.md) if outcome review is next.
 
 ## Reality check notes
-- `Readiness` combines multiple backend sources. A client can show a broad state like `Outreach active` while a specific sequence still has a `WARNING` or `NO_GO` preflight result.
-- This tab is intentionally compact. It is not the place to create templates or sequences.
-
-## Related docs / next steps
-- [Email Accounts](./EMAIL_ACCOUNTS.md)
-- [Sequences](./SEQUENCES.md)
-- [Inbox](./INBOX.md)
-- [Reports](./REPORTS.md)
+- `Readiness` combines multiple backend sources, so broad client status and sequence-specific preflight are related but not identical.
+- This tab is intentionally compact. It is a decision point, not the full place where every fix happens.
