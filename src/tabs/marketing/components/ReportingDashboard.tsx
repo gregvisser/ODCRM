@@ -990,11 +990,10 @@ const ReportingDashboard: React.FC = () => {
       <Box
         data-testid="dashboard-hero"
         borderRadius="2xl"
-        bgGradient="linear(to-br, blue.500, indigo.600, purple.500)"
-        color="white"
+        bgGradient="linear(to-br, gray.900, blue.900, purple.800)"
+        color="whiteAlpha.900"
         px={{ base: 5, md: 6 }}
         py={{ base: 5, md: 6 }}
-        boxShadow="inner"
       >
         <Stack direction={{ base: 'column', xl: 'row' }} spacing={6} justify="space-between">
           <VStack align="start" spacing={2} maxW="760px">
@@ -1009,7 +1008,7 @@ const ReportingDashboard: React.FC = () => {
                 Window: last {windowDays} days
               </Badge>
             </HStack>
-            <Heading size="lg" fontWeight="800" letterSpacing="-0.5px">{heroTitle}</Heading>
+            <Heading size="lg" fontWeight="700" color="white">{heroTitle}</Heading>
             <Text color="white" maxW="2xl" fontSize="md" lineHeight="1.6">
               {heroDescription}
             </Text>
@@ -1049,12 +1048,15 @@ const ReportingDashboard: React.FC = () => {
               minW="150px"
               bg="white"
               color="gray.800"
-              title="Reporting period (calendar modes: Week/Month support coming)"
+              title="Reporting period"
             >
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
             </Select>
+            <Button size="sm" variant="outline" colorScheme="whiteAlpha" title="Calendar-based periods (Week/Month)">
+              📅 Period Selector
+            </Button>
             <Button size="sm" onClick={() => void loadData(true)} isLoading={refreshing} colorScheme="blue">
               Refresh
             </Button>
