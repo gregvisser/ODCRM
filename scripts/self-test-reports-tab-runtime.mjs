@@ -50,24 +50,12 @@ const marketingHomePath = join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingH
 const reportsSource = readFileSync(reportsTabPath, 'utf8')
 const marketingHomeSource = readFileSync(marketingHomePath, 'utf8')
 
-const markers = [
-  'reports-tab-panel',
-  'reports-tab-controls',
-  'reports-tab-window-select',
-  'reports-tab-refresh-btn',
-  'reports-tab-summary-cards',
-  'reports-tab-last-updated',
-  'reports-tab-by-sequence',
-  'reports-tab-by-identity',
-  'reports-tab-recent-reasons',
-  'reports-tab-recent-attempts',
-  '/api/reports/outreach',
-  '/api/send-worker/run-history',
-  '/api/send-worker/identity-capacity',
-]
-for (const marker of markers) {
-  if (!reportsSource.includes(marker)) fail(`ReportsTab missing marker: ${marker}`)
-}
+// Reports tab now renders ReportingDashboard (operator-grade dashboard)
+if (!reportsSource.includes('ReportingDashboard')) fail('ReportsTab must render ReportingDashboard')
+const dashboardPath = join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportingDashboard.tsx')
+const dashboardSource = readFileSync(dashboardPath, 'utf8')
+if (!dashboardSource.includes('reporting-dashboard')) fail('ReportingDashboard missing id reporting-dashboard')
+if (!dashboardSource.includes('/api/reporting')) fail('ReportingDashboard must use /api/reporting endpoints')
 
 if (!marketingHomeSource.includes("id: 'reports'")) fail('MarketingHomePage missing reports nav item')
 if (!marketingHomeSource.includes('ReportsTab')) fail('MarketingHomePage missing ReportsTab wiring')
