@@ -6,7 +6,7 @@ export const ar: Record<string, string> = {
   // App shell & top nav
   'nav.customers-home': 'عملاء OpensDoors',
   'nav.marketing-home': 'تسويق OpensDoors',
-  'nav.reporting-home': 'التقارير',
+  'nav.reporting-home': 'لوحة التحكم',
   'nav.onboarding-home': 'الإعداد',
   'nav.settings-home': 'الإعدادات',
   'shell.signOut': 'تسجيل الخروج',

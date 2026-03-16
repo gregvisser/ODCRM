@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 function fail(message) {
-  console.error(`self-test-reporting-home-runtime: FAIL - ${message}`)
+  console.error(`self-test-dashboard-home-runtime: FAIL - ${message}`)
   process.exit(1)
 }
 
@@ -13,17 +13,23 @@ const appSource = readFileSync(join(repoRoot, 'src', 'App.tsx'), 'utf8')
 const reportingHomeSource = readFileSync(join(repoRoot, 'src', 'tabs', 'reporting', 'ReportingHomePage.tsx'), 'utf8')
 const reportingDashboardSource = readFileSync(join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportingDashboard.tsx'), 'utf8')
 const reportsTabSource = readFileSync(join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportsTab.tsx'), 'utf8')
+const enSource = readFileSync(join(repoRoot, 'src', 'i18n', 'en.ts'), 'utf8')
+const arSource = readFileSync(join(repoRoot, 'src', 'i18n', 'ar.ts'), 'utf8')
 
 const navMarkers = [
   "'reporting-home'",
+  "label: 'Dashboard'",
   "path: '/reporting'",
 ]
 for (const marker of navMarkers) {
   if (!navSource.includes(marker)) fail(`nav contract missing marker: ${marker}`)
 }
+if (navSource.indexOf("{ id: 'reporting-home'") > navSource.indexOf("{ id: 'customers-home'")) {
+  fail('Dashboard tab must be the first top-level tab')
+}
 
 const appMarkers = [
-  'ReportingHomePage',
+  'DashboardHomePage',
   "case 'reporting-home'",
   'setActiveView(getDefaultViewForTab(nextTab.id))',
 ]
@@ -32,20 +38,25 @@ for (const marker of appMarkers) {
 }
 
 const reportingHomeMarkers = [
-  'reporting-home-panel',
-  'reporting-home-guidance',
+  'dashboard-home-panel',
+  'dashboard-home-guidance',
+  'Dashboard',
   'ReportingDashboard',
 ]
 for (const marker of reportingHomeMarkers) {
   if (!reportingHomeSource.includes(marker)) fail(`ReportingHomePage missing marker: ${marker}`)
 }
 
+if (!enSource.includes("'nav.reporting-home': 'Dashboard'")) fail('English nav label must be Dashboard')
+if (!arSource.includes("'nav.reporting-home': 'لوحة التحكم'")) fail('Arabic nav label must be لوحة التحكم')
 if (!reportingDashboardSource.includes('reporting-dashboard')) fail('ReportingDashboard missing root marker')
 if (!reportingDashboardSource.includes('/api/reporting')) fail('ReportingDashboard missing /api/reporting data source')
+if (!reportingDashboardSource.includes('dashboard-kanban-board')) fail('ReportingDashboard missing kanban board marker')
+if (!reportingDashboardSource.includes('dashboard-trend-chart')) fail('ReportingDashboard missing trend chart marker')
 if (reportsTabSource.includes('ReportingDashboard')) fail('Marketing ReportsTab must not point to ReportingDashboard')
 
-console.log('PASS top-level reporting nav contract exists')
-console.log('PASS App routes reporting-home to ReportingHomePage')
-console.log('PASS ReportingHomePage resolves to ReportingDashboard')
+console.log('PASS top-level dashboard nav contract exists and is first')
+console.log('PASS App routes reporting-home to DashboardHomePage')
+console.log('PASS DashboardHomePage resolves to ReportingDashboard')
 console.log('PASS Marketing ReportsTab remains separate')
-console.log('self-test-reporting-home-runtime: PASS')
+console.log('self-test-dashboard-home-runtime: PASS')

@@ -19,6 +19,10 @@ function getSinceDate(sinceDays: number): Date {
   return new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
 }
 
+function isOptOutEventType(value: unknown): boolean {
+  return value === 'opted_out' || value === 'unsubscribed'
+}
+
 /** Current and previous period boundaries (UTC) for trend comparison */
 function getPeriodBounds(sinceDays: number): { current: { start: Date; end: Date }; previous: { start: Date; end: Date } } {
   const end = new Date()
@@ -79,7 +83,10 @@ router.get('/summary', async (req: Request, res: Response) => {
     const opened = events['opened'] ?? 0
     const replied = events['replied'] ?? 0
     const bounced = events['bounced'] ?? 0
-    const optedOut = events['opted_out'] ?? 0
+    const optedOut = Object.entries(events).reduce(
+      (sum, [type, count]) => (isOptOutEventType(type) ? sum + count : sum),
+      0,
+    )
     const failed = events['failed'] ?? 0
 
     const suppressionsByType: Record<string, number> = {}
@@ -374,35 +381,58 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
       }
     }
 
-    let replyOptEvents: Array<{ type: string; senderIdentityId: string | null; campaign: { sequenceId: string | null } | null }> = []
+    let replyEvents: Array<{ senderIdentityId: string | null; campaign: { sequenceId: string | null } | null }> = []
     try {
-      replyOptEvents = await prisma.emailEvent.findMany({
+      replyEvents = await prisma.emailEvent.findMany({
         where: {
           customerId,
-          type: { in: ['replied', 'opted_out'] },
+          type: 'replied',
           occurredAt: { gte: since },
         },
         select: {
-          type: true,
           senderIdentityId: true,
           campaign: { select: { sequenceId: true } },
         },
       })
     } catch {
-      // enum/relation may be missing in some envs
+      // Relation or environment drift should not take down the dashboard.
     }
-    for (const ev of replyOptEvents) {
+    for (const ev of replyEvents) {
       const identKey = ev.senderIdentityId ?? 'unknown'
       const seqId = ev.campaign?.sequenceId ?? 'unknown'
       if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
       if (!bySequence.has(seqId)) bySequence.set(seqId, zero())
-      if (ev.type === 'replied') {
-        byIdentity.get(identKey)!.replies += 1
-        bySequence.get(seqId)!.replies += 1
-      } else if (ev.type === 'opted_out') {
-        byIdentity.get(identKey)!.optOuts += 1
-        bySequence.get(seqId)!.optOuts += 1
-      }
+      byIdentity.get(identKey)!.replies += 1
+      bySequence.get(seqId)!.replies += 1
+    }
+
+    const optOutAuditRows = await prisma.enrollmentAuditEvent.findMany({
+      where: {
+        customerId,
+        createdAt: { gte: since },
+        eventType: 'send_skipped',
+        message: 'unsubscribe_link_clicked',
+      },
+      select: { enrollmentId: true },
+    })
+    const optOutEnrollmentIds = Array.from(new Set(optOutAuditRows.map((row) => row.enrollmentId).filter(Boolean)))
+    const optOutEnrollments =
+      optOutEnrollmentIds.length > 0
+        ? await prisma.enrollment.findMany({
+            where: { customerId, id: { in: optOutEnrollmentIds } },
+            select: { id: true, sequenceId: true },
+          })
+        : []
+    const optOutEnrollmentToSequence = new Map(optOutEnrollments.map((row) => [row.id, row.sequenceId]))
+
+    for (const row of optOutAuditRows) {
+      const seqId = optOutEnrollmentToSequence.get(row.enrollmentId) ?? 'unknown'
+      const sequence = sequenceById.get(seqId)
+      const identKey = sequence?.senderIdentityId ?? 'unknown'
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      if (!bySequence.has(seqId)) bySequence.set(seqId, zero())
+      byIdentity.get(identKey)!.optOuts += 1
+      bySequence.get(seqId)!.optOuts += 1
     }
 
     const sequenceRows = Array.from(bySequence.entries())
@@ -548,7 +578,7 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
       else if (e.type === 'delivered') row.delivered += e._count.id
       else if (e.type === 'replied') row.replied += e._count.id
       else if (e.type === 'bounced') row.bounced += e._count.id
-      else if (e.type === 'opted_out') row.optedOut += e._count.id
+      else if (isOptOutEventType(e.type)) row.optedOut += e._count.id
       else if (e.type === 'failed') row.failed += e._count.id
     }
 
@@ -584,14 +614,16 @@ router.get('/compliance', async (req: Request, res: Response) => {
   try {
     const since = getSinceDate(parseSinceDays(req.query))
 
-    const [suppressionCounts, optedOutCount, blockedFromQueue] = await Promise.all([
+    const [suppressionCounts, recentEventCounts, blockedFromQueue] = await Promise.all([
       prisma.suppressionEntry.groupBy({
         by: ['type', 'source'],
         where: { customerId },
         _count: { id: true },
       }),
-      prisma.emailEvent.count({
-        where: { customerId, type: 'opted_out', occurredAt: { gte: since } },
+      prisma.emailEvent.groupBy({
+        by: ['type'],
+        where: { customerId, occurredAt: { gte: since } },
+        _count: { id: true },
       }),
       prisma.outboundSendAttemptAudit.count({
         where: {
@@ -607,6 +639,10 @@ router.get('/compliance', async (req: Request, res: Response) => {
       const key = s.type
       byType[key] = (byType[key] ?? 0) + s._count.id
     })
+    const optedOutCount = recentEventCounts.reduce(
+      (sum, row) => (isOptOutEventType(row.type) ? sum + row._count.id : sum),
+      0,
+    )
 
     res.json({
       success: true,

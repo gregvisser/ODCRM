@@ -5,6 +5,10 @@ const router = express.Router()
 
 const LONDON_TZ = 'Europe/London'
 
+function isOptOutEventType(value: unknown): boolean {
+  return value === 'opted_out' || value === 'unsubscribed'
+}
+
 const getCustomerId = (req: express.Request): string => {
   const customerId = (req.headers['x-customer-id'] as string) || (req.query.customerId as string)
   if (!customerId) {
@@ -133,7 +137,10 @@ router.get('/customer', async (req, res, next) => {
     const clicked = counts['clicked'] || 0
     const replied = counts['replied'] || 0
     const bounced = counts['bounced'] || 0
-    const optedOut = counts['opted_out'] || 0
+    const optedOut = Object.entries(counts).reduce(
+      (sum, [type, count]) => (isOptOutEventType(type) ? sum + count : sum),
+      0,
+    )
     const spamComplaints = counts['spam_complaint'] || 0
     const failed = counts['failed'] || 0
     const notReached = counts['not_reached'] || 0
@@ -295,7 +302,7 @@ router.get('/outreach', async (req, res, next) => {
       recentEmailEvents = await prisma.emailEvent.findMany({
         where: {
           customerId,
-          type: { in: ['replied', 'opted_out'] },
+          type: 'replied',
           occurredAt: { gte: since },
         },
         select: {
@@ -318,13 +325,8 @@ router.get('/outreach', async (req, res, next) => {
       if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
       const sequenceId = event.campaign?.sequenceId ?? 'unknown'
       if (!bySequence.has(sequenceId)) bySequence.set(sequenceId, zero())
-      if (event.type === 'replied') {
-        byIdentity.get(identKey)!.replies += 1
-        bySequence.get(sequenceId)!.replies += 1
-      } else if (event.type === 'opted_out') {
-        byIdentity.get(identKey)!.optOuts += 1
-        bySequence.get(sequenceId)!.optOuts += 1
-      }
+      byIdentity.get(identKey)!.replies += 1
+      bySequence.get(sequenceId)!.replies += 1
     }
 
     const queueOptOutAuditRows = await prisma.enrollmentAuditEvent.findMany({
