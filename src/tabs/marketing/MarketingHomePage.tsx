@@ -3,8 +3,8 @@
  * Complete implementation based on Reply.io architecture exploration
  */
 
-import React, { useMemo } from 'react'
-import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
+import React, { useEffect, useMemo } from 'react'
+import { Badge, Box, Button, Code, HStack, Stack, Text } from '@chakra-ui/react'
 import {
   CheckCircleIcon,
   RepeatIcon,
@@ -31,6 +31,7 @@ import ReadinessTab from './components/ReadinessTab'
 import { useEffectiveCustomerId } from '../../hooks/useCustomerScope'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
+import { getUIMode } from '../../platform/mode'
 
 // 'overview' and 'people' removed from the UI (2026-02-22).
 // Kept in the type union for backward compatibility so that deep-link URLs like
@@ -82,10 +83,13 @@ export default function MarketingHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceViewId(view)
-  const { t } = useLocale()
+  const { locale, direction, t } = useLocale()
   const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
   const customerId = useEffectiveCustomerId()
   const { interpretation: readiness } = useClientReadinessState(customerId)
+  const uiMode = getUIMode()
+  const debugMarketingNav =
+    typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debugMarketingNav') === '1'
 
   const runReadinessNextStep = () => {
     switch (readiness.nextStep.target) {
@@ -213,6 +217,28 @@ export default function MarketingHomePage({
     return orderedItems
   }, [getTabOrder, defaultNavItems])
 
+  const savedOrder = useMemo(() => getTabOrder(MARKETING_SECTION_KEY), [getTabOrder])
+  const navItemIds = useMemo(() => navItems.map((item) => item.id), [navItems])
+  const navItemLabels = useMemo(() => navItems.map((item) => item.label), [navItems])
+  const includesReports = useMemo(() => navItems.some((item) => item.id === 'reports'), [navItems])
+
+  useEffect(() => {
+    if (!debugMarketingNav) return
+    console.info('[MarketingNavDebug] MarketingHomePage runtime state', {
+      shell: 'MarketingHomePage',
+      uiMode,
+      locale,
+      direction,
+      activeView,
+      navItemIds,
+      navItemLabels,
+      includesReports,
+      savedOrder: savedOrder ?? [],
+      hasActiveCustomer: Boolean(customerId),
+      prefsLoading,
+    })
+  }, [activeView, customerId, debugMarketingNav, direction, includesReports, locale, navItemIds, navItemLabels, prefsLoading, savedOrder, uiMode])
+
   // Save navigation order when it changes (to database, per-user)
   const handleNavReorder = async (reorderedItems: SubNavItem[]) => {
     const tabIds = reorderedItems.map(item => item.id)
@@ -246,6 +272,32 @@ export default function MarketingHomePage({
           </Button>
         </HStack>
       </Box>
+      {debugMarketingNav ? (
+        <Box
+          mb={3}
+          p={3}
+          borderWidth="1px"
+          borderRadius="md"
+          bg="yellow.50"
+          borderColor="yellow.200"
+          data-testid="marketing-nav-debug-panel"
+        >
+          <Stack spacing={1} fontSize="sm">
+            <Text fontWeight="700">Marketing nav debug</Text>
+            <Text><Code>shell</Code>: MarketingHomePage</Text>
+            <Text><Code>uiMode</Code>: {uiMode}</Text>
+            <Text><Code>locale</Code>: {locale}</Text>
+            <Text><Code>direction</Code>: {direction}</Text>
+            <Text><Code>activeView</Code>: {activeView}</Text>
+            <Text><Code>hasActiveCustomer</Code>: {customerId ? 'true' : 'false'}</Text>
+            <Text><Code>prefsLoading</Code>: {prefsLoading ? 'true' : 'false'}</Text>
+            <Text><Code>savedOrder</Code>: {savedOrder && savedOrder.length > 0 ? savedOrder.join(', ') : '(none)'}</Text>
+            <Text><Code>navItemIds</Code>: {navItemIds.join(', ')}</Text>
+            <Text><Code>navItemLabels</Code>: {navItemLabels.join(' | ')}</Text>
+            <Text><Code>includesReports</Code>: {includesReports ? 'true' : 'false'}</Text>
+          </Stack>
+        </Box>
+      ) : null}
       <SubNavigation
         items={navItems}
         activeId={activeView}
@@ -253,6 +305,7 @@ export default function MarketingHomePage({
         onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
         onReorder={handleNavReorder}
         enableDragDrop={true}
+        debugEnabled={debugMarketingNav}
       />
     </div>
   )

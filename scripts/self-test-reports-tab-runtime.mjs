@@ -47,8 +47,10 @@ if (!identityRes.body?.success || !identityRes.body?.data) fail('identity-capaci
 const repoRoot = process.cwd()
 const reportsTabPath = join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportsTab.tsx')
 const marketingHomePath = join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingHomePage.tsx')
+const subNavigationPath = join(repoRoot, 'src', 'design-system', 'components', 'SubNavigation.tsx')
 const reportsSource = readFileSync(reportsTabPath, 'utf8')
 const marketingHomeSource = readFileSync(marketingHomePath, 'utf8')
+const subNavigationSource = readFileSync(subNavigationPath, 'utf8')
 
 // Reports tab now renders ReportingDashboard (operator-grade dashboard)
 if (!reportsSource.includes('ReportingDashboard')) fail('ReportsTab must render ReportingDashboard')
@@ -59,9 +61,15 @@ if (!dashboardSource.includes('/api/reporting')) fail('ReportingDashboard must u
 
 if (!marketingHomeSource.includes("id: 'reports'")) fail('MarketingHomePage missing reports nav item')
 if (!marketingHomeSource.includes('ReportsTab')) fail('MarketingHomePage missing ReportsTab wiring')
+if (!marketingHomeSource.includes('orderedItems.push(...Array.from(itemsById.values()))')) fail('MarketingHomePage must append missing tabs after saved order')
+if (!subNavigationSource.includes('{items.map((item) => (')) fail('SubNavigation must render full items array')
+if (!subNavigationSource.includes('<TabPanels')) fail('SubNavigation missing tab panels renderer')
+if (!subNavigationSource.includes('debugEnabled')) fail('SubNavigation missing runtime nav diagnostics gate')
+if (!marketingHomeSource.includes('debugMarketingNav')) fail('MarketingHomePage missing runtime nav diagnostics gate')
 
 console.log(`PASS outreach rows bySequence=${outreach.bySequence.length} byIdentity=${outreach.byIdentity.length}`)
 console.log(`PASS run-history rows=${Array.isArray(runHistoryRes.body.data.rows) ? runHistoryRes.body.data.rows.length : 0}`)
 console.log(`PASS identity summary usable=${identityRes.body.data?.summary?.usable ?? 0}`)
 console.log('PASS reports tab markers present')
+console.log('PASS marketing nav retains reports through ordering and renderer mapping')
 console.log('self-test-reports-tab-runtime: PASS')
