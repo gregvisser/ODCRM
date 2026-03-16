@@ -6,6 +6,11 @@
 - Exact task steps: use [ODCRM_TASK_PLAYBOOKS.md](./ODCRM_TASK_PLAYBOOKS.md)
 - When the UI feels confusing: check [ODCRM_KNOWN_LIMITS_AND_GOTCHAS.md](./ODCRM_KNOWN_LIMITS_AND_GOTCHAS.md)
 
+## Packaged and export-ready versions
+- Detailed training docs live in this `docs/training/` folder.
+- Single packaged manual: [ODCRM_OPERATOR_TRAINING_MANUAL.md](./ODCRM_OPERATOR_TRAINING_MANUAL.md)
+- Share/export-ready versions: [`exports/`](./exports/)
+
 ## How to use this folder
 1. Read the workflow overview first.
 2. Read the relevant module guide for the tab you are in.
