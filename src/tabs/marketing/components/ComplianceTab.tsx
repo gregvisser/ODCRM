@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../../utils/api'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { useCustomersFromDatabase } from '../../../hooks/useCustomersFromDatabase'
+import { useLocale } from '../../../contexts/LocaleContext'
 
 type SuppressionEntry = {
   id: string
@@ -130,6 +131,7 @@ function getProtectionStatus(kind: SheetKind, health: SuppressionSheetHealth | n
 }
 
 export default function ComplianceTab() {
+  const { t } = useLocale()
   const DEFAULT_PAGE_SIZE = 50
   const { customers, loading: customersLoading, error: customersError } = useCustomersFromDatabase()
   const [entries, setEntries] = useState<SuppressionEntry[]>([])
@@ -564,9 +566,9 @@ export default function ComplianceTab() {
     <Box id="suppression-tab-panel" data-testid="suppression-tab-panel">
       <VStack align="stretch" spacing={6}>
         <Box>
-          <Heading size="lg" mb={2}>Compliance</Heading>
+          <Heading size="lg" mb={2}>{t('marketing.complianceTitle')}</Heading>
           <Text fontSize="sm" color="gray.600">
-            Check whether email and domain suppression protections are connected, current, and safe for this client.
+            {t('marketing.complianceIntro')}
           </Text>
         </Box>
 
@@ -574,22 +576,22 @@ export default function ComplianceTab() {
           <VStack align="stretch" spacing={3}>
             <HStack justify="space-between" align="flex-start" flexWrap="wrap">
               <Box>
-                <Heading size="sm">Client</Heading>
+                <Heading size="sm">{t('common.client')}</Heading>
                 <Text fontSize="sm" color="gray.600">
-                  Suppression data is client-specific.
+                  {t('marketing.clientSpecificSuppression')}
                 </Text>
               </Box>
               <Badge colorScheme={customerId ? 'blue' : 'orange'}>
-                {selectedCustomer?.name || (customerId ? 'Client selected' : 'No client selected')}
+                {selectedCustomer?.name || (customerId ? t('marketing.clientSelected') : t('marketing.noClientSelected'))}
               </Badge>
             </HStack>
 
             <FormControl>
-              <FormLabel fontSize="sm">Client</FormLabel>
+              <FormLabel fontSize="sm">{t('common.client')}</FormLabel>
               <Select
                 value={customerId}
                 onChange={(e) => handleCustomerChange(e.target.value)}
-                placeholder={customersLoading ? 'Loading clients...' : 'Select a client'}
+                placeholder={customersLoading ? t('marketing.loadingClients') : t('common.selectClient')}
                 isDisabled={customersLoading}
               >
                 {customers.map((customer) => (
@@ -613,7 +615,7 @@ export default function ComplianceTab() {
           <Alert status="warning">
             <AlertIcon />
             <AlertDescription fontSize="sm">
-              Select a client before reviewing protection status or changing suppression entries.
+              {t('marketing.selectClientBeforeSuppression')}
             </AlertDescription>
           </Alert>
         ) : (
@@ -624,7 +626,7 @@ export default function ComplianceTab() {
                   <Alert status="info">
                     <AlertIcon />
                     <AlertDescription fontSize="sm">
-                      Checking this client&apos;s suppression protections.
+                      {t('marketing.checkingProtections')}
                     </AlertDescription>
                   </Alert>
                 ) : dataHealthError ? (
@@ -651,9 +653,9 @@ export default function ComplianceTab() {
                 )}
 
                 <Box>
-                  <Heading size="sm" mb={1}>Protection status</Heading>
+                  <Heading size="sm" mb={1}>{t('marketing.protectionStatus')}</Heading>
                   <Text fontSize="sm" color="gray.600">
-                    Start here to see whether email and domain protections are connected, current, and ready to use.
+                    {t('marketing.protectionStatusDescription')}
                   </Text>
                 </Box>
 
@@ -668,9 +670,9 @@ export default function ComplianceTab() {
               <VStack align="stretch" spacing={4}>
                 <HStack justify="space-between" flexWrap="wrap">
                   <Box>
-                    <Heading size="sm">Add protected email or domain</Heading>
+                    <Heading size="sm">{t('marketing.addProtectedEntry')}</Heading>
                     <Text fontSize="sm" color="gray.600">
-                      Use manual entries for quick removals or corrections. Source setup and refresh detail stay lower down.
+                      {t('marketing.addProtectedEntryDescription')}
                     </Text>
                   </Box>
                   <HStack>
@@ -680,7 +682,7 @@ export default function ComplianceTab() {
                       colorScheme="blue"
                       onClick={() => setListTypeFilter('email')}
                     >
-                      Email suppression
+                      {t('marketing.emailSuppression')}
                     </Button>
                     <Button
                       size="sm"
@@ -688,7 +690,7 @@ export default function ComplianceTab() {
                       colorScheme="purple"
                       onClick={() => setListTypeFilter('domain')}
                     >
-                      Domain suppression
+                      {t('marketing.domainSuppression')}
                     </Button>
                   </HStack>
                 </HStack>
@@ -699,7 +701,7 @@ export default function ComplianceTab() {
 
                 <HStack spacing={3} align="flex-end" flexWrap="wrap">
                   <FormControl flex="1" minW={{ base: '100%', md: '220px' }}>
-                    <FormLabel fontSize="sm">Value</FormLabel>
+                    <FormLabel fontSize="sm">{t('marketing.value')}</FormLabel>
                     <Input
                       placeholder={listTypeFilter === 'email' ? 'person@company.com' : 'company.com'}
                       value={value}
@@ -707,11 +709,11 @@ export default function ComplianceTab() {
                     />
                   </FormControl>
                   <FormControl flex="1" minW={{ base: '100%', md: '240px' }}>
-                    <FormLabel fontSize="sm">Reason (optional)</FormLabel>
+                    <FormLabel fontSize="sm">{t('marketing.reasonOptional')}</FormLabel>
                     <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Requested removal" />
                   </FormControl>
                   <Button id="suppression-tab-manual-add-btn" data-testid="suppression-tab-manual-add-btn" colorScheme="teal" onClick={handleAdd}>
-                    Add protection
+                    {t('marketing.addProtection')}
                   </Button>
                 </HStack>
               </VStack>
@@ -721,10 +723,10 @@ export default function ComplianceTab() {
               <VStack align="stretch" spacing={0}>
                 <Box p={4} borderBottomWidth="1px">
                   <Heading size="sm" mb={1}>
-                    {listTypeFilter === 'email' ? 'Protected emails' : 'Protected domains'}
+                    {listTypeFilter === 'email' ? t('marketing.protectedEmails') : t('marketing.protectedDomains')}
                   </Heading>
                   <Text fontSize="sm" color="gray.600">
-                    Review the current protection list and remove entries that should no longer block sending.
+                    {t('marketing.currentProtectionListDescription')}
                   </Text>
                 </Box>
                 {loading ? (
@@ -735,11 +737,11 @@ export default function ComplianceTab() {
                   <Table size="sm">
                     <Thead bg="gray.50">
                       <Tr>
-                        <Th>Value</Th>
-                        <Th>Reason</Th>
-                        <Th>Added by</Th>
-                        <Th>Added</Th>
-                        <Th>Actions</Th>
+                        <Th>{t('marketing.value')}</Th>
+                        <Th>{t('marketing.reasonOptional')}</Th>
+                        <Th>{t('marketing.addedBy')}</Th>
+                        <Th>{t('marketing.added')}</Th>
+                        <Th>{t('settings.userAuth.actions')}</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
@@ -779,7 +781,7 @@ export default function ComplianceTab() {
 
             <HStack justify="space-between" flexWrap="wrap">
               <Text fontSize="sm" color="gray.600">
-                Page {pagination.page} of {pagination.totalPages}
+                {t('marketing.pageOf', { page: pagination.page, total: pagination.totalPages })}
               </Text>
               <HStack>
                 <Button
@@ -788,7 +790,7 @@ export default function ComplianceTab() {
                   onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
                   isDisabled={pagination.page <= 1 || loading}
                 >
-                  Previous
+                  {t('marketing.previous')}
                 </Button>
                 <Button
                   size="sm"
@@ -805,9 +807,9 @@ export default function ComplianceTab() {
               <VStack align="stretch" spacing={4}>
                 <HStack justify="space-between" flexWrap="wrap">
                   <Box>
-                    <Heading size="sm">Source setup & troubleshooting</Heading>
+                    <Heading size="sm">{t('marketing.sourceSetupTroubleshooting')}</Heading>
                     <Text fontSize="sm" color="gray.600">
-                      Secondary detail for Google Sheet links, refresh checks, sync results, and source replacement.
+                      {t('marketing.sourceSetupTroubleshootingDescription')}
                     </Text>
                   </Box>
                   <Button size="xs" variant="outline" onClick={() => void loadSuppressionHealth()} isLoading={dataHealthLoading}>

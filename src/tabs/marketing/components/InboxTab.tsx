@@ -44,6 +44,7 @@ import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
+import { useLocale } from '../../../contexts/LocaleContext'
 
 // Customer type
 type Customer = {
@@ -124,6 +125,7 @@ type RepliesResponse = {
 
 const InboxTab: React.FC = () => {
   const toast = useToast()
+  const { t } = useLocale()
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
     canSelectCustomer,
@@ -433,9 +435,9 @@ const InboxTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">Inbox</Heading>
+          <Heading size="lg">{t('marketing.inboxTitle')}</Heading>
           <Text color="gray.600">
-            Review conversations, handle replies, and keep operator follow-up moving across connected mailboxes.
+            {t('marketing.inboxIntro')}
           </Text>
         </VStack>
         <HStack>
@@ -447,7 +449,7 @@ const InboxTab: React.FC = () => {
             w="200px"
             isDisabled={!canSelectCustomer}
           >
-            <option value="">Select customer</option>
+            <option value="">{t('common.selectCustomer')}</option>
             {customers.map(customer => (
               <option key={customer.id} value={customer.id}>{customer.name}</option>
             ))}
@@ -461,8 +463,8 @@ const InboxTab: React.FC = () => {
             }}
             w="120px"
           >
-            <option value="threads">Conversations</option>
-            <option value="replies">Recent replies</option>
+            <option value="threads">{t('marketing.conversations')}</option>
+            <option value="replies">{t('marketing.recentReplies')}</option>
           </Select>
           <Select
             size="sm"
@@ -470,9 +472,9 @@ const InboxTab: React.FC = () => {
             onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d')}
             w="140px"
           >
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-            <option value="90d">Last 90 days</option>
+            <option value="7d">{t('marketing.last7Days')}</option>
+            <option value="30d">{t('marketing.last30Days')}</option>
+            <option value="90d">{t('marketing.last90Days')}</option>
           </Select>
         </HStack>
       </Flex>
@@ -480,13 +482,13 @@ const InboxTab: React.FC = () => {
       {!selectedCustomerId && (
         <Alert status="warning" mb={4} data-testid="inbox-tab-no-customer">
           <AlertIcon />
-          <AlertDescription>Select a customer to load inbox threads and replies.</AlertDescription>
+          <AlertDescription>{t('marketing.selectCustomerInbox')}</AlertDescription>
         </Alert>
       )}
       {customers.length === 0 && (
         <Alert status="info" mb={4} data-testid="inbox-tab-no-customers">
           <AlertIcon />
-          <AlertDescription>No customers are available for inbox operations.</AlertDescription>
+          <AlertDescription>{t('marketing.noCustomersInbox')}</AlertDescription>
         </Alert>
       )}
 
@@ -495,11 +497,11 @@ const InboxTab: React.FC = () => {
         <Alert status="error" mb={4}>
           <AlertIcon />
           <Box flex="1">
-            <AlertTitle>Failed to load inbox</AlertTitle>
+            <AlertTitle>{t('marketing.failedToLoadInbox')}</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
           <Button size="sm" onClick={() => view === 'replies' ? loadReplies() : loadThreads()} ml={4}>
-            Retry
+            {t('common.retry')}
           </Button>
         </Alert>
       )}
@@ -510,7 +512,7 @@ const InboxTab: React.FC = () => {
             <Card>
               <CardBody>
                 <Stat>
-                  <StatLabel>Conversations</StatLabel>
+                  <StatLabel>{t('marketing.conversations')}</StatLabel>
                   <StatNumber>{threadStats.total}</StatNumber>
                 </Stat>
               </CardBody>
@@ -544,9 +546,9 @@ const InboxTab: React.FC = () => {
           <Alert status="info" mb={4} data-testid="inbox-tab-main-guidance">
             <AlertIcon />
             <Box>
-              <AlertTitle fontSize="sm">Main inbox path</AlertTitle>
+              <AlertTitle fontSize="sm">{t('marketing.mainInboxPath')}</AlertTitle>
               <AlertDescription fontSize="sm">
-                Start with unread conversations, open the thread you need, then reply or record an opt-out from the conversation itself.
+                {t('marketing.mainInboxPathDescription')}
               </AlertDescription>
             </Box>
           </Alert>
@@ -559,7 +561,7 @@ const InboxTab: React.FC = () => {
           <Card data-testid="inbox-tab-thread-list">
             <CardHeader>
               <Flex justify="space-between" align="center">
-                <Heading size="md">Conversations</Heading>
+                <Heading size="md">{t('marketing.conversations')}</Heading>
                 <Button
                   size="xs"
                   variant={unreadOnly ? 'solid' : 'outline'}
@@ -582,7 +584,7 @@ const InboxTab: React.FC = () => {
                   <Text fontSize="sm" color="gray.500">Try the recent replies view, or use the follow-up tools below to pull in newer mailbox activity.</Text>
                   <HStack>
                     <Button size="xs" variant="ghost" onClick={() => setView('replies')}>
-                      Open recent replies
+                      {t('marketing.recentReplies')}
                     </Button>
                   </HStack>
                 </VStack>
@@ -672,9 +674,9 @@ const InboxTab: React.FC = () => {
 
                   {/* Reply Form */}
                   <Box borderTop="1px" borderColor="gray.200" pt={4} data-testid="inbox-tab-reply-composer">
-                    <Heading size="sm" mb={3}>Reply to this conversation</Heading>
+                    <Heading size="sm" mb={3}>{t('marketing.replyComposerTitle')}</Heading>
                     <Textarea
-                      placeholder="Type your reply..."
+                      placeholder={t('marketing.typeYourReply')}
                       value={replyContent}
                       onChange={(e) => setReplyContent(e.target.value)}
                       rows={4}
@@ -688,7 +690,7 @@ const InboxTab: React.FC = () => {
                         isDisabled={!replyContent.trim() || isSendingReply}
                         isLoading={isSendingReply}
                       >
-                        Send Reply
+                        {t('marketing.sendReply')}
                       </Button>
                       {selectedThread && selectedThread.length > 0 && (() => {
                         const firstInbound = selectedThread.find((m) => m.direction === 'inbound')
@@ -725,7 +727,7 @@ const InboxTab: React.FC = () => {
                               }
                             }}
                           >
-                            Mark as Opt-out
+                            {t('marketing.markAsOptOut')}
                           </Button>
                         )
                       })()}
@@ -781,7 +783,7 @@ const InboxTab: React.FC = () => {
           <Alert status="info" mb={4} data-testid="inbox-tab-main-guidance">
             <AlertIcon />
             <Box>
-              <AlertTitle fontSize="sm">Main inbox path</AlertTitle>
+              <AlertTitle fontSize="sm">{t('marketing.mainInboxPath')}</AlertTitle>
               <AlertDescription fontSize="sm">
                 Use recent replies to spot who responded, then open conversations when you need the full thread and next reply action.
               </AlertDescription>
@@ -794,7 +796,7 @@ const InboxTab: React.FC = () => {
               <SearchIcon color="gray.300" />
             </InputLeftElement>
             <Input
-              placeholder="Search contacts, companies, campaigns, or reply text..."
+            placeholder={t('marketing.searchInbox')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -810,14 +812,14 @@ const InboxTab: React.FC = () => {
           <CardBody textAlign="center" py={10}>
             <EmailIcon boxSize={12} color="gray.300" mb={4} />
             <Text color="gray.500" fontSize="lg">
-              {searchQuery ? 'No replies match your search' : 'No replies yet'}
+              {searchQuery ? t('marketing.noRepliesMatch') : t('marketing.noRepliesYet')}
             </Text>
             <Text color="gray.400" mt={2}>
               Replies will appear here when prospects respond to your campaigns.
             </Text>
             <HStack mt={3} justify="center">
               <Button size="sm" variant="ghost" onClick={() => setView('threads')}>
-                Open conversations
+                {t('marketing.conversations')}
               </Button>
             </HStack>
           </CardBody>
@@ -900,9 +902,9 @@ const InboxTab: React.FC = () => {
         >
           <CardHeader>
             <VStack align="start" spacing={1}>
-              <Heading size="sm">Follow-up & troubleshooting</Heading>
+              <Heading size="sm">{t('marketing.followUpTroubleshooting')}</Heading>
               <Text fontSize="sm" color="gray.600">
-                Secondary tools for refreshing mailbox data and continuing operator follow-up in other marketing workspaces.
+                {t('marketing.followUpTroubleshootingDescription')}
               </Text>
             </VStack>
           </CardHeader>
@@ -915,16 +917,16 @@ const InboxTab: React.FC = () => {
                 onClick={handleRefresh}
                 isDisabled={!selectedCustomerId}
               >
-                Check for new messages
+                {t('marketing.checkNewMessages')}
               </Button>
               <Button size="sm" variant="outline" data-testid="inbox-tab-open-sequences" onClick={() => openMarketingTab('sequences')}>
-                Open Sequences
+                {t('marketing.openSequences')}
               </Button>
               <Button size="sm" variant="outline" data-testid="inbox-tab-open-reports" onClick={() => openMarketingTab('reports')}>
-                Open Reports
+                {t('marketing.openReports')}
               </Button>
               <Button size="sm" variant="ghost" data-testid="inbox-tab-open-readiness" onClick={() => openMarketingTab('readiness')}>
-                Back to Readiness
+                {t('marketing.backToReadiness')}
               </Button>
             </HStack>
             <Text fontSize="xs" color="gray.500" data-testid="inbox-tab-last-updated">

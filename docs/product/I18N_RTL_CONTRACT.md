@@ -117,12 +117,21 @@
 
 ## 6. Rollout scope
 
-- **In scope:** App shell, top nav, sub-nav for Onboarding and Marketing, common actions, main labels in Marketing and Onboarding home, key empty/loading/error and toast messages. One-by-one inclusion of high-traffic tab content (Templates, Sequences, Schedules, Inbox, Compliance, Customer Onboarding).
+- **In scope:** App shell, top nav, sub-nav for Onboarding and Marketing, settings/admin/setup surfaces, customer/onboarding forms, common actions, key empty/loading/error and toast messages, and the first visible page content in high-traffic marketing tabs (Templates, Email Accounts, Lead Sources, Compliance, Inbox, Customer Onboarding).
 - **Out of scope:** Translating user-generated DB content; changing email/onboarding/compliance/campaign/reports logic; API or schema changes.
 
 ---
 
-## 7. QA checklist
+## 7. Fixed implementation notes
+
+- **Header control:** The shipped button-like language control was replaced with a real Chakra `Switch` and explicit side labels `English [toggle] العربية`.
+- **Header placement:** The switch now lives in a fixed non-scrolling header block alongside the environment badge and sign-out control; it is no longer buried inside the horizontally scrolling tab strip.
+- **Coverage expansion:** Arabic translation keys were extended beyond the shell into Settings/admin, Troubleshooting, customer/onboarding account forms, contacts, email-account surfaces, and the first visible marketing page content.
+- **Fallback guarantee:** Arabic keys may still be added incrementally, but missing Arabic keys always fall back to English and missing keys never throw.
+
+---
+
+## 8. QA checklist
 
 - [ ] English default: first load and no preference → English, LTR.
 - [ ] Toggle to Arabic: UI switches to Arabic, RTL applied at root.
@@ -138,7 +147,7 @@
 
 ---
 
-## 8. Risks and mitigations
+## 9. Risks and mitigations
 
 | Risk | Mitigation |
 |------|------------|
@@ -149,15 +158,15 @@
 
 ---
 
-## 9. Known limitations / low-risk leftovers
+## 10. Known limitations / low-risk leftovers
 
-- Some low-traffic or secondary copy may remain in English in the first ship (e.g. tooltips, rare error messages). Document in PR.
+- Some low-traffic or secondary copy may remain in English in the first ship (for example: some deep modal copy, long-tail validation messages, or rarely used action labels in large marketing components). English fallback covers these safely.
 - Date/number formatting: only where frontend already formats; no wholesale replacement of all formatting in one pass.
 - No automatic translation of user-generated content (e.g. template body, sequence name). Out of scope.
 - **Mixed LTR:** Use `LtrContent` (src/components/LtrContent.tsx) to wrap emails, URLs, domains, or IDs in table cells/cards when in Arabic mode so they display left-to-right. Applied incrementally where needed.
-- **Deep tab copy:** TemplatesTab, SequencesTab, SchedulesTab, InboxTab, ComplianceTab, CustomerOnboardingTab contain many more strings; first ship covers shell, marketing/onboarding home, and common actions. Remaining surfaces can be keyed in follow-up PRs.
+- **Deep tab copy:** The first visible content for Templates, Email Accounts, Lead Sources, Compliance, Inbox, Settings/admin, and Customer Onboarding is keyed now. Some deeper secondary controls in very large components such as `SequencesTab`, `SchedulesTab`, and nested dialogs remain low-risk follow-up work.
 
 ---
 
 **Last updated:** 2026-03-16  
-**Status:** Contract for English/Arabic + RTL implementation.
+**Status:** Updated contract after replacing the shipped fake language button with a real toggle and broadening Arabic UI coverage without business-logic changes.

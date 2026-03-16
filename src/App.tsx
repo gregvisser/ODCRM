@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Flex,
+  HStack,
   Tab,
   TabList,
   Tabs,
   Text,
   Button,
   Badge,
+  Switch,
 } from '@chakra-ui/react'
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
@@ -323,73 +325,62 @@ function App() {
             top={0}
             zIndex={zIndex.sticky}
           >
-            <Tabs
-              index={tabIndex}
-              onChange={(nextIndex) => {
-                const nextTab = visibleTopTabs[nextIndex]
-                if (!nextTab) return
-                setActiveTab(nextTab.id)
-                setActiveView('accounts')
-                setFocusAccountName(undefined)
-              }}
-              variant="unstyled"
-              mt={{ base: spacing[1], md: spacing[2] }}
-            >
-              <TabList
-                overflowX="auto"
-                whiteSpace="nowrap"
-                borderBottom="1px solid"
-                borderColor={semanticColor.borderSubtle}
-                gap={spacing[2]}
-                pb={spacing[1]}
-                alignItems="center"
+            <Flex w="100%" align="center" gap={spacing[3]} mt={{ base: spacing[1], md: spacing[2] }}>
+              <Tabs
+                index={tabIndex}
+                onChange={(nextIndex) => {
+                  const nextTab = visibleTopTabs[nextIndex]
+                  if (!nextTab) return
+                  setActiveTab(nextTab.id)
+                  setActiveView('accounts')
+                  setFocusAccountName(undefined)
+                }}
+                variant="unstyled"
+                flex="1"
+                minW={0}
               >
-                <Box
-                  minW={{ base: '180px', md: '260px' }}
-                  maxW={{ base: '240px', md: '320px' }}
-                  mr={{ base: spacing[1], md: spacing[2] }}
-                >
-                  <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
-                </Box>
-                {visibleTopTabs.map((tab) => (
-                  <Tab
-                    key={tab.id}
-                    px={spacing[3]}
-                    py={spacing[1]}
-                    fontSize="xs"
-                    fontWeight="600"
-                    color={semanticColor.textMuted}
-                    border="1px solid"
-                    borderColor={semanticColor.borderSubtle}
-                    borderRadius={radius.md}
-                    bg={semanticColor.bgSurface}
-                    _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
-                    _selected={{
-                      color: 'accent.700',
-                      borderColor: 'accent.500',
-                      bg: 'accent.50',
-                    }}
-                  >
-                    {t(`nav.${tab.id}`)}
-                  </Tab>
-                ))}
-                {/* Language toggle: English / العربية */}
-                <Button
-                  variant="outline"
-                  size="xs"
-                  px={spacing[2]}
-                  py={spacing[1]}
-                  fontSize="xs"
-                  fontWeight="600"
-                  color={semanticColor.textMuted}
+                <TabList
+                  overflowX="auto"
+                  whiteSpace="nowrap"
+                  borderBottom="1px solid"
                   borderColor={semanticColor.borderSubtle}
-                  _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
-                  onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
-                  title={locale === 'ar' ? t('locale.english') : t('locale.arabic')}
+                  gap={spacing[2]}
+                  pb={spacing[1]}
+                  alignItems="center"
                 >
-                  {locale === 'ar' ? t('locale.english') : t('locale.arabic')}
-                </Button>
-                {/* Environment indicator */}
+                  <Box
+                    minW={{ base: '180px', md: '260px' }}
+                    maxW={{ base: '240px', md: '320px' }}
+                    mr={{ base: spacing[1], md: spacing[2] }}
+                  >
+                    <HeaderImagePicker variant="logo" maxHeightPx={72} enableEdits={false} />
+                  </Box>
+                  {visibleTopTabs.map((tab) => (
+                    <Tab
+                      key={tab.id}
+                      px={spacing[3]}
+                      py={spacing[1]}
+                      fontSize="xs"
+                      fontWeight="600"
+                      color={semanticColor.textMuted}
+                      border="1px solid"
+                      borderColor={semanticColor.borderSubtle}
+                      borderRadius={radius.md}
+                      bg={semanticColor.bgSurface}
+                      _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
+                      _selected={{
+                        color: 'accent.700',
+                        borderColor: 'accent.500',
+                        bg: 'accent.50',
+                      }}
+                    >
+                      {t(`nav.${tab.id}`)}
+                    </Tab>
+                  ))}
+                </TabList>
+              </Tabs>
+
+              <Flex align="center" gap={spacing[3]} flexShrink={0}>
                 <Badge
                   colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
                   fontSize="xs"
@@ -401,6 +392,29 @@ function App() {
                 >
                   {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
                 </Badge>
+                <HStack
+                  spacing={2}
+                  px={spacing[2]}
+                  py={spacing[1]}
+                  border="1px solid"
+                  borderColor={semanticColor.borderSubtle}
+                  borderRadius={radius.md}
+                  bg={semanticColor.bgSurface}
+                >
+                  <Text fontSize="xs" fontWeight="600" color={locale === 'en' ? semanticColor.textPrimary : semanticColor.textMuted}>
+                    {t('locale.english')}
+                  </Text>
+                  <Switch
+                    size="md"
+                    colorScheme="accent"
+                    isChecked={locale === 'ar'}
+                    onChange={(e) => setLocale(e.target.checked ? 'ar' : 'en')}
+                    aria-label={t('locale.switchAria')}
+                  />
+                  <Text fontSize="xs" fontWeight="600" color={locale === 'ar' ? semanticColor.textPrimary : semanticColor.textMuted}>
+                    {t('locale.arabic')}
+                  </Text>
+                </HStack>
                 <Button
                   variant="outline"
                   size="xs"
@@ -415,8 +429,8 @@ function App() {
                 >
                   {t('shell.signOut')}
                 </Button>
-              </TabList>
-            </Tabs>
+              </Flex>
+            </Flex>
           </Box>
 
           {/* Main Content */}

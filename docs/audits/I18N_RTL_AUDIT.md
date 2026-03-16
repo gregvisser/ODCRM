@@ -1,12 +1,20 @@
 # I18N & RTL Audit — ODCRM
 
-**Objective:** Document current UI text surfaces, layout, and any existing i18n/RTL capability before adding English/Arabic localization with RTL support.
+**Objective:** Document the shipped English/Arabic localization defects that were visible in production, then record the corrected implementation scope.
 
 **Guarantee:** No business logic, auth, tenant isolation, routing meaning, DB schema, migrations, permissions, or workflow behavior changes. English remains primary; Arabic is a presentation layer.
 
 ---
 
-## 1. App structure (repo reality)
+## 1. Shipped defect summary
+
+- The header language control in `src/App.tsx` shipped as a single outline button inside the scrolling `TabList`, so it looked and behaved like a chip/button instead of a true language toggle.
+- RTL direction switching was wired at the document root, but translation coverage stopped early. The shell and a few marketing/onboarding labels used `t()`, while Settings/admin, onboarding account forms, contacts, email-account screens, and visible marketing page content still rendered hardcoded English.
+- Arabic mode therefore changed page direction without delivering Arabic page content across the main operator/admin/setup surfaces.
+
+---
+
+## 2. App structure (repo reality)
 
 | Area | Location | Notes |
 |------|----------|--------|
@@ -24,7 +32,7 @@
 
 ---
 
-## 2. Hardcoded UI text — main operator surfaces
+## 3. Hardcoded UI text — main operator surfaces before this fix
 
 ### 2.1 App shell (`App.tsx`)
 
@@ -68,42 +76,52 @@
 - `EmptyState`: `title`, `description`, `action.label` (props)
 - `LoadingState`: `message` default "Loading..."
 
-### 2.7 Customers home
+### 3.7 Customers home
 
 - Tab labels and view names from `CustomersHomePage` / nav (Accounts, Contacts, etc. if present)
 
-### 2.8 Settings home
+### 3.8 Settings home
 
 - Tab labels and section titles from `SettingsHomePage`
 
-### 2.9 Marketing sub-tabs (components)
+### 3.9 Marketing sub-tabs (components)
 
 - ReadinessTab, ReportsTab, LeadSourcesTabNew, ComplianceTab, EmailAccountsTab, TemplatesTab, SequencesTab, SchedulesTab, InboxTab — each contains many hardcoded strings (table headers, buttons, empty states, errors, toasts)
 
 ---
 
-## 3. Existing i18n / direction
+## 4. Current i18n / direction after fix
 
-- **i18n:** None. No `react-i18next`, `react-intl`, or custom i18n lib.
-- **Direction/RTL:** None. No `dir` on document or root; Chakra theme does not set direction. All layout is LTR-implicit.
+- **i18n:** Thin custom frontend-only layer in `src/i18n/` with `en.ts` as canonical dictionary, `ar.ts` as additive dictionary, and `t()` fallback `ar -> en -> key`.
+- **Direction/RTL:** `LocaleProvider` sets `document.documentElement.dir` and `lang` from the selected locale. Arabic uses `rtl`; English restores `ltr`.
+- **Persistence:** Locale is stored in `localStorage` under `odcrm:locale`.
 
 ---
 
-## 4. Chakra setup
+## 5. Chakra setup
 
 - `theme.ts`: `extendTheme` with colors, semanticTokens, components (Button, Heading, Tabs, Badge, Table, Input, Select, Textarea, NumberInput), `styles.global` for html/body/#root.
 - No `direction` or RTL-specific theme keys. Chakra supports `dir` on `ChakraProvider` or root element for RTL.
 
 ---
 
-## 5. Locale persistence
+## 6. Fixed coverage in this ship
+
+- `src/App.tsx`: real `Switch` control with clear `English [toggle] العربية` labels in a fixed non-scrolling header block.
+- `src/tabs/settings/SettingsHomePage.tsx`, `src/components/UserAuthorizationTab.tsx`, `src/tabs/settings/TroubleshootingTab.tsx`: settings/admin setup labels, table headers, buttons, helper text, and key modal copy translated.
+- `src/tabs/onboarding/CustomerOnboardingTab.tsx` and `src/tabs/onboarding/components/CustomerContactsSection.tsx`: account details, contact labels, lead metrics, suppression setup CTA, client-profile headings, and contacts actions translated.
+- `src/components/EmailAccountsEnhancedTab.tsx`, `src/tabs/marketing/components/TemplatesTab.tsx`, `src/tabs/marketing/components/EmailAccountsTab.tsx`, `src/tabs/marketing/components/LeadSourcesTabNew.tsx`, `src/tabs/marketing/components/ComplianceTab.tsx`, `src/tabs/marketing/components/InboxTab.tsx`: first visible page-level marketing/operator content translated so Arabic mode no longer stops at the shell.
+
+---
+
+## 7. Locale persistence
 
 - **User preferences:** `UserPreferencesContext` + `useUserPreferences`; API-backed (`/api/user-preferences`); stores `tabOrders`, `theme`, `sidebarCollapsed`. No `locale` key.
 - **Recommendation:** Persist UI locale in `localStorage` only (e.g. `odcrm:locale`) to avoid API/schema changes. Presentation-only; no business impact.
 
 ---
 
-## 6. Risk areas
+## 8. Risk areas
 
 - **TemplatesTab, SequencesTab, SchedulesTab, InboxTab, ComplianceTab, CustomerOnboardingTab:** Dense hardcoded copy; high value for localization.
 - **Nav/shell:** Single place for tab labels and "Sign out"; must stay in sync with `contracts/nav` or be derived from translation keys.
@@ -112,7 +130,7 @@
 
 ---
 
-## 7. Inventory summary
+## 9. Inventory summary
 
 | Surface | Source | Localization approach |
 |--------|--------|------------------------|
@@ -126,4 +144,4 @@
 ---
 
 **Last updated:** 2026-03-16  
-**Status:** Pre-implementation audit for English/Arabic + RTL.
+**Status:** Updated after replacing the fake language button with a real toggle and expanding Arabic coverage across the shipped operator/admin/setup surfaces.
