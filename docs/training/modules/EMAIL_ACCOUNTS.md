@@ -101,7 +101,7 @@ These are operationally real, but they can remove the mailbox from the active li
 
 ## Click-by-click workflows
 ### Connect a mailbox
-1. Open `Marketing -> Email Accounts`.
+1. Open `OpensDoors Marketing -> Email Accounts`.
 2. Confirm the correct client is selected.
 3. Click `Connect Outlook` or `Connect Outlook mailbox`.
 4. Complete the Microsoft sign-in flow.
@@ -179,3 +179,4 @@ Treat a mailbox as ready only when all of these are true:
 - Outlook connect enforces a maximum of 5 active Outlook identities per client.
 - The operator-visible list only returns active identities, which is why a turned-off mailbox can seem to vanish.
 - Current backend safety rails enforce low daily caps compared with older operator expectations.
+

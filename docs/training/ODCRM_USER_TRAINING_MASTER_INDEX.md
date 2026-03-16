@@ -21,6 +21,11 @@ What that means in practice:
 - `Settings` exists, but it is not the normal daily-work starting point.
 
 ## How to use this training set
+Use the docs in this order:
+- workflow first,
+- module guide second,
+- playbook while performing the task,
+- gotchas when the UI behaves unexpectedly.
 ### First time through
 1. Start with [Workflow Overview](./ODCRM_USER_WORKFLOW_OVERVIEW.md).
 2. Read the module docs in the recommended order below.
@@ -36,12 +41,12 @@ What that means in practice:
 1. [Workflow Overview](./ODCRM_USER_WORKFLOW_OVERVIEW.md)
 2. [Clients](./modules/CLIENTS.md)
 3. [Onboarding](./modules/ONBOARDING.md)
-4. [Readiness](./modules/READINESS.md)
-5. [Email Accounts](./modules/EMAIL_ACCOUNTS.md)
-6. [Lead Sources](./modules/LEAD_SOURCES.md)
-7. [Compliance and Suppression](./modules/COMPLIANCE_AND_SUPPRESSION.md)
-8. [Templates](./modules/TEMPLATES.md)
-9. [Sequences](./modules/SEQUENCES.md)
+4. [Email Accounts](./modules/EMAIL_ACCOUNTS.md)
+5. [Lead Sources](./modules/LEAD_SOURCES.md)
+6. [Compliance and Suppression](./modules/COMPLIANCE_AND_SUPPRESSION.md)
+7. [Templates](./modules/TEMPLATES.md)
+8. [Sequences](./modules/SEQUENCES.md)
+9. [Readiness](./modules/READINESS.md)
 10. [Schedules](./modules/SCHEDULES.md)
 11. [Inbox](./modules/INBOX.md)
 12. [Reports](./modules/REPORTS.md)
@@ -101,6 +106,7 @@ Treat this as admin/setup-only. Current sub-tabs are `User Authorization` and `T
 
 ## Training map
 ### Core workflow docs
+- [Training README](./README.md)
 - [Workflow Overview](./ODCRM_USER_WORKFLOW_OVERVIEW.md)
 - [Task Playbooks](./ODCRM_TASK_PLAYBOOKS.md)
 - [Known Limits and Gotchas](./ODCRM_KNOWN_LIMITS_AND_GOTCHAS.md)
@@ -167,3 +173,5 @@ The footer ODCRM ensures is present in send paths, even if a user forgets to add
 
 ## Reality check
 These docs are based on the implementation audited on SHA `9469db8060f497a43f1bd0b8cd3a34223ce5ce1a`. When behavior is non-obvious, the docs say so directly rather than smoothing it over.
+
+

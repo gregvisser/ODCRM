@@ -13,7 +13,8 @@ This note is for the internal business/admin team who will point new users at th
 6. Read `modules/COMPLIANCE_AND_SUPPRESSION.md`.
 7. Read `modules/TEMPLATES.md`.
 8. Read `modules/SEQUENCES.md`.
-9. Use `ODCRM_TASK_PLAYBOOKS.md` for the first real run-through.
+9. Read `modules/READINESS.md`.
+10. Use `ODCRM_TASK_PLAYBOOKS.md` for the first real run-through.
 
 ### For an already-live operator
 1. Start with `modules/READINESS.md`.
@@ -98,3 +99,4 @@ Step in when:
 - `ODCRM_TASK_PLAYBOOKS.md`
 - `ODCRM_KNOWN_LIMITS_AND_GOTCHAS.md`
 - `../audits/USER_TRAINING_GROUND_TRUTH_AUDIT.md`
+

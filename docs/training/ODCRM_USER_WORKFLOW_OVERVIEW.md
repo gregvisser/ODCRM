@@ -19,6 +19,8 @@ Use this as your first-day path through the product.
 11. Start the live sequence only after the test path and readiness checks look right.
 12. Move to `Schedules`, `Inbox`, and `Reports` for day-to-day operation.
 
+For exact step-by-step tasks inside any phase, use [Task Playbooks](./ODCRM_TASK_PLAYBOOKS.md).
+
 ## Daily operator checklist
 Use this when you are handling already-live work.
 
@@ -203,3 +205,4 @@ The UI contains some diagnostics-heavy areas, especially inside `Sequences`. For
 - [Master Index](./ODCRM_USER_TRAINING_MASTER_INDEX.md)
 - [Task Playbooks](./ODCRM_TASK_PLAYBOOKS.md)
 - [Known Limits and Gotchas](./ODCRM_KNOWN_LIMITS_AND_GOTCHAS.md)
+

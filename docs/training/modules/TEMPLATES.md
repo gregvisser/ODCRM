@@ -25,8 +25,8 @@ Users usually go here before [Sequences](./SEQUENCES.md).
 4. Insert the correct placeholders.
 5. Use `Improve with AI` only as a suggestion step.
 6. Use `Preview render`.
-7. Save the template.
-8. Move to `Sequences`.
+7. Click `Create Template` for a new template or `Save Changes` for an existing one.
+8. Move to [Sequences](./SEQUENCES.md).
 
 ## Advanced or lower-confidence parts of this screen
 These UI ideas exist, but should not be treated as the strongest persisted business truth:
@@ -128,7 +128,7 @@ Common buttons and actions:
 
 ## Create/edit flow
 ### Create a new template
-1. Open `Marketing -> Templates`.
+1. Open `OpensDoors Marketing -> Templates`.
 2. Confirm the correct client is selected.
 3. Click `Create template`.
 4. Enter `Template Name`.
@@ -137,7 +137,7 @@ Common buttons and actions:
 7. Enter `Email Content`.
 8. Insert placeholder chips where needed.
 9. Optionally add `Preview Text (optional)` and `Tags`.
-10. Save the template.
+10. Click `Create Template`.
 11. Click `Preview render`.
 
 Expected result:
@@ -148,7 +148,7 @@ Expected result:
 2. Click `Edit template`.
 3. Change the subject, content, or placeholders.
 4. Preview it.
-5. Save changes.
+5. Click `Save Changes`.
 
 Expected result:
 - the updated template replaces the previous saved content for that shared template.
@@ -247,3 +247,5 @@ Go to [Sequences](./SEQUENCES.md).
 - The current template model reliably persists the core content, but some richer metadata shown in the UI is not equally reliable in backend truth.
 - Sequence steps are copied content. Shared-template edits are not live references.
 - The send path enforces unsubscribe handling more strongly than the editor alone suggests.
+
+

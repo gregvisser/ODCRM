@@ -49,7 +49,7 @@ Connect a sending mailbox that ODCRM can use for preview, sequence sending, and 
 - You can complete the Microsoft sign-in flow.
 
 ### Exact steps
-1. Open `Marketing -> Email Accounts`.
+1. Open `OpensDoors Marketing -> Email Accounts`.
 2. Confirm the correct client is selected.
 3. Click `Connect Outlook` or `Connect Outlook mailbox`.
 4. Complete the Microsoft sign-in and consent flow.
@@ -88,7 +88,7 @@ Create reusable outreach copy that can be used in sequence steps.
 - You know the subject and message you want to send.
 
 ### Exact steps
-1. Open `Marketing -> Templates`.
+1. Open `OpensDoors Marketing -> Templates`.
 2. Confirm the correct client is selected.
 3. Click `Create template`.
 4. Enter `Template Name`.
@@ -98,7 +98,7 @@ Create reusable outreach copy that can be used in sequence steps.
 8. Insert the placeholder chips you need.
 9. Add `Preview Text (optional)` only if you want it for the editor/library flow.
 10. Add tags only if useful for your team, but do not treat them as the most important saved data.
-11. Save the template.
+11. Click `Create Template`.
 
 ### Expected result
 A reusable template appears in the template library for that client.
@@ -108,7 +108,7 @@ A reusable template appears in the template library for that client.
 - You can open `Preview render` or `Edit template` on it.
 
 ### What to do next
-Use the template in `Sequences`.
+Use the template in [Sequences](./modules/SEQUENCES.md).
 
 ### Common failure points
 - Forgetting the correct client context.
@@ -131,7 +131,7 @@ Use the AI suggestion flow to improve the template wording without silently savi
 5. Check that placeholders and unsubscribe content still look correct.
 6. Click `Apply suggestion` only if you want the editor draft replaced.
 7. Click `Restore original` if you need to undo the applied suggestion.
-8. Save the template only after you are satisfied with the result.
+8. Click `Save Changes` only after you are satisfied with the result.
 
 ### Expected result
 The editor gives you a suggested rewrite, and you stay in control of whether that suggestion becomes the saved draft.
@@ -156,7 +156,7 @@ Check whether placeholders, sender details, signature placement, and unsubscribe
 - Ideally, the client and at least one mailbox already exist.
 
 ### Exact steps
-1. Open `Marketing -> Templates`.
+1. Open `OpensDoors Marketing -> Templates`.
 2. Find the template.
 3. Click `Preview render`.
 4. Review the rendered subject.
@@ -191,7 +191,7 @@ Build a reusable sequence draft that is ready for testing.
 - A usable lead batch/list exists or is close to ready.
 
 ### Exact steps
-1. Open `Marketing -> Sequences`.
+1. Open `OpensDoors Marketing -> Sequences`.
 2. Click `New Sequence`.
 3. Enter `Sequence Name`.
 4. Choose `Leads Snapshot`.
@@ -295,7 +295,7 @@ Confirm what is currently happening in the live sending path.
 - A live or paused sequence-linked campaign already exists.
 
 ### Exact steps
-1. Open `Marketing -> Schedules`.
+1. Open `OpensDoors Marketing -> Schedules`.
 2. Select the correct client.
 3. Review the summary cards.
 4. Click `Open summary` on the relevant schedule.
@@ -362,7 +362,7 @@ Make sure ODCRM has the current DNC/protection sheet for the selected client.
 - You know whether you are connecting for the first time or replacing an existing source.
 
 ### Exact steps
-1. Open `Marketing -> Suppression List`.
+1. Open `OpensDoors Marketing -> Suppression List`.
 2. Select the correct client.
 3. Choose `Email suppression` or `Domain suppression`.
 4. Open the source settings area.
@@ -398,7 +398,7 @@ Work real reply conversations and stop future contact when needed.
 - At least one mailbox has been receiving activity.
 
 ### Exact steps
-1. Open `Marketing -> Inbox`.
+1. Open `OpensDoors Marketing -> Inbox`.
 2. Select the correct client.
 3. Stay in `Conversations` for normal work.
 4. Click `Needs action only` if you want a tighter review list.
@@ -433,7 +433,7 @@ Review whether recent outreach activity still looks healthy.
 - Enough activity exists for reporting to be meaningful.
 
 ### Exact steps
-1. Open `Marketing -> Reports`.
+1. Open `OpensDoors Marketing -> Reports`.
 2. Select the correct client.
 3. Choose the reporting window.
 4. Click `Refresh`.
@@ -470,7 +470,7 @@ Make sure a source is truly usable before relying on it in a live sequence.
 - A lead-source sheet is already connected, or ready to be connected.
 
 ### Exact steps
-1. Open `Marketing -> Lead Sources`.
+1. Open `OpensDoors Marketing -> Lead Sources`.
 2. Select the correct client.
 3. Review the source cards.
 4. If needed, click `Connect source` or `Replace source`.
@@ -490,8 +490,10 @@ You know whether the source is usable for downstream sequence work.
 - You can review actual contacts in the batch.
 
 ### What to do next
-Move to `Sequences`.
+Move to [Sequences](./modules/SEQUENCES.md).
 
 ### Common failure points
 - Assuming source connection alone means the data is ready.
 - Skipping the contact-review step.
+
+
