@@ -505,9 +505,14 @@ const ReportingDashboard: React.FC = () => {
   const effectiveCustomerId = isAllClientsScope ? '' : scopeSelection || scopedCustomerId || ''
   const currentScope: DashboardScope = isAllClientsScope ? 'all' : 'single'
 
+  // CRITICAL FIX: Pass X-Customer-Id: 'all' when scope=all to prevent auto-injection of active client ID
+  // This allows backend to distinguish intentional all-clients mode from accidental mixed scope
   const requestHeaders = useMemo(
-    () => (effectiveCustomerId.startsWith('cust_') ? { 'X-Customer-Id': effectiveCustomerId } : undefined),
-    [effectiveCustomerId],
+    () => {
+      if (isAllClientsScope) return { 'X-Customer-Id': 'all' }
+      return effectiveCustomerId.startsWith('cust_') ? { 'X-Customer-Id': effectiveCustomerId } : undefined
+    },
+    [isAllClientsScope, effectiveCustomerId],
   )
 
   const loadCustomers = useCallback(async () => {
@@ -985,10 +990,11 @@ const ReportingDashboard: React.FC = () => {
       <Box
         data-testid="dashboard-hero"
         borderRadius="2xl"
-        bgGradient="linear(to-br, gray.900, blue.900, purple.800)"
+        bgGradient="linear(to-br, blue.500, indigo.600, purple.500)"
         color="white"
         px={{ base: 5, md: 6 }}
         py={{ base: 5, md: 6 }}
+        boxShadow="inner"
       >
         <Stack direction={{ base: 'column', xl: 'row' }} spacing={6} justify="space-between">
           <VStack align="start" spacing={2} maxW="760px">
@@ -1003,8 +1009,8 @@ const ReportingDashboard: React.FC = () => {
                 Window: last {windowDays} days
               </Badge>
             </HStack>
-            <Heading size="lg">{heroTitle}</Heading>
-            <Text color="whiteAlpha.800" maxW="2xl">
+            <Heading size="lg" fontWeight="800" letterSpacing="-0.5px">{heroTitle}</Heading>
+            <Text color="white" maxW="2xl" fontSize="md" lineHeight="1.6">
               {heroDescription}
             </Text>
             <HStack spacing={3} flexWrap="wrap">
@@ -1043,6 +1049,7 @@ const ReportingDashboard: React.FC = () => {
               minW="150px"
               bg="white"
               color="gray.800"
+              title="Reporting period (calendar modes: Week/Month support coming)"
             >
               <option value="7">Last 7 days</option>
               <option value="30">Last 30 days</option>
