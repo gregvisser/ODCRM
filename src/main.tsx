@@ -8,6 +8,7 @@ import AuthGate from './auth/AuthGate'
 import LoginPage from './auth/LoginPage'
 import { msalConfig } from './auth/msalConfig'
 import ErrorBoundary from './components/ErrorBoundary'
+import { LocaleProvider } from './contexts/LocaleContext'
 import { UserPreferencesProvider } from './contexts/UserPreferencesContext'
 import { BUILD_SHA, BUILD_TIME } from './version'
 import './index.css'
@@ -96,9 +97,11 @@ try {
               {msalInstance ? (
                 <MsalProvider instance={msalInstance}>
                   <AuthGate>
-                    <UserPreferencesProvider>
-                      <App />
-                    </UserPreferencesProvider>
+                    <LocaleProvider>
+                      <UserPreferencesProvider>
+                        <App />
+                      </UserPreferencesProvider>
+                    </LocaleProvider>
                   </AuthGate>
                 </MsalProvider>
               ) : (

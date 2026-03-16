@@ -1,0 +1,101 @@
+/**
+ * Arabic dictionary — same keys as en.ts. Missing keys fall back to English.
+ * Modern Standard Arabic, professional UAE business/CRM tone.
+ */
+export const ar: Record<string, string> = {
+  // App shell & top nav
+  'nav.customers-home': 'عملاء OpensDoors',
+  'nav.marketing-home': 'تسويق OpensDoors',
+  'nav.onboarding-home': 'الإعداد',
+  'nav.settings-home': 'الإعدادات',
+  'shell.signOut': 'تسجيل الخروج',
+  'shell.loading': 'جاري التحميل...',
+  'shell.clientModeNotConfigured': 'وضع العميل غير مُعدّ بعد. تواصل مع المسؤول.',
+  'shell.build': 'الإصدار',
+
+  // Language toggle
+  'locale.english': 'English',
+  'locale.arabic': 'العربية',
+
+  // Common actions
+  'common.save': 'حفظ',
+  'common.cancel': 'إلغاء',
+  'common.close': 'إغلاق',
+  'common.create': 'إنشاء',
+  'common.update': 'تحديث',
+  'common.delete': 'حذف',
+  'common.edit': 'تعديل',
+  'common.search': 'بحث',
+  'common.filter': 'تصفية',
+  'common.refresh': 'تحديث',
+  'common.retry': 'إعادة المحاولة',
+  'common.back': 'رجوع',
+  'common.next': 'التالي',
+  'common.open': 'فتح',
+  'common.view': 'عرض',
+  'common.confirm': 'تأكيد',
+  'common.sendTest': 'إرسال تجريبي',
+  'common.launch': 'تشغيل',
+  'common.pause': 'إيقاف مؤقت',
+  'common.resume': 'استئناف',
+  'common.connected': 'متصل',
+  'common.replaceSheet': 'استبدال الجدول',
+  'common.loading': 'جاري التحميل',
+  'common.noResults': 'لا توجد نتائج',
+  'common.ready': 'جاهز',
+  'common.pending': 'قيد الانتظار',
+  'common.missing': 'ناقص',
+  'common.sections': 'الأقسام',
+
+  // Marketing sub-nav
+  'marketing.sectionTitle': 'التسويق',
+  'marketing.readiness': 'الجاهزية',
+  'marketing.reports': 'التقارير',
+  'marketing.leadSources': 'مصادر العملاء المحتملين',
+  'marketing.suppressionList': 'قائمة الاستبعاد',
+  'marketing.emailAccounts': 'حسابات البريد الإلكتروني',
+  'marketing.templates': 'القوالب',
+  'marketing.sequences': 'التسلسلات',
+  'marketing.schedules': 'الجداول',
+  'marketing.inbox': 'البريد الوارد',
+  'marketing.guidanceStart': 'ابدأ بالجاهزية لمعرفة ما يحتاج انتباهك. ثم استخدم التسلسلات للمراجعة أو الإجراء، والبريد الوارد للردود، والتقارير لتأكيد النتائج.',
+  'marketing.guidanceBlockers': 'إذا ظهرت عوائق في الإعداد أو البيانات، انتقل إلى الإعداد أو عملاء OpensDoors، ثم عد هنا لمتابعة العمليات.',
+  'marketing.openOnboardingSetup': 'فتح إعداد الإعداد',
+  'marketing.openClientsDataHealth': 'فتح صحة بيانات العملاء',
+
+  // Onboarding
+  'onboarding.title': 'الإعداد',
+  'onboarding.progressTracker': 'متتبع التقدم',
+  'onboarding.clientOnboarding': 'إعداد العميل',
+  'onboarding.status': 'حالة الإعداد',
+  'onboarding.statusDescription': 'تحقق مما إذا كان هذا العميل يبقى في الإعداد أو ينتقل إلى سير العمل التالي.',
+  'onboarding.openClientDetails': 'فتح تفاصيل العميل',
+  'onboarding.openInbox': 'فتح البريد الوارد',
+  'onboarding.openReports': 'فتح التقارير',
+  'onboarding.openSequences': 'فتح التسلسلات',
+  'onboarding.reviewMarketingReadiness': 'مراجعة جاهزية التسويق',
+  'onboarding.continueOnboarding': 'متابعة الإعداد',
+  'onboarding.selectClientFirst': 'اختر عميلاً أولاً.',
+  'onboarding.goLiveFollowUp': 'متابعة ما بعد التشغيل',
+  'onboarding.readyToMoveForward': 'جاهز للمضي قدماً',
+  'onboarding.followUpItemsLeft': '{{count}} عنصر متابعة متبقي',
+  'onboarding.checksReady': '{{ready}} من {{total}} فحوصات جاهزة',
+  'onboarding.checksHelpConfirm': 'تساعد هذه الفحوصات في التأكد من إمكانية انتقال العميل بأمان من الإعداد إلى الحملات الحية.',
+  'onboarding.selectClientToBegin': 'اختر عميلاً للبدء',
+  'onboarding.selectClientDescription': 'اختر عميلاً موجوداً، أو أنشئ واحداً من القائمة أعلاه، لمتابعة الإعداد.',
+  'onboarding.checkEmailIdentities': 'حسابات البريد الإلكتروني متصلة',
+  'onboarding.checkSuppressionList': 'قائمة الاستبعاد متصلة',
+  'onboarding.checkLeadSource': 'مصدر العملاء المحتملين متصل',
+  'onboarding.checkTemplateSequence': 'أساسيات القوالب والتسلسلات جاهزة',
+
+  // SubNavigation
+  'subnav.hidePanel': 'إخفاء لوحة {{title}}',
+  'subnav.showPanel': 'إظهار لوحة {{title}}',
+
+  // Empty / loading / errors
+  'state.loading': 'جاري التحميل...',
+  'state.loadingSchedules': 'جاري تحميل الجداول...',
+  'state.refreshSchedules': 'تحديث الجداول',
+  'state.refreshFollowUpDetail': 'تحديث تفاصيل المتابعة',
+  'state.lastUpdated': 'آخر تحديث',
+}

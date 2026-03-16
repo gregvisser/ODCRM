@@ -15,6 +15,7 @@ import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVi
 import { isClientUI } from './platform/mode'
 import { getMe, type MeResponse } from './platform/me'
 import { clearApiAuthToken } from './auth/apiAuthToken'
+import { useLocale } from './contexts/LocaleContext'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
@@ -38,6 +39,7 @@ function isSafeInternalRedirect(value: string): boolean {
 
 function App() {
   const { instance } = useMsal()
+  const { t, locale, setLocale } = useLocale()
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
@@ -273,14 +275,14 @@ function App() {
     if (!me) {
       return (
         <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
-          <Text>Loading...</Text>
+          <Text>{t('shell.loading')}</Text>
         </Flex>
       )
     }
     if (me.uiMode !== 'client' || !me.fixedCustomerId) {
       return (
         <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
-          <Text>Client mode is not configured yet. Contact admin.</Text>
+          <Text>{t('shell.clientModeNotConfigured')}</Text>
         </Flex>
       )
     }
@@ -368,9 +370,25 @@ function App() {
                       bg: 'accent.50',
                     }}
                   >
-                    {tab.label}
+                    {t(`nav.${tab.id}`)}
                   </Tab>
                 ))}
+                {/* Language toggle: English / العربية */}
+                <Button
+                  variant="outline"
+                  size="xs"
+                  px={spacing[2]}
+                  py={spacing[1]}
+                  fontSize="xs"
+                  fontWeight="600"
+                  color={semanticColor.textMuted}
+                  borderColor={semanticColor.borderSubtle}
+                  _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
+                  onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}
+                  title={locale === 'ar' ? t('locale.english') : t('locale.arabic')}
+                >
+                  {locale === 'ar' ? t('locale.english') : t('locale.arabic')}
+                </Button>
                 {/* Environment indicator */}
                 <Badge
                   colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
@@ -395,7 +413,7 @@ function App() {
                   _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
                   onClick={() => void handleSignOut()}
                 >
-                  Sign out
+                  {t('shell.signOut')}
                 </Button>
               </TabList>
             </Tabs>
@@ -420,7 +438,7 @@ function App() {
       </Box>
       <Box px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }} pb={{ base: spacing[3], md: spacing[4] }}>
         <Text fontSize="xs" color={semanticColor.textMuted} textAlign="center">
-          {import.meta.env.PROD ? `Build ${__BUILD_STAMP__}` : `Build: ${BUILD_SHA} ${BUILD_TIME}`}
+          {import.meta.env.PROD ? `${t('shell.build')} ${__BUILD_STAMP__}` : `${t('shell.build')}: ${BUILD_SHA} ${BUILD_TIME}`}
         </Text>
       </Box>
     </Flex>
