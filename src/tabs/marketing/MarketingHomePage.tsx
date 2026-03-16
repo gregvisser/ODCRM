@@ -17,6 +17,7 @@ import {
   CalendarIcon,
 } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
+import { useLocale } from '../../contexts/LocaleContext'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import SequencesTab from './components/SequencesTab'
 import LeadSourcesTabNew from './components/LeadSourcesTabNew'
@@ -81,6 +82,7 @@ export default function MarketingHomePage({
   focusAccountName?: string
 }) {
   const activeView = coerceViewId(view)
+  const { t } = useLocale()
   const { getTabOrder, saveTabOrder, loading: prefsLoading } = useUserPreferencesContext()
   const customerId = useEffectiveCustomerId()
   const { interpretation: readiness } = useClientReadinessState(customerId)
@@ -122,68 +124,68 @@ export default function MarketingHomePage({
   const defaultNavItems: SubNavItem[] = useMemo(() => [
     {
       id: 'readiness',
-      label: 'Readiness',
+      label: t('marketing.readiness'),
       icon: CheckCircleIcon,
       content: <ReadinessTab />,
       sortOrder: 0,
     },
     {
       id: 'reports',
-      label: 'Reports',
+      label: t('marketing.reports'),
       icon: SearchIcon,
       content: <ReportsTab />,
       sortOrder: 1,
     },
     {
       id: 'lists',
-      label: 'Lead Sources',
+      label: t('marketing.leadSources'),
       icon: ViewIcon,
       content: <LeadSourcesTabNew onNavigateToSequences={onNavigate ? () => onNavigate('sequences') : undefined} />,
       sortOrder: 2,
     },
     {
       id: 'compliance',
-      label: 'Suppression List',
+      label: t('marketing.suppressionList'),
       icon: WarningIcon,
       content: <ComplianceTab />,
       sortOrder: 3,
     },
     {
       id: 'email-accounts',
-      label: 'Email Accounts',
+      label: t('marketing.emailAccounts'),
       icon: SettingsIcon,
       content: <EmailAccountsTab />,
       sortOrder: 4,
     },
     {
       id: 'templates',
-      label: 'Templates',
+      label: t('marketing.templates'),
       icon: CopyIcon,
       content: <TemplatesTab />,
       sortOrder: 5,
     },
     {
       id: 'sequences',
-      label: 'Sequences',
+      label: t('marketing.sequences'),
       icon: RepeatIcon,
       content: <SequencesTab />,
       sortOrder: 6,
     },
     {
       id: 'schedules',
-      label: 'Schedules',
+      label: t('marketing.schedules'),
       icon: CalendarIcon,
       content: <SchedulesTab />,
       sortOrder: 7,
     },
     {
       id: 'inbox',
-      label: 'Inbox',
+      label: t('marketing.inbox'),
       icon: ChatIcon,
       content: <InboxTab />,
       sortOrder: 8,
     },
-  ], [onNavigate])
+  ], [onNavigate, t])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
@@ -227,29 +229,29 @@ export default function MarketingHomePage({
           <Text fontSize="sm" color="gray.600">{readiness.reason}</Text>
         </HStack>
         <Text fontSize="sm" color="gray.600">
-          Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.
+          {t('marketing.guidanceStart')}
         </Text>
         <Text fontSize="xs" color="gray.500" mt={1} data-testid="marketing-module-continuity-guidance">
-          If setup or data blockers appear, switch to Onboarding or OpensDoors Clients, then return here to continue operations.
+          {t('marketing.guidanceBlockers')}
         </Text>
         <HStack mt={2} flexWrap="wrap">
           <Button size="xs" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="marketing-readiness-next-step">
             {readiness.nextStep.label}
           </Button>
           <Button size="xs" variant="ghost" colorScheme="purple" onClick={goToOnboarding} data-testid="marketing-go-onboarding-setup">
-            Open Onboarding setup
+            {t('marketing.openOnboardingSetup')}
           </Button>
           <Button size="xs" variant="ghost" colorScheme="gray" onClick={goToClients} data-testid="marketing-go-clients-data-health">
-            Open Clients data health
+            {t('marketing.openClientsDataHealth')}
           </Button>
         </HStack>
       </Box>
       <SubNavigation
         items={navItems}
         activeId={activeView}
+        title={t('marketing.sectionTitle')}
         onChange={(id) => onNavigate?.(id as OpenDoorsViewId)}
         onReorder={handleNavReorder}
-        title="Marketing"
         enableDragDrop={true}
       />
     </div>
