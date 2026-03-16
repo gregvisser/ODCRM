@@ -20,7 +20,7 @@ import { clearApiAuthToken } from './auth/apiAuthToken'
 import { useLocale } from './contexts/LocaleContext'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
-import ReportingHomePage, { type ReportingViewId } from './tabs/reporting/ReportingHomePage'
+import DashboardHomePage, { type DashboardViewId } from './tabs/reporting/ReportingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
@@ -72,8 +72,8 @@ function App() {
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
       inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
-      reporting: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies ReportingViewId },
-      dashboard: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies ReportingViewId },
+      reporting: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies DashboardViewId },
+      dashboard: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies DashboardViewId },
       'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies OpenDoorsViewId },
       schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies OpenDoorsViewId },
     } as const
@@ -244,7 +244,7 @@ function App() {
           />
         )
       case 'reporting-home':
-        return <ReportingHomePage view={activeView} />
+        return <DashboardHomePage view={activeView} />
       case 'onboarding-home':
         return (
           <OnboardingHomePage

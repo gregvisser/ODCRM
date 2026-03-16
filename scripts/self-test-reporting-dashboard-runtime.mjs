@@ -44,8 +44,26 @@ async function main() {
   const lvt = leadsVsTargetRes.body?.data ?? leadsVsTargetRes.body
   if (!lvt || typeof lvt.leadsCreated !== 'number') fail('leads-vs-target.leadsCreated must be number')
 
+  const complianceRes = await getJson(`/api/reporting/compliance?sinceDays=30&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
+  if (complianceRes.status === 404) fail('/api/reporting/compliance returned 404')
+  const compliance = complianceRes.body?.data ?? complianceRes.body
+  if (!compliance || typeof compliance.unsubscribesInPeriod !== 'number') fail('compliance.unsubscribesInPeriod must be number')
+
+  const outreachRes = await getJson(`/api/reporting/outreach-performance?sinceDays=30&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
+  if (outreachRes.status === 404) fail('/api/reporting/outreach-performance returned 404')
+  const outreach = outreachRes.body?.data ?? outreachRes.body
+  if (!outreach || !Array.isArray(outreach.bySequence)) fail('outreach-performance.bySequence must be array')
+
+  const mailboxRes = await getJson(`/api/reporting/mailboxes?sinceDays=30&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
+  if (mailboxRes.status === 404) fail('/api/reporting/mailboxes returned 404')
+  const mailboxPayload = mailboxRes.body?.data ?? mailboxRes.body
+  if (!mailboxPayload || !Array.isArray(mailboxPayload.mailboxes)) fail('mailboxes.mailboxes must be array')
+
   console.log('PASS /api/reporting/summary returns data shape')
   console.log('PASS /api/reporting/leads-vs-target returns data shape')
+  console.log('PASS /api/reporting/compliance returns opt-out-safe data shape')
+  console.log('PASS /api/reporting/outreach-performance returns sequence data shape')
+  console.log('PASS /api/reporting/mailboxes returns mailbox data shape')
   console.log('self-test-reporting-dashboard-runtime: PASS')
 }
 
