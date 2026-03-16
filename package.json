@@ -112,6 +112,7 @@
     "test:exception-center-runtime": "node scripts/self-test-exception-center-runtime.mjs",
     "test:readiness-tab-runtime": "node scripts/self-test-readiness-tab-runtime.mjs",
     "test:reports-tab-runtime": "node scripts/self-test-reports-tab-runtime.mjs",
+    "test:reporting-home-runtime": "node scripts/self-test-reporting-home-runtime.mjs",
     "test:reporting-dashboard-runtime": "node scripts/self-test-reporting-dashboard-runtime.mjs",
     "test:lead-sources-tab-runtime": "node scripts/self-test-lead-sources-tab-runtime.mjs",
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",

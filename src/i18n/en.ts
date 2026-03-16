@@ -6,6 +6,7 @@ export const en: Record<string, string> = {
   // App shell & top nav
   'nav.customers-home': 'OpensDoors Clients',
   'nav.marketing-home': 'OpensDoors Marketing',
+  'nav.reporting-home': 'Reporting',
   'nav.onboarding-home': 'Onboarding',
   'nav.settings-home': 'Settings',
   'shell.signOut': 'Sign out',
