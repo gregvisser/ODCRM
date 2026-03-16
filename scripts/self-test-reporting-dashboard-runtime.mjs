@@ -13,10 +13,10 @@ function fail(message) {
   process.exit(1)
 }
 
-async function getJson(path) {
+async function getJson(path, customerId = CUSTOMER_ID) {
   const url = `${BASE_URL}${path}`
   const response = await fetch(url, {
-    headers: CUSTOMER_ID ? { Accept: 'application/json', 'X-Customer-Id': CUSTOMER_ID } : { Accept: 'application/json' },
+    headers: customerId ? { Accept: 'application/json', 'X-Customer-Id': customerId } : { Accept: 'application/json' },
   })
   const text = await response.text()
   if (response.status === 400 && (text.includes('Customer ID') || text.includes('customerId'))) {
@@ -60,13 +60,13 @@ async function main() {
   if (!mailboxPayload || !Array.isArray(mailboxPayload.mailboxes)) fail('mailboxes.mailboxes must be array')
 
   if (CHECK_ALL_CLIENTS) {
-    const aggregateSummaryRes = await getJson('/api/reporting/summary?sinceDays=30&scope=all')
+    const aggregateSummaryRes = await getJson('/api/reporting/summary?sinceDays=30&scope=all', '')
     const aggregateSummary = aggregateSummaryRes.body?.data ?? aggregateSummaryRes.body
     if (!aggregateSummary || aggregateSummary.customerId !== 'all') fail('aggregate summary must return customerId=all')
     if (typeof aggregateSummary.customerCount !== 'number') fail('aggregate summary must return customerCount')
     if (typeof aggregateSummary.leadsCreated !== 'number') fail('aggregate summary.leadsCreated must be number')
 
-    const aggregateTrendRes = await getJson('/api/reporting/trends?sinceDays=30&scope=all')
+    const aggregateTrendRes = await getJson('/api/reporting/trends?sinceDays=30&scope=all', '')
     const aggregateTrend = aggregateTrendRes.body?.data ?? aggregateTrendRes.body
     if (!aggregateTrend || !Array.isArray(aggregateTrend.trend)) fail('aggregate trends.trend must be array')
   }
