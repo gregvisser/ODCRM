@@ -26,7 +26,6 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
-import { useI18n } from '../../../contexts/I18nContext'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
@@ -166,7 +165,6 @@ function humanizeReason(reason?: string | null): string {
 }
 
 const ReportsTab: React.FC = () => {
-  const { t } = useI18n()
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
     canSelectCustomer,
@@ -325,7 +323,7 @@ const ReportsTab: React.FC = () => {
             <CardHeader>
               <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
                 <VStack align="start" spacing={0}>
-                  <Heading size="md">{t('reports.title')}</Heading>
+                  <Heading size="md">Outreach reporting</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
                     Review send volume, replies, opt-outs, mailbox performance, and recent outcomes. Queue detail and follow-up tools are kept in a secondary section.
                   </Text>
