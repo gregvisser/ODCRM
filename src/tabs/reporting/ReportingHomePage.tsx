@@ -18,7 +18,7 @@ export default function DashboardHomePage({
             Dashboard
           </Text>
           <Text fontSize="sm" color="gray.600">
-            Cross-system operator dashboard for truthful outreach performance, sourcing, funnel health, conversion pressure, and compliance visibility.
+            Cross-system operator dashboard for truthful outreach performance, sourcing, funnel health, conversion pressure, compliance visibility, and all-clients aggregate reporting.
           </Text>
         </VStack>
       </Box>

@@ -13,11 +13,9 @@ import {
   Card,
   CardBody,
   CardHeader,
-  Divider,
   Flex,
   Heading,
   HStack,
-  Progress,
   Select,
   SimpleGrid,
   Spinner,
@@ -36,13 +34,18 @@ import {
   VStack,
 } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
-import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
-import RequireActiveClient from '../../../components/RequireActiveClient'
+import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 
 type WindowDays = 7 | 30 | 90
+type DashboardScope = 'single' | 'all'
+type ScopeMeta = {
+  customerId?: string
+  customerCount?: number
+  scope?: DashboardScope
+}
 
-type SummaryData = {
+type SummaryData = ScopeMeta & {
   leadsCreated: number
   leadsTarget: number | null
   percentToTarget: number | null
@@ -60,7 +63,7 @@ type SummaryData = {
   sendFailures: number
 }
 
-type LeadsVsTargetData = {
+type LeadsVsTargetData = ScopeMeta & {
   leadsCreated: number
   leadsTarget: number | null
   percentToTarget: number | null
@@ -73,6 +76,7 @@ type TopSourcerRow = { owner: string; count: number; percent: number }
 type OutreachSequenceRow = {
   sequenceId: string
   sequenceName: string
+  customerName?: string | null
   sent: number
   failed: number
   suppressed: number
@@ -84,6 +88,7 @@ type OutreachIdentityRow = {
   identityId: string
   email: string | null
   name: string | null
+  customerName?: string | null
   sent: number
   failed: number
   suppressed: number
@@ -91,7 +96,7 @@ type OutreachIdentityRow = {
   replies: number
   optOuts: number
 }
-type FunnelData = {
+type FunnelData = ScopeMeta & {
   leadsCreated: number
   contacted: number
   replied: number
@@ -103,6 +108,7 @@ type MailboxRow = {
   identityId: string
   email: string | null
   name: string | null
+  customerName?: string | null
   sent: number
   delivered: number
   replied: number
@@ -110,13 +116,14 @@ type MailboxRow = {
   optedOut: number
   failed: number
 }
-type ComplianceData = {
+type ComplianceData = ScopeMeta & {
   suppressedEmails: number
   suppressedDomains: number
   unsubscribesInPeriod: number
   suppressionBlocksInPeriod: number
 }
 type TrendRow = { day: string; leads: number; sent: number; replied: number }
+type CustomerOption = { id: string; name: string }
 
 type RankedItem = {
   label: string
@@ -132,6 +139,13 @@ type LaneItem = {
   tone: 'blue' | 'green' | 'orange' | 'red' | 'gray'
 }
 
+type AttentionItem = {
+  title: string
+  detail: string
+  tone: LaneItem['tone']
+}
+
+const ALL_CLIENTS_VALUE = '__all_clients__'
 const CHART_HEIGHT = 220
 const CHART_WIDTH = 640
 const CHART_PADDING = 20
@@ -151,6 +165,10 @@ function downloadCsv(filename: string, headers: string[], rows: (string | number
   a.download = filename
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function sanitizeFilePart(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'dashboard'
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -176,7 +194,7 @@ function formatLastUpdated(value: string): string {
 function statusTone(value: number, warnAt: number, criticalAt: number): LaneItem['tone'] {
   if (value >= criticalAt) return 'red'
   if (value >= warnAt) return 'orange'
-  return 'green'
+  return value > 0 ? 'green' : 'gray'
 }
 
 function statusScheme(tone: LaneItem['tone']): string {
@@ -208,11 +226,16 @@ function trendPath(values: number[], height = CHART_HEIGHT, width = CHART_WIDTH)
     .join(' ')
 }
 
-function TrendChart({
-  rows,
-}: {
-  rows: TrendRow[]
-}) {
+function formatEntityLabel(label: string | null | undefined, customerName: string | null | undefined, aggregate: boolean): string {
+  const cleanLabel = String(label || '').trim()
+  const cleanCustomerName = String(customerName || '').trim()
+  if (aggregate && cleanCustomerName && cleanLabel) return `${cleanCustomerName} · ${cleanLabel}`
+  if (cleanLabel) return cleanLabel
+  if (cleanCustomerName) return cleanCustomerName
+  return 'Unknown'
+}
+
+function TrendChart({ rows }: { rows: TrendRow[] }) {
   const labels = rows.map((row) => row.day.slice(5))
   const leadValues = rows.map((row) => row.leads)
   const sentValues = rows.map((row) => row.sent)
@@ -252,7 +275,7 @@ function TrendChart({
             const usableWidth = CHART_WIDTH - CHART_PADDING * 2
             const x = CHART_PADDING + (labels.length === 1 ? usableWidth / 2 : (index / (labels.length - 1)) * usableWidth)
             return (
-              <text key={label} x={x} y={CHART_HEIGHT - 4} fill="rgba(255,255,255,0.72)" fontSize="12" textAnchor="middle">
+              <text key={`${label}-${index}`} x={x} y={CHART_HEIGHT - 4} fill="rgba(255,255,255,0.72)" fontSize="12" textAnchor="middle">
                 {label}
               </text>
             )
@@ -414,14 +437,48 @@ function OverviewStat({
   )
 }
 
+function AttentionPanel({ items }: { items: AttentionItem[] }) {
+  if (items.length === 0) {
+    return null
+  }
+
+  return (
+    <Card variant="outline" bg="white">
+      <CardHeader pb={2}>
+        <Heading size="md">What matters now</Heading>
+        <Text color="gray.600" fontSize="sm">
+          High-signal operator guidance based on the selected scope and window.
+        </Text>
+      </CardHeader>
+      <CardBody pt={0}>
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+          {items.map((item) => (
+            <Box key={item.title} borderWidth="1px" borderColor="gray.200" borderRadius="xl" px={4} py={4} bg="gray.50">
+              <HStack justify="space-between" align="start" mb={2}>
+                <Text fontWeight="700">{item.title}</Text>
+                <Badge colorScheme={statusScheme(item.tone)} variant="subtle">
+                  {item.tone === 'red' ? 'Priority' : item.tone === 'orange' ? 'Watch' : item.tone === 'green' ? 'Healthy' : 'Info'}
+                </Badge>
+              </HStack>
+              <Text fontSize="sm" color="gray.600">
+                {item.detail}
+              </Text>
+            </Box>
+          ))}
+        </SimpleGrid>
+      </CardBody>
+    </Card>
+  )
+}
+
 const ReportingDashboard: React.FC = () => {
   const {
     canSelectCustomer,
-    customerHeaders,
-    customerId: selectedCustomerId,
-    setCustomerId: setSelectedCustomerId,
+    customerId: scopedCustomerId,
+    setCustomerId: setScopedCustomerId,
   } = useScopedCustomerSelection()
-  const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([])
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [scopeSelection, setScopeSelection] = useState<string>(() => scopedCustomerId || '')
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -444,6 +501,15 @@ const ReportingDashboard: React.FC = () => {
   const [trends, setTrends] = useState<TrendRow[]>([])
   const [lastUpdated, setLastUpdated] = useState<string>('')
 
+  const isAllClientsScope = scopeSelection === ALL_CLIENTS_VALUE
+  const effectiveCustomerId = isAllClientsScope ? '' : scopeSelection || scopedCustomerId || ''
+  const currentScope: DashboardScope = isAllClientsScope ? 'all' : 'single'
+
+  const requestHeaders = useMemo(
+    () => (effectiveCustomerId.startsWith('cust_') ? { 'X-Customer-Id': effectiveCustomerId } : undefined),
+    [effectiveCustomerId],
+  )
+
   const loadCustomers = useCallback(async () => {
     const { data, error: apiError } = await api.get('/api/customers')
     if (apiError) {
@@ -451,98 +517,152 @@ const ReportingDashboard: React.FC = () => {
       return
     }
     try {
-      const list = normalizeCustomersListResponse(data) as Array<{ id: string; name: string }>
-      setCustomers(list)
+      const list = normalizeCustomersListResponse(data)
+      const visibleCustomers = !canSelectCustomer && scopedCustomerId
+        ? list.filter((customer) => customer.id === scopedCustomerId)
+        : list
+      setCustomers(visibleCustomers.map((customer) => ({ id: customer.id, name: customer.name })))
     } catch {
       setCustomers([])
     }
-  }, [])
+  }, [canSelectCustomer, scopedCustomerId])
 
   useEffect(() => {
     void loadCustomers()
   }, [loadCustomers])
 
-  const loadData = useCallback(async (isRefresh = false) => {
-    if (!selectedCustomerId?.startsWith('cust_')) {
-      setError('Select an active client to view the dashboard.')
-      return
-    }
-    if (isRefresh) setRefreshing(true)
-    else setLoading(true)
-    setError(null)
-    const sinceDays = windowDays
-    const base = '/api/reporting'
-    const opts = { headers: customerHeaders }
-    try {
-      const [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes] =
-        await Promise.all([
-          api.get<SummaryData>(`${base}/summary?sinceDays=${sinceDays}`, opts),
-          api.get<LeadsVsTargetData>(`${base}/leads-vs-target?sinceDays=${sinceDays}`, opts),
-          api.get<{ bySource: LeadsBySourceRow[] }>(`${base}/leads-by-source?sinceDays=${sinceDays}`, opts),
-          api.get<{ sourcers: TopSourcerRow[] }>(`${base}/top-sourcers?sinceDays=${sinceDays}`, opts),
-          api.get<{
-            bySequence: OutreachSequenceRow[]
-            byIdentity: OutreachIdentityRow[]
-            totalSent: number
-            totalReplies: number
-            topSequence: OutreachSequenceRow | null
-          }>(`${base}/outreach-performance?sinceDays=${sinceDays}`, opts),
-          api.get<FunnelData>(`${base}/funnel?sinceDays=${sinceDays}`, opts),
-          api.get<{ mailboxes: MailboxRow[] }>(`${base}/mailboxes?sinceDays=${sinceDays}`, opts),
-          api.get<ComplianceData>(`${base}/compliance?sinceDays=${sinceDays}`, opts),
-          api.get<{ trend: TrendRow[] }>(`${base}/trends?sinceDays=${sinceDays}`, opts),
-        ])
-      const firstErr = [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes].find(
-        (r) => r.error,
-      )
-      if (firstErr?.error) {
-        setError(firstErr.error)
+  useEffect(() => {
+    setScopeSelection((current) => (current === ALL_CLIENTS_VALUE ? current : scopedCustomerId || ''))
+  }, [scopedCustomerId])
+
+  const currentCustomerName = useMemo(
+    () => customers.find((customer) => customer.id === effectiveCustomerId)?.name ?? '',
+    [customers, effectiveCustomerId],
+  )
+
+  const includedCustomerCount = summary?.customerCount ?? (currentScope === 'all' ? customers.length : effectiveCustomerId ? 1 : 0)
+  const requestSuffix = currentScope === 'all'
+    ? `sinceDays=${windowDays}&scope=all`
+    : `sinceDays=${windowDays}`
+
+  const handleScopeSelectionChange = useCallback(
+    (nextValue: string) => {
+      setScopeSelection(nextValue)
+      if (nextValue === ALL_CLIENTS_VALUE) return
+      setScopedCustomerId(nextValue)
+    },
+    [setScopedCustomerId],
+  )
+
+  const clearData = useCallback(() => {
+    setSummary(null)
+    setLeadsVsTarget(null)
+    setLeadsBySource([])
+    setTopSourcers([])
+    setOutreach(null)
+    setFunnel(null)
+    setMailboxes([])
+    setCompliance(null)
+    setTrends([])
+  }, [])
+
+  const loadData = useCallback(
+    async (isRefresh = false) => {
+      if (currentScope === 'single' && !effectiveCustomerId.startsWith('cust_')) {
+        clearData()
+        setError(canSelectCustomer ? 'Select a client or choose All Clients to view the dashboard.' : 'Select an active client to view the dashboard.')
+        setLoading(false)
+        setRefreshing(false)
         return
       }
-      setSummary(summaryRes.data ?? null)
-      setLeadsVsTarget(leadsVsTargetRes.data ?? null)
-      setLeadsBySource(leadsBySourceRes.data?.bySource ?? [])
-      setTopSourcers(topSourcersRes.data?.sourcers ?? [])
-      setOutreach(outreachRes.data ?? null)
-      setFunnel(funnelRes.data ?? null)
-      setMailboxes(mailboxesRes.data?.mailboxes ?? [])
-      setCompliance(complianceRes.data ?? null)
-      setTrends(trendsRes.data?.trend ?? [])
-      setLastUpdated(new Date().toISOString())
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [selectedCustomerId, windowDays, customerHeaders])
+
+      if (isRefresh) setRefreshing(true)
+      else setLoading(true)
+      setError(null)
+      const base = '/api/reporting'
+      const opts = requestHeaders ? { headers: requestHeaders } : undefined
+
+      try {
+        const [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes] =
+          await Promise.all([
+            api.get<SummaryData>(`${base}/summary?${requestSuffix}`, opts),
+            api.get<LeadsVsTargetData>(`${base}/leads-vs-target?${requestSuffix}`, opts),
+            api.get<{ bySource: LeadsBySourceRow[] }>(`${base}/leads-by-source?${requestSuffix}`, opts),
+            api.get<{ sourcers: TopSourcerRow[] }>(`${base}/top-sourcers?${requestSuffix}`, opts),
+            api.get<{
+              bySequence: OutreachSequenceRow[]
+              byIdentity: OutreachIdentityRow[]
+              totalSent: number
+              totalReplies: number
+              topSequence: OutreachSequenceRow | null
+            }>(`${base}/outreach-performance?${requestSuffix}`, opts),
+            api.get<FunnelData>(`${base}/funnel?${requestSuffix}`, opts),
+            api.get<{ mailboxes: MailboxRow[] }>(`${base}/mailboxes?${requestSuffix}`, opts),
+            api.get<ComplianceData>(`${base}/compliance?${requestSuffix}`, opts),
+            api.get<{ trend: TrendRow[] }>(`${base}/trends?${requestSuffix}`, opts),
+          ])
+
+        const firstErr = [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes].find(
+          (result) => result.error,
+        )
+
+        if (firstErr?.error) {
+          clearData()
+          setError(firstErr.error)
+          return
+        }
+
+        setSummary(summaryRes.data ?? null)
+        setLeadsVsTarget(leadsVsTargetRes.data ?? null)
+        setLeadsBySource(leadsBySourceRes.data?.bySource ?? [])
+        setTopSourcers(topSourcersRes.data?.sourcers ?? [])
+        setOutreach(outreachRes.data ?? null)
+        setFunnel(funnelRes.data ?? null)
+        setMailboxes(mailboxesRes.data?.mailboxes ?? [])
+        setCompliance(complianceRes.data ?? null)
+        setTrends(trendsRes.data?.trend ?? [])
+        setLastUpdated(new Date().toISOString())
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [canSelectCustomer, clearData, currentScope, effectiveCustomerId, requestHeaders, requestSuffix],
+  )
 
   useEffect(() => {
     void loadData(false)
   }, [loadData])
 
+  const exportPrefix = useMemo(() => {
+    if (currentScope === 'all') return `all-clients-${windowDays}d`
+    return `${sanitizeFilePart(currentCustomerName || effectiveCustomerId || 'client')}-${windowDays}d`
+  }, [currentCustomerName, currentScope, effectiveCustomerId, windowDays])
+
   const exportLeadsBySourceCsv = useCallback(() => {
     downloadCsv(
-      `leads-by-source-${windowDays}d.csv`,
+      `leads-by-source-${exportPrefix}.csv`,
       ['Source', 'Count', 'Percent'],
-      leadsBySource.map((r) => [r.source, r.count, `${r.percent}%`]),
+      leadsBySource.map((row) => [row.source, row.count, `${row.percent}%`]),
     )
-  }, [leadsBySource, windowDays])
+  }, [exportPrefix, leadsBySource])
 
   const exportTopSourcersCsv = useCallback(() => {
     downloadCsv(
-      `top-sourcers-${windowDays}d.csv`,
+      `top-sourcers-${exportPrefix}.csv`,
       ['Owner', 'Leads', 'Percent'],
-      topSourcers.map((r) => [r.owner, r.count, `${r.percent}%`]),
+      topSourcers.map((row) => [row.owner, row.count, `${row.percent}%`]),
     )
-  }, [topSourcers, windowDays])
+  }, [exportPrefix, topSourcers])
 
   const exportOutreachCsv = useCallback(() => {
     if (!outreach?.bySequence.length) return
     downloadCsv(
-      `outreach-by-sequence-${windowDays}d.csv`,
-      ['Sequence', 'Sent', 'Failed', 'Suppressed', 'Replies', 'Opt-outs'],
-      outreach.bySequence.map((r) => [r.sequenceName, r.sent, r.failed, r.suppressed, r.replies, r.optOuts]),
+      `outreach-by-sequence-${exportPrefix}.csv`,
+      ['Sequence', 'Customer', 'Sent', 'Failed', 'Suppressed', 'Replies', 'Opt-outs'],
+      outreach.bySequence.map((row) => [row.sequenceName, row.customerName ?? '', row.sent, row.failed, row.suppressed, row.replies, row.optOuts]),
     )
-  }, [outreach, windowDays])
+  }, [exportPrefix, outreach])
 
   const topSources = useMemo<RankedItem[]>(
     () =>
@@ -569,21 +689,77 @@ const ReportingDashboard: React.FC = () => {
   const topMailboxes = useMemo<RankedItem[]>(
     () =>
       mailboxes.slice(0, 6).map((row) => ({
-        label: row.name || row.email || row.identityId,
+        label: formatEntityLabel(row.name || row.email || row.identityId, row.customerName, currentScope === 'all'),
         value: row.sent,
         helper: `${row.replied} replies · ${row.failed + row.bounced + row.optedOut} risk signals`,
         color: '#38a169',
       })),
-    [mailboxes],
+    [currentScope, mailboxes],
+  )
+
+  const topSequences = useMemo<RankedItem[]>(
+    () =>
+      (outreach?.bySequence ?? []).slice(0, 6).map((row) => ({
+        label: formatEntityLabel(row.sequenceName, row.customerName, currentScope === 'all'),
+        value: row.sent,
+        helper: `${row.replies} replies · ${row.optOuts} opt-outs · ${row.failed + row.suppressed} blocked/fail`,
+        color: '#dd6b20',
+      })),
+    [currentScope, outreach],
   )
 
   const recentTrends = useMemo(() => trends.slice(-Math.min(trends.length, 14)), [trends])
-
   const riskSignals = (summary?.bounces ?? 0) + (summary?.unsubscribes ?? 0) + (summary?.sendFailures ?? 0)
   const targetPercent = leadsVsTarget?.percentToTarget ?? summary?.percentToTarget ?? null
   const topSequence = outreach?.topSequence
   const replyLeader = mailboxes[0] ?? null
   const topStatus = funnel ? Object.entries(funnel.byLeadStatus).sort((a, b) => b[1] - a[1])[0] : null
+  const noTargetsSet = summary?.leadsTarget === 0 && currentScope === 'all'
+
+  const scopeBadgeLabel = currentScope === 'all' ? 'All Clients' : currentCustomerName || 'Single Client'
+  const heroTitle = currentScope === 'all'
+    ? 'Combined operator view across all accessible clients'
+    : 'Operator command view for truthful pipeline, outreach, and compliance'
+  const heroDescription = currentScope === 'all'
+    ? `Combined reporting across ${includedCustomerCount} accessible clients. Totals, rankings, and trends are aggregated from the same backend truth used in single-client mode.`
+    : `Use this surface to monitor lead creation, outreach throughput, reply momentum, conversion movement, and risk signals for ${currentCustomerName || 'the selected client'}.`
+
+  const attentionItems = useMemo<AttentionItem[]>(() => {
+    const items: AttentionItem[] = []
+    items.push({
+      title: currentScope === 'all' ? 'Scope confirmation' : 'Active client focus',
+      detail: currentScope === 'all'
+        ? `You are viewing combined totals across ${includedCustomerCount} active clients.`
+        : `You are viewing single-client truth for ${currentCustomerName || 'the selected client'}.`,
+      tone: 'blue',
+    })
+    items.push({
+      title: 'Target pacing',
+      detail: noTargetsSet
+        ? 'No client targets are set in the selected aggregate scope.'
+        : targetPercent == null
+          ? 'Target progress is unavailable until a valid lead target exists.'
+          : `${targetPercent}% to target. ${formatDelta(leadsVsTarget?.trendVsPrevious)}`,
+      tone: targetPercent == null ? 'gray' : targetPercent >= 100 ? 'green' : targetPercent >= 70 ? 'orange' : 'red',
+    })
+    items.push({
+      title: 'Risk watch',
+      detail: `${formatNumber(summary?.unsubscribes)} opt-outs, ${formatNumber(summary?.sendFailures)} failures, and ${formatNumber(summary?.bounces)} bounces in the selected window.`,
+      tone: statusTone(riskSignals, 1, 5),
+    })
+    return items
+  }, [
+    currentCustomerName,
+    currentScope,
+    includedCustomerCount,
+    leadsVsTarget?.trendVsPrevious,
+    noTargetsSet,
+    riskSignals,
+    summary?.bounces,
+    summary?.sendFailures,
+    summary?.unsubscribes,
+    targetPercent,
+  ])
 
   const lanes = useMemo(
     () => [
@@ -594,13 +770,17 @@ const ReportingDashboard: React.FC = () => {
           {
             label: 'Created',
             value: formatNumber(summary?.leadsCreated),
-            helper: `${windowDays}-day sourced lead volume`,
+            helper: currentScope === 'all' ? `${windowDays}-day sourced lead volume across all included clients` : `${windowDays}-day sourced lead volume`,
             tone: 'blue' as const,
           },
           {
             label: 'Target progress',
-            value: targetPercent != null ? `${targetPercent}%` : 'No target',
-            helper: targetPercent != null ? formatDelta(leadsVsTarget?.trendVsPrevious) : 'Set a client target to unlock pacing',
+            value: noTargetsSet ? 'No targets set' : targetPercent != null ? `${targetPercent}%` : 'No target',
+            helper: noTargetsSet
+              ? 'Aggregate targets sum all valid client targets and ignore missing values.'
+              : targetPercent != null
+                ? formatDelta(leadsVsTarget?.trendVsPrevious)
+                : 'Set a lead target to unlock pacing',
             tone: targetPercent == null ? 'gray' : targetPercent >= 100 ? 'green' : targetPercent >= 70 ? 'orange' : 'red',
           },
           {
@@ -618,7 +798,9 @@ const ReportingDashboard: React.FC = () => {
           {
             label: 'Sends',
             value: formatNumber(summary?.emailsSent),
-            helper: topSequence ? `${topSequence.sequenceName} leads sequence output` : 'No sequence activity yet',
+            helper: topSequence
+              ? `${formatEntityLabel(topSequence.sequenceName, topSequence.customerName, currentScope === 'all')} leads sequence output`
+              : 'No sequence activity yet',
             tone: (summary?.emailsSent ?? 0) > 0 ? 'green' : 'gray',
           },
           {
@@ -629,9 +811,9 @@ const ReportingDashboard: React.FC = () => {
           },
           {
             label: 'Top sequence',
-            value: topSequence ? `${topSequence.sequenceName}` : 'No sequence data',
+            value: topSequence ? formatEntityLabel(topSequence.sequenceName, topSequence.customerName, currentScope === 'all') : 'No sequence data',
             helper: topSequence ? `${topSequence.sent} sent · ${topSequence.replies} replies` : 'Sequence runs have not generated recent sends',
-            tone: topSequence ? 'purple' as LaneItem['tone'] : 'gray',
+            tone: topSequence ? 'blue' : 'gray',
           },
         ],
       },
@@ -653,7 +835,9 @@ const ReportingDashboard: React.FC = () => {
           },
           {
             label: 'Leading mailbox',
-            value: replyLeader ? `${replyLeader.name || replyLeader.email || 'Mailbox'}` : 'No mailbox activity',
+            value: replyLeader
+              ? formatEntityLabel(replyLeader.name || replyLeader.email || 'Mailbox', replyLeader.customerName, currentScope === 'all')
+              : 'No mailbox activity',
             helper: replyLeader ? `${replyLeader.replied} replies from ${replyLeader.sent} sends` : 'No reply-producing mailbox this window',
             tone: replyLeader ? 'green' : 'gray',
           },
@@ -713,9 +897,11 @@ const ReportingDashboard: React.FC = () => {
       compliance?.suppressedEmails,
       compliance?.suppressionBlocksInPeriod,
       compliance?.unsubscribesInPeriod,
+      currentScope,
       funnel?.contacted,
       funnel?.converted,
       leadsVsTarget?.trendVsPrevious,
+      noTargetsSet,
       replyLeader,
       riskSignals,
       summary?.bounces,
@@ -736,380 +922,355 @@ const ReportingDashboard: React.FC = () => {
     ],
   )
 
-  if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
+  if (currentScope === 'single' && !effectiveCustomerId.startsWith('cust_')) {
     return (
-      <RequireActiveClient>
-        <Box py={6}>
-          <Text>Select an active client to open the Dashboard.</Text>
-        </Box>
-      </RequireActiveClient>
-    )
-  }
-
-  return (
-    <RequireActiveClient>
       <VStack align="stretch" spacing={6} id="reporting-dashboard">
         <Alert status="info">
           <AlertIcon />
           <AlertDescription>
-            All dashboard numbers come from backend truth. If a metric is not yet supported, it stays explicit instead of being guessed.
+            All dashboard numbers come from backend truth. Choose a client to open the single-client view{canSelectCustomer ? ' or switch to All Clients for combined totals.' : '.'}
           </AlertDescription>
         </Alert>
 
-        <Box
-          data-testid="dashboard-hero"
-          borderRadius="2xl"
-          bgGradient="linear(to-br, gray.900, blue.900, purple.800)"
-          color="white"
-          px={{ base: 5, md: 6 }}
-          py={{ base: 5, md: 6 }}
-        >
-          <Stack direction={{ base: 'column', xl: 'row' }} spacing={6} justify="space-between">
-            <VStack align="start" spacing={2} maxW="700px">
-              <Badge colorScheme="whiteAlpha" variant="subtle">
-                Dashboard
-              </Badge>
-              <Heading size="lg">Operator command view for truthful pipeline, outreach, and compliance</Heading>
-              <Text color="whiteAlpha.800" maxW="2xl">
-                Use this surface to monitor lead creation, outreach throughput, reply momentum, conversion movement, and risk signals for the active client.
-              </Text>
-              <HStack spacing={3} flexWrap="wrap">
-                <Badge colorScheme="whiteAlpha" variant="outline">
-                  Window: last {windowDays} days
-                </Badge>
-                <Badge colorScheme="whiteAlpha" variant="outline">
-                  Last updated: {formatLastUpdated(lastUpdated)}
-                </Badge>
-              </HStack>
-            </VStack>
-            <Stack direction={{ base: 'column', md: 'row' }} spacing={3} align="stretch">
+        <Card variant="outline">
+          <CardHeader pb={2}>
+            <Heading size="md">Choose a reporting scope</Heading>
+            <Text color="gray.600" fontSize="sm">
+              Dashboard stays explicit: no client is selected yet, so no aggregate or single-client numbers are being inferred.
+            </Text>
+          </CardHeader>
+          <CardBody pt={0}>
+            <Stack direction={{ base: 'column', md: 'row' }} spacing={3}>
               <Select
                 size="sm"
-                value={selectedCustomerId}
-                onChange={(e) => setSelectedCustomerId(e.target.value)}
-                minW="220px"
-                bg="white"
-                color="gray.800"
-                isDisabled={!canSelectCustomer}
+                value={scopeSelection}
+                onChange={(event) => handleScopeSelectionChange(event.target.value)}
+                minW="260px"
+                isDisabled={!canSelectCustomer && !scopedCustomerId}
               >
                 <option value="">Select client</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+                {canSelectCustomer ? <option value={ALL_CLIENTS_VALUE}>All Clients</option> : null}
+                {customers.map((customer) => (
+                  <option key={customer.id} value={customer.id}>
+                    {customer.name}
                   </option>
                 ))}
               </Select>
               <Select
                 size="sm"
                 value={String(windowDays)}
-                onChange={(e) => setWindowDays(Number(e.target.value) as WindowDays)}
+                onChange={(event) => setWindowDays(Number(event.target.value) as WindowDays)}
                 minW="150px"
-                bg="white"
-                color="gray.800"
               >
                 <option value="7">Last 7 days</option>
                 <option value="30">Last 30 days</option>
                 <option value="90">Last 90 days</option>
               </Select>
-              <Button size="sm" onClick={() => void loadData(true)} isLoading={refreshing} colorScheme="blue">
-                Refresh
-              </Button>
             </Stack>
+          </CardBody>
+        </Card>
+      </VStack>
+    )
+  }
+
+  return (
+    <VStack align="stretch" spacing={6} id="reporting-dashboard">
+      <Alert status="info">
+        <AlertIcon />
+        <AlertDescription>
+          All dashboard numbers come from backend truth. Aggregate mode sums real customer data only for agency operators and is blocked in fixed-customer client mode.
+        </AlertDescription>
+      </Alert>
+
+      <Box
+        data-testid="dashboard-hero"
+        borderRadius="2xl"
+        bgGradient="linear(to-br, gray.900, blue.900, purple.800)"
+        color="white"
+        px={{ base: 5, md: 6 }}
+        py={{ base: 5, md: 6 }}
+      >
+        <Stack direction={{ base: 'column', xl: 'row' }} spacing={6} justify="space-between">
+          <VStack align="start" spacing={2} maxW="760px">
+            <HStack spacing={2} flexWrap="wrap">
+              <Badge colorScheme="whiteAlpha" variant="subtle">
+                Dashboard
+              </Badge>
+              <Badge colorScheme="whiteAlpha" variant="outline" data-testid="dashboard-scope-badge">
+                Scope: {scopeBadgeLabel}
+              </Badge>
+              <Badge colorScheme="whiteAlpha" variant="outline">
+                Window: last {windowDays} days
+              </Badge>
+            </HStack>
+            <Heading size="lg">{heroTitle}</Heading>
+            <Text color="whiteAlpha.800" maxW="2xl">
+              {heroDescription}
+            </Text>
+            <HStack spacing={3} flexWrap="wrap">
+              <Badge colorScheme="whiteAlpha" variant="outline">
+                Included clients: {includedCustomerCount.toLocaleString()}
+              </Badge>
+              <Badge colorScheme="whiteAlpha" variant="outline">
+                Last updated: {formatLastUpdated(lastUpdated)}
+              </Badge>
+            </HStack>
+          </VStack>
+
+          <Stack direction={{ base: 'column', md: 'row' }} spacing={3} align="stretch">
+            <Select
+              size="sm"
+              value={scopeSelection}
+              onChange={(event) => handleScopeSelectionChange(event.target.value)}
+              minW="260px"
+              bg="white"
+              color="gray.800"
+              data-testid="dashboard-client-selector"
+              isDisabled={!canSelectCustomer && !scopedCustomerId}
+            >
+              <option value="">Select client</option>
+              {canSelectCustomer ? <option value={ALL_CLIENTS_VALUE}>All Clients</option> : null}
+              {customers.map((customer) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              size="sm"
+              value={String(windowDays)}
+              onChange={(event) => setWindowDays(Number(event.target.value) as WindowDays)}
+              minW="150px"
+              bg="white"
+              color="gray.800"
+            >
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </Select>
+            <Button size="sm" onClick={() => void loadData(true)} isLoading={refreshing} colorScheme="blue">
+              Refresh
+            </Button>
           </Stack>
+        </Stack>
 
-          <SimpleGrid columns={{ base: 1, md: 2, xl: 6 }} spacing={3} mt={6}>
-            <OverviewStat label="Leads created" value={formatNumber(summary?.leadsCreated)} helper="Lead records created in this window" />
-            <OverviewStat label="Target progress" value={targetPercent != null ? `${targetPercent}%` : 'No target'} helper={formatDelta(leadsVsTarget?.trendVsPrevious)} />
-            <OverviewStat label="Emails sent" value={formatNumber(summary?.emailsSent)} helper={`${formatNumber(summary?.delivered)} delivered`} />
-            <OverviewStat label="Replies" value={formatNumber(summary?.replyCount)} helper={formatPercent(summary?.replyRate, 'No reply rate')} />
-            <OverviewStat label="Converted" value={formatNumber(funnel?.converted)} helper={`${formatNumber(funnel?.contacted)} contacted`} />
-            <OverviewStat label="Risk signals" value={formatNumber(riskSignals)} helper={`${formatNumber(summary?.unsubscribes)} opt-outs + failures + bounces`} />
-          </SimpleGrid>
-        </Box>
+        <SimpleGrid columns={{ base: 1, md: 2, xl: 7 }} spacing={3} mt={6}>
+          <OverviewStat label="Leads created" value={formatNumber(summary?.leadsCreated)} helper={currentScope === 'all' ? 'Aggregate lead records in the selected window' : 'Lead records created in this window'} />
+          <OverviewStat label="Target progress" value={noTargetsSet ? 'No targets set' : targetPercent != null ? `${targetPercent}%` : 'No target'} helper={noTargetsSet ? 'Aggregate targets sum valid client targets only' : formatDelta(leadsVsTarget?.trendVsPrevious)} />
+          <OverviewStat label="Emails sent" value={formatNumber(summary?.emailsSent)} helper={`${formatNumber(summary?.delivered)} delivered`} />
+          <OverviewStat label="Replies" value={formatNumber(summary?.replyCount)} helper={formatPercent(summary?.replyRate, 'No reply rate')} />
+          <OverviewStat label="Converted" value={formatNumber(funnel?.converted)} helper={`${formatNumber(funnel?.contacted)} contacted`} />
+          <OverviewStat label="Risk signals" value={formatNumber(riskSignals)} helper={`${formatNumber(summary?.unsubscribes)} opt-outs + failures + bounces`} />
+          <OverviewStat label="Included clients" value={formatNumber(includedCustomerCount)} helper={currentScope === 'all' ? 'Non-archived accessible clients in aggregate scope' : 'Single-client truth surface'} />
+        </SimpleGrid>
+      </Box>
 
-        {error ? (
-          <Alert status="error">
-            <AlertIcon />
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        ) : null}
+      {error ? (
+        <Alert status="error">
+          <AlertIcon />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
 
-        {loading ? (
-          <Card>
-            <CardBody>
-              <HStack>
-                <Spinner size="sm" />
-                <Text>Loading dashboard…</Text>
-              </HStack>
-            </CardBody>
-          </Card>
-        ) : (
-          <>
-            <SimpleGrid columns={{ base: 1, xl: 3 }} spacing={6}>
-              <Card variant="outline" gridColumn={{ xl: 'span 2' }}>
-                <CardHeader pb={2}>
-                  <Heading size="md">Activity trend</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Leads, sends, and replies over the most recent slice of the selected window.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <TrendChart rows={recentTrends} />
-                </CardBody>
-              </Card>
+      <AttentionPanel items={attentionItems} />
 
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <HStack justify="space-between">
-                    <Box>
-                      <Heading size="md">Source mix</Heading>
-                      <Text color="gray.600" fontSize="sm">
-                        Contribution by lead source.
-                      </Text>
-                    </Box>
-                    {leadsBySource.length > 0 ? (
-                      <Button size="xs" variant="outline" onClick={exportLeadsBySourceCsv}>
-                        Export CSV
-                      </Button>
-                    ) : null}
-                  </HStack>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <RankedBars items={topSources} emptyMessage="No leads in this period." testId="dashboard-source-mix-chart" />
-                </CardBody>
-              </Card>
-            </SimpleGrid>
-
-            <Box data-testid="dashboard-kanban-board">
-              <HStack justify="space-between" mb={3} flexWrap="wrap">
-                <Box>
-                  <Heading size="md">Performance lanes</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Kanban-style operator lanes for the most important truth-based signals.
-                  </Text>
-                </Box>
-              </HStack>
-              <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} spacing={4}>
-                {lanes.map((lane) => (
-                  <LaneColumn key={lane.title} title={lane.title} accent={lane.accent} items={lane.items} />
-                ))}
-              </SimpleGrid>
-            </Box>
-
-            <SimpleGrid columns={{ base: 1, xl: 3 }} spacing={6} data-testid="dashboard-team-performance">
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <HStack justify="space-between">
-                    <Box>
-                      <Heading size="md">Top sourcers</Heading>
-                      <Text color="gray.600" fontSize="sm">
-                        Operators ranked by lead creation.
-                      </Text>
-                    </Box>
-                    {topSourcers.length > 0 ? (
-                      <Button size="xs" variant="outline" onClick={exportTopSourcersCsv}>
-                        Export CSV
-                      </Button>
-                    ) : null}
-                  </HStack>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <RankedBars items={topOperators} emptyMessage="No lead ownership data in this period." />
-                </CardBody>
-              </Card>
-
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <Heading size="md">Mailbox output</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Highest sending mailboxes with reply context.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <RankedBars items={topMailboxes} emptyMessage="No mailbox activity in this period." />
-                </CardBody>
-              </Card>
-
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <Heading size="md">Outreach pulse</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Sequence performance by recent send volume.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <RankedBars
-                    items={(outreach?.bySequence ?? []).slice(0, 6).map((row) => ({
-                      label: row.sequenceName,
-                      value: row.sent,
-                      helper: `${row.replies} replies · ${row.optOuts} opt-outs · ${row.failed + row.suppressed} blocked/fail`,
-                      color: '#dd6b20',
-                    }))}
-                    emptyMessage="No sequence activity in this period."
-                  />
-                </CardBody>
-              </Card>
-            </SimpleGrid>
-
-            <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6} data-testid="dashboard-operational-health">
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <Heading size="md">Operational health</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Compliance, suppression, and delivery pressure.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
-                    <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
-                      <StatLabel>Suppressed emails</StatLabel>
-                      <StatNumber>{formatNumber(compliance?.suppressedEmails)}</StatNumber>
-                      <StatHelpText mb={0}>Database suppression list truth</StatHelpText>
-                    </Stat>
-                    <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
-                      <StatLabel>Suppressed domains</StatLabel>
-                      <StatNumber>{formatNumber(compliance?.suppressedDomains)}</StatNumber>
-                      <StatHelpText mb={0}>Domain-level risk blocks</StatHelpText>
-                    </Stat>
-                    <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
-                      <StatLabel>Opt-outs in window</StatLabel>
-                      <StatNumber>{formatNumber(compliance?.unsubscribesInPeriod)}</StatNumber>
-                      <StatHelpText mb={0}>Counts both legacy and current opt-out events</StatHelpText>
-                    </Stat>
-                    <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
-                      <StatLabel>Suppression blocks</StatLabel>
-                      <StatNumber>{formatNumber(compliance?.suppressionBlocksInPeriod)}</StatNumber>
-                      <StatHelpText mb={0}>Send attempts blocked by suppressions</StatHelpText>
-                    </Stat>
-                  </SimpleGrid>
-                </CardBody>
-              </Card>
-
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <Heading size="md">Funnel / pipeline</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Visual progression from created leads to conversion.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  <FunnelPanel funnel={funnel} />
-                </CardBody>
-              </Card>
-            </SimpleGrid>
-
-            <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6}>
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <HStack justify="space-between">
-                    <Box>
-                      <Heading size="md">Sequence detail</Heading>
-                      <Text color="gray.600" fontSize="sm">
-                        Detailed outreach performance by sequence.
-                      </Text>
-                    </Box>
-                    {outreach?.bySequence.length ? (
-                      <Button size="xs" variant="outline" onClick={exportOutreachCsv}>
-                        Export CSV
-                      </Button>
-                    ) : null}
-                  </HStack>
-                </CardHeader>
-                <CardBody pt={0}>
-                  {!outreach?.bySequence.length ? (
-                    <Text color="gray.500">No sequence activity in this period.</Text>
-                  ) : (
-                    <Table size="sm">
-                      <Thead>
-                        <Tr>
-                          <Th>Sequence</Th>
-                          <Th isNumeric>Sent</Th>
-                          <Th isNumeric>Replies</Th>
-                          <Th isNumeric>Opt-outs</Th>
-                          <Th isNumeric>Failed</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {outreach.bySequence.slice(0, 10).map((row) => (
-                          <Tr key={row.sequenceId}>
-                            <Td>{row.sequenceName}</Td>
-                            <Td isNumeric>{row.sent}</Td>
-                            <Td isNumeric>{row.replies}</Td>
-                            <Td isNumeric>{row.optOuts}</Td>
-                            <Td isNumeric>{row.failed}</Td>
-                          </Tr>
-                        ))}
-                      </Tbody>
-                    </Table>
-                  )}
-                </CardBody>
-              </Card>
-
-              <Card variant="outline">
-                <CardHeader pb={2}>
-                  <Heading size="md">Mailbox detail</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Mailbox-level send and reply table for operators.
-                  </Text>
-                </CardHeader>
-                <CardBody pt={0}>
-                  {mailboxes.length === 0 ? (
-                    <Text color="gray.500">No mailbox activity in this period.</Text>
-                  ) : (
-                    <Table size="sm">
-                      <Thead>
-                        <Tr>
-                          <Th>Mailbox</Th>
-                          <Th isNumeric>Sent</Th>
-                          <Th isNumeric>Replies</Th>
-                          <Th isNumeric>Bounces</Th>
-                          <Th isNumeric>Opt-outs</Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {mailboxes.slice(0, 10).map((row) => (
-                          <Tr key={row.identityId}>
-                            <Td>{row.name || row.email || row.identityId}</Td>
-                            <Td isNumeric>{row.sent}</Td>
-                            <Td isNumeric>{row.replied}</Td>
-                            <Td isNumeric>{row.bounced}</Td>
-                            <Td isNumeric>{row.optedOut}</Td>
-                          </Tr>
-                        ))}
-                      </Tbody>
-                    </Table>
-                  )}
-                </CardBody>
-              </Card>
-            </SimpleGrid>
-
-            <Card variant="outline">
+      {loading ? (
+        <Card>
+          <CardBody>
+            <HStack>
+              <Spinner size="sm" />
+              <Text>Loading dashboard…</Text>
+            </HStack>
+          </CardBody>
+        </Card>
+      ) : (
+        <>
+          <SimpleGrid columns={{ base: 1, xl: 4 }} spacing={6}>
+            <Card variant="outline" gridColumn={{ xl: 'span 3' }}>
               <CardHeader pb={2}>
-                <Heading size="md">Daily truth table</Heading>
+                <Heading size="md">Activity trend</Heading>
                 <Text color="gray.600" fontSize="sm">
-                  Raw day-by-day lead, send, and reply counts for the selected window.
+                  Leads, sends, and replies over the most recent slice of the selected window.
                 </Text>
               </CardHeader>
               <CardBody pt={0}>
-                {trends.length === 0 ? (
-                  <Text color="gray.500">No trend data for this period.</Text>
+                <TrendChart rows={recentTrends} />
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <HStack justify="space-between">
+                  <Box>
+                    <Heading size="md">Source mix</Heading>
+                    <Text color="gray.600" fontSize="sm">
+                      Contribution by lead source.
+                    </Text>
+                  </Box>
+                  {leadsBySource.length > 0 ? (
+                    <Button size="xs" variant="outline" onClick={exportLeadsBySourceCsv}>
+                      Export CSV
+                    </Button>
+                  ) : null}
+                </HStack>
+              </CardHeader>
+              <CardBody pt={0}>
+                <RankedBars items={topSources} emptyMessage="No leads in this period." testId="dashboard-source-mix-chart" />
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          <Box data-testid="dashboard-kanban-board">
+            <HStack justify="space-between" mb={3} flexWrap="wrap">
+              <Box>
+                <Heading size="md">Performance lanes</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Each lane summarizes what operators should watch right now in {currentScope === 'all' ? 'aggregate mode' : 'single-client mode'}.
+                </Text>
+              </Box>
+            </HStack>
+            <SimpleGrid columns={{ base: 1, md: 2, xl: 5 }} spacing={4}>
+              {lanes.map((lane) => (
+                <LaneColumn key={lane.title} title={lane.title} accent={lane.accent} items={lane.items} />
+              ))}
+            </SimpleGrid>
+          </Box>
+
+          <SimpleGrid columns={{ base: 1, xl: 3 }} spacing={6} data-testid="dashboard-team-performance">
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <HStack justify="space-between">
+                  <Box>
+                    <Heading size="md">Top sourcers</Heading>
+                    <Text color="gray.600" fontSize="sm">
+                      Operators ranked by lead creation.
+                    </Text>
+                  </Box>
+                  {topSourcers.length > 0 ? (
+                    <Button size="xs" variant="outline" onClick={exportTopSourcersCsv}>
+                      Export CSV
+                    </Button>
+                  ) : null}
+                </HStack>
+              </CardHeader>
+              <CardBody pt={0}>
+                <RankedBars items={topOperators} emptyMessage="No lead ownership data in this period." />
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <Heading size="md">Mailbox output</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Highest sending mailboxes with reply context.
+                </Text>
+              </CardHeader>
+              <CardBody pt={0}>
+                <RankedBars items={topMailboxes} emptyMessage="No mailbox activity in this period." />
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <Heading size="md">Outreach pulse</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Sequence performance by recent send volume.
+                </Text>
+              </CardHeader>
+              <CardBody pt={0}>
+                <RankedBars items={topSequences} emptyMessage="No sequence activity in this period." />
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6} data-testid="dashboard-operational-health">
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <Heading size="md">Operational health</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Compliance, suppression, and delivery pressure.
+                </Text>
+              </CardHeader>
+              <CardBody pt={0}>
+                <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                  <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
+                    <StatLabel>Suppressed emails</StatLabel>
+                    <StatNumber>{formatNumber(compliance?.suppressedEmails)}</StatNumber>
+                    <StatHelpText mb={0}>Database suppression list truth</StatHelpText>
+                  </Stat>
+                  <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
+                    <StatLabel>Suppressed domains</StatLabel>
+                    <StatNumber>{formatNumber(compliance?.suppressedDomains)}</StatNumber>
+                    <StatHelpText mb={0}>Domain-level risk blocks</StatHelpText>
+                  </Stat>
+                  <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
+                    <StatLabel>Opt-outs in window</StatLabel>
+                    <StatNumber>{formatNumber(compliance?.unsubscribesInPeriod)}</StatNumber>
+                    <StatHelpText mb={0}>Counts both legacy and current opt-out events</StatHelpText>
+                  </Stat>
+                  <Stat borderWidth="1px" borderColor="gray.100" borderRadius="xl" px={4} py={3}>
+                    <StatLabel>Suppression blocks</StatLabel>
+                    <StatNumber>{formatNumber(compliance?.suppressionBlocksInPeriod)}</StatNumber>
+                    <StatHelpText mb={0}>Send attempts blocked by suppressions</StatHelpText>
+                  </Stat>
+                </SimpleGrid>
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <Heading size="md">Funnel / pipeline</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Visual progression from created leads to conversion.
+                </Text>
+              </CardHeader>
+              <CardBody pt={0}>
+                <FunnelPanel funnel={funnel} />
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={6}>
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <HStack justify="space-between">
+                  <Box>
+                    <Heading size="md">Sequence detail</Heading>
+                    <Text color="gray.600" fontSize="sm">
+                      Detailed outreach performance by sequence.
+                    </Text>
+                  </Box>
+                  {outreach?.bySequence.length ? (
+                    <Button size="xs" variant="outline" onClick={exportOutreachCsv}>
+                      Export CSV
+                    </Button>
+                  ) : null}
+                </HStack>
+              </CardHeader>
+              <CardBody pt={0}>
+                {!outreach?.bySequence.length ? (
+                  <Text color="gray.500">No sequence activity in this period.</Text>
                 ) : (
                   <Table size="sm">
                     <Thead>
                       <Tr>
-                        <Th>Day</Th>
-                        <Th isNumeric>Leads</Th>
-                        <Th isNumeric>Sends</Th>
+                        {currentScope === 'all' ? <Th>Client</Th> : null}
+                        <Th>Sequence</Th>
+                        <Th isNumeric>Sent</Th>
                         <Th isNumeric>Replies</Th>
+                        <Th isNumeric>Opt-outs</Th>
+                        <Th isNumeric>Failed</Th>
                       </Tr>
                     </Thead>
                     <Tbody>
-                      {[...trends].reverse().slice(0, 30).map((row) => (
-                        <Tr key={row.day}>
-                          <Td>{row.day}</Td>
-                          <Td isNumeric>{row.leads}</Td>
+                      {outreach.bySequence.slice(0, 10).map((row) => (
+                        <Tr key={row.sequenceId}>
+                          {currentScope === 'all' ? <Td>{row.customerName ?? 'Unknown client'}</Td> : null}
+                          <Td>{row.sequenceName}</Td>
                           <Td isNumeric>{row.sent}</Td>
-                          <Td isNumeric>{row.replied}</Td>
+                          <Td isNumeric>{row.replies}</Td>
+                          <Td isNumeric>{row.optOuts}</Td>
+                          <Td isNumeric>{row.failed}</Td>
                         </Tr>
                       ))}
                     </Tbody>
@@ -1117,10 +1278,84 @@ const ReportingDashboard: React.FC = () => {
                 )}
               </CardBody>
             </Card>
-          </>
-        )}
-      </VStack>
-    </RequireActiveClient>
+
+            <Card variant="outline">
+              <CardHeader pb={2}>
+                <Heading size="md">Mailbox detail</Heading>
+                <Text color="gray.600" fontSize="sm">
+                  Mailbox-level send and reply table for operators.
+                </Text>
+              </CardHeader>
+              <CardBody pt={0}>
+                {mailboxes.length === 0 ? (
+                  <Text color="gray.500">No mailbox activity in this period.</Text>
+                ) : (
+                  <Table size="sm">
+                    <Thead>
+                      <Tr>
+                        {currentScope === 'all' ? <Th>Client</Th> : null}
+                        <Th>Mailbox</Th>
+                        <Th isNumeric>Sent</Th>
+                        <Th isNumeric>Replies</Th>
+                        <Th isNumeric>Bounces</Th>
+                        <Th isNumeric>Opt-outs</Th>
+                      </Tr>
+                    </Thead>
+                    <Tbody>
+                      {mailboxes.slice(0, 10).map((row) => (
+                        <Tr key={row.identityId}>
+                          {currentScope === 'all' ? <Td>{row.customerName ?? 'Unknown client'}</Td> : null}
+                          <Td>{row.name || row.email || row.identityId}</Td>
+                          <Td isNumeric>{row.sent}</Td>
+                          <Td isNumeric>{row.replied}</Td>
+                          <Td isNumeric>{row.bounced}</Td>
+                          <Td isNumeric>{row.optedOut}</Td>
+                        </Tr>
+                      ))}
+                    </Tbody>
+                  </Table>
+                )}
+              </CardBody>
+            </Card>
+          </SimpleGrid>
+
+          <Card variant="outline">
+            <CardHeader pb={2}>
+              <Heading size="md">Daily truth table</Heading>
+              <Text color="gray.600" fontSize="sm">
+                Raw day-by-day lead, send, and reply counts for the selected window.
+              </Text>
+            </CardHeader>
+            <CardBody pt={0}>
+              {trends.length === 0 ? (
+                <Text color="gray.500">No trend data for this period.</Text>
+              ) : (
+                <Table size="sm">
+                  <Thead>
+                    <Tr>
+                      <Th>Day</Th>
+                      <Th isNumeric>Leads</Th>
+                      <Th isNumeric>Sends</Th>
+                      <Th isNumeric>Replies</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {[...trends].reverse().slice(0, 30).map((row) => (
+                      <Tr key={row.day}>
+                        <Td>{row.day}</Td>
+                        <Td isNumeric>{row.leads}</Td>
+                        <Td isNumeric>{row.sent}</Td>
+                        <Td isNumeric>{row.replied}</Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              )}
+            </CardBody>
+          </Card>
+        </>
+      )}
+    </VStack>
   )
 }
 

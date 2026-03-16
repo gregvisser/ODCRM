@@ -5,9 +5,17 @@
  */
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { requireCustomerId } from '../utils/tenantId.js'
+import { isClientMode, requireCustomerId } from '../utils/tenantId.js'
 
 const router = Router()
+
+type ReportingScope = {
+  scope: 'single' | 'all'
+  customerId: string
+  customerIds: string[]
+  customerCount: number
+  customerNamesById: Map<string, string>
+}
 
 function parseSinceDays(query: Request['query']): number {
   const raw = typeof query.sinceDays === 'string' ? parseInt(query.sinceDays, 10) : 30
@@ -21,6 +29,90 @@ function getSinceDate(sinceDays: number): Date {
 
 function isOptOutEventType(value: unknown): boolean {
   return value === 'opted_out' || value === 'unsubscribed'
+}
+
+function normalizeString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function wantsAllClientsScope(req: Request): boolean {
+  const scopeParam = normalizeString(req.query.scope).toLowerCase()
+  const headerCustomerId = normalizeString(req.headers['x-customer-id']).toLowerCase()
+  const queryCustomerId = normalizeString(req.query.customerId).toLowerCase()
+  return scopeParam === 'all' || headerCustomerId === 'all' || queryCustomerId === 'all'
+}
+
+function hasConflictingCustomerScope(req: Request): boolean {
+  const headerCustomerId = normalizeString(req.headers['x-customer-id'])
+  const queryCustomerId = normalizeString(req.query.customerId)
+  return [headerCustomerId, queryCustomerId].some((value) => value && value.toLowerCase() !== 'all')
+}
+
+function getCustomerIdFilter(customerIds: string[]): string | { in: string[] } {
+  return customerIds.length === 1 ? customerIds[0] : { in: customerIds }
+}
+
+function zeroSummaryData(scope: ReportingScope, sinceDays: number) {
+  return {
+    customerId: scope.customerId,
+    scope: scope.scope,
+    customerCount: scope.customerCount,
+    sinceDays,
+    generatedAt: new Date().toISOString(),
+    leadsCreated: 0,
+    leadsTarget: scope.scope === 'all' ? 0 : null,
+    percentToTarget: null,
+    emailsSent: 0,
+    delivered: null,
+    openRate: null,
+    replyRate: null,
+    replyCount: 0,
+    positiveReplyCount: null,
+    meetingsBooked: null,
+    bounces: 0,
+    unsubscribes: 0,
+    suppressedEmails: 0,
+    suppressedDomains: 0,
+    sendFailures: 0,
+  }
+}
+
+async function resolveReportingScope(req: Request, res: Response): Promise<ReportingScope | null> {
+  if (!wantsAllClientsScope(req)) {
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return null
+    return {
+      scope: 'single',
+      customerId,
+      customerIds: [customerId],
+      customerCount: 1,
+      customerNamesById: new Map(),
+    }
+  }
+
+  if (hasConflictingCustomerScope(req)) {
+    res.status(400).json({ success: false, error: 'scope=all cannot be combined with a specific customerId or X-Customer-Id' })
+    return null
+  }
+
+  if (isClientMode()) {
+    res.status(403).json({ success: false, error: 'All clients reporting is not allowed in client mode' })
+    return null
+  }
+
+  const customers = await prisma.customer.findMany({
+    where: { isArchived: false },
+    select: { id: true, name: true },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  return {
+    scope: 'all',
+    customerId: 'all',
+    customerIds: customers.map((customer) => customer.id),
+    customerCount: customers.length,
+    customerNamesById: new Map(customers.map((customer) => [customer.id, customer.name])),
+  }
 }
 
 /** Current and previous period boundaries (UTC) for trend comparison */
@@ -37,41 +129,45 @@ function getPeriodBounds(sinceDays: number): { current: { start: Date; end: Date
 
 // --- GET /api/reporting/summary ---
 router.get('/summary', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({ success: true, data: zeroSummaryData(reportingScope, sinceDays) })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
-    const [customer, leadCount, eventCounts, suppressionCounts, queueCounts] = await Promise.all([
-      prisma.customer.findUnique({
-        where: { id: customerId },
+    const [customers, leadCount, eventCounts, suppressionCounts, queueCounts] = await Promise.all([
+      prisma.customer.findMany({
+        where: { id: { in: reportingScope.customerIds } },
         select: {
+          id: true,
           weeklyLeadTarget: true,
           monthlyLeadTarget: true,
-          weeklyLeadActual: true,
-          monthlyLeadActual: true,
         },
       }),
       prisma.leadRecord.count({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
         },
       }),
       prisma.emailEvent.groupBy({
         by: ['type'],
-        where: { customerId, occurredAt: { gte: since } },
+        where: { customerId: customerIdFilter, occurredAt: { gte: since } },
         _count: { id: true },
       }),
       prisma.suppressionEntry.groupBy({
         by: ['type'],
-        where: { customerId },
+        where: { customerId: customerIdFilter },
         _count: { id: true },
       }),
       prisma.outboundSendQueueItem.groupBy({
         by: ['status'],
-        where: { customerId, createdAt: { gte: since } },
+        where: { customerId: customerIdFilter, createdAt: { gte: since } },
         _count: { id: true },
       }),
     ])
@@ -99,19 +195,23 @@ router.get('/summary', async (req: Request, res: Response) => {
     const queueSent = queueByStatus['SENT'] ?? 0
     const queueFailed = queueByStatus['FAILED'] ?? 0
 
-    const target = sinceDays <= 14 ? (customer?.weeklyLeadTarget ?? null) : (customer?.monthlyLeadTarget ?? null)
-    const targetValue = target != null ? target : null
+    const targetValue = sinceDays <= 14
+      ? customers.reduce((sum, customer) => sum + (customer.weeklyLeadTarget ?? 0), 0)
+      : customers.reduce((sum, customer) => sum + (customer.monthlyLeadTarget ?? 0), 0)
+    const normalizedTargetValue = reportingScope.scope === 'all' ? targetValue : (targetValue > 0 ? targetValue : null)
     const percentToTarget =
-      targetValue != null && targetValue > 0 ? Math.round((leadCount / targetValue) * 100) : null
+      normalizedTargetValue != null && normalizedTargetValue > 0 ? Math.round((leadCount / normalizedTargetValue) * 100) : null
 
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         generatedAt: new Date().toISOString(),
         leadsCreated: leadCount,
-        leadsTarget: targetValue,
+        leadsTarget: normalizedTargetValue,
         percentToTarget,
         emailsSent: sent || queueSent,
         delivered: delivered || null,
@@ -137,20 +237,41 @@ router.get('/summary', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/leads-vs-target ---
 router.get('/leads-vs-target', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const { current, previous } = getPeriodBounds(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          periodStart: current.start.toISOString(),
+          periodEnd: current.end.toISOString(),
+          leadsCreated: 0,
+          leadsTarget: 0,
+          percentToTarget: null,
+          previousPeriodLeads: 0,
+          trendVsPrevious: null,
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
-    const [customer, currentLeads, previousLeads] = await Promise.all([
-      prisma.customer.findUnique({
-        where: { id: customerId },
+    const [customers, currentLeads, previousLeads] = await Promise.all([
+      prisma.customer.findMany({
+        where: { id: { in: reportingScope.customerIds } },
         select: { weeklyLeadTarget: true, monthlyLeadTarget: true },
       }),
       prisma.leadRecord.count({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           OR: [
             { occurredAt: { gte: current.start, lte: current.end } },
             { occurredAt: null, createdAt: { gte: current.start, lte: current.end } },
@@ -159,7 +280,7 @@ router.get('/leads-vs-target', async (req: Request, res: Response) => {
       }),
       prisma.leadRecord.count({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           OR: [
             { occurredAt: { gte: previous.start, lte: previous.end } },
             { occurredAt: null, createdAt: { gte: previous.start, lte: previous.end } },
@@ -168,22 +289,25 @@ router.get('/leads-vs-target', async (req: Request, res: Response) => {
       }),
     ])
 
-    const target =
-      sinceDays <= 14 ? (customer?.weeklyLeadTarget ?? null) : (customer?.monthlyLeadTarget ?? null)
-    const targetValue = target != null ? target : null
+    const targetValue = sinceDays <= 14
+      ? customers.reduce((sum, customer) => sum + (customer.weeklyLeadTarget ?? 0), 0)
+      : customers.reduce((sum, customer) => sum + (customer.monthlyLeadTarget ?? 0), 0)
+    const normalizedTargetValue = reportingScope.scope === 'all' ? targetValue : (targetValue > 0 ? targetValue : null)
     const percentToTarget =
-      targetValue != null && targetValue > 0 ? Math.round((currentLeads / targetValue) * 100) : null
+      normalizedTargetValue != null && normalizedTargetValue > 0 ? Math.round((currentLeads / normalizedTargetValue) * 100) : null
     const trend = previousLeads > 0 ? currentLeads - previousLeads : null
 
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         periodStart: current.start.toISOString(),
         periodEnd: current.end.toISOString(),
         leadsCreated: currentLeads,
-        leadsTarget: targetValue,
+        leadsTarget: normalizedTargetValue,
         percentToTarget,
         previousPeriodLeads: previousLeads,
         trendVsPrevious: trend,
@@ -200,16 +324,33 @@ router.get('/leads-vs-target', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/leads-by-source ---
 router.get('/leads-by-source', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          totalLeads: 0,
+          bySource: [],
+          topByVolume: null,
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const groups = await prisma.leadRecord.groupBy({
       by: ['source'],
       where: {
-        customerId,
+        customerId: customerIdFilter,
         OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
       },
       _count: { id: true },
@@ -229,7 +370,9 @@ router.get('/leads-by-source', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         totalLeads: total,
         bySource,
@@ -247,16 +390,32 @@ router.get('/leads-by-source', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/top-sourcers ---
 router.get('/top-sourcers', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          totalLeads: 0,
+          sourcers: [],
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const groups = await prisma.leadRecord.groupBy({
       by: ['owner'],
       where: {
-        customerId,
+        customerId: customerIdFilter,
         OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
       },
       _count: { id: true },
@@ -274,7 +433,9 @@ router.get('/top-sourcers', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         totalLeads: total,
         sourcers,
@@ -291,14 +452,33 @@ router.get('/top-sourcers', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/outreach-performance ---
 router.get('/outreach-performance', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          totalSent: 0,
+          totalReplies: 0,
+          bySequence: [],
+          byIdentity: [],
+          topSequence: null,
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const audits = await prisma.outboundSendAttemptAudit.findMany({
-      where: { customerId, decidedAt: { gte: since } },
+      where: { customerId: customerIdFilter, decidedAt: { gte: since } },
       select: { queueItemId: true, decision: true, reason: true },
       orderBy: { decidedAt: 'desc' },
       take: 10000,
@@ -308,7 +488,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const queueItems =
       queueItemIds.length > 0
         ? await prisma.outboundSendQueueItem.findMany({
-            where: { id: { in: queueItemIds }, customerId },
+            where: { id: { in: queueItemIds }, customerId: customerIdFilter },
             select: { id: true, enrollmentId: true },
           })
         : []
@@ -316,7 +496,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const enrollments =
       enrollmentIds.length > 0
         ? await prisma.enrollment.findMany({
-            where: { id: { in: enrollmentIds }, customerId },
+            where: { id: { in: enrollmentIds }, customerId: customerIdFilter },
             select: { id: true, sequenceId: true },
           })
         : []
@@ -324,8 +504,8 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const sequences =
       sequenceIds.length > 0
         ? await prisma.emailSequence.findMany({
-            where: { id: { in: sequenceIds }, customerId },
-            select: { id: true, name: true, senderIdentityId: true },
+            where: { id: { in: sequenceIds }, customerId: customerIdFilter },
+            select: { id: true, name: true, senderIdentityId: true, customerId: true },
           })
         : []
     const identityIds = Array.from(
@@ -334,8 +514,8 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const identities =
       identityIds.length > 0
         ? await prisma.emailIdentity.findMany({
-            where: { id: { in: identityIds }, customerId },
-            select: { id: true, emailAddress: true, displayName: true },
+            where: { id: { in: identityIds }, customerId: customerIdFilter },
+            select: { id: true, emailAddress: true, displayName: true, customerId: true },
           })
         : []
 
@@ -385,7 +565,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     try {
       replyEvents = await prisma.emailEvent.findMany({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           type: 'replied',
           occurredAt: { gte: since },
         },
@@ -408,7 +588,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
 
     const optOutAuditRows = await prisma.enrollmentAuditEvent.findMany({
       where: {
-        customerId,
+        customerId: customerIdFilter,
         createdAt: { gte: since },
         eventType: 'send_skipped',
         message: 'unsubscribe_link_clicked',
@@ -419,7 +599,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const optOutEnrollments =
       optOutEnrollmentIds.length > 0
         ? await prisma.enrollment.findMany({
-            where: { customerId, id: { in: optOutEnrollmentIds } },
+            where: { customerId: customerIdFilter, id: { in: optOutEnrollmentIds } },
             select: { id: true, sequenceId: true },
           })
         : []
@@ -439,6 +619,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
       .map(([id, m]) => ({
         sequenceId: id,
         sequenceName: sequenceById.get(id)?.name ?? 'Unknown',
+        customerName: reportingScope.customerNamesById.get(sequenceById.get(id)?.customerId ?? '') ?? null,
         ...m,
       }))
       .sort((a, b) => b.sent - a.sent)
@@ -449,6 +630,7 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
           identityId: id,
           email: ident?.emailAddress ?? null,
           name: ident?.displayName ?? null,
+          customerName: reportingScope.customerNamesById.get(ident?.customerId ?? '') ?? null,
           ...m,
         }
       })
@@ -461,7 +643,9 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         totalSent,
         totalReplies,
@@ -481,29 +665,49 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/funnel ---
 router.get('/funnel', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          leadsCreated: 0,
+          contacted: 0,
+          replied: 0,
+          positiveReplies: null,
+          converted: 0,
+          byLeadStatus: {},
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const [leadStatusCounts, contactedCount, repliedCount, convertedCount] = await Promise.all([
       prisma.leadRecord.groupBy({
         by: ['status'],
         where: {
-          customerId,
+          customerId: customerIdFilter,
           OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
         },
         _count: { id: true },
       }),
       prisma.outboundSendQueueItem.count({
-        where: { customerId, status: 'SENT', sentAt: { gte: since } },
+        where: { customerId: customerIdFilter, status: 'SENT', sentAt: { gte: since } },
       }),
       prisma.emailEvent.count({
-        where: { customerId, type: 'replied', occurredAt: { gte: since } },
+        where: { customerId: customerIdFilter, type: 'replied', occurredAt: { gte: since } },
       }),
       prisma.leadRecord.count({
-        where: { customerId, convertedToContactId: { not: null }, convertedAt: { gte: since } },
+        where: { customerId: customerIdFilter, convertedToContactId: { not: null }, convertedAt: { gte: since } },
       }),
     ])
 
@@ -516,7 +720,9 @@ router.get('/funnel', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         leadsCreated: leadsTotal,
         contacted: contactedCount,
@@ -537,16 +743,31 @@ router.get('/funnel', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/mailboxes ---
 router.get('/mailboxes', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          mailboxes: [],
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const eventsByIdentity = await prisma.emailEvent.groupBy({
       by: ['senderIdentityId', 'type'],
       where: {
-        customerId,
+        customerId: customerIdFilter,
         occurredAt: { gte: since },
         senderIdentityId: { not: null },
       },
@@ -559,8 +780,8 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
     const identities =
       identityIds.length > 0
         ? await prisma.emailIdentity.findMany({
-            where: { id: { in: identityIds }, customerId },
-            select: { id: true, emailAddress: true, displayName: true },
+            where: { id: { in: identityIds }, customerId: customerIdFilter },
+            select: { id: true, emailAddress: true, displayName: true, customerId: true },
           })
         : []
 
@@ -587,13 +808,16 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
       identityId: id,
       email: identityById.get(id)?.emailAddress ?? null,
       name: identityById.get(id)?.displayName ?? null,
+      customerName: reportingScope.customerNamesById.get(identityById.get(id)?.customerId ?? '') ?? null,
       ...m,
     }))
 
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         mailboxes: rows.sort((a, b) => b.sent - a.sent),
         generatedAt: new Date().toISOString(),
@@ -609,25 +833,42 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/compliance ---
 router.get('/compliance', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const since = getSinceDate(parseSinceDays(req.query))
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          suppressedEmails: 0,
+          suppressedDomains: 0,
+          unsubscribesInPeriod: 0,
+          suppressionBlocksInPeriod: 0,
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const [suppressionCounts, recentEventCounts, blockedFromQueue] = await Promise.all([
       prisma.suppressionEntry.groupBy({
         by: ['type', 'source'],
-        where: { customerId },
+        where: { customerId: customerIdFilter },
         _count: { id: true },
       }),
       prisma.emailEvent.groupBy({
         by: ['type'],
-        where: { customerId, occurredAt: { gte: since } },
+        where: { customerId: customerIdFilter, occurredAt: { gte: since } },
         _count: { id: true },
       }),
       prisma.outboundSendAttemptAudit.count({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           decidedAt: { gte: since },
           decision: 'SKIP_SUPPRESSED',
         },
@@ -647,7 +888,9 @@ router.get('/compliance', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         suppressedEmails: byType['email'] ?? 0,
         suppressedDomains: byType['domain'] ?? 0,
         unsubscribesInPeriod: optedOutCount,
@@ -665,22 +908,37 @@ router.get('/compliance', async (req: Request, res: Response) => {
 
 // --- GET /api/reporting/trends ---
 router.get('/trends', async (req: Request, res: Response) => {
-  const customerId = requireCustomerId(req, res)
-  if (!customerId) return
   try {
+    const reportingScope = await resolveReportingScope(req, res)
+    if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
     const since = getSinceDate(sinceDays)
+    if (reportingScope.customerIds.length === 0) {
+      res.json({
+        success: true,
+        data: {
+          customerId: reportingScope.customerId,
+          scope: reportingScope.scope,
+          customerCount: reportingScope.customerCount,
+          sinceDays,
+          trend: [],
+          generatedAt: new Date().toISOString(),
+        },
+      })
+      return
+    }
+    const customerIdFilter = getCustomerIdFilter(reportingScope.customerIds)
 
     const [leadsRaw, eventsRaw] = await Promise.all([
       prisma.leadRecord.findMany({
         where: {
-          customerId,
+          customerId: customerIdFilter,
           OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
         },
         select: { occurredAt: true, createdAt: true },
       }),
       prisma.emailEvent.findMany({
-        where: { customerId, occurredAt: { gte: since }, type: { in: ['sent', 'replied'] } },
+        where: { customerId: customerIdFilter, occurredAt: { gte: since }, type: { in: ['sent', 'replied'] } },
         select: { type: true, occurredAt: true },
       }),
     ])
@@ -718,7 +976,9 @@ router.get('/trends', async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        customerId,
+        customerId: reportingScope.customerId,
+        scope: reportingScope.scope,
+        customerCount: reportingScope.customerCount,
         sinceDays,
         trend,
         generatedAt: new Date().toISOString(),
