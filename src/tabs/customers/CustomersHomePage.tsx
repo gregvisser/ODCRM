@@ -10,6 +10,7 @@ import LeadsTab from '../../components/LeadsTab'
 import { useEffectiveCustomerId } from '../../hooks/useCustomerScope'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
+import { useLocale } from '../../contexts/LocaleContext'
 
 export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
 
@@ -33,6 +34,7 @@ export default function CustomersHomePage({
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
   const customerId = useEffectiveCustomerId()
   const { interpretation: readiness } = useClientReadinessState(customerId)
+  const { t } = useLocale()
 
   const goToMarketingReadiness = () => {
     window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
@@ -65,23 +67,23 @@ export default function CustomersHomePage({
   const defaultNavItems: SubNavItem[] = useMemo(() => [
     {
       id: 'accounts',
-      label: 'Accounts',
+      label: t('customers.accounts'),
       icon: ViewIcon,
       content: <AccountsTabDatabase focusAccountName={focusAccountName} />,
     },
     {
       id: 'contacts',
-      label: 'Contacts',
+      label: t('customers.contacts'),
       icon: EmailIcon,
       content: <ContactsTab />,
     },
     {
       id: 'leads-reporting',
-      label: 'Leads',
+      label: t('customers.leads'),
       icon: MdAssessment,
       content: activeView === 'leads-reporting' ? <LeadsTab /> : null,
     },
-  ], [activeView, focusAccountName])
+  ], [activeView, focusAccountName, t])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
@@ -126,7 +128,7 @@ export default function CustomersHomePage({
         data-testid="customers-marketing-bridge"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
-          OpensDoors Clients is the live workspace for accounts, contacts, and leads.
+          {t('customers.workspaceIntro')}
         </Text>
         <HStack mt={2} spacing={2}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">
@@ -135,14 +137,14 @@ export default function CustomersHomePage({
           <Text fontSize="sm" color="gray.700">{readiness.reason}</Text>
         </HStack>
         <Text fontSize="sm" color="gray.700" mt={1} data-testid="customers-readiness-guidance">
-          Keep client records current here, then continue in Marketing Readiness when outreach setup needs attention.
+          {t('customers.workspaceGuidance')}
         </Text>
         <HStack mt={3}>
           <Button size="sm" variant="outline" colorScheme="teal" onClick={runReadinessNextStep} data-testid="customers-readiness-next-step">
             {readiness.nextStep.label}
           </Button>
           <Button size="sm" colorScheme="blue" onClick={goToMarketingReadiness} data-testid="customers-go-marketing-readiness">
-            Continue in Marketing Readiness
+            {t('customers.continueInMarketingReadiness')}
           </Button>
         </HStack>
       </Box>
@@ -152,7 +154,7 @@ export default function CustomersHomePage({
         activeId={activeView}
         onChange={(id) => onNavigate?.(id as CustomersViewId)}
         onReorder={handleNavReorder}
-        title="Clients"
+        title={t('customers.title')}
         enableDragDrop={true}
       />
     </Box>
