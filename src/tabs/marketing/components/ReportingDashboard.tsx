@@ -180,18 +180,18 @@ const ReportingDashboard: React.FC = () => {
     try {
       const [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes] =
         await Promise.all([
-          api.get<{ success?: boolean; data?: SummaryData }>(`${base}/summary?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: LeadsVsTargetData }>(`${base}/leads-vs-target?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: { bySource?: LeadsBySourceRow[] } }>(`${base}/leads-by-source?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: { sourcers: TopSourcerRow[] } }>(`${base}/top-sourcers?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: { bySequence: OutreachSequenceRow[]; totalSent: number; totalReplies: number; topSequence: OutreachSequenceRow | null } }>(
+          api.get<SummaryData>(`${base}/summary?sinceDays=${sinceDays}`, opts),
+          api.get<LeadsVsTargetData>(`${base}/leads-vs-target?sinceDays=${sinceDays}`, opts),
+          api.get<{ bySource: LeadsBySourceRow[] }>(`${base}/leads-by-source?sinceDays=${sinceDays}`, opts),
+          api.get<{ sourcers: TopSourcerRow[] }>(`${base}/top-sourcers?sinceDays=${sinceDays}`, opts),
+          api.get<{ bySequence: OutreachSequenceRow[]; totalSent: number; totalReplies: number; topSequence: OutreachSequenceRow | null }>(
             `${base}/outreach-performance?sinceDays=${sinceDays}`,
             opts,
           ),
-          api.get<{ success?: boolean; data?: FunnelData }>(`${base}/funnel?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: { mailboxes: MailboxRow[] } }>(`${base}/mailboxes?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: ComplianceData }>(`${base}/compliance?sinceDays=${sinceDays}`, opts),
-          api.get<{ success?: boolean; data?: { trend: TrendRow[] } }>(`${base}/trends?sinceDays=${sinceDays}`, opts),
+          api.get<FunnelData>(`${base}/funnel?sinceDays=${sinceDays}`, opts),
+          api.get<{ mailboxes: MailboxRow[] }>(`${base}/mailboxes?sinceDays=${sinceDays}`, opts),
+          api.get<ComplianceData>(`${base}/compliance?sinceDays=${sinceDays}`, opts),
+          api.get<{ trend: TrendRow[] }>(`${base}/trends?sinceDays=${sinceDays}`, opts),
         ])
       const firstErr = [summaryRes, leadsVsTargetRes, leadsBySourceRes, topSourcersRes, outreachRes, funnelRes, mailboxesRes, complianceRes, trendsRes].find(
         (r) => r.error,
@@ -200,15 +200,15 @@ const ReportingDashboard: React.FC = () => {
         setError(firstErr.error)
         return
       }
-      setSummary(summaryRes.data?.data ?? null)
-      setLeadsVsTarget(leadsVsTargetRes.data?.data ?? null)
-      setLeadsBySource(leadsBySourceRes.data?.data?.bySource ?? [])
-      setTopSourcers(topSourcersRes.data?.data?.sourcers ?? [])
-      setOutreach(outreachRes.data?.data ?? null)
-      setFunnel(funnelRes.data?.data ?? null)
-      setMailboxes(mailboxesRes.data?.data?.mailboxes ?? [])
-      setCompliance(complianceRes.data?.data ?? null)
-      setTrends(trendsRes.data?.data?.trend ?? [])
+      setSummary(summaryRes.data ?? null)
+      setLeadsVsTarget(leadsVsTargetRes.data ?? null)
+      setLeadsBySource(leadsBySourceRes.data?.bySource ?? [])
+      setTopSourcers(topSourcersRes.data?.sourcers ?? [])
+      setOutreach(outreachRes.data ?? null)
+      setFunnel(funnelRes.data ?? null)
+      setMailboxes(mailboxesRes.data?.mailboxes ?? [])
+      setCompliance(complianceRes.data ?? null)
+      setTrends(trendsRes.data?.trend ?? [])
       setLastUpdated(new Date().toISOString())
     } finally {
       setLoading(false)
