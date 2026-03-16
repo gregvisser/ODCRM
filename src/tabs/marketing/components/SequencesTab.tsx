@@ -142,10 +142,16 @@ type SequenceCampaign = {
 type SequenceDeleteErrorDetails = {
   code?: string
   totalCampaigns?: number
+  summary?: {
+    runningCampaigns?: number
+    historicalCampaigns?: number
+    linkedDraftCampaigns?: number
+  }
   campaigns?: Array<{
     id: string
     name: string
     status?: string | null
+    blockerReason?: 'running_campaign' | 'historical_campaign' | 'linked_campaign'
   }>
 }
 
@@ -309,6 +315,11 @@ const SequencesTab: React.FC = () => {
   const [startPreviewCampaign, setStartPreviewCampaign] = useState<SequenceCampaign | null>(null)
   const [startPreview, setStartPreview] = useState<StartPreview | null>(null)
   const { isOpen: isStartOpen, onOpen: onStartOpen, onClose: onStartClose } = useDisclosure()
+  const {
+    isOpen: isDeleteBlockedOpen,
+    onOpen: onDeleteBlockedOpen,
+    onClose: onDeleteBlockedClose,
+  } = useDisclosure()
   const cancelStartRef = useRef<HTMLButtonElement | null>(null)
   const toast = useToast()
   const [leadSourceSelection, setLeadSourceSelection] = useState(leadSourceSelectionStore.getLeadSourceBatchSelection())
@@ -381,6 +392,10 @@ const SequencesTab: React.FC = () => {
   } = useDisclosure({ defaultIsOpen: false })
   const { isOpen: isDiagnosticsOpen, onOpen: onDiagnosticsOpen, onClose: onDiagnosticsClose } = useDisclosure({ defaultIsOpen: false })
   const [deletingSequenceId, setDeletingSequenceId] = useState<string | null>(null)
+  const [sequenceDeleteBlockers, setSequenceDeleteBlockers] = useState<{
+    sequence: SequenceCampaign
+    details: SequenceDeleteErrorDetails
+  } | null>(null)
   const [queueEnrollmentId, setQueueEnrollmentId] = useState<string | null>(null)
   const [queueLoading, setQueueLoading] = useState(false)
   const [queueRefreshing, setQueueRefreshing] = useState(false)
@@ -3798,6 +3813,49 @@ const SequencesTab: React.FC = () => {
     return fallback
   }
 
+  const getSequenceDeleteReasonText = (
+    campaign: NonNullable<SequenceDeleteErrorDetails['campaigns']>[number]
+  ) => {
+    switch (campaign.blockerReason) {
+      case 'running_campaign':
+        return 'This campaign is currently sending, so the sequence must stay attached.'
+      case 'historical_campaign':
+        return 'This campaign still preserves reporting/history through the sequence link.'
+      default:
+        return 'This campaign is still explicitly linked to the sequence.'
+    }
+  }
+
+  const getSequenceDeleteStatusBadgeColor = (status: string | null | undefined) => {
+    switch ((status || '').trim().toLowerCase()) {
+      case 'running':
+        return 'green'
+      case 'paused':
+        return 'orange'
+      case 'completed':
+        return 'blue'
+      case 'draft':
+        return 'gray'
+      default:
+        return 'purple'
+    }
+  }
+
+  const getSequenceDeleteSummaryText = (details: SequenceDeleteErrorDetails | undefined) => {
+    if (details?.code !== 'sequence_linked_campaign') {
+      return 'This sequence is still linked to one or more campaigns.'
+    }
+
+    const summary = details.summary
+    if ((summary?.runningCampaigns || 0) > 0) {
+      return 'At least one linked campaign is still sending. Pause or finish the live campaign before deleting this sequence.'
+    }
+    if ((summary?.historicalCampaigns || 0) > 0) {
+      return 'Completed or paused campaigns keep this sequence attached for historical reporting, so deletion stays blocked.'
+    }
+    return 'A draft campaign is still linked to this sequence. Remove that campaign link before deleting the sequence.'
+  }
+
   const getSequenceDraftValidationErrors = (sequence: SequenceCampaign): string[] => {
     const errors: string[] = []
     if (!sequence.name.trim()) errors.push('Sequence name is required.')
@@ -4020,17 +4078,24 @@ const SequencesTab: React.FC = () => {
     })
   }
 
-  const handleDeleteSequence = async (sequenceId: string) => {
+  const handleDeleteSequence = async (sequence: SequenceCampaign) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    const sequenceId = sequence.id
     if (deletingSequenceId) return
     setDeletingSequenceId(sequenceId)
     const deleteHeaders = { 'X-Customer-Id': selectedCustomerId }
     try {
       const deleteRes = await api.delete(`/api/sequences/${sequenceId}`, { headers: deleteHeaders })
       if (deleteRes.error) {
+        const details = deleteRes.errorDetails?.details as SequenceDeleteErrorDetails | undefined
+        if (details?.code === 'sequence_linked_campaign') {
+          setSequenceDeleteBlockers({ sequence, details })
+          onDeleteBlockedOpen()
+          return
+        }
         toast({
           title: 'Failed to delete sequence',
-          description: buildSequenceDeleteMessage(deleteRes.errorDetails?.details as SequenceDeleteErrorDetails | undefined, deleteRes.error),
+          description: buildSequenceDeleteMessage(details, deleteRes.error),
           status: 'error',
           duration: 7000,
         })
@@ -4067,6 +4132,12 @@ const SequencesTab: React.FC = () => {
     } finally {
       setDeletingSequenceId((current) => (current === sequenceId ? null : current))
     }
+  }
+
+  const handleOpenDeleteBlockedSequence = async () => {
+    if (!sequenceDeleteBlockers) return
+    onDeleteBlockedClose()
+    await handleEditSequence(sequenceDeleteBlockers.sequence)
   }
 
   const getStatusColor = (status: string) => {
@@ -6727,7 +6798,7 @@ const SequencesTab: React.FC = () => {
                                 icon={<DeleteIcon />}
                                 color="red.500"
                                 isDisabled={Boolean(deletingSequenceId)}
-                                onClick={() => handleDeleteSequence(sequence.id)}
+                                onClick={() => handleDeleteSequence(sequence)}
                               >
                                 {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
                               </MenuItem>
@@ -8120,6 +8191,77 @@ const SequencesTab: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Modal
+        isOpen={isDeleteBlockedOpen}
+        onClose={() => {
+          setSequenceDeleteBlockers(null)
+          onDeleteBlockedClose()
+        }}
+        size="lg"
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Sequence deletion blocked</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <VStack align="stretch" spacing={4}>
+              <Alert status="warning" variant="left-accent">
+                <AlertIcon />
+                <Box>
+                  <AlertTitle>Linked campaigns still depend on this sequence</AlertTitle>
+                  <AlertDescription>
+                    {getSequenceDeleteSummaryText(sequenceDeleteBlockers?.details)}
+                  </AlertDescription>
+                </Box>
+              </Alert>
+
+              {(sequenceDeleteBlockers?.details.campaigns || []).map((campaign) => (
+                <Box key={campaign.id} borderWidth="1px" borderRadius="md" px={4} py={3}>
+                  <Flex justify="space-between" align="center" gap={3} mb={1}>
+                    <Text fontWeight="semibold">{campaign.name}</Text>
+                    <Badge colorScheme={getSequenceDeleteStatusBadgeColor(campaign.status)}>
+                      {humanizeCampaignStatus(campaign.status)}
+                    </Badge>
+                  </Flex>
+                  <Text fontSize="sm" color="gray.600">
+                    {getSequenceDeleteReasonText(campaign)}
+                  </Text>
+                  <Text fontSize="xs" color="gray.500" mt={2}>
+                    Campaign ID: {campaign.id}
+                  </Text>
+                </Box>
+              ))}
+
+              {sequenceDeleteBlockers?.details.totalCampaigns ? (
+                <Text fontSize="sm" color="gray.600">
+                  {sequenceDeleteBlockers.details.totalCampaigns} linked campaign
+                  {sequenceDeleteBlockers.details.totalCampaigns === 1 ? '' : 's'} must be resolved before this
+                  sequence can be deleted.
+                </Text>
+              ) : null}
+
+              <Flex justify="flex-end" gap={3}>
+                <Button
+                  variant="outline"
+                  onClick={handleOpenDeleteBlockedSequence}
+                  isDisabled={!sequenceDeleteBlockers}
+                >
+                  Open linked sequence
+                </Button>
+                <Button
+                  onClick={() => {
+                    setSequenceDeleteBlockers(null)
+                    onDeleteBlockedClose()
+                  }}
+                >
+                  Close
+                </Button>
+              </Flex>
+            </VStack>
+          </ModalBody>
+        </ModalContent>
+      </Modal>
 
       <Modal isOpen={isPreviewOpen} onClose={onPreviewClose} size="full" scrollBehavior="inside">
         <ModalOverlay />

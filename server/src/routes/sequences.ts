@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
+import { buildSequenceDeleteBlockerDetails } from '../lib/sequenceDeleteBlockers.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { listEnrollmentsForSequence, createEnrollmentForSequence } from './enrollments.js'
@@ -348,27 +349,19 @@ router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
       return res.status(404).json({ error: 'Sequence not found' })
     }
 
-    const campaignsUsingSequence = await prisma.emailCampaign.count({
+    const linkedCampaigns = await prisma.emailCampaign.findMany({
       where: { customerId, sequenceId: id },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
     })
-    if (campaignsUsingSequence > 0) {
-      const linkedCampaigns = await prisma.emailCampaign.findMany({
-        where: { customerId, sequenceId: id },
-        orderBy: { updatedAt: 'desc' },
-        take: 3,
-        select: {
-          id: true,
-          name: true,
-          status: true,
-        },
-      })
+    if (linkedCampaigns.length > 0) {
       return res.status(409).json({
         error: 'This sequence is still linked to one or more campaigns.',
-        details: {
-          code: 'sequence_linked_campaign',
-          totalCampaigns: campaignsUsingSequence,
-          campaigns: linkedCampaigns,
-        },
+        details: buildSequenceDeleteBlockerDetails(linkedCampaigns),
       })
     }
 
