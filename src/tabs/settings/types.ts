@@ -1,1 +1,1 @@
-export type SettingsViewId = 'user-authorization'
+export type SettingsViewId = 'user-authorization' | 'troubleshooting'

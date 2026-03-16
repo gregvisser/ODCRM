@@ -900,6 +900,44 @@ model UserPreferences {
 }
 
 // ============================================================================
+// SETTINGS: TROUBLESHOOTING / FEEDBACK REPORTS
+// ============================================================================
+
+model TroubleshootingReport {
+  id                  String    @id @default(cuid())
+  customerId          String?
+  createdByUserId     String?
+  createdByEmail      String
+  createdByName       String?
+  type                String    // Bug, Issue, Suggestion, Ease of Use, Feature Request, Other
+  title               String
+  description         String    @db.Text
+  priority            String    // Low, Medium, High, Critical
+  appArea             String?
+  pagePath            String?
+  userAgent           String?
+  proofUrl            String?
+  proofFileName       String?
+  proofMimeType       String?
+  proofUploadedAt     DateTime?
+  proofBlobName       String?
+  proofContainerName  String?
+  status              String    // Open, In Review, Planned, Resolved, Closed
+  internalNotes       String?   @db.Text
+  resolutionNotes     String?   @db.Text
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  resolvedAt          DateTime?
+
+  @@index([customerId])
+  @@index([createdByEmail])
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt(sort: Desc)])
+  @@map("troubleshooting_reports")
+}
+
+// ============================================================================
 // AUDIT TRAIL
 // ============================================================================
 

@@ -29,6 +29,7 @@ import uploadsRoutes from './routes/uploads.js'
 import suppressionRoutes from './routes/suppression.js'
 import usersRoutes from './routes/users.js'
 import userPreferencesRoutes from './routes/userPreferences.js'
+import settingsTroubleshootingRoutes from './routes/settingsTroubleshooting.js'
 import sheetsRoutes from './routes/sheets.js'
 import diagRoutes from './routes/diag.js'
 import overviewRoutes from './routes/overview.js'
@@ -457,6 +458,7 @@ app.get('/api/routes', (req, res): void => {
     '/api/suppression',
     '/api/users',
     '/api/user-preferences',
+    '/api/settings',
   ]
   
   res.json({ 
@@ -504,6 +506,7 @@ app.use('/api/uploads', uploadsRoutes)
 app.use('/api/suppression', suppressionRoutes)
 app.use('/api/users', usersRoutes)
 app.use('/api/user-preferences', userPreferencesRoutes)
+app.use('/api/settings', settingsTroubleshootingRoutes)
 app.use('/api/sheets', sheetsRoutes)
 app.use('/api/_diag', diagRoutes)
 app.use('/api/overview', observabilityHeaders, overviewRoutes)

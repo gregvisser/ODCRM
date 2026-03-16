@@ -1,14 +1,15 @@
 import { useMemo } from 'react'
 import { Box, Text } from '@chakra-ui/react'
-import { UnlockIcon } from '@chakra-ui/icons'
+import { UnlockIcon, ChatIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import UserAuthorizationTab from '../../components/UserAuthorizationTab'
-
-export type SettingsViewId = 'user-authorization'
+import TroubleshootingTab from './TroubleshootingTab'
+import type { SettingsViewId } from './types'
 
 function coerceSettingsViewId(view?: string): SettingsViewId {
-  if (view === 'user-authorization') return view
+  if (view === 'user-authorization') return 'user-authorization'
+  if (view === 'troubleshooting') return 'troubleshooting'
   return 'user-authorization'
 }
 
@@ -32,6 +33,12 @@ export default function SettingsHomePage({
         label: 'User Authorization',
         icon: UnlockIcon,
         content: <UserAuthorizationTab />,
+      },
+      {
+        id: 'troubleshooting',
+        label: 'Troubleshooting & Feedback',
+        icon: ChatIcon,
+        content: <TroubleshootingTab />,
       },
     ]
 

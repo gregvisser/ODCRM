@@ -186,3 +186,39 @@ export function generateCustomerAttachmentBlobName(
   const randomId = Math.random().toString(36).slice(2, 8)
   return `attachment_${customerId}_${sanitizedType}_${timestamp}_${randomId}_${safeName}`
 }
+
+/** Container for troubleshooting report proof uploads (screenshots/images). */
+const TROUBLESHOOTING_PROOF_CONTAINER =
+  process.env.AZURE_STORAGE_CONTAINER_TROUBLESHOOTING_PROOFS || 'troubleshooting-proofs'
+
+/**
+ * Upload a troubleshooting report proof (screenshot/image) to Azure Blob Storage.
+ * Allowed types: image/png, image/jpeg, image/webp. Max 5MB.
+ */
+export async function uploadTroubleshootingProof(params: {
+  buffer: Buffer
+  contentType: string
+  blobName: string
+}): Promise<UploadAgreementResult> {
+  const { buffer, contentType, blobName } = params
+  return uploadToContainer({
+    buffer,
+    contentType,
+    containerName: TROUBLESHOOTING_PROOF_CONTAINER,
+    blobName,
+  })
+}
+
+export function generateTroubleshootingProofBlobName(reportId: string, fileName: string): string {
+  const sanitized = String(fileName || '')
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .slice(0, 80)
+  const safeName = sanitized || 'proof'
+  const timestamp = Date.now()
+  const randomId = Math.random().toString(36).slice(2, 8)
+  return `proof_${reportId}_${timestamp}_${randomId}_${safeName}`
+}
+
+export function getTroubleshootingProofContainerName(): string {
+  return TROUBLESHOOTING_PROOF_CONTAINER
+}
