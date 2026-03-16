@@ -2,6 +2,7 @@ import { useMemo, useCallback, useEffect } from 'react'
 import { Alert, AlertDescription, AlertIcon, AlertTitle, Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
 import { EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
+import { useLocale } from '../../contexts/LocaleContext'
 import { isClientUI } from '../../platform/mode'
 import CustomerSelector from './components/CustomerSelector'
 import ProgressTrackerTab from './ProgressTrackerTab'
@@ -13,23 +14,26 @@ import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
 
 export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'
 
-function getNextStepButtonLabel(target: OnboardingViewId | 'onboarding' | 'clients' | 'marketing-readiness' | 'marketing-inbox' | 'marketing-reports' | 'marketing-sequences'): string {
+function getNextStepButtonLabel(
+  target: OnboardingViewId | 'onboarding' | 'clients' | 'marketing-readiness' | 'marketing-inbox' | 'marketing-reports' | 'marketing-sequences',
+  t: (key: string) => string
+): string {
   switch (target) {
     case 'clients':
-      return 'Open client details'
+      return t('onboarding.openClientDetails')
     case 'marketing-inbox':
-      return 'Open inbox'
+      return t('onboarding.openInbox')
     case 'marketing-reports':
-      return 'Open reports'
+      return t('onboarding.openReports')
     case 'marketing-sequences':
-      return 'Open sequences'
+      return t('onboarding.openSequences')
     case 'marketing-readiness':
-      return 'Review marketing readiness'
+      return t('onboarding.reviewMarketingReadiness')
     case 'customer-onboarding':
     case 'progress-tracker':
     case 'onboarding':
     default:
-      return 'Continue onboarding'
+      return t('onboarding.continueOnboarding')
   }
 }
 
@@ -46,6 +50,7 @@ interface OnboardingHomePageProps {
 
 export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
   const activeView = coerceViewId(view)
+  const { t } = useLocale()
   const { customerId: selectedCustomerId, setCustomerId: setSelectedCustomerId } = useScopedCustomerSelection()
   const { signal, interpretation: readiness } = useClientReadinessState(selectedCustomerId || null)
 
@@ -93,7 +98,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     const items: SubNavItem[] = [
       {
         id: 'progress-tracker',
-        label: 'Progress Tracker',
+        label: t('onboarding.progressTracker'),
         icon: CheckCircleIcon,
         content: <ProgressTrackerTab />,
         sortOrder: 2,
@@ -105,7 +110,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       items.push(
         {
           id: 'customer-onboarding',
-          label: 'Client Onboarding',
+          label: t('onboarding.clientOnboarding'),
           icon: EditIcon,
           content: <CustomerOnboardingTab customerId={selectedCustomerId} />,
           sortOrder: 1,
@@ -114,7 +119,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     }
 
     return items
-  }, [selectedCustomerId])
+  }, [selectedCustomerId, t])
 
   const activationChecks = useMemo(() => {
     const mapCheck = (label: string, value: boolean | null) => ({
@@ -123,12 +128,12 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
       unknown: value === null,
     })
     return [
-      mapCheck('Email identities connected', signal.checks.emailIdentitiesConnected),
-      mapCheck('Suppression list connected', signal.checks.suppressionConfigured),
-      mapCheck('Lead source connected', signal.checks.leadSourceConfigured),
-      mapCheck('Template and sequence basics ready', signal.checks.templateAndSequenceReady),
+      mapCheck(t('onboarding.checkEmailIdentities'), signal.checks.emailIdentitiesConnected),
+      mapCheck(t('onboarding.checkSuppressionList'), signal.checks.suppressionConfigured),
+      mapCheck(t('onboarding.checkLeadSource'), signal.checks.leadSourceConfigured),
+      mapCheck(t('onboarding.checkTemplateSequence'), signal.checks.templateAndSequenceReady),
     ]
-  }, [signal.checks])
+  }, [signal.checks, t])
 
   const canProceedToOperations = readiness.state === 'ready-for-outreach' || readiness.state === 'outreach-active'
   const blockersCount = activationChecks.filter((item) => !item.complete).length
@@ -155,10 +160,10 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
         >
           <VStack align="start" spacing={1}>
             <Text fontSize="sm" fontWeight="semibold" color="blue.900">
-              Onboarding status
+              {t('onboarding.status')}
             </Text>
             <Text fontSize="sm" color="blue.800">
-              See whether this client should stay in onboarding or move on to the next workflow.
+              {t('onboarding.statusDescription')}
             </Text>
           </VStack>
           <HStack mt={2} spacing={2}>
@@ -176,7 +181,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               isDisabled={!selectedCustomerId}
               data-testid="onboarding-readiness-next-step"
             >
-              {getNextStepButtonLabel(readiness.nextStep.target)}
+              {getNextStepButtonLabel(readiness.nextStep.target, t)}
             </Button>
             <Button
               size="sm"
@@ -185,11 +190,11 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               isDisabled={!selectedCustomerId}
               data-testid="onboarding-go-marketing-readiness"
             >
-              Review marketing readiness
+              {t('onboarding.reviewMarketingReadiness')}
             </Button>
             {!selectedCustomerId ? (
               <Text fontSize="xs" color="blue.700">
-                Select a client first.
+                {t('onboarding.selectClientFirst')}
               </Text>
             ) : null}
           </HStack>
@@ -204,24 +209,24 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           >
             <VStack align="start" spacing={2}>
               <Text fontSize="xs" fontWeight="bold" textTransform="uppercase" color="blue.700">
-                Go-live follow-up
+                {t('onboarding.goLiveFollowUp')}
               </Text>
               <HStack spacing={2} flexWrap="wrap">
                 <Badge colorScheme={canProceedToOperations ? 'green' : 'orange'} data-testid="onboarding-activation-state">
-                  {canProceedToOperations ? 'Ready to move forward' : `${blockersCount} follow-up item${blockersCount === 1 ? '' : 's'} left`}
+                  {canProceedToOperations ? t('onboarding.readyToMoveForward') : t('onboarding.followUpItemsLeft', { count: blockersCount })}
                 </Badge>
                 <Badge colorScheme="blue">
-                  {readyCheckCount} of {activationChecks.length} checks ready
+                  {t('onboarding.checksReady', { ready: readyCheckCount, total: activationChecks.length })}
                 </Badge>
               </HStack>
               <Text fontSize="sm" color="blue.900">
-                These checks help confirm the client can move safely from onboarding into live outreach.
+                {t('onboarding.checksHelpConfirm')}
               </Text>
               <SimpleGrid columns={{ base: 1, md: 2 }} spacing={1} width="100%">
                 {activationChecks.map((item) => (
                   <HStack key={item.label} spacing={2}>
                     <Badge colorScheme={item.complete ? 'green' : item.unknown ? 'gray' : 'red'} minW="90px" textAlign="center">
-                      {item.complete ? 'Ready' : item.unknown ? 'Pending' : 'Missing'}
+                      {item.complete ? t('common.ready') : item.unknown ? t('common.pending') : t('common.missing')}
                     </Badge>
                     <Text fontSize="xs" color="blue.900">{item.label}</Text>
                   </HStack>
@@ -235,9 +240,9 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           <Alert status="info" mb={4}>
             <AlertIcon />
             <Box>
-              <AlertTitle>Select a client to begin</AlertTitle>
+              <AlertTitle>{t('onboarding.selectClientToBegin')}</AlertTitle>
               <AlertDescription>
-                Choose an existing client, or create one from the selector above, to continue onboarding.
+                {t('onboarding.selectClientDescription')}
               </AlertDescription>
             </Box>
           </Alert>
@@ -248,7 +253,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           items={navItems}
           activeId={effectiveActiveView}
           onChange={(id) => onNavigate?.(id as OnboardingViewId)}
-          title="Onboarding"
+          title={t('onboarding.title')}
           enableDragDrop={false}
         />
       </Box>
