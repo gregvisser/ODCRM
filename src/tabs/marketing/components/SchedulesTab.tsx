@@ -31,8 +31,9 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import { RepeatIcon } from '@chakra-ui/icons'
-import { api } from '../../../utils/api'
+import { useLocale } from '../../../contexts/LocaleContext'
 import RequireActiveClient from '../../../components/RequireActiveClient'
+import { api } from '../../../utils/api'
 
 type SenderIdentity = {
   id: string
@@ -306,6 +307,7 @@ function getOperatorScheduleStatus(schedule: CampaignSchedule): {
 }
 
 const SchedulesTab: React.FC = () => {
+  const { t } = useLocale()
   const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -571,7 +573,7 @@ const SchedulesTab: React.FC = () => {
       <RequireActiveClient>
         <Box textAlign="center" py={10}>
           <Spinner size="lg" />
-          <Text mt={3}>Loading schedules...</Text>
+          <Text mt={3}>{t('state.loadingSchedules')}</Text>
         </Box>
       </RequireActiveClient>
     )
@@ -843,7 +845,7 @@ const SchedulesTab: React.FC = () => {
                 </VStack>
                 <HStack spacing={3} flexWrap="wrap">
                   <Text fontSize="xs" color="gray.500">
-                    Last updated: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'}
+                    {t('state.lastUpdated')}: {lastUpdatedAt ? new Date(lastUpdatedAt).toLocaleString() : '—'}
                   </Text>
                   <Button
                     leftIcon={<RepeatIcon />}
@@ -851,7 +853,7 @@ const SchedulesTab: React.FC = () => {
                     onClick={() => void loadData(true)}
                     isLoading={refreshing}
                   >
-                    Refresh schedules
+                    {t('state.refreshSchedules')}
                   </Button>
                   <Button
                     variant="ghost"
@@ -860,7 +862,7 @@ const SchedulesTab: React.FC = () => {
                     isLoading={detailLoading}
                     isDisabled={!selectedSchedule}
                   >
-                    Refresh follow-up detail
+                    {t('state.refreshFollowUpDetail')}
                   </Button>
                 </HStack>
               </Flex>

@@ -1,0 +1,101 @@
+/**
+ * English dictionary — canonical source of truth for all UI copy.
+ * Keys are flat and dot-separated. Missing key in ar.ts falls back to this.
+ */
+export const en: Record<string, string> = {
+  // App shell & top nav
+  'nav.customers-home': 'OpensDoors Clients',
+  'nav.marketing-home': 'OpensDoors Marketing',
+  'nav.onboarding-home': 'Onboarding',
+  'nav.settings-home': 'Settings',
+  'shell.signOut': 'Sign out',
+  'shell.loading': 'Loading...',
+  'shell.clientModeNotConfigured': 'Client mode is not configured yet. Contact admin.',
+  'shell.build': 'Build',
+
+  // Language toggle
+  'locale.english': 'English',
+  'locale.arabic': 'العربية',
+
+  // Common actions
+  'common.save': 'Save',
+  'common.cancel': 'Cancel',
+  'common.close': 'Close',
+  'common.create': 'Create',
+  'common.update': 'Update',
+  'common.delete': 'Delete',
+  'common.edit': 'Edit',
+  'common.search': 'Search',
+  'common.filter': 'Filter',
+  'common.refresh': 'Refresh',
+  'common.retry': 'Retry',
+  'common.back': 'Back',
+  'common.next': 'Next',
+  'common.open': 'Open',
+  'common.view': 'View',
+  'common.confirm': 'Confirm',
+  'common.sendTest': 'Send Test',
+  'common.launch': 'Launch',
+  'common.pause': 'Pause',
+  'common.resume': 'Resume',
+  'common.connected': 'Connected',
+  'common.replaceSheet': 'Replace Sheet',
+  'common.loading': 'Loading',
+  'common.noResults': 'No results',
+  'common.ready': 'Ready',
+  'common.pending': 'Pending',
+  'common.missing': 'Missing',
+  'common.sections': 'Sections',
+
+  // Marketing sub-nav
+  'marketing.sectionTitle': 'Marketing',
+  'marketing.readiness': 'Readiness',
+  'marketing.reports': 'Reports',
+  'marketing.leadSources': 'Lead Sources',
+  'marketing.suppressionList': 'Suppression List',
+  'marketing.emailAccounts': 'Email Accounts',
+  'marketing.templates': 'Templates',
+  'marketing.sequences': 'Sequences',
+  'marketing.schedules': 'Schedules',
+  'marketing.inbox': 'Inbox',
+  'marketing.guidanceStart': 'Start with Readiness to see what needs attention now. Then use Sequences to inspect or act, Inbox to handle replies, and Reports to confirm results.',
+  'marketing.guidanceBlockers': 'If setup or data blockers appear, switch to Onboarding or OpensDoors Clients, then return here to continue operations.',
+  'marketing.openOnboardingSetup': 'Open Onboarding setup',
+  'marketing.openClientsDataHealth': 'Open Clients data health',
+
+  // Onboarding
+  'onboarding.title': 'Onboarding',
+  'onboarding.progressTracker': 'Progress Tracker',
+  'onboarding.clientOnboarding': 'Client Onboarding',
+  'onboarding.status': 'Onboarding status',
+  'onboarding.statusDescription': 'See whether this client should stay in onboarding or move on to the next workflow.',
+  'onboarding.openClientDetails': 'Open client details',
+  'onboarding.openInbox': 'Open inbox',
+  'onboarding.openReports': 'Open reports',
+  'onboarding.openSequences': 'Open sequences',
+  'onboarding.reviewMarketingReadiness': 'Review marketing readiness',
+  'onboarding.continueOnboarding': 'Continue onboarding',
+  'onboarding.selectClientFirst': 'Select a client first.',
+  'onboarding.goLiveFollowUp': 'Go-live follow-up',
+  'onboarding.readyToMoveForward': 'Ready to move forward',
+  'onboarding.followUpItemsLeft': '{{count}} follow-up item(s) left',
+  'onboarding.checksReady': '{{ready}} of {{total}} checks ready',
+  'onboarding.checksHelpConfirm': 'These checks help confirm the client can move safely from onboarding into live outreach.',
+  'onboarding.selectClientToBegin': 'Select a client to begin',
+  'onboarding.selectClientDescription': 'Choose an existing client, or create one from the selector above, to continue onboarding.',
+  'onboarding.checkEmailIdentities': 'Email identities connected',
+  'onboarding.checkSuppressionList': 'Suppression list connected',
+  'onboarding.checkLeadSource': 'Lead source connected',
+  'onboarding.checkTemplateSequence': 'Template and sequence basics ready',
+
+  // SubNavigation
+  'subnav.hidePanel': 'Hide {{title}} panel',
+  'subnav.showPanel': 'Show {{title}} panel',
+
+  // Empty / loading / errors
+  'state.loading': 'Loading...',
+  'state.loadingSchedules': 'Loading schedules...',
+  'state.refreshSchedules': 'Refresh schedules',
+  'state.refreshFollowUpDetail': 'Refresh follow-up detail',
+  'state.lastUpdated': 'Last updated',
+}
