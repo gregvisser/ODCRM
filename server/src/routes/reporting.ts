@@ -1,0 +1,699 @@
+/**
+ * Reporting Dashboard API — operator-grade, tenant-scoped reporting.
+ * All endpoints require X-Customer-Id (or query customerId). No silent defaults.
+ * Metrics are derived from DB truth only; unavailable metrics are omitted or explicitly null.
+ */
+import { Router, Request, Response } from 'express'
+import { prisma } from '../lib/prisma.js'
+import { requireCustomerId } from '../utils/tenantId.js'
+
+const router = Router()
+
+function parseSinceDays(query: Request['query']): number {
+  const raw = typeof query.sinceDays === 'string' ? parseInt(query.sinceDays, 10) : 30
+  if (!Number.isFinite(raw) || raw < 1) return 30
+  return Math.min(Math.max(raw, 1), 90)
+}
+
+function getSinceDate(sinceDays: number): Date {
+  return new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
+}
+
+/** Current and previous period boundaries (UTC) for trend comparison */
+function getPeriodBounds(sinceDays: number): { current: { start: Date; end: Date }; previous: { start: Date; end: Date } } {
+  const end = new Date()
+  const currentStart = getSinceDate(sinceDays)
+  const previousEnd = new Date(currentStart.getTime() - 1)
+  const previousStart = new Date(currentStart.getTime() - sinceDays * 24 * 60 * 60 * 1000)
+  return {
+    current: { start: currentStart, end },
+    previous: { start: previousStart, end: previousEnd },
+  }
+}
+
+// --- GET /api/reporting/summary ---
+router.get('/summary', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const [customer, leadCount, eventCounts, suppressionCounts, queueCounts] = await Promise.all([
+      prisma.customer.findUnique({
+        where: { id: customerId },
+        select: {
+          weeklyLeadTarget: true,
+          monthlyLeadTarget: true,
+          weeklyLeadActual: true,
+          monthlyLeadActual: true,
+        },
+      }),
+      prisma.leadRecord.count({
+        where: {
+          customerId,
+          OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+        },
+      }),
+      prisma.emailEvent.groupBy({
+        by: ['type'],
+        where: { customerId, occurredAt: { gte: since } },
+        _count: { id: true },
+      }),
+      prisma.suppressionEntry.groupBy({
+        by: ['type'],
+        where: { customerId },
+        _count: { id: true },
+      }),
+      prisma.outboundSendQueueItem.groupBy({
+        by: ['status'],
+        where: { customerId, createdAt: { gte: since } },
+        _count: { id: true },
+      }),
+    ])
+
+    const events: Record<string, number> = {}
+    eventCounts.forEach((e) => { events[e.type] = e._count.id })
+    const sent = events['sent'] ?? 0
+    const delivered = events['delivered'] ?? 0
+    const opened = events['opened'] ?? 0
+    const replied = events['replied'] ?? 0
+    const bounced = events['bounced'] ?? 0
+    const optedOut = events['opted_out'] ?? 0
+    const failed = events['failed'] ?? 0
+
+    const suppressionsByType: Record<string, number> = {}
+    suppressionCounts.forEach((s) => { suppressionsByType[s.type] = s._count.id })
+    const suppressedEmails = suppressionsByType['email'] ?? 0
+    const suppressedDomains = suppressionsByType['domain'] ?? 0
+
+    const queueByStatus: Record<string, number> = {}
+    queueCounts.forEach((q) => { queueByStatus[q.status] = q._count.id })
+    const queueSent = queueByStatus['SENT'] ?? 0
+    const queueFailed = queueByStatus['FAILED'] ?? 0
+
+    const target = sinceDays <= 14 ? (customer?.weeklyLeadTarget ?? null) : (customer?.monthlyLeadTarget ?? null)
+    const targetValue = target != null ? target : null
+    const percentToTarget =
+      targetValue != null && targetValue > 0 ? Math.round((leadCount / targetValue) * 100) : null
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        generatedAt: new Date().toISOString(),
+        leadsCreated: leadCount,
+        leadsTarget: targetValue,
+        percentToTarget,
+        emailsSent: sent || queueSent,
+        delivered: delivered || null,
+        openRate: delivered > 0 && opened >= 0 ? Math.round((opened / delivered) * 1000) / 10 : null,
+        replyRate: (sent || queueSent) > 0 ? Math.round((replied / (sent || queueSent)) * 1000) / 10 : null,
+        replyCount: replied,
+        positiveReplyCount: null,
+        meetingsBooked: null,
+        bounces: bounced,
+        unsubscribes: optedOut,
+        suppressedEmails,
+        suppressedDomains,
+        sendFailures: failed || queueFailed,
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Summary failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/leads-vs-target ---
+router.get('/leads-vs-target', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const { current, previous } = getPeriodBounds(sinceDays)
+
+    const [customer, currentLeads, previousLeads] = await Promise.all([
+      prisma.customer.findUnique({
+        where: { id: customerId },
+        select: { weeklyLeadTarget: true, monthlyLeadTarget: true },
+      }),
+      prisma.leadRecord.count({
+        where: {
+          customerId,
+          OR: [
+            { occurredAt: { gte: current.start, lte: current.end } },
+            { occurredAt: null, createdAt: { gte: current.start, lte: current.end } },
+          ],
+        },
+      }),
+      prisma.leadRecord.count({
+        where: {
+          customerId,
+          OR: [
+            { occurredAt: { gte: previous.start, lte: previous.end } },
+            { occurredAt: null, createdAt: { gte: previous.start, lte: previous.end } },
+          ],
+        },
+      }),
+    ])
+
+    const target =
+      sinceDays <= 14 ? (customer?.weeklyLeadTarget ?? null) : (customer?.monthlyLeadTarget ?? null)
+    const targetValue = target != null ? target : null
+    const percentToTarget =
+      targetValue != null && targetValue > 0 ? Math.round((currentLeads / targetValue) * 100) : null
+    const trend = previousLeads > 0 ? currentLeads - previousLeads : null
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        periodStart: current.start.toISOString(),
+        periodEnd: current.end.toISOString(),
+        leadsCreated: currentLeads,
+        leadsTarget: targetValue,
+        percentToTarget,
+        previousPeriodLeads: previousLeads,
+        trendVsPrevious: trend,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Leads vs target failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/leads-by-source ---
+router.get('/leads-by-source', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const groups = await prisma.leadRecord.groupBy({
+      by: ['source'],
+      where: {
+        customerId,
+        OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+      },
+      _count: { id: true },
+    })
+
+    const total = groups.reduce((sum, g) => sum + g._count.id, 0)
+    const bySource = groups
+      .map((g) => ({
+        source: g.source ?? 'Unknown',
+        count: g._count.id,
+        percent: total > 0 ? Math.round((g._count.id / total) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+
+    const topByVolume = bySource[0] ?? null
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        totalLeads: total,
+        bySource,
+        topByVolume,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Leads by source failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/top-sourcers ---
+router.get('/top-sourcers', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const groups = await prisma.leadRecord.groupBy({
+      by: ['owner'],
+      where: {
+        customerId,
+        OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+      },
+      _count: { id: true },
+    })
+
+    const total = groups.reduce((sum, g) => sum + g._count.id, 0)
+    const sourcers = groups
+      .map((g) => ({
+        owner: g.owner ?? 'Unassigned',
+        count: g._count.id,
+        percent: total > 0 ? Math.round((g._count.id / total) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        totalLeads: total,
+        sourcers,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Top sourcers failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/outreach-performance ---
+router.get('/outreach-performance', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const audits = await prisma.outboundSendAttemptAudit.findMany({
+      where: { customerId, decidedAt: { gte: since } },
+      select: { queueItemId: true, decision: true, reason: true },
+      orderBy: { decidedAt: 'desc' },
+      take: 10000,
+    })
+
+    const queueItemIds = Array.from(new Set(audits.map((a) => a.queueItemId).filter(Boolean))) as string[]
+    const queueItems =
+      queueItemIds.length > 0
+        ? await prisma.outboundSendQueueItem.findMany({
+            where: { id: { in: queueItemIds }, customerId },
+            select: { id: true, enrollmentId: true },
+          })
+        : []
+    const enrollmentIds = Array.from(new Set(queueItems.map((q) => q.enrollmentId).filter(Boolean)))
+    const enrollments =
+      enrollmentIds.length > 0
+        ? await prisma.enrollment.findMany({
+            where: { id: { in: enrollmentIds }, customerId },
+            select: { id: true, sequenceId: true },
+          })
+        : []
+    const sequenceIds = Array.from(new Set(enrollments.map((e) => e.sequenceId).filter(Boolean)))
+    const sequences =
+      sequenceIds.length > 0
+        ? await prisma.emailSequence.findMany({
+            where: { id: { in: sequenceIds }, customerId },
+            select: { id: true, name: true, senderIdentityId: true },
+          })
+        : []
+    const identityIds = Array.from(
+      new Set(sequences.map((s) => s.senderIdentityId).filter((v): v is string => !!v)),
+    )
+    const identities =
+      identityIds.length > 0
+        ? await prisma.emailIdentity.findMany({
+            where: { id: { in: identityIds }, customerId },
+            select: { id: true, emailAddress: true, displayName: true },
+          })
+        : []
+
+    const queueToEnrollment = new Map(queueItems.map((q) => [q.id, q.enrollmentId]))
+    const enrollmentToSequence = new Map(enrollments.map((e) => [e.id, e.sequenceId]))
+    const sequenceById = new Map(sequences.map((s) => [s.id, s]))
+    const identityById = new Map(identities.map((i) => [i.id, i]))
+
+    type M = { sent: number; failed: number; suppressed: number; skipped: number; replies: number; optOuts: number }
+    const bySequence = new Map<string, M>()
+    const byIdentity = new Map<string, M>()
+    const zero = (): M => ({ sent: 0, failed: 0, suppressed: 0, skipped: 0, replies: 0, optOuts: 0 })
+
+    for (const audit of audits) {
+      const enrollmentId = queueToEnrollment.get(audit.queueItemId)
+      const sequenceId = enrollmentId ? enrollmentToSequence.get(enrollmentId) : null
+      const sequence = sequenceId ? sequenceById.get(sequenceId) : null
+      const identityId = sequence?.senderIdentityId ?? null
+      const seqKey = sequenceId ?? 'unknown'
+      const identKey = identityId ?? 'unknown'
+      if (!bySequence.has(seqKey)) bySequence.set(seqKey, zero())
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      const sm = bySequence.get(seqKey)!
+      const im = byIdentity.get(identKey)!
+      if (audit.decision === 'SENT') {
+        sm.sent += 1
+        im.sent += 1
+        continue
+      }
+      if (audit.decision === 'SEND_FAILED') {
+        sm.failed += 1
+        im.failed += 1
+        continue
+      }
+      if (audit.decision === 'SKIP_SUPPRESSED') {
+        sm.suppressed += 1
+        im.suppressed += 1
+        continue
+      }
+      if (String(audit.decision).startsWith('SKIP_')) {
+        sm.skipped += 1
+        im.skipped += 1
+      }
+    }
+
+    let replyOptEvents: Array<{ type: string; senderIdentityId: string | null; campaign: { sequenceId: string | null } | null }> = []
+    try {
+      replyOptEvents = await prisma.emailEvent.findMany({
+        where: {
+          customerId,
+          type: { in: ['replied', 'opted_out'] },
+          occurredAt: { gte: since },
+        },
+        select: {
+          type: true,
+          senderIdentityId: true,
+          campaign: { select: { sequenceId: true } },
+        },
+      })
+    } catch {
+      // enum/relation may be missing in some envs
+    }
+    for (const ev of replyOptEvents) {
+      const identKey = ev.senderIdentityId ?? 'unknown'
+      const seqId = ev.campaign?.sequenceId ?? 'unknown'
+      if (!byIdentity.has(identKey)) byIdentity.set(identKey, zero())
+      if (!bySequence.has(seqId)) bySequence.set(seqId, zero())
+      if (ev.type === 'replied') {
+        byIdentity.get(identKey)!.replies += 1
+        bySequence.get(seqId)!.replies += 1
+      } else if (ev.type === 'opted_out') {
+        byIdentity.get(identKey)!.optOuts += 1
+        bySequence.get(seqId)!.optOuts += 1
+      }
+    }
+
+    const sequenceRows = Array.from(bySequence.entries())
+      .map(([id, m]) => ({
+        sequenceId: id,
+        sequenceName: sequenceById.get(id)?.name ?? 'Unknown',
+        ...m,
+      }))
+      .sort((a, b) => b.sent - a.sent)
+    const identityRows = Array.from(byIdentity.entries())
+      .map(([id, m]) => {
+        const ident = identityById.get(id)
+        return {
+          identityId: id,
+          email: ident?.emailAddress ?? null,
+          name: ident?.displayName ?? null,
+          ...m,
+        }
+      })
+      .sort((a, b) => b.sent - a.sent)
+
+    const totalSent = sequenceRows.reduce((s, r) => s + r.sent, 0)
+    const totalReplies = sequenceRows.reduce((s, r) => s + r.replies, 0)
+    const topSequence = sequenceRows[0] ?? null
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        totalSent,
+        totalReplies,
+        bySequence: sequenceRows,
+        byIdentity: identityRows,
+        topSequence,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Outreach performance failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/funnel ---
+router.get('/funnel', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const [leadStatusCounts, contactedCount, repliedCount, convertedCount] = await Promise.all([
+      prisma.leadRecord.groupBy({
+        by: ['status'],
+        where: {
+          customerId,
+          OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+        },
+        _count: { id: true },
+      }),
+      prisma.outboundSendQueueItem.count({
+        where: { customerId, status: 'SENT', sentAt: { gte: since } },
+      }),
+      prisma.emailEvent.count({
+        where: { customerId, type: 'replied', occurredAt: { gte: since } },
+      }),
+      prisma.leadRecord.count({
+        where: { customerId, convertedToContactId: { not: null }, convertedAt: { gte: since } },
+      }),
+    ])
+
+    const leadsTotal = leadStatusCounts.reduce((s, g) => s + g._count.id, 0)
+    const byStatus: Record<string, number> = {}
+    leadStatusCounts.forEach((g) => {
+      byStatus[g.status] = g._count.id
+    })
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        leadsCreated: leadsTotal,
+        contacted: contactedCount,
+        replied: repliedCount,
+        positiveReplies: null,
+        converted: convertedCount,
+        byLeadStatus: byStatus,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Funnel failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/mailboxes ---
+router.get('/mailboxes', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const eventsByIdentity = await prisma.emailEvent.groupBy({
+      by: ['senderIdentityId', 'type'],
+      where: {
+        customerId,
+        occurredAt: { gte: since },
+        senderIdentityId: { not: null },
+      },
+      _count: { id: true },
+    })
+
+    const identityIds = Array.from(
+      new Set(eventsByIdentity.map((e) => e.senderIdentityId).filter((v): v is string => !!v)),
+    )
+    const identities =
+      identityIds.length > 0
+        ? await prisma.emailIdentity.findMany({
+            where: { id: { in: identityIds }, customerId },
+            select: { id: true, emailAddress: true, displayName: true },
+          })
+        : []
+
+    const byIdentity = new Map<
+      string,
+      { sent: number; delivered: number; replied: number; bounced: number; optedOut: number; failed: number }
+    >()
+    for (const e of eventsByIdentity) {
+      const id = e.senderIdentityId!
+      if (!byIdentity.has(id)) {
+        byIdentity.set(id, { sent: 0, delivered: 0, replied: 0, bounced: 0, optedOut: 0, failed: 0 })
+      }
+      const row = byIdentity.get(id)!
+      if (e.type === 'sent') row.sent += e._count.id
+      else if (e.type === 'delivered') row.delivered += e._count.id
+      else if (e.type === 'replied') row.replied += e._count.id
+      else if (e.type === 'bounced') row.bounced += e._count.id
+      else if (e.type === 'opted_out') row.optedOut += e._count.id
+      else if (e.type === 'failed') row.failed += e._count.id
+    }
+
+    const identityById = new Map(identities.map((i) => [i.id, i]))
+    const rows = Array.from(byIdentity.entries()).map(([id, m]) => ({
+      identityId: id,
+      email: identityById.get(id)?.emailAddress ?? null,
+      name: identityById.get(id)?.displayName ?? null,
+      ...m,
+    }))
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        mailboxes: rows.sort((a, b) => b.sent - a.sent),
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Mailboxes failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/compliance ---
+router.get('/compliance', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const since = getSinceDate(parseSinceDays(req.query))
+
+    const [suppressionCounts, optedOutCount, blockedFromQueue] = await Promise.all([
+      prisma.suppressionEntry.groupBy({
+        by: ['type', 'source'],
+        where: { customerId },
+        _count: { id: true },
+      }),
+      prisma.emailEvent.count({
+        where: { customerId, type: 'opted_out', occurredAt: { gte: since } },
+      }),
+      prisma.outboundSendAttemptAudit.count({
+        where: {
+          customerId,
+          decidedAt: { gte: since },
+          decision: 'SKIP_SUPPRESSED',
+        },
+      }),
+    ])
+
+    const byType: Record<string, number> = {}
+    suppressionCounts.forEach((s) => {
+      const key = s.type
+      byType[key] = (byType[key] ?? 0) + s._count.id
+    })
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        suppressedEmails: byType['email'] ?? 0,
+        suppressedDomains: byType['domain'] ?? 0,
+        unsubscribesInPeriod: optedOutCount,
+        suppressionBlocksInPeriod: blockedFromQueue,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Compliance failed',
+    })
+  }
+})
+
+// --- GET /api/reporting/trends ---
+router.get('/trends', async (req: Request, res: Response) => {
+  const customerId = requireCustomerId(req, res)
+  if (!customerId) return
+  try {
+    const sinceDays = parseSinceDays(req.query)
+    const since = getSinceDate(sinceDays)
+
+    const [leadsRaw, eventsRaw] = await Promise.all([
+      prisma.leadRecord.findMany({
+        where: {
+          customerId,
+          OR: [{ occurredAt: { gte: since } }, { occurredAt: null, createdAt: { gte: since } }],
+        },
+        select: { occurredAt: true, createdAt: true },
+      }),
+      prisma.emailEvent.findMany({
+        where: { customerId, occurredAt: { gte: since }, type: { in: ['sent', 'replied'] } },
+        select: { type: true, occurredAt: true },
+      }),
+    ])
+
+    const dayKey = (d: Date) => d.toISOString().slice(0, 10)
+    const leadsByDay: Record<string, number> = {}
+    leadsRaw.forEach((r) => {
+      const at = r.occurredAt ?? r.createdAt
+      if (at) {
+        const k = dayKey(at)
+        leadsByDay[k] = (leadsByDay[k] ?? 0) + 1
+      }
+    })
+    const sentByDay: Record<string, number> = {}
+    const repliedByDay: Record<string, number> = {}
+    eventsRaw.forEach((e) => {
+      const k = dayKey(e.occurredAt)
+      if (e.type === 'sent') sentByDay[k] = (sentByDay[k] ?? 0) + 1
+      else if (e.type === 'replied') repliedByDay[k] = (repliedByDay[k] ?? 0) + 1
+    })
+
+    const allDays = new Set<string>([
+      ...Object.keys(leadsByDay),
+      ...Object.keys(sentByDay),
+      ...Object.keys(repliedByDay),
+    ])
+    const sortedDays = Array.from(allDays).sort()
+    const trend = sortedDays.map((day) => ({
+      day,
+      leads: leadsByDay[day] ?? 0,
+      sent: sentByDay[day] ?? 0,
+      replied: repliedByDay[day] ?? 0,
+    }))
+
+    res.json({
+      success: true,
+      data: {
+        customerId,
+        sinceDays,
+        trend,
+        generatedAt: new Date().toISOString(),
+      },
+    })
+  } catch (err) {
+    res.status(500).json({
+      success: false,
+      error: err instanceof Error ? err.message : 'Trends failed',
+    })
+  }
+})
+
+export default router

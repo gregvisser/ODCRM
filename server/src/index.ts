@@ -13,6 +13,7 @@ import outlookRoutes from './routes/outlook.js'
 import trackingRoutes from './routes/tracking.js'
 import schedulesRoutes from './routes/schedules.js'
 import reportsRoutes from './routes/reports.js'
+import reportingRoutes from './routes/reporting.js'
 import inboxRoutes from './routes/inbox.js'
 import listsRoutes from './routes/lists.js'
 import sequencesRoutes from './routes/sequences.js'
@@ -434,6 +435,7 @@ app.get('/api/routes', (req, res): void => {
     '/api/email',
     '/api/schedules',
     '/api/reports',
+    '/api/reporting',
     '/api/inbox',
     '/api/lists',
     '/api/sequences',
@@ -479,6 +481,7 @@ app.use('/api/outlook', observabilityHeaders, outlookRoutes)
 app.use('/api/email', trackingRoutes)
 app.use('/api/schedules', schedulesRoutes)
 app.use('/api/reports', reportsRoutes)
+app.use('/api/reporting', observabilityHeaders, reportingRoutes)
 app.use('/api/onboarding', onboardingReadinessRoutes)
 app.use('/api/inbox', observabilityHeaders, inboxRoutes)
 app.use('/api/lists', listsRoutes)
