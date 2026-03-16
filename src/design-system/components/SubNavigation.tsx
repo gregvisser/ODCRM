@@ -10,7 +10,7 @@
  * a lazy-loaded sub-component to prevent the circular-init issue.
  */
 
-import React, { useEffect, useState, type ReactNode } from 'react'
+import React, { useState, type ReactNode } from 'react'
 import {
   Box,
   Flex,
@@ -59,8 +59,6 @@ interface SubNavigationProps {
   forceDesktopLayout?: boolean
   /** Enable drag and drop reordering — currently disabled, kept for API compatibility */
   enableDragDrop?: boolean
-  /** Show runtime nav diagnostics when explicitly enabled */
-  debugEnabled?: boolean
 }
 
 export function SubNavigation({
@@ -69,30 +67,12 @@ export function SubNavigation({
   onChange,
   title = 'Sections',
   forceDesktopLayout = false,
-  debugEnabled = false,
 }: SubNavigationProps) {
   const [isPanelOpen, setIsPanelOpen] = useState(true)
   const isMobile = useBreakpointValue({ base: true, md: false })
   const useMobileLayout = !forceDesktopLayout && isMobile
 
   const activeIndex = activeId ? items.findIndex((item) => item.id === activeId) : 0
-  const itemIds = items.map((item) => item.id)
-  const itemLabels = items.map((item) => item.label)
-  const includesReports = items.some((item) => item.id === 'reports')
-
-  useEffect(() => {
-    if (!debugEnabled) return
-    console.info('[MarketingNavDebug] SubNavigation runtime state', {
-      title,
-      useMobileLayout,
-      isPanelOpen,
-      activeId: activeId ?? null,
-      activeIndex,
-      itemIds,
-      itemLabels,
-      includesReports,
-    })
-  }, [activeId, activeIndex, debugEnabled, includesReports, isPanelOpen, itemIds, itemLabels, title, useMobileLayout])
 
   // Mobile Layout: Horizontal scrollable tabs
   if (useMobileLayout) {
@@ -107,26 +87,6 @@ export function SubNavigation({
         lazyBehavior="unmount"
         variant="unstyled"
       >
-        {debugEnabled ? (
-          <Box
-            mb={spacing[3]}
-            p={spacing[3]}
-            border="1px solid"
-            borderColor="yellow.200"
-            borderRadius={radius.md}
-            bg="yellow.50"
-            data-testid="subnav-debug-panel"
-          >
-            <Text fontSize="sm" fontWeight="700" mb={spacing[1]}>SubNavigation debug</Text>
-            <Text fontSize="sm">layout: mobile</Text>
-            <Text fontSize="sm">collapsed: false</Text>
-            <Text fontSize="sm">activeId: {activeId ?? '(none)'}</Text>
-            <Text fontSize="sm">activeIndex: {String(activeIndex)}</Text>
-            <Text fontSize="sm">itemIds: {itemIds.join(', ')}</Text>
-            <Text fontSize="sm">itemLabels: {itemLabels.join(' | ')}</Text>
-            <Text fontSize="sm">includesReports: {includesReports ? 'true' : 'false'}</Text>
-          </Box>
-        ) : null}
         <Box
           overflowX="auto"
           overflowY="hidden"
@@ -209,26 +169,6 @@ export function SubNavigation({
       variant="unstyled"
       orientation="vertical"
     >
-      {debugEnabled ? (
-        <Box
-          mb={spacing[3]}
-          p={spacing[3]}
-          border="1px solid"
-          borderColor="yellow.200"
-          borderRadius={radius.md}
-          bg="yellow.50"
-          data-testid="subnav-debug-panel"
-        >
-          <Text fontSize="sm" fontWeight="700" mb={spacing[1]}>SubNavigation debug</Text>
-          <Text fontSize="sm">layout: desktop</Text>
-          <Text fontSize="sm">collapsed: {isPanelOpen ? 'false' : 'true'}</Text>
-          <Text fontSize="sm">activeId: {activeId ?? '(none)'}</Text>
-          <Text fontSize="sm">activeIndex: {String(activeIndex)}</Text>
-          <Text fontSize="sm">itemIds: {itemIds.join(', ')}</Text>
-          <Text fontSize="sm">itemLabels: {itemLabels.join(' | ')}</Text>
-          <Text fontSize="sm">includesReports: {includesReports ? 'true' : 'false'}</Text>
-        </Box>
-      ) : null}
       <Flex direction="row" gap={spacing[4]} align="flex-start">
         {/* Desktop Sidebar - Expanded */}
         {isPanelOpen ? (

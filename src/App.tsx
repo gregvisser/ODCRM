@@ -20,6 +20,7 @@ import { clearApiAuthToken } from './auth/apiAuthToken'
 import { useLocale } from './contexts/LocaleContext'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
+import ReportingHomePage, { type ReportingViewId } from './tabs/reporting/ReportingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
@@ -71,10 +72,17 @@ function App() {
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
       inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
+      reporting: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies ReportingViewId },
+      dashboard: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies ReportingViewId },
       'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies OpenDoorsViewId },
       schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies OpenDoorsViewId },
     } as const
   }, [])
+
+  const getDefaultViewForTab = (tab: CrmTopTabId): string => {
+    if (tab === 'reporting-home') return 'reporting-dashboard'
+    return 'accounts'
+  }
 
   // Deep-linking: keep current tab/view in the URL (?tab=...&view=...&account=...).
   useEffect(() => {
@@ -105,6 +113,7 @@ function App() {
       if (fromPath) {
         setActiveTab(resolveClientModeTab(fromPath))
         if (view) setActiveView(view)
+        else setActiveView(getDefaultViewForTab(fromPath))
         return
       }
       // Root or unknown path: default authenticated landing is Clients.
@@ -114,6 +123,7 @@ function App() {
     if (isCrmTopTabId(tab)) {
       setActiveTab(resolveClientModeTab(tab))
       if (view) setActiveView(view)
+      else setActiveView(getDefaultViewForTab(tab))
       return
     }
 
@@ -233,6 +243,8 @@ function App() {
             }}
           />
         )
+      case 'reporting-home':
+        return <ReportingHomePage view={activeView} />
       case 'onboarding-home':
         return (
           <OnboardingHomePage
@@ -332,7 +344,7 @@ function App() {
                   const nextTab = visibleTopTabs[nextIndex]
                   if (!nextTab) return
                   setActiveTab(nextTab.id)
-                  setActiveView('accounts')
+                  setActiveView(getDefaultViewForTab(nextTab.id))
                   setFocusAccountName(undefined)
                 }}
                 variant="unstyled"
