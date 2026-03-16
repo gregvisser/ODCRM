@@ -2,14 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Flex,
-  HStack,
   Tab,
   TabList,
   Tabs,
   Text,
   Button,
   Badge,
-  Select,
 } from '@chakra-ui/react'
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
@@ -25,7 +23,6 @@ import './App.css'
 import { HeaderImagePicker } from './components/HeaderImagePicker'
 // import { DiagnosticBanner } from './components/DiagnosticBanner' // REMOVED per user request
 import { spacing, semanticColor, radius, shadow, zIndex } from './design-system'
-import { useI18n } from './contexts/I18nContext'
 import { BUILD_SHA, BUILD_TIME } from './version'
 
 const POST_LOGIN_REDIRECT_KEY = 'odcrm_post_login_redirect_v1'
@@ -41,7 +38,6 @@ function isSafeInternalRedirect(value: string): boolean {
 
 function App() {
   const { instance } = useMsal()
-  const { language, setLanguage, t, dir, isRTL } = useI18n()
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
@@ -207,21 +203,6 @@ function App() {
     await instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
   }
 
-  const getTopTabLabel = (tabId: CrmTopTabId): string => {
-    switch (tabId) {
-      case 'customers-home':
-        return t('nav.customers')
-      case 'marketing-home':
-        return t('nav.marketing')
-      case 'onboarding-home':
-        return t('nav.onboarding')
-      case 'settings-home':
-        return t('nav.settings')
-      default:
-        return tabId
-    }
-  }
-
   const page = (() => {
     switch (effectiveTab) {
       case 'customers-home':
@@ -284,21 +265,21 @@ function App() {
   if (isClientUI()) {
     if (meError) {
       return (
-        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6} dir={dir}>
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
           <Text color="red.600">{meError}</Text>
         </Flex>
       )
     }
     if (!me) {
       return (
-        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6} dir={dir}>
-          <Text>{t('shell.loading')}</Text>
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
+          <Text>Loading...</Text>
         </Flex>
       )
     }
     if (me.uiMode !== 'client' || !me.fixedCustomerId) {
       return (
-        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6} dir={dir}>
+        <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
           <Text>Client mode is not configured yet. Contact admin.</Text>
         </Flex>
       )
@@ -306,7 +287,7 @@ function App() {
   }
 
   return (
-    <Flex minH="100vh" bg={semanticColor.bgCanvas} direction="column" position="relative" dir={dir}>
+    <Flex minH="100vh" bg={semanticColor.bgCanvas} direction="column" position="relative">
       {/* Main Content Area */}
       <Box
         flex="1"
@@ -329,75 +310,17 @@ function App() {
         >
           {/* Top Bar */}
           <Box
-            bg={semanticColor.bgElevated}
-            borderRadius="2xl"
+            bg={semanticColor.bgSurface}
+            borderRadius={radius.lg}
             border="1px solid"
-            borderColor={semanticColor.borderStrong}
+            borderColor={semanticColor.borderSubtle}
             px={{ base: spacing[3], md: spacing[4] }}
-            py={{ base: spacing[3], md: spacing[4] }}
-            boxShadow={shadow.md}
-            backdropFilter="blur(22px)"
+            py={{ base: spacing[2], md: spacing[2] }}
+            boxShadow={shadow.sm}
             position="sticky"
             top={0}
             zIndex={zIndex.sticky}
-            overflow="hidden"
           >
-            <Flex
-              align={{ base: 'stretch', md: 'center' }}
-              justify="space-between"
-              gap={3}
-              flexDirection={{ base: 'column', lg: isRTL ? 'row-reverse' : 'row' }}
-              mb={{ base: spacing[3], md: spacing[4] }}
-            >
-              <Box>
-                <Text
-                  fontSize={{ base: 'lg', md: 'xl' }}
-                  fontWeight="800"
-                  letterSpacing="-0.03em"
-                  color={semanticColor.textPrimary}
-                >
-                  {t('shell.productName')}
-                </Text>
-                <Text fontSize="sm" color={semanticColor.textMuted}>
-                  Premium operator workspace
-                </Text>
-              </Box>
-              <HStack
-                spacing={2}
-                justify={{ base: 'flex-start', lg: 'flex-end' }}
-                flexWrap="wrap"
-                flexDirection={isRTL ? 'row-reverse' : 'row'}
-              >
-                <Select
-                  size="sm"
-                  maxW={{ base: '100%', md: '180px' }}
-                  value={language}
-                  onChange={(event) => setLanguage(event.target.value as 'en' | 'ar')}
-                  aria-label={t('shell.language')}
-                >
-                  <option value="en">{t('shell.english')}</option>
-                  <option value="ar">{t('shell.arabic')}</option>
-                </Select>
-                <Badge
-                  colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
-                  fontSize="xs"
-                  px={2.5}
-                  py={1}
-                  borderRadius="full"
-                  textTransform="uppercase"
-                  fontWeight="800"
-                >
-                  {import.meta.env.PROD ? t('shell.production') : t('shell.dev')}
-                </Badge>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleSignOut()}
-                >
-                  {t('shell.signOut')}
-                </Button>
-              </HStack>
-            </Flex>
             <Tabs
               index={tabIndex}
               onChange={(nextIndex) => {
@@ -408,7 +331,7 @@ function App() {
                 setFocusAccountName(undefined)
               }}
               variant="unstyled"
-              dir={dir}
+              mt={{ base: spacing[1], md: spacing[2] }}
             >
               <TabList
                 overflowX="auto"
@@ -416,9 +339,8 @@ function App() {
                 borderBottom="1px solid"
                 borderColor={semanticColor.borderSubtle}
                 gap={spacing[2]}
-                pb={spacing[2]}
+                pb={spacing[1]}
                 alignItems="center"
-                dir={dir}
               >
                 <Box
                   minW={{ base: '180px', md: '260px' }}
@@ -430,26 +352,51 @@ function App() {
                 {visibleTopTabs.map((tab) => (
                   <Tab
                     key={tab.id}
-                    px={spacing[4]}
-                    py={spacing[2]}
-                    fontSize="sm"
-                    fontWeight="700"
+                    px={spacing[3]}
+                    py={spacing[1]}
+                    fontSize="xs"
+                    fontWeight="600"
                     color={semanticColor.textMuted}
                     border="1px solid"
                     borderColor={semanticColor.borderSubtle}
-                    borderRadius="xl"
-                    bg="rgba(255,255,255,0.03)"
-                    _hover={{ color: semanticColor.textPrimary, bg: 'rgba(255,255,255,0.06)' }}
+                    borderRadius={radius.md}
+                    bg={semanticColor.bgSurface}
+                    _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
                     _selected={{
-                      color: 'accent.100',
+                      color: 'accent.700',
                       borderColor: 'accent.500',
-                      bg: 'rgba(227,179,65,0.14)',
-                      boxShadow: '0 10px 28px rgba(227,179,65,0.16)',
+                      bg: 'accent.50',
                     }}
                   >
-                    {getTopTabLabel(tab.id)}
+                    {tab.label}
                   </Tab>
                 ))}
+                {/* Environment indicator */}
+                <Badge
+                  colorScheme={import.meta.env.PROD ? 'red' : 'yellow'}
+                  fontSize="xs"
+                  px={2}
+                  py={1}
+                  borderRadius={radius.md}
+                  textTransform="uppercase"
+                  fontWeight="bold"
+                >
+                  {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  px={spacing[3]}
+                  py={spacing[1]}
+                  fontSize="xs"
+                  fontWeight="600"
+                  color={semanticColor.textMuted}
+                  borderColor={semanticColor.borderSubtle}
+                  _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
+                  onClick={() => void handleSignOut()}
+                >
+                  Sign out
+                </Button>
               </TabList>
             </Tabs>
           </Box>
@@ -457,12 +404,11 @@ function App() {
           {/* Main Content */}
           <Box
             bg={semanticColor.bgSurface}
-            borderRadius="2xl"
+            borderRadius={radius.lg}
             border="1px solid"
             borderColor={semanticColor.borderSubtle}
             p={{ base: spacing[3], md: spacing[4], lg: spacing[6] }}
-            boxShadow={shadow.lg}
-            backdropFilter="blur(22px)"
+            boxShadow={shadow.md}
             w="100%"
             minW={0}
             overflowX="auto"
@@ -474,7 +420,7 @@ function App() {
       </Box>
       <Box px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }} pb={{ base: spacing[3], md: spacing[4] }}>
         <Text fontSize="xs" color={semanticColor.textMuted} textAlign="center">
-          {import.meta.env.PROD ? `${t('shell.build')} ${__BUILD_STAMP__}` : `${t('shell.build')}: ${BUILD_SHA} ${BUILD_TIME}`}
+          {import.meta.env.PROD ? `Build ${__BUILD_STAMP__}` : `Build: ${BUILD_SHA} ${BUILD_TIME}`}
         </Text>
       </Box>
     </Flex>

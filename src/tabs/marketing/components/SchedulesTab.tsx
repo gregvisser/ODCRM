@@ -32,7 +32,6 @@ import {
 } from '@chakra-ui/react'
 import { RepeatIcon } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { useI18n } from '../../../contexts/I18nContext'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 type SenderIdentity = {
@@ -307,7 +306,6 @@ function getOperatorScheduleStatus(schedule: CampaignSchedule): {
 }
 
 const SchedulesTab: React.FC = () => {
-  const { t } = useI18n()
   const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -591,7 +589,7 @@ const SchedulesTab: React.FC = () => {
 
         <Flex justify="space-between" align={{ base: 'start', md: 'center' }} mb={6} gap={4} wrap="wrap">
           <VStack align="start" spacing={1}>
-            <Heading size="lg">{t('schedules.title')}</Heading>
+            <Heading size="lg">Schedules</Heading>
             <Text color="gray.600">
               See which schedules are active or paused, which mailbox and sequence each one uses, and what should happen next.
             </Text>
@@ -724,7 +722,7 @@ const SchedulesTab: React.FC = () => {
                           </VStack>
                           <HStack spacing={2}>
                             <Button size="sm" variant={isSelected ? 'solid' : 'outline'} onClick={() => setSelectedScheduleId(schedule.id)}>
-                              {isSelected ? `${t('actions.openSummary')}...` : t('actions.openSummary')}
+                              {isSelected ? 'Summary open' : 'Open summary'}
                             </Button>
                             <Button
                               size="sm"

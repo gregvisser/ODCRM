@@ -63,7 +63,6 @@ import {
   ExternalLinkIcon,
 } from '@chakra-ui/icons'
 import { api } from '../../../utils/api'
-import { useI18n } from '../../../contexts/I18nContext'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
@@ -171,7 +170,6 @@ function describeMailboxReason(reason: string): string {
 }
 
 const EmailAccountsTab: React.FC = () => {
-  const { t } = useI18n()
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -504,7 +502,7 @@ const EmailAccountsTab: React.FC = () => {
       <RequireActiveClient>
       <Box id="email-accounts-tab-panel" data-testid="email-accounts-tab-panel">
         <VStack align="start" spacing={1} mb={4}>
-          <Text fontSize="2xl" fontWeight="bold">{t('emailAccounts.title')}</Text>
+          <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">See which mailboxes are connected, ready to send, or need attention for this client.</Text>
           <FormControl w="300px" mt={2}>
             <FormLabel fontSize="sm">Client</FormLabel>
@@ -516,7 +514,7 @@ const EmailAccountsTab: React.FC = () => {
                   setSelectedCustomerId(id)
                 }
               }}
-              placeholder={t('common.selectClient')}
+              placeholder="Select client"
               isDisabled={!canSelectCustomer}
             >
               {customers.map((customer) => (
@@ -572,7 +570,7 @@ const EmailAccountsTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Text fontSize="2xl" fontWeight="bold">{t('emailAccounts.title')}</Text>
+          <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
             Review connected mailboxes, see which ones are usable, and manage what needs attention next.
           </Text>
@@ -585,7 +583,7 @@ const EmailAccountsTab: React.FC = () => {
                   const id = e.target.value
                   setSelectedCustomerId(id)
                 }}
-              placeholder={t('common.selectClient')}
+                placeholder="Select client"
                 isDisabled={!canSelectCustomer}
               >
                 {customers.map((customer) => (
@@ -703,7 +701,7 @@ const EmailAccountsTab: React.FC = () => {
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder={`${t('common.search')} mailboxes...`}
+            placeholder="Search mailboxes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
