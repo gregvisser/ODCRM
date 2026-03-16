@@ -2,22 +2,21 @@
 /**
  * Smoke test for /api/reporting/* dashboard endpoints.
  * Run: CUSTOMER_ID=cust_xxx node scripts/self-test-reporting-dashboard-runtime.mjs
- * Or: BASE_URL=http://localhost:3001 CUSTOMER_ID=cust_xxx node scripts/self-test-reporting-dashboard-runtime.mjs
+ * Or: BASE_URL=http://localhost:3001 CUSTOMER_ID=cust_xxx CHECK_ALL_CLIENTS=1 node scripts/self-test-reporting-dashboard-runtime.mjs
  */
 const BASE_URL = (process.env.BASE_URL || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net').replace(/\/$/, '')
 const CUSTOMER_ID = (process.env.CUSTOMER_ID || '').trim()
+const CHECK_ALL_CLIENTS = process.env.CHECK_ALL_CLIENTS === '1'
 
 function fail(message) {
   console.error(`self-test-reporting-dashboard-runtime: FAIL - ${message}`)
   process.exit(1)
 }
 
-if (!CUSTOMER_ID) fail('CUSTOMER_ID env var is required')
-
 async function getJson(path) {
   const url = `${BASE_URL}${path}`
   const response = await fetch(url, {
-    headers: { Accept: 'application/json', 'X-Customer-Id': CUSTOMER_ID },
+    headers: CUSTOMER_ID ? { Accept: 'application/json', 'X-Customer-Id': CUSTOMER_ID } : { Accept: 'application/json' },
   })
   const text = await response.text()
   if (response.status === 400 && (text.includes('Customer ID') || text.includes('customerId'))) {
@@ -32,6 +31,7 @@ async function getJson(path) {
 }
 
 async function main() {
+  if (!CUSTOMER_ID) fail('CUSTOMER_ID env var is required')
   const summaryRes = await getJson(`/api/reporting/summary?sinceDays=7&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
   if (summaryRes.status === 404) fail('/api/reporting/summary returned 404')
   const data = summaryRes.body?.data ?? summaryRes.body
@@ -59,11 +59,27 @@ async function main() {
   const mailboxPayload = mailboxRes.body?.data ?? mailboxRes.body
   if (!mailboxPayload || !Array.isArray(mailboxPayload.mailboxes)) fail('mailboxes.mailboxes must be array')
 
+  if (CHECK_ALL_CLIENTS) {
+    const aggregateSummaryRes = await getJson('/api/reporting/summary?sinceDays=30&scope=all')
+    const aggregateSummary = aggregateSummaryRes.body?.data ?? aggregateSummaryRes.body
+    if (!aggregateSummary || aggregateSummary.customerId !== 'all') fail('aggregate summary must return customerId=all')
+    if (typeof aggregateSummary.customerCount !== 'number') fail('aggregate summary must return customerCount')
+    if (typeof aggregateSummary.leadsCreated !== 'number') fail('aggregate summary.leadsCreated must be number')
+
+    const aggregateTrendRes = await getJson('/api/reporting/trends?sinceDays=30&scope=all')
+    const aggregateTrend = aggregateTrendRes.body?.data ?? aggregateTrendRes.body
+    if (!aggregateTrend || !Array.isArray(aggregateTrend.trend)) fail('aggregate trends.trend must be array')
+  }
+
   console.log('PASS /api/reporting/summary returns data shape')
   console.log('PASS /api/reporting/leads-vs-target returns data shape')
   console.log('PASS /api/reporting/compliance returns opt-out-safe data shape')
   console.log('PASS /api/reporting/outreach-performance returns sequence data shape')
   console.log('PASS /api/reporting/mailboxes returns mailbox data shape')
+  if (CHECK_ALL_CLIENTS) {
+    console.log('PASS /api/reporting/summary supports scope=all')
+    console.log('PASS /api/reporting/trends supports scope=all')
+  }
   console.log('self-test-reporting-dashboard-runtime: PASS')
 }
 

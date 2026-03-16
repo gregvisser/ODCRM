@@ -53,6 +53,9 @@ if (!reportingDashboardSource.includes('reporting-dashboard')) fail('ReportingDa
 if (!reportingDashboardSource.includes('/api/reporting')) fail('ReportingDashboard missing /api/reporting data source')
 if (!reportingDashboardSource.includes('dashboard-kanban-board')) fail('ReportingDashboard missing kanban board marker')
 if (!reportingDashboardSource.includes('dashboard-trend-chart')) fail('ReportingDashboard missing trend chart marker')
+if (!reportingDashboardSource.includes('All Clients')) fail('ReportingDashboard missing All Clients selector option')
+if (!reportingDashboardSource.includes('dashboard-client-selector')) fail('ReportingDashboard missing scope selector marker')
+if (!reportingDashboardSource.includes('dashboard-scope-badge')) fail('ReportingDashboard missing scope badge marker')
 if (reportsTabSource.includes('ReportingDashboard')) fail('Marketing ReportsTab must not point to ReportingDashboard')
 
 console.log('PASS top-level dashboard nav contract exists and is first')
