@@ -990,11 +990,10 @@ const ReportingDashboard: React.FC = () => {
       <Box
         data-testid="dashboard-hero"
         borderRadius="2xl"
-        bgGradient="linear(to-br, blue.500, indigo.600, purple.500)"
-        color="white"
+        bgGradient="linear(to-br, gray.900, blue.900, purple.800)"
+        color="whiteAlpha.900"
         px={{ base: 5, md: 6 }}
         py={{ base: 5, md: 6 }}
-        boxShadow="inner"
       >
         <Stack direction={{ base: 'column', xl: 'row' }} spacing={6} justify="space-between">
           <VStack align="start" spacing={2} maxW="760px">
@@ -1009,8 +1008,8 @@ const ReportingDashboard: React.FC = () => {
                 Window: last {windowDays} days
               </Badge>
             </HStack>
-            <Heading size="lg" fontWeight="800" letterSpacing="-0.5px">{heroTitle}</Heading>
-            <Text color="white" maxW="2xl" fontSize="md" lineHeight="1.6">
+            <Heading size="lg" fontWeight="700">{heroTitle}</Heading>
+            <Text color="whiteAlpha.900" maxW="2xl" fontSize="md" lineHeight="1.6">
               {heroDescription}
             </Text>
             <HStack spacing={3} flexWrap="wrap">
