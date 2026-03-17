@@ -17,9 +17,13 @@ const required = [
   'Next operator action',
   'Live audience',
   'Test audience',
-  'Latest send result',
+  'Latest result',
   'Live outreach view',
   'Show troubleshooting tools',
+  'Ready now',
+  'Needs attention',
+  'Running',
+  'Archived',
 ]
 const forbidden = ['Stage 2A', 'Stage 3', '(Stage']
 

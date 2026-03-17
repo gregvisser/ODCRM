@@ -27,6 +27,10 @@ const required = [
   'Waiting for send window',
   'Sequence paused',
   'Fix blocker',
+  'Ready now',
+  'Needs attention',
+  'Running',
+  'Archived',
 ]
 
 const missing = required.filter((marker) => !content.includes(marker))
