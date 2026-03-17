@@ -65,6 +65,7 @@
     "test:sendworker-normalization": "node scripts/self-test-sendworker-normalization.mjs",
     "test:enrollment-recipient-source-ui": "node scripts/self-test-enrollment-recipient-source-ui.mjs",
     "test:enrollment-snapshot-ingestion": "node scripts/self-test-enrollment-snapshot-ingestion.mjs",
+    "test:sequences-archive-contract": "node scripts/self-test-sequences-archive-contract.mjs",
     "test:sequences-operator-ui": "node scripts/self-test-sequences-operator-ui.mjs",
     "test:sequences-startflow-step-based": "node scripts/self-test-sequences-startflow-step-based.mjs",
     "test:queue-preview-autoload": "node scripts/self-test-queue-preview-autoload.mjs",
