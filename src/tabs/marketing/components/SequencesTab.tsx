@@ -3537,6 +3537,67 @@ const SequencesTab: React.FC = () => {
     return [mailboxSignal, audienceSignal, contentSignal, windowSignal]
   }
 
+  const liveOpsSummary = (() => {
+    const summary = {
+      ready: 0,
+      needsAttention: 0,
+      running: 0,
+      archived: 0,
+      mailboxBlocked: 0,
+      audienceBlocked: 0,
+      contentBlocked: 0,
+      windowWaiting: 0,
+    }
+
+    for (const sequence of filteredSequences) {
+      const operatorState = getSequenceOperatorStateSummary(sequence)
+      const confidenceSignals = getSequenceSendConfidenceSummary(sequence)
+
+      switch (operatorState.label) {
+        case 'Ready':
+          summary.ready += 1
+          break
+        case 'Blocked':
+        case 'Paused':
+          summary.needsAttention += 1
+          break
+        case 'Running':
+          summary.running += 1
+          break
+        case 'Archived':
+          summary.archived += 1
+          break
+        default:
+          break
+      }
+
+      if (operatorState.label === 'Blocked' || operatorState.label === 'Paused') {
+        const mailboxSignal = confidenceSignals.find((signal) => signal.label === 'Mailbox')
+        const audienceSignal = confidenceSignals.find((signal) => signal.label === 'Audience')
+        const contentSignal = confidenceSignals.find((signal) => signal.label === 'Content')
+        const windowSignal = confidenceSignals.find((signal) => signal.label === 'Window')
+
+        if (mailboxSignal && (mailboxSignal.value === 'Missing' || mailboxSignal.value === 'Blocked')) {
+          summary.mailboxBlocked += 1
+        }
+        if (audienceSignal && (audienceSignal.value === 'Empty' || audienceSignal.value === 'Not chosen')) {
+          summary.audienceBlocked += 1
+        }
+        if (contentSignal && (contentSignal.value === 'Missing' || contentSignal.value === 'Incomplete')) {
+          summary.contentBlocked += 1
+        }
+        if (
+          operatorState.reasonLabel === 'Waiting for send window'
+          || (windowSignal && windowSignal.value === 'Waiting' && operatorState.label === 'Blocked')
+        ) {
+          summary.windowWaiting += 1
+        }
+      }
+    }
+
+    return summary
+  })()
+
   const getSequenceFixBlockerFocusTarget = (
     sequence: SequenceCampaign,
     reasonLabel: string
@@ -4902,6 +4963,107 @@ const SequencesTab: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
+
+      <Card mb={6} data-testid="sequences-live-ops-summary-header">
+        <CardBody py={4}>
+          <VStack align="stretch" spacing={3}>
+            <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} flexWrap="wrap">
+              <Box>
+                <Text fontSize="sm" fontWeight="semibold">Live ops snapshot</Text>
+                <Text fontSize="xs" color="gray.600">
+                  Current sequence fleet counts from the mounted row state. Click a summary to filter the table.
+                </Text>
+              </Box>
+              <Badge colorScheme="blue" variant="subtle">
+                {filteredSequences.length.toLocaleString()} in current scope
+              </Badge>
+            </Flex>
+
+            <SimpleGrid columns={{ base: 2, md: 4 }} spacing={3}>
+              <Button
+                variant={operatorQuickFilter === 'ready' ? 'solid' : 'outline'}
+                colorScheme="green"
+                justifyContent="flex-start"
+                h="auto"
+                py={3}
+                px={4}
+                data-testid="sequences-summary-ready-now"
+                onClick={() => handleOperatorQuickFilterChange('ready')}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="2xl" fontWeight="bold" lineHeight="shorter">{liveOpsSummary.ready}</Text>
+                  <Text fontSize="sm">Ready now</Text>
+                </VStack>
+              </Button>
+              <Button
+                variant={operatorQuickFilter === 'needs_attention' ? 'solid' : 'outline'}
+                colorScheme="orange"
+                justifyContent="flex-start"
+                h="auto"
+                py={3}
+                px={4}
+                data-testid="sequences-summary-needs-attention"
+                onClick={() => handleOperatorQuickFilterChange('needs_attention')}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="2xl" fontWeight="bold" lineHeight="shorter">{liveOpsSummary.needsAttention}</Text>
+                  <Text fontSize="sm">Needs attention</Text>
+                </VStack>
+              </Button>
+              <Button
+                variant={operatorQuickFilter === 'running' ? 'solid' : 'outline'}
+                colorScheme="blue"
+                justifyContent="flex-start"
+                h="auto"
+                py={3}
+                px={4}
+                data-testid="sequences-summary-running"
+                onClick={() => handleOperatorQuickFilterChange('running')}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="2xl" fontWeight="bold" lineHeight="shorter">{liveOpsSummary.running}</Text>
+                  <Text fontSize="sm">Running</Text>
+                </VStack>
+              </Button>
+              <Button
+                variant={operatorQuickFilter === 'archived' ? 'solid' : 'outline'}
+                colorScheme="purple"
+                justifyContent="flex-start"
+                h="auto"
+                py={3}
+                px={4}
+                data-testid="sequences-summary-archived"
+                onClick={() => handleOperatorQuickFilterChange('archived')}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontSize="2xl" fontWeight="bold" lineHeight="shorter">{liveOpsSummary.archived}</Text>
+                  <Text fontSize="sm">Archived</Text>
+                </VStack>
+              </Button>
+            </SimpleGrid>
+
+            {(liveOpsSummary.mailboxBlocked > 0
+              || liveOpsSummary.audienceBlocked > 0
+              || liveOpsSummary.contentBlocked > 0
+              || liveOpsSummary.windowWaiting > 0) ? (
+              <HStack spacing={2} flexWrap="wrap" data-testid="sequences-live-ops-summary-breakdown">
+                {liveOpsSummary.mailboxBlocked > 0 ? (
+                  <Badge colorScheme="red" variant="subtle">Mailbox blocker: {liveOpsSummary.mailboxBlocked}</Badge>
+                ) : null}
+                {liveOpsSummary.audienceBlocked > 0 ? (
+                  <Badge colorScheme="red" variant="subtle">Audience blocker: {liveOpsSummary.audienceBlocked}</Badge>
+                ) : null}
+                {liveOpsSummary.contentBlocked > 0 ? (
+                  <Badge colorScheme="red" variant="subtle">Content blocker: {liveOpsSummary.contentBlocked}</Badge>
+                ) : null}
+                {liveOpsSummary.windowWaiting > 0 ? (
+                  <Badge colorScheme="orange" variant="subtle">Waiting for send window: {liveOpsSummary.windowWaiting}</Badge>
+                ) : null}
+              </HStack>
+            ) : null}
+          </VStack>
+        </CardBody>
+      </Card>
 
       <Collapse in={isDiagnosticsOpen} animateOpacity>
       <Card mb={6}>
