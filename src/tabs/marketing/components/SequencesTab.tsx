@@ -137,6 +137,8 @@ type SequenceCampaign = {
   } | null
   metrics?: CampaignMetrics
   steps?: SequenceStep[]
+  isArchived?: boolean
+  archivedAt?: string | null
 }
 
 type SequenceDeleteErrorDetails = {
@@ -302,6 +304,7 @@ const SequencesTab: React.FC = () => {
   const [senderIdentities, setSenderIdentities] = useState<EmailIdentity[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [showArchived, setShowArchived] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null)
@@ -392,6 +395,7 @@ const SequencesTab: React.FC = () => {
   } = useDisclosure({ defaultIsOpen: false })
   const { isOpen: isDiagnosticsOpen, onOpen: onDiagnosticsOpen, onClose: onDiagnosticsClose } = useDisclosure({ defaultIsOpen: false })
   const [deletingSequenceId, setDeletingSequenceId] = useState<string | null>(null)
+  const [archiveActionSequenceId, setArchiveActionSequenceId] = useState<string | null>(null)
   const [sequenceDeleteBlockers, setSequenceDeleteBlockers] = useState<{
     sequence: SequenceCampaign
     details: SequenceDeleteErrorDetails
@@ -419,18 +423,18 @@ const SequencesTab: React.FC = () => {
   const [queueOperatorActionId, setQueueOperatorActionId] = useState<string | null>(null)
   const [queueTickLoading, setQueueTickLoading] = useState(false)
 
-  const resetSequenceStepAiState = () => {
+  const resetSequenceStepAiState = useCallback(() => {
     setSequenceStepAiLoading({})
     setSequenceStepAiError({})
     setSequenceStepAiSuggestion({})
     setSequenceStepOriginals({})
-  }
+  }, [])
 
-  const handleCloseSequenceEditor = () => {
+  const handleCloseSequenceEditor = useCallback(() => {
     resetSequenceStepAiState()
     setSequenceValidationVisible(false)
     onClose()
-  }
+  }, [onClose, resetSequenceStepAiState])
 
   // Send Queue Preview (dry-run, read-only)
   type SendQueuePreviewItem = {
@@ -2562,6 +2566,7 @@ const SequencesTab: React.FC = () => {
     setLoading(true)
     setError(null)
     const headers = customerHeaders!
+    const sequencePath = showArchived ? '/api/sequences?includeArchived=true' : '/api/sequences'
     const [sequencesRes, campaignsRes] = await Promise.all([
       api.get<Array<{
         id: string
@@ -2570,9 +2575,11 @@ const SequencesTab: React.FC = () => {
         stepCount: number
         senderIdentityId?: string
         senderIdentity?: { id: string; emailAddress: string; displayName?: string } | null
+        isArchived?: boolean
+        archivedAt?: string | null
         createdAt: string
         updatedAt: string
-      }>>('/api/sequences', { headers }),
+      }>>(sequencePath, { headers }),
       api.get<Array<{
         id: string
         name: string
@@ -2616,6 +2623,8 @@ const SequencesTab: React.FC = () => {
           updatedAt: campaign.updatedAt ?? seq.updatedAt,
           senderIdentity: campaign.senderIdentity ?? seq.senderIdentity ?? null,
           metrics: campaign.metrics,
+          isArchived: seq.isArchived ?? false,
+          archivedAt: seq.archivedAt ?? null,
         }
       }
       return {
@@ -2631,12 +2640,14 @@ const SequencesTab: React.FC = () => {
         updatedAt: seq.updatedAt,
         senderIdentity: seq.senderIdentity ?? null,
         metrics: undefined,
+        isArchived: seq.isArchived ?? false,
+        archivedAt: seq.archivedAt ?? null,
       }
     })
     setSequences(rows)
     setLoading(false)
     return rows
-  }, [selectedCustomerId, customerHeaders])
+  }, [selectedCustomerId, customerHeaders, showArchived])
 
   const loadSnapshots = useCallback(async () => {
     const results = await Promise.all(
@@ -4138,6 +4149,94 @@ const SequencesTab: React.FC = () => {
     if (!sequenceDeleteBlockers) return
     onDeleteBlockedClose()
     await handleEditSequence(sequenceDeleteBlockers.sequence)
+  }
+
+  const handleSetSequenceArchivedState = useCallback(async (
+    sequence: SequenceCampaign,
+    shouldArchive: boolean,
+    options?: {
+      closeDeleteBlockedModal?: boolean
+      successTitle?: string
+      successDescription?: string
+    }
+  ) => {
+    if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return false
+    if (archiveActionSequenceId) return false
+    setArchiveActionSequenceId(sequence.id)
+    try {
+      const endpoint = shouldArchive ? 'archive' : 'unarchive'
+      const actionLabel = shouldArchive ? 'archive' : 'unarchive'
+      const response = await api.post(
+        `/api/sequences/${sequence.id}/${endpoint}`,
+        {},
+        { headers: { 'X-Customer-Id': selectedCustomerId } }
+      )
+      if (response.error) {
+        toast({
+          title: `Failed to ${actionLabel} sequence`,
+          description: response.error,
+          status: 'error',
+          duration: 5000,
+        })
+        return false
+      }
+
+      await loadData()
+
+      if (options?.closeDeleteBlockedModal) {
+        setSequenceDeleteBlockers(null)
+        onDeleteBlockedClose()
+      }
+
+      if (shouldArchive && editingSequence?.id === sequence.id && !showArchived) {
+        handleCloseSequenceEditor()
+        setEditingSequence(null)
+      }
+
+      toast({
+        title: options?.successTitle ?? (shouldArchive ? 'Sequence archived' : 'Sequence unarchived'),
+        description: options?.successDescription
+          ?? (shouldArchive
+            ? 'The sequence is preserved for historical reporting and hidden from the default list.'
+            : 'The sequence is back in the active list.'),
+        status: 'success',
+        duration: 4000,
+      })
+      return true
+    } catch (archiveError: any) {
+      toast({
+        title: `Failed to ${shouldArchive ? 'archive' : 'unarchive'} sequence`,
+        description: archiveError?.message || 'Unexpected error',
+        status: 'error',
+        duration: 5000,
+      })
+      return false
+    } finally {
+      setArchiveActionSequenceId((current) => (current === sequence.id ? null : current))
+    }
+  }, [
+    archiveActionSequenceId,
+    editingSequence?.id,
+    handleCloseSequenceEditor,
+    loadData,
+    onDeleteBlockedClose,
+    selectedCustomerId,
+    showArchived,
+    toast,
+  ])
+
+  const canArchiveBlockedSequence = Boolean(
+    sequenceDeleteBlockers?.details.summary?.historicalCampaigns
+    || sequenceDeleteBlockers?.details.campaigns?.some((campaign) => campaign.blockerReason === 'historical_campaign')
+  )
+
+  const handleArchiveBlockedSequence = async () => {
+    if (!sequenceDeleteBlockers) return
+    await handleSetSequenceArchivedState(sequenceDeleteBlockers.sequence, true, {
+      closeDeleteBlockedModal: true,
+      successTitle: 'Sequence archived instead',
+      successDescription: 'The sequence was archived and preserved for historical campaign reporting.',
+    })
   }
 
   const getStatusColor = (status: string) => {
@@ -6701,6 +6800,16 @@ const SequencesTab: React.FC = () => {
           <option value="paused">Paused</option>
         </Select>
 
+        <Checkbox
+          id="sequences-show-archived-toggle"
+          data-testid="sequences-show-archived-toggle"
+          isChecked={showArchived}
+          onChange={(e) => setShowArchived(e.target.checked)}
+          colorScheme="purple"
+        >
+          Show archived
+        </Checkbox>
+
         <Spacer />
       </Flex>
 
@@ -6715,7 +6824,7 @@ const SequencesTab: React.FC = () => {
                   <Th>Live audience</Th>
                   <Th>Test audience</Th>
                   <Th>Latest send result</Th>
-                  <Th w="220px">Next operator action</Th>
+                  <Th w="320px">Next operator action</Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -6729,10 +6838,20 @@ const SequencesTab: React.FC = () => {
                     <Tr key={sequence.id}>
                       <Td>
                         <VStack align="start" spacing={1}>
-                          <Text fontWeight="semibold">{sequence.name}</Text>
+                          <HStack spacing={2}>
+                            <Text fontWeight="semibold">{sequence.name}</Text>
+                            {sequence.isArchived ? (
+                              <Badge colorScheme="purple" variant="subtle">Archived</Badge>
+                            ) : null}
+                          </HStack>
                           <Text fontSize="sm" color="gray.600">
                             {sequence.description || 'No description'}
                           </Text>
+                          {sequence.isArchived && sequence.archivedAt ? (
+                            <Text fontSize="xs" color="gray.500">
+                              Archived on {new Date(sequence.archivedAt).toLocaleDateString()}
+                            </Text>
+                          ) : null}
                         </VStack>
                       </Td>
                       <Td>
@@ -6770,6 +6889,19 @@ const SequencesTab: React.FC = () => {
                         <HStack justify="space-between" spacing={2}>
                           <Button size="sm" colorScheme="blue" variant="outline" onClick={() => handleEditSequence(sequence)}>
                             {nextActionLabel}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={sequence.isArchived ? 'outline' : 'solid'}
+                            colorScheme={sequence.isArchived ? 'purple' : 'gray'}
+                            data-testid={sequence.isArchived ? 'sequence-row-unarchive-button' : 'sequence-row-archive-button'}
+                            isLoading={archiveActionSequenceId === sequence.id}
+                            loadingText={sequence.isArchived ? 'Unarchiving…' : 'Archiving…'}
+                            onClick={() => {
+                              void handleSetSequenceArchivedState(sequence, !sequence.isArchived)
+                            }}
+                          >
+                            {sequence.isArchived ? 'Unarchive' : 'Archive'}
                           </Button>
                           <Menu>
                             <MenuButton
@@ -8216,6 +8348,19 @@ const SequencesTab: React.FC = () => {
                 </Box>
               </Alert>
 
+              {canArchiveBlockedSequence ? (
+                <Alert status="info" variant="subtle">
+                  <AlertIcon />
+                  <Box>
+                    <AlertTitle>Archive this sequence instead</AlertTitle>
+                    <AlertDescription>
+                      This sequence has historical campaign data and cannot be deleted. Archive it instead, then use
+                      {' '}Show archived to view or restore it later.
+                    </AlertDescription>
+                  </Box>
+                </Alert>
+              ) : null}
+
               {(sequenceDeleteBlockers?.details.campaigns || []).map((campaign) => (
                 <Box key={campaign.id} borderWidth="1px" borderRadius="md" px={4} py={3}>
                   <Flex justify="space-between" align="center" gap={3} mb={1}>
@@ -8242,6 +8387,19 @@ const SequencesTab: React.FC = () => {
               ) : null}
 
               <Flex justify="flex-end" gap={3}>
+                {canArchiveBlockedSequence ? (
+                  <Button
+                    colorScheme="purple"
+                    data-testid="sequence-delete-blocked-archive-button"
+                    onClick={() => {
+                      void handleArchiveBlockedSequence()
+                    }}
+                    isLoading={archiveActionSequenceId === sequenceDeleteBlockers?.sequence.id}
+                    loadingText="Archiving…"
+                  >
+                    Archive sequence
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   onClick={handleOpenDeleteBlockedSequence}
