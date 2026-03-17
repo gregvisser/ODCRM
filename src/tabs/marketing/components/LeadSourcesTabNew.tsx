@@ -66,7 +66,7 @@ import {
   type LeadSourceType,
   type LeadSourceBatch,
 } from '../../../utils/leadSourcesApi'
-import { visibleColumns, normKey } from '../../../utils/visibleColumns'
+import { normKey } from '../../../utils/visibleColumns'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const SOURCE_LABELS: Record<LeadSourceType, string> = {
@@ -76,6 +76,21 @@ const SOURCE_LABELS: Record<LeadSourceType, string> = {
   BLACKBOOK: 'Blackbook',
 }
 const POLL_INTERVAL_MS = 45 * 1000
+const CONTACT_COLUMN_PRIORITY = [
+  'firstname',
+  'lastname',
+  'email',
+  'companyname',
+  'jobtitle',
+  'client',
+  'campaigns',
+  'mobile',
+  'directphone',
+  'officephone',
+  'linkedinurl',
+  'country',
+  'city',
+]
 
 const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? v : [])
 
@@ -125,14 +140,26 @@ function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>
   }
 }
 
+function getPreferredContactsColumns(normalizedColumns: string[]): string[] {
+  const priority = CONTACT_COLUMN_PRIORITY.filter((column) => normalizedColumns.includes(column))
+  const remaining = normalizedColumns.filter((column) => !priority.includes(column))
+  return [...priority, ...remaining]
+}
+
 function SourcesOverview({
   sources,
   onViewBatches,
   onOpenConnect,
+  onPoll,
+  pollingSourceType,
+  customerId,
 }: {
   sources: Awaited<ReturnType<typeof getLeadSources>>['sources']
   onViewBatches: (sourceType: LeadSourceType) => void
   onOpenConnect: (sourceType: LeadSourceType) => void
+  onPoll: (sourceType: LeadSourceType) => void
+  pollingSourceType: LeadSourceType | null
+  customerId: string
 }) {
   return (
     <SimpleGrid id="lead-sources-overview-grid" data-testid="lead-sources-overview-grid" columns={{ base: 1, md: 2, lg: 4 }} spacing={4}>
@@ -172,7 +199,40 @@ function SourcesOverview({
                 >
                   Review batches
                 </Button>
-                <Button id="lead-sources-connect-btn" data-testid="lead-sources-connect-btn" size="sm" leftIcon={<AddIcon />} variant="outline" onClick={() => onOpenConnect(sourceType)}>
+                {src?.connected ? (
+                  <Button
+                    id="lead-sources-poll-now-btn"
+                    data-testid="lead-sources-poll-now-btn"
+                    size="sm"
+                    leftIcon={<RepeatIcon />}
+                    variant="outline"
+                    isLoading={pollingSourceType === sourceType}
+                    onClick={() => onPoll(sourceType)}
+                  >
+                    Refresh from sheet
+                  </Button>
+                ) : null}
+                {src?.connected ? (
+                  <Link
+                    id="lead-sources-open-sheet-link"
+                    data-testid="lead-sources-open-sheet-link"
+                    href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
+                    isExternal
+                    _hover={{ textDecoration: 'none' }}
+                  >
+                    <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="ghost">
+                      Open linked sheet
+                    </Button>
+                  </Link>
+                ) : null}
+                <Button
+                  id="lead-sources-connect-btn"
+                  data-testid="lead-sources-connect-btn"
+                  size="sm"
+                  leftIcon={<AddIcon />}
+                  variant="ghost"
+                  onClick={() => onOpenConnect(sourceType)}
+                >
                   {src?.connected ? 'Replace source' : 'Connect source'}
                 </Button>
               </VStack>
@@ -191,10 +251,13 @@ function BatchesBlock({
   sourceLabel,
   activeBatchKey,
   batchDate,
+  openSheetUrl,
+  refreshingSource,
   onBatchDateChange,
   onBack,
   onViewContacts,
   onUseInSequence,
+  onRefreshSource,
 }: {
   batches: LeadSourceBatch[]
   batchesLoading: boolean
@@ -202,22 +265,46 @@ function BatchesBlock({
   sourceLabel: string
   activeBatchKey?: string | null
   batchDate: string
+  openSheetUrl: string
+  refreshingSource: boolean
   onBatchDateChange: (date: string) => void
   onBack: () => void
   onViewContacts: (batchKey: string) => void
   onUseInSequence: (batch: LeadSourceBatch) => void
+  onRefreshSource: () => void
 }) {
   const safeBatches = asArray<LeadSourceBatch>(batches)
+  const [searchTerm, setSearchTerm] = useState('')
+  const filteredBatches = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase()
+    if (!query) return safeBatches
+    return safeBatches.filter((batch) =>
+      [batch.client, batch.jobTitle, batch.batchKey].some((value) =>
+        String(value ?? '').toLowerCase().includes(query)
+      )
+    )
+  }, [safeBatches, searchTerm])
   return (
     <Box mt={6} id="lead-sources-batches-panel" data-testid="lead-sources-batches-panel">
-      <Flex justify="space-between" align="center" mb={3}>
+      <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} wrap="wrap" mb={3}>
         <Box>
           <Heading size="md">Lead batches — {sourceLabel}</Heading>
           <Text fontSize="sm" color="gray.600" mt={1}>
-            Review the available batches for this source, then open contacts or pass the right batch into Sequences.
+            Refresh here, review the newest matching batches, then open contacts or pass the right batch into Sequences.
           </Text>
         </Box>
-        <HStack>
+        <HStack align="end" spacing={3} wrap="wrap">
+          <FormControl width={{ base: '100%', md: '240px' }}>
+            <FormLabel fontSize="sm">Filter batches</FormLabel>
+            <Input
+              id="lead-sources-batches-filter-input"
+              data-testid="lead-sources-batches-filter-input"
+              size="sm"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Filter client, job title, or batch key"
+            />
+          </FormControl>
           <FormControl width="auto">
             <FormLabel fontSize="sm">Date</FormLabel>
             <Input
@@ -228,6 +315,14 @@ function BatchesBlock({
               maxW="160px"
             />
           </FormControl>
+          <Button size="sm" variant="outline" leftIcon={<RepeatIcon />} onClick={onRefreshSource} isLoading={refreshingSource}>
+            Refresh from sheet
+          </Button>
+          <Link href={openSheetUrl} isExternal _hover={{ textDecoration: 'none' }}>
+            <Button size="sm" variant="ghost" leftIcon={<ExternalLinkIcon />}>
+              Open linked sheet
+            </Button>
+          </Link>
           <Button size="sm" onClick={onBack}>
             Back
           </Button>
@@ -242,10 +337,14 @@ function BatchesBlock({
               No batches were found for that date, so the most recent batches are shown instead.
             </Text>
           )}
+          <Text fontSize="sm" color="gray.600" mb={2}>
+            Showing {filteredBatches.length} of {safeBatches.length} batch{safeBatches.length === 1 ? '' : 'es'}, newest batch first.
+          </Text>
           <Box id="lead-sources-batches-table" data-testid="lead-sources-batches-table" overflowX="auto" borderWidth="1px" borderRadius="md">
             <Table size="sm">
               <Thead>
                 <Tr>
+                  <Th>Batch key</Th>
                   <Th>Client</Th>
                   <Th>Job Title</Th>
                   <Th isNumeric>Count</Th>
@@ -254,27 +353,36 @@ function BatchesBlock({
                 </Tr>
               </Thead>
               <Tbody>
-              {safeBatches.length === 0 ? (
+              {filteredBatches.length === 0 ? (
                 <Tr>
-                  <Td colSpan={5} color="gray.500">
+                  <Td colSpan={6} color="gray.500">
                     <VStack align="stretch" spacing={2} py={2}>
                       <Text>
-                        No batches were found for this date. Try yesterday&apos;s date, or use the setup section below to refresh the source.
+                        {safeBatches.length === 0
+                          ? "No batches were found for this date. Try yesterday's date, or refresh the source from the sheet."
+                          : 'No batches match that filter.'}
                       </Text>
                       <Button
                         size="sm"
                         variant="outline"
                         width="fit-content"
-                        onClick={() => onBatchDateChange(isoYesterday())}
+                        onClick={() => {
+                          if (safeBatches.length === 0) {
+                            onBatchDateChange(isoYesterday())
+                            return
+                          }
+                          setSearchTerm('')
+                        }}
                       >
-                        Set date to yesterday
+                        {safeBatches.length === 0 ? 'Set date to yesterday' : 'Clear filter'}
                       </Button>
                     </VStack>
                   </Td>
                 </Tr>
               ) : (
-                safeBatches.map((b) => (
+                filteredBatches.map((b) => (
                   <Tr key={b.batchKey}>
+                    <Td fontFamily="mono" fontSize="xs">{b.batchKey}</Td>
                     <Td>{b.client ?? '(none)'}</Td>
                     <Td>{b.jobTitle ?? '(none)'}</Td>
                     <Td isNumeric>{b.count ?? 0}</Td>
@@ -314,7 +422,10 @@ function ContactsBlock({
   contactsLoading,
   contactsPage,
   contactsPageSize,
+  contactsSearchQuery,
   sourceLabel,
+  batchIdentity,
+  onContactsSearchChange,
   onPrevPage,
   onNextPage,
   onBack,
@@ -326,7 +437,10 @@ function ContactsBlock({
   contactsLoading: boolean
   contactsPage: number
   contactsPageSize: number
+  contactsSearchQuery: string
   sourceLabel: string
+  batchIdentity: string
+  onContactsSearchChange: (value: string) => void
   onPrevPage: () => void
   onNextPage: () => void
   onBack: () => void
@@ -343,19 +457,22 @@ function ContactsBlock({
     for (const [k, v] of Object.entries(row ?? {})) out[normKey(k)] = typeof v === 'string' ? v : String(v ?? '')
     return out
   })
-  const recommendedCols = normalizedContacts.length
-    ? visibleColumns(normalizedColumns, normalizedContacts)
-    : normalizedColumns
-  const defaultCols = recommendedCols.length ? recommendedCols : normalizedColumns
-  const [selectedCols, setSelectedCols] = useState<string[]>(defaultCols)
+  const preferredCols = useMemo(() => {
+    const ordered = getPreferredContactsColumns(normalizedColumns)
+    return ordered.length > 0 ? ordered : normalizedColumns
+  }, [normalizedColumns])
+  const [selectedCols, setSelectedCols] = useState<string[]>(preferredCols)
   const [showColumnChooser, setShowColumnChooser] = useState(false)
   useEffect(() => {
     setSelectedCols((current) => {
       const safeCurrent = current.filter((col) => normalizedColumns.includes(col))
-      return safeCurrent.length > 0 ? safeCurrent : defaultCols
+      return safeCurrent.length > 0 ? safeCurrent : preferredCols
     })
-  }, [defaultCols, normalizedColumns])
-  const cols = selectedCols.length ? selectedCols : defaultCols
+  }, [normalizedColumns, preferredCols])
+  useEffect(() => {
+    setShowColumnChooser(false)
+  }, [batchIdentity])
+  const cols = selectedCols.length ? selectedCols : preferredCols
   const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
   return (
     <Card id="lead-sources-contacts-panel" data-testid="lead-sources-contacts-panel" overflow="visible">
@@ -366,7 +483,7 @@ function ContactsBlock({
             <Text fontSize="sm" color="gray.600" mt={1}>
               {contactsConfigScope === 'all_accounts'
                 ? 'Using the shared source sheet for accounts that do not have their own source.'
-                : "Using this client's connected source sheet."}
+                : "Using this client's connected source sheet."} Page 1 shows the newest added rows first.
             </Text>
           </Box>
           <HStack>
@@ -384,6 +501,22 @@ function ContactsBlock({
           <Spinner size="sm" />
         ) : (
           <>
+            <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} wrap="wrap" mb={4}>
+              <FormControl maxW={{ base: '100%', md: '360px' }}>
+                <FormLabel fontSize="sm">Search this batch</FormLabel>
+                <Input
+                  id="lead-sources-contacts-search-input"
+                  data-testid="lead-sources-contacts-search-input"
+                  size="sm"
+                  value={contactsSearchQuery}
+                  onChange={(e) => onContactsSearchChange(e.target.value)}
+                  placeholder="Search all loaded rows in this batch"
+                />
+              </FormControl>
+              <Text fontSize="sm" color="gray.600">
+                Showing {contacts.length} row{contacts.length === 1 ? '' : 's'} on this page, {contactsTotal} match{contactsTotal === 1 ? '' : 'es'} overall.
+              </Text>
+            </Flex>
             {showColumnChooser && (
               <Box borderWidth="1px" borderRadius="md" p={3} mb={4}>
                 <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap" mb={3}>
@@ -396,7 +529,7 @@ function ContactsBlock({
                     </Text>
                   </Box>
                   <HStack>
-                    <Button size="xs" variant="ghost" onClick={() => setSelectedCols(defaultCols)}>
+                    <Button size="xs" variant="ghost" onClick={() => setSelectedCols(preferredCols)}>
                       Recommended
                     </Button>
                     <Button size="xs" variant="ghost" onClick={() => setSelectedCols(normalizedColumns)}>
@@ -441,10 +574,20 @@ function ContactsBlock({
               _dark={{ bg: 'gray.800' }}
             >
               <Table size="sm" minW="1100px">
-                <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
+                <Thead>
                   <Tr>
                     {cols.map((col) => (
-                      <Th key={col} whiteSpace="nowrap" minW="120px">
+                      <Th
+                        key={col}
+                        whiteSpace="nowrap"
+                        minW="120px"
+                        position="sticky"
+                        top={0}
+                        zIndex={2}
+                        bg="gray.50"
+                        _dark={{ bg: 'gray.800' }}
+                        boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                      >
                         {displayLabel(col)}
                       </Th>
                     ))}
@@ -515,12 +658,14 @@ export default function LeadSourcesTabNew({
   const [contactsTotal, setContactsTotal] = useState(0)
   const [contactsPageSize] = useState(50)
   const [contactsLoading, setContactsLoading] = useState(false)
+  const [contactsSearchQuery, setContactsSearchQuery] = useState('')
   const [connectSource, setConnectSource] = useState<LeadSourceType | null>(null)
   const [connectUrl, setConnectUrl] = useState('')
   const [connectName, setConnectName] = useState('')
   const [connectSubmitting, setConnectSubmitting] = useState(false)
   const [connectUrlError, setConnectUrlError] = useState<string | null>(null)
   const [connectApplyToAllAccounts, setConnectApplyToAllAccounts] = useState(false)
+  const [pollingSourceType, setPollingSourceType] = useState<LeadSourceType | null>(null)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
 
@@ -637,7 +782,8 @@ export default function LeadSourcesTabNew({
           contactsBatchKey.sourceType,
           contactsBatchKey.batchKey,
           contactsPage,
-          contactsPageSize
+          contactsPageSize,
+          contactsSearchQuery
         )
         if (import.meta.env.DEV) {
           console.log('[LeadSources] contacts columns:', data?.columns)
@@ -659,12 +805,16 @@ export default function LeadSourcesTabNew({
         setContactsLoading(false)
       }
     },
-    [customerId, contactsBatchKey, contactsPage, contactsPageSize]
+    [customerId, contactsBatchKey, contactsPage, contactsPageSize, contactsSearchQuery]
   )
 
   useEffect(() => {
     if (contactsBatchKey) loadContacts()
   }, [contactsBatchKey, contactsPage, loadContacts])
+
+  useEffect(() => {
+    setContactsPage(1)
+  }, [contactsSearchQuery])
 
   // Poll contacts every 45s when viewing a batch; keep previous data while refreshing (no flicker)
   useEffect(() => {
@@ -678,9 +828,11 @@ export default function LeadSourcesTabNew({
     setViewBatchesSource(null)
     setContactsBatchKey(null)
     setContactsConfigScope(null)
+    setContactsSearchQuery('')
   }
 
   const handlePoll = async (sourceType: LeadSourceType) => {
+    setPollingSourceType(sourceType)
     try {
       const result = await pollLeadSource(customerId, sourceType)
       toast({ title: 'Poll complete', description: `${result.totalRows} rows, ${result.newRowsDetected} new`, status: 'success', duration: 3000 })
@@ -690,9 +842,14 @@ export default function LeadSourcesTabNew({
         const list = Array.isArray(data) ? data : (data?.batches ?? [])
         setBatches(list)
         setBatchesFallback(!!(data && 'batchesFallback' in data && data.batchesFallback))
+        if (contactsBatchKey?.sourceType === sourceType) {
+          await loadContacts({ keepPrevious: true })
+        }
       }
     } catch (e) {
       toast({ title: 'Poll failed', description: e instanceof Error ? e.message : 'Error', status: 'error', duration: 5000 })
+    } finally {
+      setPollingSourceType(null)
     }
   }
 
@@ -877,9 +1034,13 @@ export default function LeadSourcesTabNew({
                 </Box>
                 <SourcesOverview
                   sources={sources}
+                  customerId={customerId}
+                  onPoll={handlePoll}
+                  pollingSourceType={pollingSourceType}
                   onViewBatches={(sourceType) => {
                     setViewBatchesSource(sourceType)
                     setContactsBatchKey(null)
+                    setContactsSearchQuery('')
                     setBatchDate((prev) => normalizeBatchDate(prev))
                     setBatches([])
                     setBatchesFallback(false)
@@ -894,10 +1055,14 @@ export default function LeadSourcesTabNew({
                     batchesFallback={batchesFallback}
                     activeBatchKey={contactsBatchKey?.batchKey ?? null}
                     batchDate={batchDate}
+                    openSheetUrl={buildOpenSheetUrl(API_BASE, viewBatchesSource, customerId)}
+                    refreshingSource={pollingSourceType === viewBatchesSource}
                     onBatchDateChange={(next) => setBatchDate(next)}
+                    onRefreshSource={() => handlePoll(viewBatchesSource)}
                     onBack={() => {
                       setViewBatchesSource(null)
                       setContactsBatchKey(null)
+                      setContactsSearchQuery('')
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
@@ -905,6 +1070,7 @@ export default function LeadSourcesTabNew({
                       setContactsPage(1)
                     }}
                     onViewContacts={(batchKey) => {
+                      setContactsSearchQuery('')
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
@@ -917,6 +1083,8 @@ export default function LeadSourcesTabNew({
                 ) : null}
                 {contactsBatchKey ? (
                   <ContactsBlock
+                    key={`${contactsBatchKey.sourceType}:${contactsBatchKey.batchKey}`}
+                    batchIdentity={`${contactsBatchKey.sourceType}:${contactsBatchKey.batchKey}`}
                     sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
                     contacts={contacts}
                     contactsColumns={contactsColumns}
@@ -925,10 +1093,13 @@ export default function LeadSourcesTabNew({
                     contactsLoading={contactsLoading}
                     contactsPage={contactsPage}
                     contactsPageSize={contactsPageSize}
+                    contactsSearchQuery={contactsSearchQuery}
+                    onContactsSearchChange={(value) => setContactsSearchQuery(value)}
                     onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
                     onNextPage={() => setContactsPage((p) => p + 1)}
                     onBack={() => {
                       setContactsBatchKey(null)
+                      setContactsSearchQuery('')
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
@@ -941,82 +1112,35 @@ export default function LeadSourcesTabNew({
                   <CardHeader pb={2}>
                     <Heading size="md">{t('marketing.sourceSetupTroubleshooting')}</Heading>
                     <Text fontSize="sm" color="gray.600" mt={1}>
-                      {t('marketing.sourceSetupTroubleshootingDescription')}
+                      Use the source cards above to refresh, open, review, or reconnect a sheet without switching to a second operator flow.
                     </Text>
                   </CardHeader>
                   <CardBody pt={0}>
                     <Alert id="lead-sources-sheet-truth-banner" data-testid="lead-sources-sheet-truth-banner" status="info" mb={4}>
                       <AlertIcon />
                       <AlertDescription fontSize="sm">
-                        The linked Google Sheet remains the source of truth for this tab. Source setup and refresh controls live here so the main view can stay focused on status and batch choice.
+                        The linked Google Sheet remains the source of truth for this tab. Shared source inheritance still applies exactly as before; the main source cards now carry the day-to-day operator actions.
                       </AlertDescription>
                     </Alert>
-                    <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} spacing={4}>
-                      {(['COGNISM', 'APOLLO', 'SOCIAL', 'BLACKBOOK'] as const).map((sourceType) => {
-                        const src = sources.find((source) => source.sourceType === sourceType)
-                        const connected = !!src?.connected
-                        return (
-                          <Box key={sourceType} borderWidth="1px" borderRadius="md" p={4}>
-                            <VStack align="stretch" spacing={3}>
-                              <Box>
-                                <HStack justify="space-between" align="start" spacing={3}>
-                                  <Heading size="sm">{src?.displayName ?? SOURCE_LABELS[sourceType]}</Heading>
-                                  <Badge colorScheme={connected ? 'green' : 'gray'}>
-                                    {connected ? 'Connected' : 'Not connected'}
-                                  </Badge>
-                                </HStack>
-                                <Text fontSize="sm" color="gray.600" mt={2}>
-                                  {src?.usingGlobalConfig
-                                    ? 'This source currently uses a shared sheet.'
-                                    : connected
-                                      ? 'This client has its own connected source sheet.'
-                                      : 'No source sheet is connected yet.'}
-                                </Text>
-                                <Text fontSize="xs" color="gray.500" mt={2}>
-                                  {src?.lastFetchAt
-                                    ? `Last refresh: ${new Date(src.lastFetchAt).toLocaleString()}`
-                                    : 'No refresh recorded yet.'}
-                                </Text>
-                                {src?.lastError ? (
-                                  <Text fontSize="xs" color="red.600" mt={2}>
-                                    Latest issue: {src.lastError}
-                                  </Text>
-                                ) : null}
-                              </Box>
-                              <VStack align="stretch" spacing={2}>
-                                <Button size="sm" variant="outline" leftIcon={<AddIcon />} onClick={() => openConnect(sourceType)}>
-                                  {connected ? 'Replace source' : 'Connect source'}
-                                </Button>
-                                {connected ? (
-                                  <Link
-                                    id="lead-sources-open-sheet-link"
-                                    data-testid="lead-sources-open-sheet-link"
-                                    href={buildOpenSheetUrl(API_BASE, sourceType, customerId)}
-                                    isExternal
-                                    _hover={{ textDecoration: 'none' }}
-                                  >
-                                    <Button size="sm" leftIcon={<ExternalLinkIcon />} width="100%" variant="outline">
-                                      Open linked sheet
-                                    </Button>
-                                  </Link>
-                                ) : null}
-                                {connected ? (
-                                  <Button
-                                    id="lead-sources-poll-now-btn"
-                                    data-testid="lead-sources-poll-now-btn"
-                                    size="sm"
-                                    leftIcon={<RepeatIcon />}
-                                    variant="ghost"
-                                    onClick={() => handlePoll(sourceType)}
-                                  >
-                                    Refresh from sheet
-                                  </Button>
-                                ) : null}
-                              </VStack>
-                            </VStack>
-                          </Box>
-                        )
-                      })}
+                    <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+                      <Box borderWidth="1px" borderRadius="md" p={4}>
+                        <Heading size="sm" mb={2}>Refresh and review</Heading>
+                        <Text fontSize="sm" color="gray.600">
+                          Open a source card, refresh from sheet, and review the latest batches in the same flow.
+                        </Text>
+                      </Box>
+                      <Box borderWidth="1px" borderRadius="md" p={4}>
+                        <Heading size="sm" mb={2}>Reconnect safely</Heading>
+                        <Text fontSize="sm" color="gray.600">
+                          Use Replace source on a card when the linked sheet changes. Shared and client-specific scope behavior is unchanged.
+                        </Text>
+                      </Box>
+                      <Box borderWidth="1px" borderRadius="md" p={4}>
+                        <Heading size="sm" mb={2}>Sheet troubleshooting</Heading>
+                        <Text fontSize="sm" color="gray.600">
+                          If batches or contacts look wrong, open the linked sheet directly from the same source card and verify the latest rows there first.
+                        </Text>
+                      </Box>
                     </SimpleGrid>
                   </CardBody>
                 </Card>
