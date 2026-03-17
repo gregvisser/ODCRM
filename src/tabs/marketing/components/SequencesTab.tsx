@@ -153,7 +153,7 @@ type SequenceDeleteErrorDetails = {
     id: string
     name: string
     status?: string | null
-    blockerReason?: 'running_campaign' | 'historical_campaign' | 'linked_campaign'
+    blockerReason?: 'running_campaign' | 'historical_campaign' | 'linked_campaign' | 'disposable_campaign_cleanup_possible'
   }>
 }
 
@@ -3832,6 +3832,8 @@ const SequencesTab: React.FC = () => {
         return 'This campaign is currently sending, so the sequence must stay attached.'
       case 'historical_campaign':
         return 'This campaign still preserves reporting/history through the sequence link.'
+      case 'disposable_campaign_cleanup_possible':
+        return 'This linked campaign has no meaningful send history and would be safe to clean up if no historical blockers remain.'
       default:
         return 'This campaign is still explicitly linked to the sequence.'
     }
@@ -3862,6 +3864,9 @@ const SequencesTab: React.FC = () => {
       return 'At least one linked campaign is still sending. Pause or finish the live campaign before deleting this sequence.'
     }
     if ((summary?.historicalCampaigns || 0) > 0) {
+      if ((summary?.disposableCampaigns || 0) > 0) {
+        return 'At least one linked campaign still preserves reporting/history. Disposable test wrappers can be cleaned up automatically, but deletion stays blocked while historical campaign history remains.'
+      }
       return 'Completed or paused campaigns keep this sequence attached for historical reporting, so deletion stays blocked.'
     }
     return 'A draft campaign is still linked to this sequence. Remove that campaign link before deleting the sequence.'
