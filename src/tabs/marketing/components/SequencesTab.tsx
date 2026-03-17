@@ -212,6 +212,17 @@ type LinkedListSummary = {
   contactCount: number
 }
 
+type SequenceOperatorStateSummary = {
+  label: 'Ready' | 'Running' | 'Paused' | 'Blocked' | 'Completed' | 'Archived'
+  colorScheme: 'green' | 'blue' | 'orange' | 'red' | 'purple'
+  icon: typeof CheckCircleIcon
+  reasonLabel: string
+  detail: string
+  nextActionLabel: 'Start' | 'Resume' | 'Open' | 'Fix blocker'
+  nextActionColorScheme: 'green' | 'blue' | 'orange' | 'gray'
+  nextActionVariant: 'solid' | 'outline'
+}
+
 type StartPreview = {
   snapshot?: SnapshotOption
   template?: EmailTemplate
@@ -3173,41 +3184,148 @@ const SequencesTab: React.FC = () => {
     }
   }
 
-  const getSequenceRowStateSummary = (sequence: SequenceCampaign) => {
-    const blockedReason = validateStartRequirements(sequence)
-    if (blockedReason) {
+  const getSequenceBlockedReasonSummary = (
+    sequence: SequenceCampaign,
+    blockedReason: string
+  ): Pick<SequenceOperatorStateSummary, 'reasonLabel' | 'detail'> => {
+    if (sequence.isArchived) {
       return {
-        label: 'Blocked',
-        detail: blockedReason,
+        reasonLabel: 'Archived',
+        detail: 'Restore it first if live outreach should use this sequence again.',
       }
     }
-    if (sequence.status === 'paused') {
+    if (!sequence.listId) {
       return {
-        label: 'Paused',
-        detail: 'Resume it before expecting more live sending.',
+        reasonLabel: 'No live recipients',
+        detail: 'Link a live recipient batch before starting this sequence.',
       }
     }
-    if (sequence.status === 'sending' || sequence.status === 'running') {
+    if (senderIdentities.length === 0) {
       return {
-        label: 'Sending',
-        detail: 'The live recipients are already active.',
+        reasonLabel: 'No active mailbox',
+        detail: 'Connect a sending mailbox before this sequence can go live.',
       }
     }
-    if (sequence.status === 'scheduled') {
+    if (!sequence.senderIdentityId) {
       return {
-        label: 'Waiting',
-        detail: 'It will send in the next allowed window.',
+        reasonLabel: 'Choose mailbox',
+        detail: 'Pick the mailbox that should send this sequence.',
       }
     }
-    if (sequence.status === 'sent') {
+    if (templates.length === 0) {
       return {
-        label: 'Completed',
-        detail: 'This sequence has finished its live sends.',
+        reasonLabel: 'No template ready',
+        detail: 'Add at least one template before starting.',
+      }
+    }
+    if (!sequence.sequenceId || !sequence.campaignId) {
+      return {
+        reasonLabel: 'Save changes first',
+        detail: 'Save the sequence so live sending has the latest version.',
+      }
+    }
+    if (snapshotsError || templatesError || sendersError) {
+      return {
+        reasonLabel: 'Loading error',
+        detail: 'Fix the data loading errors before starting live outreach.',
       }
     }
     return {
-      label: 'Ready to start',
-      detail: 'Start live sequence will use the linked live recipients.',
+      reasonLabel: 'Needs setup',
+      detail: blockedReason,
+    }
+  }
+
+  const getSequenceOperatorStateSummary = (sequence: SequenceCampaign): SequenceOperatorStateSummary => {
+    if (sequence.isArchived) {
+      return {
+        label: 'Archived',
+        colorScheme: 'purple',
+        icon: ViewIcon,
+        reasonLabel: 'Archived',
+        detail: 'Hidden from the default list and preserved for reporting.',
+        nextActionLabel: 'Open',
+        nextActionColorScheme: 'gray',
+        nextActionVariant: 'outline',
+      }
+    }
+
+    const blockedReason = validateStartRequirements(sequence)
+    if (blockedReason) {
+      const blocker = getSequenceBlockedReasonSummary(sequence, blockedReason)
+      return {
+        label: 'Blocked',
+        colorScheme: 'red',
+        icon: InfoIcon,
+        reasonLabel: blocker.reasonLabel,
+        detail: blocker.detail,
+        nextActionLabel: 'Fix blocker',
+        nextActionColorScheme: 'orange',
+        nextActionVariant: 'outline',
+      }
+    }
+
+    if (sequence.status === 'paused') {
+      return {
+        label: 'Paused',
+        colorScheme: 'orange',
+        icon: SettingsIcon,
+        reasonLabel: 'Sequence paused',
+        detail: 'Resume it before expecting more live sending.',
+        nextActionLabel: 'Resume',
+        nextActionColorScheme: 'blue',
+        nextActionVariant: 'solid',
+      }
+    }
+
+    if (sequence.status === 'sending' || sequence.status === 'running') {
+      return {
+        label: 'Running',
+        colorScheme: 'blue',
+        icon: EmailIcon,
+        reasonLabel: 'Live send in progress',
+        detail: 'The live recipients are already active.',
+        nextActionLabel: 'Open',
+        nextActionColorScheme: 'gray',
+        nextActionVariant: 'outline',
+      }
+    }
+
+    if (sequence.status === 'scheduled') {
+      return {
+        label: 'Blocked',
+        colorScheme: 'orange',
+        icon: CalendarIcon,
+        reasonLabel: 'Waiting for send window',
+        detail: 'Live recipients are queued and will send in the next allowed window.',
+        nextActionLabel: 'Open',
+        nextActionColorScheme: 'gray',
+        nextActionVariant: 'outline',
+      }
+    }
+
+    if (sequence.status === 'sent') {
+      return {
+        label: 'Completed',
+        colorScheme: 'green',
+        icon: CheckCircleIcon,
+        reasonLabel: 'Completed',
+        detail: 'This sequence has finished its live sends.',
+        nextActionLabel: 'Open',
+        nextActionColorScheme: 'gray',
+        nextActionVariant: 'outline',
+      }
+    }
+
+    return {
+      label: 'Ready',
+      colorScheme: 'green',
+      icon: CheckCircleIcon,
+      reasonLabel: 'Ready to send now',
+      detail: 'Live recipients and mailbox are in place for starting.',
+      nextActionLabel: 'Start',
+      nextActionColorScheme: 'green',
+      nextActionVariant: 'solid',
     }
   }
 
@@ -3247,19 +3365,7 @@ const SequencesTab: React.FC = () => {
   }
 
   const getSequenceNextAction = (sequence: SequenceCampaign) => {
-    if (sequence.status === 'paused') {
-      return 'Review and resume'
-    }
-    if (sequence.status === 'draft') {
-      return 'Review and start'
-    }
-    if (sequence.status === 'scheduled') {
-      return 'View status'
-    }
-    if (sequence.status === 'sending' || sequence.status === 'running') {
-      return 'Monitor results'
-    }
-    return 'Open sequence'
+    return getSequenceOperatorStateSummary(sequence).nextActionLabel
   }
 
   const handleCreateSequence = useCallback(() => {
@@ -4296,28 +4402,6 @@ const SequencesTab: React.FC = () => {
       successTitle: 'Sequence archived instead',
       successDescription: 'The sequence was archived and preserved for historical campaign reporting.',
     })
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'draft': return 'gray'
-      case 'scheduled': return 'blue'
-      case 'sending': return 'yellow'
-      case 'sent': return 'green'
-      case 'paused': return 'orange'
-      default: return 'gray'
-    }
-  }
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'draft': return EditIcon
-      case 'scheduled': return CalendarIcon
-      case 'sending': return EmailIcon
-      case 'sent': return CheckCircleIcon
-      case 'paused': return SettingsIcon
-      default: return TimeIcon
-    }
   }
 
   if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) {
@@ -6861,16 +6945,16 @@ const SequencesTab: React.FC = () => {
               <Thead>
                 <Tr>
                   <Th>Sequence</Th>
-                  <Th>Status</Th>
+                  <Th>Operator state</Th>
                   <Th>Live audience</Th>
                   <Th>Test audience</Th>
-                  <Th>Latest send result</Th>
+                  <Th>Latest result</Th>
                   <Th w="320px">Next operator action</Th>
                 </Tr>
               </Thead>
               <Tbody>
                 {filteredSequences.map((sequence) => {
-                  const rowStateSummary = getSequenceRowStateSummary(sequence)
+                  const rowStateSummary = getSequenceOperatorStateSummary(sequence)
                   const rowLiveAudienceSummary = getSequenceLiveAudienceSummary(sequence)
                   const rowTestAudienceSummary = getSequenceTestAudienceSummary(sequence)
                   const rowLastResultSummary = getSequenceLastResultSummary(sequence)
@@ -6898,11 +6982,14 @@ const SequencesTab: React.FC = () => {
                       <Td>
                         <VStack align="start" spacing={1}>
                           <HStack>
-                            <Icon as={getStatusIcon(sequence.status)} color={`${getStatusColor(sequence.status)}.500`} boxSize={4} />
-                            <Badge colorScheme={getStatusColor(sequence.status)} size="sm">
+                            <Icon as={rowStateSummary.icon} color={`${rowStateSummary.colorScheme}.500`} boxSize={4} />
+                            <Badge colorScheme={rowStateSummary.colorScheme} size="sm">
                               {rowStateSummary.label}
                             </Badge>
                           </HStack>
+                          <Text fontSize="sm" fontWeight="medium">
+                            {rowStateSummary.reasonLabel}
+                          </Text>
                           <Text fontSize="xs" color="gray.600">
                             {rowStateSummary.detail}
                           </Text>
@@ -6928,7 +7015,12 @@ const SequencesTab: React.FC = () => {
                       </Td>
                       <Td>
                         <HStack justify="space-between" spacing={2}>
-                          <Button size="sm" colorScheme="blue" variant="outline" onClick={() => handleEditSequence(sequence)}>
+                          <Button
+                            size="sm"
+                            colorScheme={rowStateSummary.nextActionColorScheme}
+                            variant={rowStateSummary.nextActionVariant}
+                            onClick={() => handleEditSequence(sequence)}
+                          >
                             {nextActionLabel}
                           </Button>
                           {canManageSequenceDestructiveActions ? (
