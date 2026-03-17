@@ -27,6 +27,71 @@ function getSinceDate(sinceDays: number): Date {
   return new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000)
 }
 
+/** Parse reporting period type: 'week', 'month', or 'days' (default) */
+function parsePeriodType(query: Request['query']): 'week' | 'month' | 'days' {
+  const raw = typeof query.periodType === 'string' ? query.periodType.toLowerCase().trim() : 'days'
+  return raw === 'week' ? 'week' : raw === 'month' ? 'month' : 'days'
+}
+
+/** Calculate Monday (start) for a given week date in UTC */
+function getMonday(date: Date): Date {
+  const d = new Date(date)
+  d.setUTCHours(0, 0, 0, 0)
+  const day = d.getUTCDay()
+  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1)
+  d.setUTCDate(diff)
+  return d
+}
+
+/** Parse week start date (YYYY-MM-DD) and return [Monday 00:00:00, Sunday 23:59:59] UTC */
+function getWeekBoundaries(weekStart: string): { start: Date; end: Date } | null {
+  const match = /^\d{4}-\d{2}-\d{2}$/.test(weekStart)
+  if (!match) return null
+  const date = new Date(weekStart + 'T00:00:00Z')
+  if (Number.isNaN(date.getTime())) return null
+  const monday = getMonday(date)
+  const sunday = new Date(monday)
+  sunday.setUTCDate(sunday.getUTCDate() + 6)
+  sunday.setUTCHours(23, 59, 59, 999)
+  return { start: monday, end: sunday }
+}
+
+/** Parse calendar month (YYYY-MM) and return [1st 00:00:00, last day 23:59:59] UTC */
+function getMonthBoundaries(month: string): { start: Date; end: Date } | null {
+  const match = /^\d{4}-\d{2}$/.test(month)
+  if (!match) return null
+  const date = new Date(month + '-01T00:00:00Z')
+  if (Number.isNaN(date.getTime())) return null
+  const start = new Date(date.getUTCFullYear(), date.getUTCMonth(), 1)
+  start.setUTCHours(0, 0, 0, 0)
+  const end = new Date(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)
+  end.setUTCHours(23, 59, 59, 999)
+  return { start, end }
+}
+
+/** Resolve reporting period boundaries based on period type and parameters */
+function resolvePeriodBoundaries(query: Request['query']): { start: Date; end: Date } {
+  const periodType = parsePeriodType(query)
+  
+  if (periodType === 'week') {
+    const weekStart = typeof query.weekStart === 'string' ? query.weekStart : ''
+    const boundaries = getWeekBoundaries(weekStart)
+    if (boundaries) return { start: boundaries.start, end: boundaries.end }
+  }
+  
+  if (periodType === 'month') {
+    const monthStr = typeof query.month === 'string' ? query.month : ''
+    const boundaries = getMonthBoundaries(monthStr)
+    if (boundaries) return { start: boundaries.start, end: boundaries.end }
+  }
+  
+  // Fallback to sinceDays
+  const sinceDays = parseSinceDays(query)
+  const end = new Date()
+  const start = getSinceDate(sinceDays)
+  return { start, end }
+}
+
 function isOptOutEventType(value: unknown): boolean {
   return value === 'opted_out' || value === 'unsubscribed'
 }
@@ -133,7 +198,8 @@ router.get('/summary', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({ success: true, data: zeroSummaryData(reportingScope, sinceDays) })
       return
@@ -328,7 +394,8 @@ router.get('/leads-by-source', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -394,7 +461,8 @@ router.get('/top-sourcers', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -456,7 +524,8 @@ router.get('/outreach-performance', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -669,7 +738,8 @@ router.get('/funnel', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -747,7 +817,8 @@ router.get('/mailboxes', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -836,7 +907,9 @@ router.get('/compliance', async (req: Request, res: Response) => {
   try {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
-    const since = getSinceDate(parseSinceDays(req.query))
+    const sinceDays = parseSinceDays(req.query)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
@@ -912,7 +985,8 @@ router.get('/trends', async (req: Request, res: Response) => {
     const reportingScope = await resolveReportingScope(req, res)
     if (!reportingScope) return
     const sinceDays = parseSinceDays(req.query)
-    const since = getSinceDate(sinceDays)
+    const periodBoundaries = resolvePeriodBoundaries(req.query)
+    const since = periodBoundaries.start
     if (reportingScope.customerIds.length === 0) {
       res.json({
         success: true,
