@@ -38,11 +38,15 @@ import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 
 type WindowDays = 7 | 30 | 90
+type DashboardPeriodType = 'days' | 'week' | 'month'
 type DashboardScope = 'single' | 'all'
 type ScopeMeta = {
   customerId?: string
   customerCount?: number
   scope?: DashboardScope
+  periodType?: DashboardPeriodType
+  periodStart?: string
+  periodEnd?: string
 }
 
 type SummaryData = ScopeMeta & {
@@ -189,6 +193,63 @@ function formatDelta(value: number | null | undefined): string {
 function formatLastUpdated(value: string): string {
   if (!value) return 'Not refreshed yet'
   return new Date(value).toLocaleString()
+}
+
+function formatUtcDate(
+  value: string | Date,
+  options: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric' },
+): string {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Invalid date'
+  return new Intl.DateTimeFormat('en-GB', { ...options, timeZone: 'UTC' }).format(date)
+}
+
+function getDefaultWeekStart(): string {
+  const now = new Date()
+  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const day = todayUtc.getUTCDay()
+  todayUtc.setUTCDate(todayUtc.getUTCDate() - (day === 0 ? 6 : day - 1))
+  return todayUtc.toISOString().slice(0, 10)
+}
+
+function normalizeWeekStartValue(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return getDefaultWeekStart()
+  const date = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return getDefaultWeekStart()
+  const day = date.getUTCDay()
+  date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1))
+  return date.toISOString().slice(0, 10)
+}
+
+function getWeekRange(weekStart: string): { start: string; end: string } {
+  const start = normalizeWeekStartValue(weekStart)
+  const endDate = new Date(`${start}T00:00:00Z`)
+  endDate.setUTCDate(endDate.getUTCDate() + 6)
+  return { start, end: endDate.toISOString().slice(0, 10) }
+}
+
+function getDefaultMonthValue(): string {
+  const now = new Date()
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function getMonthRange(month: string): { start: string; end: string } {
+  const safeMonth = /^\d{4}-\d{2}$/.test(month) ? month : getDefaultMonthValue()
+  const startDate = new Date(`${safeMonth}-01T00:00:00Z`)
+  const endDate = new Date(Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + 1, 0, 0, 0, 0, 0))
+  return {
+    start: startDate.toISOString().slice(0, 10),
+    end: endDate.toISOString().slice(0, 10),
+  }
+}
+
+function formatPeriodRangeLabel(start: string, end: string): string {
+  return `${formatUtcDate(start, { day: 'numeric', month: 'short' })} - ${formatUtcDate(end, { day: 'numeric', month: 'short', year: 'numeric' })}`
+}
+
+function formatMonthLabel(monthOrStart: string): string {
+  const value = /^\d{4}-\d{2}$/.test(monthOrStart) ? `${monthOrStart}-01T00:00:00Z` : monthOrStart
+  return formatUtcDate(value, { month: 'long', year: 'numeric' })
 }
 
 function statusTone(value: number, warnAt: number, criticalAt: number): LaneItem['tone'] {
@@ -480,9 +541,9 @@ const ReportingDashboard: React.FC = () => {
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [scopeSelection, setScopeSelection] = useState<string>(() => scopedCustomerId || '')
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
-  const [periodType, setPeriodType] = useState<'days' | 'week' | 'month'>('days')
-  const [weekStart, setWeekStart] = useState<string>('')
-  const [month, setMonth] = useState<string>('')
+  const [periodType, setPeriodType] = useState<DashboardPeriodType>('days')
+  const [weekStart, setWeekStart] = useState<string>(() => getDefaultWeekStart())
+  const [month, setMonth] = useState<string>(() => getDefaultMonthValue())
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -549,27 +610,27 @@ const ReportingDashboard: React.FC = () => {
   )
 
   const includedCustomerCount = summary?.customerCount ?? (currentScope === 'all' ? customers.length : effectiveCustomerId ? 1 : 0)
-  
+
   const buildRequestSuffix = useCallback((): string => {
     const params = new URLSearchParams()
-    
-    if (periodType === 'week' && weekStart) {
+
+    if (periodType === 'week') {
       params.append('periodType', 'week')
-      params.append('weekStart', weekStart)
-    } else if (periodType === 'month' && month) {
+      params.append('weekStart', normalizeWeekStartValue(weekStart))
+    } else if (periodType === 'month') {
       params.append('periodType', 'month')
       params.append('month', month)
     } else {
       params.append('sinceDays', String(windowDays))
     }
-    
+
     if (currentScope === 'all') {
       params.append('scope', 'all')
     }
-    
+
     return params.toString()
   }, [periodType, weekStart, month, windowDays, currentScope])
-  
+
   const requestSuffix = buildRequestSuffix()
 
   const handleScopeSelectionChange = useCallback(
@@ -661,10 +722,60 @@ const ReportingDashboard: React.FC = () => {
     void loadData(false)
   }, [loadData])
 
+  const selectedWeekRange = useMemo(() => getWeekRange(weekStart), [weekStart])
+  const selectedMonthRange = useMemo(() => getMonthRange(month), [month])
+  const appliedPeriodStart =
+    summary?.periodStart ??
+    leadsVsTarget?.periodStart ??
+    (periodType === 'week'
+      ? `${selectedWeekRange.start}T00:00:00.000Z`
+      : periodType === 'month'
+        ? `${selectedMonthRange.start}T00:00:00.000Z`
+        : '')
+  const appliedPeriodEnd =
+    summary?.periodEnd ??
+    leadsVsTarget?.periodEnd ??
+    (periodType === 'week'
+      ? `${selectedWeekRange.end}T23:59:59.999Z`
+      : periodType === 'month'
+        ? `${selectedMonthRange.end}T23:59:59.999Z`
+        : '')
+  const periodBadgeLabel = useMemo(() => {
+    if (periodType === 'week') {
+      const start = appliedPeriodStart || `${selectedWeekRange.start}T00:00:00.000Z`
+      const end = appliedPeriodEnd || `${selectedWeekRange.end}T23:59:59.999Z`
+      return `Week: ${formatPeriodRangeLabel(start, end)}`
+    }
+    if (periodType === 'month') {
+      return `Month: ${formatMonthLabel(appliedPeriodStart || month)}`
+    }
+    return `Last ${windowDays} days`
+  }, [appliedPeriodEnd, appliedPeriodStart, month, periodType, selectedWeekRange.end, selectedWeekRange.start, windowDays])
+  const selectedPeriodDescription = useMemo(() => {
+    if (periodType === 'week') {
+      const start = appliedPeriodStart || `${selectedWeekRange.start}T00:00:00.000Z`
+      const end = appliedPeriodEnd || `${selectedWeekRange.end}T23:59:59.999Z`
+      return `the selected week (${formatPeriodRangeLabel(start, end)})`
+    }
+    if (periodType === 'month') {
+      return `the selected month (${formatMonthLabel(appliedPeriodStart || month)})`
+    }
+    return `the last ${windowDays} days`
+  }, [appliedPeriodEnd, appliedPeriodStart, month, periodType, selectedWeekRange.end, selectedWeekRange.start, windowDays])
+  const leadsVolumeLabel = useMemo(() => {
+    if (periodType === 'week') return `Week of ${formatPeriodRangeLabel(appliedPeriodStart, appliedPeriodEnd)}`
+    if (periodType === 'month') return `Month of ${formatMonthLabel(appliedPeriodStart || month)}`
+    return `${windowDays}-day`
+  }, [appliedPeriodEnd, appliedPeriodStart, month, periodType, windowDays])
+  const exportPeriodSuffix = useMemo(() => {
+    if (periodType === 'week') return `week-${selectedWeekRange.start}`
+    if (periodType === 'month') return `month-${month}`
+    return `${windowDays}d`
+  }, [month, periodType, selectedWeekRange.start, windowDays])
   const exportPrefix = useMemo(() => {
-    if (currentScope === 'all') return `all-clients-${windowDays}d`
-    return `${sanitizeFilePart(currentCustomerName || effectiveCustomerId || 'client')}-${windowDays}d`
-  }, [currentCustomerName, currentScope, effectiveCustomerId, windowDays])
+    const scopePrefix = currentScope === 'all' ? 'all-clients' : sanitizeFilePart(currentCustomerName || effectiveCustomerId || 'client')
+    return `${scopePrefix}-${exportPeriodSuffix}`
+  }, [currentCustomerName, currentScope, effectiveCustomerId, exportPeriodSuffix])
 
   const exportLeadsBySourceCsv = useCallback(() => {
     downloadCsv(
@@ -771,7 +882,7 @@ const ReportingDashboard: React.FC = () => {
     })
     items.push({
       title: 'Risk watch',
-      detail: `${formatNumber(summary?.unsubscribes)} opt-outs, ${formatNumber(summary?.sendFailures)} failures, and ${formatNumber(summary?.bounces)} bounces in the selected window.`,
+      detail: `${formatNumber(summary?.unsubscribes)} opt-outs, ${formatNumber(summary?.sendFailures)} failures, and ${formatNumber(summary?.bounces)} bounces in ${selectedPeriodDescription}.`,
       tone: statusTone(riskSignals, 1, 5),
     })
     return items
@@ -786,6 +897,7 @@ const ReportingDashboard: React.FC = () => {
     summary?.sendFailures,
     summary?.unsubscribes,
     targetPercent,
+    selectedPeriodDescription,
   ])
 
   const lanes = useMemo(
@@ -797,7 +909,7 @@ const ReportingDashboard: React.FC = () => {
           {
             label: 'Created',
             value: formatNumber(summary?.leadsCreated),
-            helper: currentScope === 'all' ? `${windowDays}-day sourced lead volume across all included clients` : `${windowDays}-day sourced lead volume`,
+            helper: currentScope === 'all' ? `${leadsVolumeLabel} sourced lead volume across all included clients` : `${leadsVolumeLabel} sourced lead volume`,
             tone: 'blue' as const,
           },
           {
@@ -833,7 +945,7 @@ const ReportingDashboard: React.FC = () => {
           {
             label: 'Delivered',
             value: formatNumber(summary?.delivered),
-            helper: `Delivery view for ${windowDays} days`,
+            helper: `Delivery view for ${selectedPeriodDescription}`,
             tone: (summary?.delivered ?? 0) > 0 ? 'blue' : 'gray',
           },
           {
@@ -945,7 +1057,8 @@ const ReportingDashboard: React.FC = () => {
       topSequence,
       topSources,
       topStatus,
-      windowDays,
+      leadsVolumeLabel,
+      selectedPeriodDescription,
     ],
   )
 
@@ -1027,7 +1140,7 @@ const ReportingDashboard: React.FC = () => {
                 Scope: {scopeBadgeLabel}
               </Badge>
               <Badge colorScheme="whiteAlpha" variant="outline">
-                Window: last {windowDays} days
+                {periodBadgeLabel}
               </Badge>
             </HStack>
             <Heading size="lg" fontWeight="700" color="yellow.300">{heroTitle}</Heading>
@@ -1065,33 +1178,9 @@ const ReportingDashboard: React.FC = () => {
             </Select>
             <Select
               size="sm"
-              value={String(windowDays)}
-              onChange={(event) => setWindowDays(Number(event.target.value) as WindowDays)}
-              minW="150px"
-              bg="white"
-              color="gray.800"
-              title="Reporting period"
-            >
-              <option value="7">Last 7 days</option>
-              <option value="30">Last 30 days</option>
-              <option value="90">Last 90 days</option>
-            </Select>
-            <Select
-              size="sm"
               value={periodType}
               onChange={(e) => {
-                const newType = e.target.value as 'days' | 'week' | 'month'
-                setPeriodType(newType)
-                if (newType === 'week' && !weekStart) {
-                  const today = new Date()
-                  const monday = new Date(today)
-                  const day = monday.getDay()
-                  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1))
-                  setWeekStart(monday.toISOString().split('T')[0])
-                } else if (newType === 'month' && !month) {
-                  const today = new Date()
-                  setMonth(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
-                }
+                setPeriodType(e.target.value as DashboardPeriodType)
               }}
               minW="120px"
               bg="white"
@@ -1102,12 +1191,27 @@ const ReportingDashboard: React.FC = () => {
               <option value="week">Week</option>
               <option value="month">Month</option>
             </Select>
+            {periodType === 'days' && (
+              <Select
+                size="sm"
+                value={String(windowDays)}
+                onChange={(event) => setWindowDays(Number(event.target.value) as WindowDays)}
+                minW="150px"
+                bg="white"
+                color="gray.800"
+                title="Rolling day range"
+              >
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </Select>
+            )}
             {periodType === 'week' && (
               <Box>
                 <input
                   type="date"
                   value={weekStart}
-                  onChange={(e) => setWeekStart(e.target.value)}
+                  onChange={(e) => setWeekStart(normalizeWeekStartValue(e.target.value))}
                   style={{
                     padding: '0.375rem',
                     borderRadius: '0.375rem',
@@ -1141,7 +1245,7 @@ const ReportingDashboard: React.FC = () => {
         </Stack>
 
         <SimpleGrid columns={{ base: 1, md: 2, xl: 7 }} spacing={3} mt={6}>
-          <OverviewStat label="Leads created" value={formatNumber(summary?.leadsCreated)} helper={currentScope === 'all' ? 'Aggregate lead records in the selected window' : 'Lead records created in this window'} />
+          <OverviewStat label="Leads created" value={formatNumber(summary?.leadsCreated)} helper={currentScope === 'all' ? `Aggregate lead records in ${selectedPeriodDescription}` : `Lead records created in ${selectedPeriodDescription}`} />
           <OverviewStat label="Target progress" value={noTargetsSet ? 'No targets set' : targetPercent != null ? `${targetPercent}%` : 'No target'} helper={noTargetsSet ? 'Aggregate targets sum valid client targets only' : formatDelta(leadsVsTarget?.trendVsPrevious)} />
           <OverviewStat label="Emails sent" value={formatNumber(summary?.emailsSent)} helper={`${formatNumber(summary?.delivered)} delivered`} />
           <OverviewStat label="Replies" value={formatNumber(summary?.replyCount)} helper={formatPercent(summary?.replyRate, 'No reply rate')} />
@@ -1176,7 +1280,7 @@ const ReportingDashboard: React.FC = () => {
               <CardHeader pb={2}>
                 <Heading size="md">Activity trend</Heading>
                 <Text color="gray.600" fontSize="sm">
-                  Leads, sends, and replies over the most recent slice of the selected window.
+                  Leads, sends, and replies inside {selectedPeriodDescription}.
                 </Text>
               </CardHeader>
               <CardBody pt={0}>
@@ -1211,7 +1315,7 @@ const ReportingDashboard: React.FC = () => {
               <Box>
                 <Heading size="md">Performance lanes</Heading>
                 <Text color="gray.600" fontSize="sm">
-                  Each lane summarizes what operators should watch right now in {currentScope === 'all' ? 'aggregate mode' : 'single-client mode'}.
+                  Each lane summarizes what operators should watch right now in {currentScope === 'all' ? 'aggregate mode' : 'single-client mode'} for {selectedPeriodDescription}.
                 </Text>
               </Box>
             </HStack>
@@ -1409,7 +1513,7 @@ const ReportingDashboard: React.FC = () => {
             <CardHeader pb={2}>
               <Heading size="md">Daily truth table</Heading>
               <Text color="gray.600" fontSize="sm">
-                Raw day-by-day lead, send, and reply counts for the selected window.
+                Raw day-by-day lead, send, and reply counts for {selectedPeriodDescription}.
               </Text>
             </CardHeader>
             <CardBody pt={0}>
