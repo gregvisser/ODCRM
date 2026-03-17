@@ -233,6 +233,11 @@ type SequenceSendConfidenceSignal = {
   value: 'Ready' | 'Missing' | 'Blocked' | 'Waiting' | 'Unknown' | 'Empty' | 'Not chosen' | 'Incomplete'
   colorScheme: 'green' | 'red' | 'orange' | 'gray'
 }
+type SequenceLaunchReadinessSignal = {
+  label: 'Overall' | 'Mailbox' | 'Audience' | 'Content' | 'Window'
+  value: 'Ready' | 'Missing' | 'Blocked' | 'Waiting' | 'Archived' | 'Paused' | 'Incomplete' | 'Unknown' | 'Completed'
+  colorScheme: 'green' | 'red' | 'orange' | 'purple' | 'gray' | 'blue'
+}
 
 type StartPreview = {
   snapshot?: SnapshotOption
@@ -3673,6 +3678,100 @@ const SequencesTab: React.FC = () => {
 
     void handleEditSequence(sequence, focusTarget)
   }
+
+  const sequenceLaunchReadinessPanel = editingSequence ? (() => {
+    const blockedReason = sequenceStartBlockedReason
+    const blocker = blockedReason ? getSequenceBlockedReasonSummary(editingSequence, blockedReason) : null
+    const hasActiveMailbox = editingSequence.senderIdentityId
+      ? senderIdentities.some((sender) => sender.id === editingSequence.senderIdentityId)
+      : false
+    const hasAnySteps = (editingSequence.steps?.length ?? 0) > 0
+    const hasIncompleteStep = (editingSequence.steps || []).some((step) => {
+      const hasTemplate = Boolean(step.templateId)
+      const hasSubject = Boolean(step.subjectTemplate?.trim())
+      const hasBody = Boolean((step.bodyTemplateText || step.bodyTemplateHtml || '').trim())
+      return !hasTemplate || !hasSubject || !hasBody
+    })
+
+    const overallSignal: SequenceLaunchReadinessSignal = editingSequence.isArchived
+      ? { label: 'Overall', value: 'Archived', colorScheme: 'purple' }
+      : blockedReason
+        ? { label: 'Overall', value: 'Blocked', colorScheme: 'red' }
+        : editingSequence.status === 'paused'
+          ? { label: 'Overall', value: 'Paused', colorScheme: 'orange' }
+          : editingSequence.status === 'scheduled'
+            ? { label: 'Overall', value: 'Waiting', colorScheme: 'orange' }
+            : editingSequence.status === 'sending' || editingSequence.status === 'running'
+              ? { label: 'Overall', value: 'Ready', colorScheme: 'blue' }
+              : editingSequence.status === 'sent'
+                ? { label: 'Overall', value: 'Completed', colorScheme: 'green' }
+                : { label: 'Overall', value: 'Ready', colorScheme: 'green' }
+
+    const mailboxSignal: SequenceLaunchReadinessSignal = activeMailboxCount === 0
+      ? { label: 'Mailbox', value: 'Missing', colorScheme: 'red' }
+      : !editingSequence.senderIdentityId
+        ? { label: 'Mailbox', value: 'Missing', colorScheme: 'red' }
+        : !hasActiveMailbox
+          ? { label: 'Mailbox', value: 'Blocked', colorScheme: 'orange' }
+          : { label: 'Mailbox', value: 'Ready', colorScheme: 'green' }
+
+    const audienceSignal: SequenceLaunchReadinessSignal = !editingSequence.listId
+      ? { label: 'Audience', value: leadBatches.length === 0 ? 'Missing' : 'Blocked', colorScheme: 'red' }
+      : linkedListSummaryLoading
+        ? { label: 'Audience', value: 'Unknown', colorScheme: 'gray' }
+        : linkedListSummary && linkedListSummary.contactCount === 0
+          ? { label: 'Audience', value: 'Blocked', colorScheme: 'red' }
+          : getRecipientCount(editingSequence) > 0 || linkedListSummary
+            ? { label: 'Audience', value: 'Ready', colorScheme: 'green' }
+            : { label: 'Audience', value: 'Unknown', colorScheme: 'gray' }
+
+    const contentSignal: SequenceLaunchReadinessSignal = !hasAnySteps
+      ? { label: 'Content', value: 'Missing', colorScheme: 'red' }
+      : hasIncompleteStep
+        ? { label: 'Content', value: 'Incomplete', colorScheme: 'orange' }
+        : { label: 'Content', value: 'Ready', colorScheme: 'green' }
+
+    const windowSignal: SequenceLaunchReadinessSignal = editingSequence.isArchived
+      ? { label: 'Window', value: 'Archived', colorScheme: 'purple' }
+      : editingSequence.status === 'paused'
+        ? { label: 'Window', value: 'Paused', colorScheme: 'orange' }
+        : editingSequence.status === 'scheduled'
+          ? { label: 'Window', value: 'Waiting', colorScheme: 'orange' }
+          : editingSequence.status === 'sending' || editingSequence.status === 'running' || !blockedReason
+            ? { label: 'Window', value: 'Ready', colorScheme: 'green' }
+            : { label: 'Window', value: 'Unknown', colorScheme: 'gray' }
+
+    const strongestNextAction = editingSequence.isArchived
+      ? 'Restore or open the archived sequence.'
+      : blocker?.reasonLabel === 'No active mailbox' || blocker?.reasonLabel === 'Mailbox not selected'
+        ? 'Choose mailbox.'
+        : blocker?.reasonLabel === 'No live recipients' || blocker?.reasonLabel === 'Live recipients not chosen'
+          ? 'Pick live audience.'
+          : blocker?.reasonLabel === 'No template ready' || contentSignal.value === 'Incomplete' || contentSignal.value === 'Missing'
+            ? 'Add content.'
+            : blocker?.reasonLabel === 'Name missing' || blocker?.reasonLabel === 'Save changes first'
+              ? 'Complete sequence setup.'
+              : editingSequence.status === 'paused'
+                ? 'Resume sequence.'
+                : editingSequence.status === 'scheduled'
+                  ? 'Wait for send window.'
+                  : overallSignal.value === 'Completed'
+                    ? 'Review outcomes.'
+                    : 'Ready to start.'
+
+    return {
+      overallSignal,
+      strongestNextAction,
+      strongestNextActionDetail: blocker?.detail || launchStatusSummary.detail,
+      signals: [
+        overallSignal,
+        mailboxSignal,
+        audienceSignal,
+        contentSignal,
+        windowSignal,
+      ] satisfies SequenceLaunchReadinessSignal[],
+    }
+  })() : null
 
   const handleCreateSequence = useCallback(() => {
     // Check if templates exist
@@ -7939,6 +8038,44 @@ const SequencesTab: React.FC = () => {
                         Review the sender mailbox, live audience, test audience, and readiness, then send a test batch or start the live sequence.
                       </Text>
                     </Box>
+                    {sequenceLaunchReadinessPanel ? (
+                      <Card variant="outline" data-testid="sequence-launch-readiness-panel">
+                        <CardBody py={4}>
+                          <VStack align="stretch" spacing={3}>
+                            <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} flexWrap="wrap">
+                              <Box>
+                                <Text fontSize="sm" fontWeight="semibold">Launch readiness</Text>
+                                <Text fontSize="xs" color="gray.600">
+                                  Current launch state from the same readiness and blocker truth used by the mounted sequence list.
+                                </Text>
+                              </Box>
+                              <Badge colorScheme={sequenceLaunchReadinessPanel.overallSignal.colorScheme} variant="subtle">
+                                Overall: {sequenceLaunchReadinessPanel.overallSignal.value}
+                              </Badge>
+                            </Flex>
+                            <SimpleGrid columns={{ base: 2, md: 5 }} spacing={2}>
+                              {sequenceLaunchReadinessPanel.signals.map((signal) => (
+                                <Box key={`launch-readiness-${signal.label}`} borderWidth="1px" borderRadius="md" p={3}>
+                                  <Text fontSize="xs" color="gray.600">{signal.label}</Text>
+                                  <Badge mt={1} colorScheme={signal.colorScheme} variant="subtle">
+                                    {signal.value}
+                                  </Badge>
+                                </Box>
+                              ))}
+                            </SimpleGrid>
+                            <Alert status={launchStatusSummary.tone} borderRadius="md" alignItems="flex-start">
+                              <AlertIcon mt={1} />
+                              <Box>
+                                <AlertTitle fontSize="sm">Strongest next action</AlertTitle>
+                                <AlertDescription fontSize="sm">
+                                  {sequenceLaunchReadinessPanel.strongestNextAction} {sequenceLaunchReadinessPanel.strongestNextActionDetail}
+                                </AlertDescription>
+                              </Box>
+                            </Alert>
+                          </VStack>
+                        </CardBody>
+                      </Card>
+                    ) : null}
                     <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={3}>
                       <Card variant="outline">
                         <CardBody py={3}>
