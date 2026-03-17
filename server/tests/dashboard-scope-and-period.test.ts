@@ -1,172 +1,132 @@
-/**
- * Dashboard scope and period selector regression tests
- * Tests for:
- * 1. All Clients mode properly prevents scope conflict by sending X-Customer-Id: 'all'
- * 2. Single-client mode still sends X-Customer-Id with customer ID
- * 3. Backend correctly rejects conflicting all-clients + single-client scope
- * 4. Period selection preserves data integrity (days-based and future calendar periods)
- */
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  getMonthBoundaries,
+  getPreviousReportingPeriod,
+  getWeekBoundaries,
+  resolveReportingPeriod,
+} from '../src/utils/reportingPeriods.js'
 
-/**
- * Test: All Clients mode sends correct X-Customer-Id header
- * Validates that scope=all + X-Customer-Id: 'all' prevents backend conflicts
- */
-export async function testAllClientsHeaderNoConflict(): Promise<void> {
-  // FRONTEND: When Dashboard detects isAllClientsScope = true
-  // It should send: X-Customer-Id: 'all' as header
-  // AND: scope=all in query params
-  
-  const requestInAllClientsMode = {
-    headers: { 'X-Customer-Id': 'all' },
-    query: { scope: 'all', sinceDays: 30 }
-  }
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const repoRoot = path.resolve(__dirname, '..', '..')
 
-  // BACKEND: resolveReportingScope() should recognize this correctly
-  // and NOT treat it as a conflicting scope
-  const isAllClientsScope = normalizeString(requestInAllClientsMode.headers['x-customer-id']).toLowerCase() === 'all'
-    || normalizeString(requestInAllClientsMode.query.scope).toLowerCase() === 'all'
+const reportingRouteSource = readFileSync(path.join(repoRoot, 'server', 'src', 'routes', 'reporting.ts'), 'utf8')
+const dashboardSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportingDashboard.tsx'), 'utf8')
+const reportsTabSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportsTab.tsx'), 'utf8')
+const marketingHomeSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingHomePage.tsx'), 'utf8')
+const navSource = readFileSync(path.join(repoRoot, 'src', 'contracts', 'nav.ts'), 'utf8')
 
-  const hasConflict = [
-    normalizeString(requestInAllClientsMode.headers['x-customer-id']),
-    normalizeString(requestInAllClientsMode.query.customerId)
-  ].some((value) => value && value.toLowerCase() !== 'all')
+function testWeekModeResolvesMondaySunday(): void {
+  const period = resolveReportingPeriod({
+    periodType: 'week',
+    weekStart: '2026-03-18',
+  } as never)
+  assert.equal(period.periodType, 'week')
+  assert.equal(period.start.toISOString(), '2026-03-16T00:00:00.000Z')
+  assert.equal(period.end.toISOString(), '2026-03-22T23:59:59.999Z')
 
-  return {
-    test: 'All Clients header sends X-Customer-Id: all',
-    isAllClientsScope: true,
-    hasConflict: false,  // MUST be false
-    expectedBehavior: 'Backend recognizes all-clients intent without scope conflict'
-  }
+  const direct = getWeekBoundaries('2026-03-18')
+  assert.ok(direct)
+  assert.equal(direct?.start.toISOString(), '2026-03-16T00:00:00.000Z')
+  assert.equal(direct?.end.toISOString(), '2026-03-22T23:59:59.999Z')
 }
 
-/**
- * Test: Single-client mode still sends proper X-Customer-Id header
- * Validates that single-client requests maintain tenant scoping
- */
-export async function testSingleClientHeaderPreserved(): Promise<void> {
-  const customerId = 'cust_abc123'
-  
-  const requestInSingleClientMode = {
-    headers: { 'X-Customer-Id': customerId },
-    query: { sinceDays: 30 }
-  }
+function testMonthModeResolvesCalendarMonth(): void {
+  const period = resolveReportingPeriod({
+    periodType: 'month',
+    month: '2026-02',
+  } as never)
+  assert.equal(period.periodType, 'month')
+  assert.equal(period.start.toISOString(), '2026-02-01T00:00:00.000Z')
+  assert.equal(period.end.toISOString(), '2026-02-28T23:59:59.999Z')
 
-  // BACKEND: Should treat this as single-client scope
-  const isAllClientsScope = normalizeString(requestInSingleClientMode.headers['x-customer-id']).toLowerCase() === 'all'
-    || normalizeString(requestInSingleClientMode.query.scope).toLowerCase() === 'all'
-
-  const hasConflict = [
-    normalizeString(requestInSingleClientMode.headers['x-customer-id']),
-    normalizeString(requestInSingleClientMode.query.customerId)
-  ].some((value) => value && value.toLowerCase() !== 'all')
-
-  return {
-    test: 'Single-client header sends X-Customer-Id: cust_XXX',
-    isAllClientsScope: false,
-    hasConflict: false,
-    expectedBehavior: 'Backend continues single-client tenant isolation'
-  }
+  const direct = getMonthBoundaries('2026-02')
+  assert.ok(direct)
+  assert.equal(direct?.start.toISOString(), '2026-02-01T00:00:00.000Z')
+  assert.equal(direct?.end.toISOString(), '2026-02-28T23:59:59.999Z')
 }
 
-/**
- * Test: Backend rejects mixed all-clients + single-client scope
- * This regression guard ensures the original bug is prevented
- */
-export async function testBackendRejectsMixedScope(): Promise<void> {
-  // The original bug was: scope=all + X-Customer-Id: cust_123 (specific customer)
-  const badRequest = {
-    headers: { 'X-Customer-Id': 'cust_abc123' },
-    query: { scope: 'all', sinceDays: 30 }
-  }
+function testPreviousPeriodAlignment(): void {
+  const week = resolveReportingPeriod({ periodType: 'week', weekStart: '2026-03-18' } as never)
+  const previousWeek = getPreviousReportingPeriod(week)
+  assert.equal(previousWeek.start.toISOString(), '2026-03-09T00:00:00.000Z')
+  assert.equal(previousWeek.end.toISOString(), '2026-03-15T23:59:59.999Z')
 
-  // BACKEND logic from reporting.ts:
-  // wantsAllClientsScope = scope param OR header = 'all' OR query = 'all'
-  // hasConflictingCustomerScope = any header/query that is NOT 'all'
-  // If both true, REJECT with 400
-
-  const wantsAllClientsScope = 'all'.toLowerCase() === 'all'  // query.scope = 'all'
-  
-  const headerCustomerIdNormalized = normalizeString(badRequest.headers['x-customer-id'])  // 'cust_abc123'
-  const hasConflictingScope = headerCustomerIdNormalized && headerCustomerIdNormalized.toLowerCase() !== 'all'
-
-  return {
-    test: 'Backend rejects scope=all + X-Customer-Id: cust_XXX',
-    wantsAllClientsScope: true,
-    hasConflictingScope: true,
-    shouldRejectWith400: true,
-    expectedErrorMessage: 'scope=all cannot be combined with a specific customerId or X-Customer-Id'
-  }
+  const month = resolveReportingPeriod({ periodType: 'month', month: '2026-03' } as never)
+  const previousMonth = getPreviousReportingPeriod(month)
+  assert.equal(previousMonth.start.toISOString(), '2026-02-01T00:00:00.000Z')
+  assert.equal(previousMonth.end.toISOString(), '2026-02-28T23:59:59.999Z')
 }
 
-/**
- * Test: Dashboard respects All Clients mode UI state
- * Frontend should not accidentally send active client ID when all-clients mode is intentional
- */
-export async function testDashboardAllClientsModeUIState(): Promise<void> {
-  // FRONTEND state:
-  // scopeSelection = '__all_clients__' (constant value)
-  // isAllClientsScope = scopeSelection === ALL_CLIENTS_VALUE
-  // effectiveCustomerId = isAllClientsScope ? '' : scopeSelection || scopedCustomerId || ''
-
-  const scopeSelection = '__all_clients__'
-  const isAllClientsScope = scopeSelection === '__all_clients__'
-  const effectiveCustomerId = isAllClientsScope ? '' : ''
-
-  // requestHeaders logic:
-  // if (isAllClientsScope) return { 'X-Customer-Id': 'all' }
-  // else if (effectiveCustomerId.startsWith('cust_')) return { 'X-Customer-Id': effectiveCustomerId }
-  
-  const requestHeaders = isAllClientsScope ? { 'X-Customer-Id': 'all' } : undefined
-
-  return {
-    test: 'Dashboard All Clients mode sets proper request headers',
-    actualHeaders: requestHeaders,
-    expectedHeaders: { 'X-Customer-Id': 'all' },
-    passes: JSON.stringify(requestHeaders) === JSON.stringify({ 'X-Customer-Id': 'all' })
-  }
+function testSummaryUsesBoundedRanges(): void {
+  assert.match(reportingRouteSource, /const period = resolveReportingPeriod\(req\.query\)/)
+  assert.match(reportingRouteSource, /const periodRange = getDateRangeFilter\(period\)/)
+  assert.match(reportingRouteSource, /getLeadCreatedWithinPeriodWhere\(period\)/)
+  assert.match(reportingRouteSource, /occurredAt: periodRange/)
+  assert.match(reportingRouteSource, /createdAt: periodRange/)
 }
 
-/**
- * Helper: Normalize string for comparison (same as backend)
- */
-function normalizeString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+function testLeadsVsTargetUsesSelectedPeriod(): void {
+  assert.match(reportingRouteSource, /const currentPeriod = resolveReportingPeriod\(req\.query\)/)
+  assert.match(reportingRouteSource, /const previousPeriod = getPreviousReportingPeriod\(currentPeriod\)/)
+  assert.match(reportingRouteSource, /getLeadCreatedWithinPeriodWhere\(currentPeriod\)/)
+  assert.match(reportingRouteSource, /getLeadCreatedWithinPeriodWhere\(previousPeriod\)/)
+  assert.match(reportingRouteSource, /sumLeadTargets\(customers, currentPeriod\)/)
 }
 
-/**
- * Report: All regression tests
- */
-export async function runAllDashboardRegressionTests(): Promise<void> {
-  console.log('╔════════════════════════════════════════════════════════════════╗')
-  console.log('║     DASHBOARD FIXES — REGRESSION PROTECTION TEST SUITE        ║')
-  console.log('╚════════════════════════════════════════════════════════════════╝')
-  console.log('')
-
-  const tests = [
-    { name: 'All Clients header (no conflict)', fn: testAllClientsHeaderNoConflict },
-    { name: 'Single-client header (tenant preserved)', fn: testSingleClientHeaderPreserved },
-    { name: 'Backend rejects mixed scope', fn: testBackendRejectsMixedScope },
-    { name: 'Dashboard UI state correct', fn: testDashboardAllClientsModeUIState },
-  ]
-
-  for (const testCase of tests) {
-    try {
-      const result = await testCase.fn()
-      console.log(`✓ ${testCase.name}`)
-      console.log(`  ${JSON.stringify(result, null, 2)}`)
-    } catch (err) {
-      console.log(`✗ ${testCase.name}`)
-      console.log(`  ERROR: ${err}`)
-    }
-  }
-
-  console.log('')
-  console.log('╔════════════════════════════════════════════════════════════════╗')
-  console.log('║  ALL TESTS COMPLETE — DASHBOARD FIXES REGRESSION PROTECTED   ║')
-  console.log('╚════════════════════════════════════════════════════════════════╝')
+function testTrendsUsesBoundedRanges(): void {
+  assert.match(reportingRouteSource, /getLeadCreatedWithinPeriodWhere\(period\)/)
+  assert.match(reportingRouteSource, /occurredAt: getDateRangeFilter\(period\), type: \{ in: \['sent', 'replied'\] \}/)
 }
 
-// Export for CLI test runner
-if (typeof require !== 'undefined' && require.main === module) {
-  void runAllDashboardRegressionTests()
+function testAllClientsCalendarModesRemainSupported(): void {
+  assert.match(dashboardSource, /params\.append\('periodType', 'week'\)/)
+  assert.match(dashboardSource, /params\.append\('periodType', 'month'\)/)
+  assert.match(dashboardSource, /params\.append\('scope', 'all'\)/)
+  assert.match(reportingRouteSource, /scope=all cannot be combined with a specific customerId or X-Customer-Id/)
 }
+
+function testDashboardLabelsMatchSelectedPeriod(): void {
+  assert.match(dashboardSource, /const periodBadgeLabel = useMemo/)
+  assert.match(dashboardSource, /Week: \$\{formatPeriodRangeLabel/)
+  assert.match(dashboardSource, /Month: \$\{formatMonthLabel/)
+  assert.ok(!dashboardSource.includes('Window: last {windowDays} days'))
+  assert.match(dashboardSource, /setWeekStart\(normalizeWeekStartValue\(e\.target\.value\)\)/)
+}
+
+function testMarketingReportsRemainsSeparate(): void {
+  assert.ok(!reportsTabSource.includes('ReportingDashboard'))
+  assert.match(marketingHomeSource, /id: 'reports'/)
+  assert.match(marketingHomeSource, /content: <ReportsTab \/>/)
+}
+
+function testDashboardRemainsFirstTopLevelTab(): void {
+  const reportingIndex = navSource.indexOf("{ id: 'reporting-home'")
+  const customersIndex = navSource.indexOf("{ id: 'customers-home'")
+  assert.ok(reportingIndex >= 0, 'Dashboard tab missing from nav contract')
+  assert.ok(customersIndex >= 0, 'Customers tab missing from nav contract')
+  assert.ok(reportingIndex < customersIndex, 'Dashboard tab must remain first in the top-level nav')
+}
+
+const tests: Array<{ name: string; fn: () => void }> = [
+  { name: 'week mode resolves Monday-Sunday boundaries', fn: testWeekModeResolvesMondaySunday },
+  { name: 'month mode resolves true month boundaries', fn: testMonthModeResolvesCalendarMonth },
+  { name: 'previous period alignment stays correct', fn: testPreviousPeriodAlignment },
+  { name: 'summary respects bounded week/month ranges', fn: testSummaryUsesBoundedRanges },
+  { name: 'leads-vs-target respects selected calendar period', fn: testLeadsVsTargetUsesSelectedPeriod },
+  { name: 'trends respects bounded week/month ranges', fn: testTrendsUsesBoundedRanges },
+  { name: 'All Clients works with calendar period modes', fn: testAllClientsCalendarModesRemainSupported },
+  { name: 'dashboard labels match selected period', fn: testDashboardLabelsMatchSelectedPeriod },
+  { name: 'Marketing > Reports remains separate', fn: testMarketingReportsRemainsSeparate },
+  { name: 'Dashboard remains first top-level tab', fn: testDashboardRemainsFirstTopLevelTab },
+]
+
+for (const test of tests) {
+  test.fn()
+  console.log(`PASS ${test.name}`)
+}
+
+console.log('dashboard-scope-and-period.test.ts: PASS')

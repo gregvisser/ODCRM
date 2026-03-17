@@ -30,6 +30,67 @@ async function getJson(path, customerId = CUSTOMER_ID) {
   }
 }
 
+function getCurrentWeekStart() {
+  const now = new Date()
+  const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+  const day = todayUtc.getUTCDay()
+  todayUtc.setUTCDate(todayUtc.getUTCDate() - (day === 0 ? 6 : day - 1))
+  return todayUtc.toISOString().slice(0, 10)
+}
+
+function getCurrentMonth() {
+  const now = new Date()
+  return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+function assertTrendRowsWithinPeriod(rows, start, end, label) {
+  const startMs = new Date(start).getTime()
+  const endMs = new Date(end).getTime()
+  for (const row of rows) {
+    const rowMs = new Date(`${row.day}T00:00:00.000Z`).getTime()
+    if (rowMs < startMs || rowMs > endMs) {
+      fail(`${label} trend row ${row.day} is outside ${start}..${end}`)
+    }
+  }
+}
+
+function sumTrend(rows, field) {
+  return rows.reduce((sum, row) => sum + (Number(row?.[field]) || 0), 0)
+}
+
+async function verifyPeriodMode(label, query, customerId = CUSTOMER_ID) {
+  const summaryRes = await getJson(`/api/reporting/summary?${query}`, customerId)
+  const summary = summaryRes.body?.data ?? summaryRes.body
+  if (!summary?.periodType || !summary?.periodStart || !summary?.periodEnd) {
+    fail(`${label} summary missing period metadata`)
+  }
+
+  const leadsVsTargetRes = await getJson(`/api/reporting/leads-vs-target?${query}`, customerId)
+  const leadsVsTarget = leadsVsTargetRes.body?.data ?? leadsVsTargetRes.body
+  if (!leadsVsTarget?.periodType || !leadsVsTarget?.periodStart || !leadsVsTarget?.periodEnd) {
+    fail(`${label} leads-vs-target missing period metadata`)
+  }
+
+  const trendsRes = await getJson(`/api/reporting/trends?${query}`, customerId)
+  const trends = trendsRes.body?.data ?? trendsRes.body
+  if (!Array.isArray(trends?.trend)) fail(`${label} trends payload missing trend array`)
+  if (!trends?.periodStart || !trends?.periodEnd) fail(`${label} trends missing period metadata`)
+
+  assertTrendRowsWithinPeriod(trends.trend, trends.periodStart, trends.periodEnd, label)
+
+  const trendLeadTotal = sumTrend(trends.trend, 'leads')
+  if (typeof summary.leadsCreated !== 'number' || summary.leadsCreated !== trendLeadTotal) {
+    fail(`${label} summary.leadsCreated (${summary.leadsCreated}) does not match trend lead total (${trendLeadTotal})`)
+  }
+  if (typeof leadsVsTarget.leadsCreated !== 'number' || leadsVsTarget.leadsCreated !== trendLeadTotal) {
+    fail(`${label} leads-vs-target.leadsCreated (${leadsVsTarget.leadsCreated}) does not match trend lead total (${trendLeadTotal})`)
+  }
+
+  console.log(`PASS ${label} period metadata present`)
+  console.log(`PASS ${label} trends stay within ${trends.periodStart} .. ${trends.periodEnd}`)
+  console.log(`PASS ${label} summary/leads-vs-target align to bounded trend totals`)
+}
+
 async function main() {
   if (!CUSTOMER_ID) fail('CUSTOMER_ID env var is required')
   const summaryRes = await getJson(`/api/reporting/summary?sinceDays=7&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
@@ -59,6 +120,11 @@ async function main() {
   const mailboxPayload = mailboxRes.body?.data ?? mailboxRes.body
   if (!mailboxPayload || !Array.isArray(mailboxPayload.mailboxes)) fail('mailboxes.mailboxes must be array')
 
+  const weekStart = getCurrentWeekStart()
+  const month = getCurrentMonth()
+  await verifyPeriodMode('single-client week mode', `periodType=week&weekStart=${encodeURIComponent(weekStart)}&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
+  await verifyPeriodMode('single-client month mode', `periodType=month&month=${encodeURIComponent(month)}&customerId=${encodeURIComponent(CUSTOMER_ID)}`)
+
   if (CHECK_ALL_CLIENTS) {
     const aggregateSummaryRes = await getJson('/api/reporting/summary?sinceDays=30&scope=all', '')
     const aggregateSummary = aggregateSummaryRes.body?.data ?? aggregateSummaryRes.body
@@ -69,6 +135,9 @@ async function main() {
     const aggregateTrendRes = await getJson('/api/reporting/trends?sinceDays=30&scope=all', '')
     const aggregateTrend = aggregateTrendRes.body?.data ?? aggregateTrendRes.body
     if (!aggregateTrend || !Array.isArray(aggregateTrend.trend)) fail('aggregate trends.trend must be array')
+
+    await verifyPeriodMode('all-clients week mode', `periodType=week&weekStart=${encodeURIComponent(weekStart)}&scope=all`, '')
+    await verifyPeriodMode('all-clients month mode', `periodType=month&month=${encodeURIComponent(month)}&scope=all`, '')
   }
 
   console.log('PASS /api/reporting/summary returns data shape')

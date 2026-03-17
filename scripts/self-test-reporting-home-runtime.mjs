@@ -56,6 +56,9 @@ if (!reportingDashboardSource.includes('dashboard-trend-chart')) fail('Reporting
 if (!reportingDashboardSource.includes('All Clients')) fail('ReportingDashboard missing All Clients selector option')
 if (!reportingDashboardSource.includes('dashboard-client-selector')) fail('ReportingDashboard missing scope selector marker')
 if (!reportingDashboardSource.includes('dashboard-scope-badge')) fail('ReportingDashboard missing scope badge marker')
+if (!reportingDashboardSource.includes('const periodBadgeLabel = useMemo')) fail('ReportingDashboard missing period badge label helper')
+if (!reportingDashboardSource.includes('normalizeWeekStartValue')) fail('ReportingDashboard missing week normalization helper')
+if (reportingDashboardSource.includes('Window: last {windowDays} days')) fail('ReportingDashboard still contains stale day-window hero label')
 if (reportsTabSource.includes('ReportingDashboard')) fail('Marketing ReportsTab must not point to ReportingDashboard')
 
 console.log('PASS top-level dashboard nav contract exists and is first')
