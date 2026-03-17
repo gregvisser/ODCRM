@@ -480,6 +480,9 @@ const ReportingDashboard: React.FC = () => {
   const [customers, setCustomers] = useState<CustomerOption[]>([])
   const [scopeSelection, setScopeSelection] = useState<string>(() => scopedCustomerId || '')
   const [windowDays, setWindowDays] = useState<WindowDays>(30)
+  const [periodType, setPeriodType] = useState<'days' | 'week' | 'month'>('days')
+  const [weekStart, setWeekStart] = useState<string>('')
+  const [month, setMonth] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -546,9 +549,28 @@ const ReportingDashboard: React.FC = () => {
   )
 
   const includedCustomerCount = summary?.customerCount ?? (currentScope === 'all' ? customers.length : effectiveCustomerId ? 1 : 0)
-  const requestSuffix = currentScope === 'all'
-    ? `sinceDays=${windowDays}&scope=all`
-    : `sinceDays=${windowDays}`
+  
+  const buildRequestSuffix = useCallback((): string => {
+    const params = new URLSearchParams()
+    
+    if (periodType === 'week' && weekStart) {
+      params.append('periodType', 'week')
+      params.append('weekStart', weekStart)
+    } else if (periodType === 'month' && month) {
+      params.append('periodType', 'month')
+      params.append('month', month)
+    } else {
+      params.append('sinceDays', String(windowDays))
+    }
+    
+    if (currentScope === 'all') {
+      params.append('scope', 'all')
+    }
+    
+    return params.toString()
+  }, [periodType, weekStart, month, windowDays, currentScope])
+  
+  const requestSuffix = buildRequestSuffix()
 
   const handleScopeSelectionChange = useCallback(
     (nextValue: string) => {
@@ -1008,8 +1030,8 @@ const ReportingDashboard: React.FC = () => {
                 Window: last {windowDays} days
               </Badge>
             </HStack>
-            <Heading size="lg" fontWeight="700" color="white">{heroTitle}</Heading>
-            <Text color="white" maxW="2xl" fontSize="md" lineHeight="1.6">
+            <Heading size="lg" fontWeight="700" color="yellow.300">{heroTitle}</Heading>
+            <Text color="yellow.100" maxW="2xl" fontSize="md" lineHeight="1.6">
               {heroDescription}
             </Text>
             <HStack spacing={3} flexWrap="wrap">
@@ -1054,9 +1076,64 @@ const ReportingDashboard: React.FC = () => {
               <option value="30">Last 30 days</option>
               <option value="90">Last 90 days</option>
             </Select>
-            <Button size="sm" variant="outline" colorScheme="whiteAlpha" title="Calendar-based periods (Week/Month)">
-              📅 Period Selector
-            </Button>
+            <Select
+              size="sm"
+              value={periodType}
+              onChange={(e) => {
+                const newType = e.target.value as 'days' | 'week' | 'month'
+                setPeriodType(newType)
+                if (newType === 'week' && !weekStart) {
+                  const today = new Date()
+                  const monday = new Date(today)
+                  const day = monday.getDay()
+                  monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1))
+                  setWeekStart(monday.toISOString().split('T')[0])
+                } else if (newType === 'month' && !month) {
+                  const today = new Date()
+                  setMonth(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
+                }
+              }}
+              minW="120px"
+              bg="white"
+              color="gray.800"
+              title="Period type"
+            >
+              <option value="days">Days</option>
+              <option value="week">Week</option>
+              <option value="month">Month</option>
+            </Select>
+            {periodType === 'week' && (
+              <Box>
+                <input
+                  type="date"
+                  value={weekStart}
+                  onChange={(e) => setWeekStart(e.target.value)}
+                  style={{
+                    padding: '0.375rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid #cbd5e0',
+                    fontSize: '0.875rem',
+                  }}
+                  title="Week start date (Monday)"
+                />
+              </Box>
+            )}
+            {periodType === 'month' && (
+              <Box>
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => setMonth(e.target.value)}
+                  style={{
+                    padding: '0.375rem',
+                    borderRadius: '0.375rem',
+                    border: '1px solid #cbd5e0',
+                    fontSize: '0.875rem',
+                  }}
+                  title="Month selection"
+                />
+              </Box>
+            )}
             <Button size="sm" onClick={() => void loadData(true)} isLoading={refreshing} colorScheme="blue">
               Refresh
             </Button>
