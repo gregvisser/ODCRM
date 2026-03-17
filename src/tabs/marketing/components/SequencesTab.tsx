@@ -223,6 +223,8 @@ type SequenceOperatorStateSummary = {
   nextActionVariant: 'solid' | 'outline'
 }
 
+type SequenceOperatorQuickFilter = 'all' | 'ready' | 'needs_attention' | 'running' | 'archived'
+
 type StartPreview = {
   snapshot?: SnapshotOption
   template?: EmailTemplate
@@ -339,7 +341,7 @@ const SequencesTab: React.FC = () => {
   const [senderIdentities, setSenderIdentities] = useState<EmailIdentity[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [showArchived, setShowArchived] = useState(false)
+  const [operatorQuickFilter, setOperatorQuickFilter] = useState<SequenceOperatorQuickFilter>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [snapshotsError, setSnapshotsError] = useState<string | null>(null)
@@ -365,6 +367,7 @@ const SequencesTab: React.FC = () => {
     () => hasSequenceDestructiveAuthority(signedInUserEmail),
     [signedInUserEmail]
   )
+  const includeArchivedInList = operatorQuickFilter === 'archived'
   const [leadSourceSelection, setLeadSourceSelection] = useState(leadSourceSelectionStore.getLeadSourceBatchSelection())
   const { isOpen: isPreviewOpen, onOpen: onPreviewOpen, onClose: onPreviewClose } = useDisclosure()
   const [previewContacts, setPreviewContacts] = useState<Record<string, string>[]>([])
@@ -2606,7 +2609,7 @@ const SequencesTab: React.FC = () => {
     setLoading(true)
     setError(null)
     const headers = customerHeaders!
-    const sequencePath = showArchived ? '/api/sequences?includeArchived=true' : '/api/sequences'
+    const sequencePath = includeArchivedInList ? '/api/sequences?includeArchived=true' : '/api/sequences'
     const [sequencesRes, campaignsRes] = await Promise.all([
       api.get<Array<{
         id: string
@@ -2687,7 +2690,7 @@ const SequencesTab: React.FC = () => {
     setSequences(rows)
     setLoading(false)
     return rows
-  }, [selectedCustomerId, customerHeaders, showArchived])
+  }, [selectedCustomerId, customerHeaders, includeArchivedInList])
 
   const loadSnapshots = useCallback(async () => {
     const results = await Promise.all(
@@ -2832,6 +2835,11 @@ const SequencesTab: React.FC = () => {
       return matchesSearch && matchesStatus
     })
   }, [sequences, searchQuery, statusFilter])
+
+  const handleOperatorQuickFilterChange = (nextFilter: SequenceOperatorQuickFilter) => {
+    setOperatorQuickFilter(nextFilter)
+    setStatusFilter('all')
+  }
 
   const readinessSequenceOptions = useMemo(() => {
     return sequences
@@ -3328,6 +3336,59 @@ const SequencesTab: React.FC = () => {
       nextActionVariant: 'solid',
     }
   }
+
+  const operatorVisibleSequences = (() => {
+    const getSortPriority = (sequence: SequenceCampaign) => {
+      const operatorState = getSequenceOperatorStateSummary(sequence).label
+      switch (operatorState) {
+        case 'Ready':
+          return 0
+        case 'Blocked':
+        case 'Paused':
+          return 1
+        case 'Running':
+          return 2
+        case 'Completed':
+          return 3
+        case 'Archived':
+          return 4
+        default:
+          return 5
+      }
+    }
+
+    const matchesQuickFilter = (sequence: SequenceCampaign) => {
+      if (!includeArchivedInList && sequence.isArchived) return false
+
+      const operatorState = getSequenceOperatorStateSummary(sequence).label
+      switch (operatorQuickFilter) {
+        case 'ready':
+          return operatorState === 'Ready'
+        case 'needs_attention':
+          return operatorState === 'Blocked' || operatorState === 'Paused'
+        case 'running':
+          return operatorState === 'Running'
+        case 'archived':
+          return operatorState === 'Archived'
+        case 'all':
+        default:
+          return includeArchivedInList ? operatorState === 'Archived' : operatorState !== 'Archived'
+      }
+    }
+
+    return [...filteredSequences]
+      .filter((sequence) => matchesQuickFilter(sequence))
+      .sort((left, right) => {
+        const priorityDelta = getSortPriority(left) - getSortPriority(right)
+        if (priorityDelta !== 0) return priorityDelta
+
+        const leftTime = new Date(left.updatedAt || left.createdAt).getTime()
+        const rightTime = new Date(right.updatedAt || right.createdAt).getTime()
+        if (rightTime !== leftTime) return rightTime - leftTime
+
+        return left.name.localeCompare(right.name)
+      })
+  })()
 
   const getSequenceLastResultSummary = (sequence: SequenceCampaign) => {
     if (editingSequence?.id === sequence.id) {
@@ -4352,7 +4413,7 @@ const SequencesTab: React.FC = () => {
         onDeleteBlockedClose()
       }
 
-      if (shouldArchive && editingSequence?.id === sequence.id && !showArchived) {
+      if (shouldArchive && editingSequence?.id === sequence.id && !includeArchivedInList) {
         handleCloseSequenceEditor()
         setEditingSequence(null)
       }
@@ -4386,7 +4447,7 @@ const SequencesTab: React.FC = () => {
     loadData,
     onDeleteBlockedClose,
     selectedCustomerId,
-    showArchived,
+    includeArchivedInList,
     toast,
   ])
 
@@ -6900,7 +6961,7 @@ const SequencesTab: React.FC = () => {
         </Card>
       </Collapse>
 
-      <Flex gap={4} mb={6} align="center">
+      <Flex gap={4} mb={6} align="center" flexWrap="wrap">
         <InputGroup maxW="300px">
           <InputLeftElement>
             <Icon as={SearchIcon} color="gray.400" />
@@ -6925,15 +6986,56 @@ const SequencesTab: React.FC = () => {
           <option value="paused">Paused</option>
         </Select>
 
-        <Checkbox
-          id="sequences-show-archived-toggle"
-          data-testid="sequences-show-archived-toggle"
-          isChecked={showArchived}
-          onChange={(e) => setShowArchived(e.target.checked)}
-          colorScheme="purple"
+        <HStack
+          spacing={2}
+          flexWrap="wrap"
+          data-testid="sequences-operator-quick-filters"
         >
-          Show archived
-        </Checkbox>
+          <Button
+            size="sm"
+            variant={operatorQuickFilter === 'all' ? 'solid' : 'outline'}
+            colorScheme={operatorQuickFilter === 'all' ? 'gray' : 'gray'}
+            onClick={() => handleOperatorQuickFilterChange('all')}
+          >
+            All
+          </Button>
+          <Button
+            size="sm"
+            variant={operatorQuickFilter === 'ready' ? 'solid' : 'outline'}
+            colorScheme="green"
+            data-testid="sequences-filter-ready-now"
+            onClick={() => handleOperatorQuickFilterChange('ready')}
+          >
+            Ready now
+          </Button>
+          <Button
+            size="sm"
+            variant={operatorQuickFilter === 'needs_attention' ? 'solid' : 'outline'}
+            colorScheme="orange"
+            data-testid="sequences-filter-needs-attention"
+            onClick={() => handleOperatorQuickFilterChange('needs_attention')}
+          >
+            Needs attention
+          </Button>
+          <Button
+            size="sm"
+            variant={operatorQuickFilter === 'running' ? 'solid' : 'outline'}
+            colorScheme="blue"
+            data-testid="sequences-filter-running"
+            onClick={() => handleOperatorQuickFilterChange('running')}
+          >
+            Running
+          </Button>
+          <Button
+            size="sm"
+            variant={operatorQuickFilter === 'archived' ? 'solid' : 'outline'}
+            colorScheme="purple"
+            data-testid="sequences-filter-archived"
+            onClick={() => handleOperatorQuickFilterChange('archived')}
+          >
+            Archived
+          </Button>
+        </HStack>
 
         <Spacer />
       </Flex>
@@ -6953,7 +7055,7 @@ const SequencesTab: React.FC = () => {
                 </Tr>
               </Thead>
               <Tbody>
-                {filteredSequences.map((sequence) => {
+                {operatorVisibleSequences.map((sequence) => {
                   const rowStateSummary = getSequenceOperatorStateSummary(sequence)
                   const rowLiveAudienceSummary = getSequenceLiveAudienceSummary(sequence)
                   const rowTestAudienceSummary = getSequenceTestAudienceSummary(sequence)
