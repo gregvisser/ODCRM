@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Box,
+  Switch,
   Button,
   Heading,
   Table,
@@ -79,6 +80,8 @@ type Sequence = {
   name: string
   description?: string | null
   stepCount?: number
+  isArchived?: boolean
+  archivedAt?: string | null
   createdAt: string
   updatedAt: string
   steps?: SequenceStep[]
@@ -140,6 +143,7 @@ type DryRunResult = {
 export default function MarketingSequencesTab() {
   const [sequences, setSequences] = useState<Sequence[]>([])
   const [loading, setLoading] = useState(true)
+  const [showArchived, setShowArchived] = useState(false)
   const [selectedSequence, setSelectedSequence] = useState<Sequence | null>(null)
   const [editingSequence, setEditingSequence] = useState<Sequence | null>(null)
   const [sequenceToDelete, setSequenceToDelete] = useState<Sequence | null>(null)
@@ -169,7 +173,7 @@ export default function MarketingSequencesTab() {
 
   const fetchSequences = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await api.get<Sequence[]>(`/api/sequences?customerId=${customerId}`)
+    const { data, error } = await api.get<Sequence[]>(`/api/sequences?customerId=${customerId}${showArchived ? '&includeArchived=true' : ''}`)
     if (error) {
       toast({
         title: 'Error',
@@ -182,6 +186,10 @@ export default function MarketingSequencesTab() {
     }
     setLoading(false)
   }, [customerId, toast])
+
+  useEffect(() => {
+    fetchSequences()
+  }, [showArchived])
 
   useEffect(() => {
     if (customerId) {
@@ -309,9 +317,13 @@ export default function MarketingSequencesTab() {
             Build multi-step email sequences for campaigns
           </Text>
         </Box>
-        <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onCreateOpen}>
-          Create Sequence
-        </Button>
+        <HStack>
+          <Switch id="show-archived" isChecked={showArchived} onChange={(e) => setShowArchived((e.target as HTMLInputElement).checked)} />
+          <Text fontSize="sm">Show archived</Text>
+          <Button leftIcon={<AddIcon />} colorScheme="teal" onClick={onCreateOpen}>
+            Create Sequence
+          </Button>
+        </HStack>
       </HStack>
 
       <Box bg="white" borderRadius="lg" border="1px solid" borderColor="gray.200" overflowX="auto">
