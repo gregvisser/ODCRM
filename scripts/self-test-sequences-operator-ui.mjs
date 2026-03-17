@@ -13,13 +13,13 @@ const file = join(root, 'src/tabs/marketing/components/SequencesTab.tsx')
 const content = readFileSync(file, 'utf8')
 
 const required = [
-  'How this works',
-  'Pick a Leads Snapshot',
-  'Create an Enrollment',
   'Preview email',
-  'Send Queue Preview (Dry Run)',
-  'Dry-run Audit',
-  'Details are available in the Send Queue drawer',
+  'Next operator action',
+  'Live audience',
+  'Test audience',
+  'Latest send result',
+  'Live outreach view',
+  'Show troubleshooting tools',
 ]
 const forbidden = ['Stage 2A', 'Stage 3', '(Stage']
 

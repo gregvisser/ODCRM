@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { buildSequenceDeleteBlockerDetails } from '../lib/sequenceDeleteBlockers.js'
@@ -6,8 +6,36 @@ import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { listEnrollmentsForSequence, createEnrollmentForSequence } from './enrollments.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 
 const router = Router()
+const SEQUENCE_DESTRUCTIVE_AUTHORITY_EMAILS = [
+  'greg@opensdoor.co.uk',
+  'greg@bidlow.co.uk',
+] as const
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function hasSequenceDestructiveAuthority(email: string | null | undefined): boolean {
+  if (!email) return false
+  const normalized = normalizeEmail(email)
+  return SEQUENCE_DESTRUCTIVE_AUTHORITY_EMAILS.some((allowed) => normalizeEmail(allowed) === normalized)
+}
+
+async function requireSequenceDestructiveAuthority(req: Request, res: Response): Promise<boolean> {
+  const actor = await getVerifiedActorIdentity(req)
+  if (hasSequenceDestructiveAuthority(actor.emailNormalized || actor.email)) {
+    return true
+  }
+
+  res.status(403).json({
+    error: 'Forbidden',
+    message: 'Only greg@opensdoor.co.uk or greg@bidlow.co.uk may delete, archive, or unarchive sequences.',
+  })
+  return false
+}
 
 // Schema validation
 const MAX_SEQUENCE_STEPS = 8
@@ -349,6 +377,8 @@ router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
+    const canDelete = await requireSequenceDestructiveAuthority(req, res)
+    if (!canDelete) return
     const { id } = req.params
 
     const existing = await prisma.emailSequence.findFirst({
@@ -424,6 +454,8 @@ router.post('/:id/archive', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
+    const canArchive = await requireSequenceDestructiveAuthority(req, res)
+    if (!canArchive) return
     const { id } = req.params
 
     const sequence = await prisma.emailSequence.findFirst({ where: { id, customerId } })
@@ -443,6 +475,8 @@ router.post('/:id/unarchive', requireMarketingMutationAuth, async (req, res) => 
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
+    const canUnarchive = await requireSequenceDestructiveAuthority(req, res)
+    if (!canUnarchive) return
     const { id } = req.params
 
     const sequence = await prisma.emailSequence.findFirst({ where: { id, customerId } })

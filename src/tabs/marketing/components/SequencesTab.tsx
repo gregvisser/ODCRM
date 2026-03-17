@@ -84,6 +84,7 @@ import {
   InfoIcon,
   CopyIcon,
 } from '@chakra-ui/icons'
+import { useMsal } from '@azure/msal-react'
 import { RiSparkling2Line } from 'react-icons/ri'
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
@@ -281,6 +282,28 @@ const buildStepSnapshotMap = (steps?: SequenceStep[]) =>
 
 const LEAD_SOURCES: SnapshotOption['source'][] = ['cognism', 'apollo', 'blackbook']
 const MAX_STEP_DELAY_DAYS = 365
+const SEQUENCE_DESTRUCTIVE_AUTHORITY_EMAILS = ['greg@opensdoor.co.uk', 'greg@bidlow.co.uk'] as const
+const SEQUENCE_DESTRUCTIVE_AUTHORITY_MESSAGE =
+  'Delete, archive, and unarchive are restricted to greg@opensdoor.co.uk and greg@bidlow.co.uk.'
+
+function extractSignedInEmail(account: {
+  username?: string
+  idTokenClaims?: Record<string, unknown>
+} | null | undefined): string {
+  const claims = (account?.idTokenClaims || {}) as Record<string, unknown>
+  const raw =
+    claims.preferred_username ||
+    claims.email ||
+    claims.upn ||
+    account?.username ||
+    ''
+  return String(raw || '').trim().toLowerCase()
+}
+
+function hasSequenceDestructiveAuthority(email: string | null | undefined): boolean {
+  if (!email) return false
+  return SEQUENCE_DESTRUCTIVE_AUTHORITY_EMAILS.includes(email.trim().toLowerCase() as (typeof SEQUENCE_DESTRUCTIVE_AUTHORITY_EMAILS)[number])
+}
 
 type Customer = {
   id: string
@@ -288,6 +311,7 @@ type Customer = {
 }
 
 const SequencesTab: React.FC = () => {
+  const { accounts } = useMsal()
   const [sequences, setSequences] = useState<SequenceCampaign[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
@@ -325,6 +349,11 @@ const SequencesTab: React.FC = () => {
   } = useDisclosure()
   const cancelStartRef = useRef<HTMLButtonElement | null>(null)
   const toast = useToast()
+  const signedInUserEmail = useMemo(() => extractSignedInEmail(accounts[0]), [accounts])
+  const canManageSequenceDestructiveActions = useMemo(
+    () => hasSequenceDestructiveAuthority(signedInUserEmail),
+    [signedInUserEmail]
+  )
   const [leadSourceSelection, setLeadSourceSelection] = useState(leadSourceSelectionStore.getLeadSourceBatchSelection())
   const { isOpen: isPreviewOpen, onOpen: onPreviewOpen, onClose: onPreviewClose } = useDisclosure()
   const [previewContacts, setPreviewContacts] = useState<Record<string, string>[]>([])
@@ -4096,6 +4125,15 @@ const SequencesTab: React.FC = () => {
 
   const handleDeleteSequence = async (sequence: SequenceCampaign) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return
+    if (!canManageSequenceDestructiveActions) {
+      toast({
+        title: 'Delete restricted',
+        description: SEQUENCE_DESTRUCTIVE_AUTHORITY_MESSAGE,
+        status: 'info',
+        duration: 5000,
+      })
+      return
+    }
     const sequenceId = sequence.id
     if (deletingSequenceId) return
     setDeletingSequenceId(sequenceId)
@@ -4109,9 +4147,12 @@ const SequencesTab: React.FC = () => {
           onDeleteBlockedOpen()
           return
         }
+        const forbiddenMessage = deleteRes.errorDetails?.status === 403
+          ? deleteRes.error
+          : buildSequenceDeleteMessage(details, deleteRes.error)
         toast({
           title: 'Failed to delete sequence',
-          description: buildSequenceDeleteMessage(details, deleteRes.error),
+          description: forbiddenMessage,
           status: 'error',
           duration: 7000,
         })
@@ -4166,6 +4207,15 @@ const SequencesTab: React.FC = () => {
     }
   ) => {
     if (!selectedCustomerId || !selectedCustomerId.startsWith('cust_')) return false
+    if (!canManageSequenceDestructiveActions) {
+      toast({
+        title: `${shouldArchive ? 'Archive' : 'Unarchive'} restricted`,
+        description: SEQUENCE_DESTRUCTIVE_AUTHORITY_MESSAGE,
+        status: 'info',
+        duration: 5000,
+      })
+      return false
+    }
     if (archiveActionSequenceId) return false
     setArchiveActionSequenceId(sequence.id)
     try {
@@ -4177,9 +4227,12 @@ const SequencesTab: React.FC = () => {
         { headers: { 'X-Customer-Id': selectedCustomerId } }
       )
       if (response.error) {
+        const description = response.errorDetails?.status === 403
+          ? response.error
+          : response.error
         toast({
           title: `Failed to ${actionLabel} sequence`,
-          description: response.error,
+          description,
           status: 'error',
           duration: 5000,
         })
@@ -4221,6 +4274,7 @@ const SequencesTab: React.FC = () => {
     }
   }, [
     archiveActionSequenceId,
+    canManageSequenceDestructiveActions,
     editingSequence?.id,
     handleCloseSequenceEditor,
     loadData,
@@ -4362,11 +4416,20 @@ const SequencesTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Heading size="lg">Sequences</Heading>
           <Text color="gray.600">
-            Choose a sequence, confirm who it will send to, then test or start it.
+            Choose a sequence, confirm the live audience, then preview, start, or resume it.
           </Text>
           <Text fontSize="sm" color="gray.600" data-testid="sequences-tab-operator-cue">
-            The main workflow keeps live audience, test audience, readiness, and the next operator action in focus.
+            The main workflow keeps live audience, readiness, latest result, and the next operator action in focus.
           </Text>
+          {!canManageSequenceDestructiveActions ? (
+            <Text
+              fontSize="xs"
+              color="gray.500"
+              data-testid="sequence-destructive-actions-restricted-note"
+            >
+              {SEQUENCE_DESTRUCTIVE_AUTHORITY_MESSAGE}
+            </Text>
+          ) : null}
           {activeFocusPanel && isDiagnosticsOpen ? (
             <Text id="sequences-tab-focus-panel" data-testid="sequences-tab-focus-panel" fontSize="xs" color="gray.500">
               Focused panel: {activeFocusPanel}
@@ -4374,17 +4437,17 @@ const SequencesTab: React.FC = () => {
           ) : null}
           <HStack spacing={2} mt={1} data-testid="sequences-tab-view-toggle">
             <Badge colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}>
-              {isDiagnosticsOpen ? 'Troubleshooting open' : 'Operator workflow'}
+              {isDiagnosticsOpen ? 'Troubleshooting open' : 'Live outreach view'}
             </Badge>
             <Button
               id="sequences-tab-toggle-diagnostics"
               data-testid="sequences-tab-toggle-diagnostics"
               size="xs"
-              variant={isDiagnosticsOpen ? 'outline' : 'solid'}
-              colorScheme={isDiagnosticsOpen ? 'purple' : 'blue'}
+              variant={isDiagnosticsOpen ? 'outline' : 'ghost'}
+              colorScheme={isDiagnosticsOpen ? 'purple' : 'gray'}
               onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
             >
-              {isDiagnosticsOpen ? 'Hide troubleshooting & audits' : 'Open troubleshooting & audits'}
+              {isDiagnosticsOpen ? 'Hide troubleshooting tools' : 'Show troubleshooting tools'}
             </Button>
           </HStack>
           {isDiagnosticsOpen ? (
@@ -4506,33 +4569,6 @@ const SequencesTab: React.FC = () => {
           </CardBody>
         </Card>
       </SimpleGrid>
-
-      <Card
-        mb={6}
-        variant="outline"
-        borderColor={isDiagnosticsOpen ? 'purple.200' : 'gray.200'}
-        bg={isDiagnosticsOpen ? 'purple.50' : 'gray.50'}
-      >
-        <CardBody>
-          <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} flexWrap="wrap">
-            <VStack align="start" spacing={1} maxW="3xl">
-              <Heading size="sm">Troubleshooting & audits</Heading>
-              <Text fontSize="sm" color="gray.600">
-                Secondary tools for queue inspection, audit history, dry-run previews, and backend launch diagnostics.
-                Use these when the normal sequence workflow needs explanation or recovery.
-              </Text>
-            </VStack>
-            <Button
-              size="sm"
-              variant={isDiagnosticsOpen ? 'outline' : 'solid'}
-              colorScheme="purple"
-              onClick={isDiagnosticsOpen ? onDiagnosticsClose : onDiagnosticsOpen}
-            >
-              {isDiagnosticsOpen ? 'Hide troubleshooting' : 'Open troubleshooting'}
-            </Button>
-          </Flex>
-        </CardBody>
-      </Card>
 
       <Collapse in={isDiagnosticsOpen} animateOpacity>
       <Card mb={6}>
@@ -6895,19 +6931,21 @@ const SequencesTab: React.FC = () => {
                           <Button size="sm" colorScheme="blue" variant="outline" onClick={() => handleEditSequence(sequence)}>
                             {nextActionLabel}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant={sequence.isArchived ? 'outline' : 'solid'}
-                            colorScheme={sequence.isArchived ? 'purple' : 'gray'}
-                            data-testid={sequence.isArchived ? 'sequence-row-unarchive-button' : 'sequence-row-archive-button'}
-                            isLoading={archiveActionSequenceId === sequence.id}
-                            loadingText={sequence.isArchived ? 'Unarchiving…' : 'Archiving…'}
-                            onClick={() => {
-                              void handleSetSequenceArchivedState(sequence, !sequence.isArchived)
-                            }}
-                          >
-                            {sequence.isArchived ? 'Unarchive' : 'Archive'}
-                          </Button>
+                          {canManageSequenceDestructiveActions ? (
+                            <Button
+                              size="sm"
+                              variant={sequence.isArchived ? 'outline' : 'solid'}
+                              colorScheme={sequence.isArchived ? 'purple' : 'gray'}
+                              data-testid={sequence.isArchived ? 'sequence-row-unarchive-button' : 'sequence-row-archive-button'}
+                              isLoading={archiveActionSequenceId === sequence.id}
+                              loadingText={sequence.isArchived ? 'Unarchiving…' : 'Archiving…'}
+                              onClick={() => {
+                                void handleSetSequenceArchivedState(sequence, !sequence.isArchived)
+                              }}
+                            >
+                              {sequence.isArchived ? 'Unarchive' : 'Archive'}
+                            </Button>
+                          ) : null}
                           <Menu>
                             <MenuButton
                               as={IconButton}
@@ -6931,14 +6969,20 @@ const SequencesTab: React.FC = () => {
                                 </MenuItem>
                               )}
                               <MenuDivider />
-                              <MenuItem
-                                icon={<DeleteIcon />}
-                                color="red.500"
-                                isDisabled={Boolean(deletingSequenceId)}
-                                onClick={() => handleDeleteSequence(sequence)}
-                              >
-                                {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
-                              </MenuItem>
+                              {canManageSequenceDestructiveActions ? (
+                                <MenuItem
+                                  icon={<DeleteIcon />}
+                                  color="red.500"
+                                  isDisabled={Boolean(deletingSequenceId)}
+                                  onClick={() => handleDeleteSequence(sequence)}
+                                >
+                                  {deletingSequenceId === sequence.id ? 'Deleting…' : 'Delete'}
+                                </MenuItem>
+                              ) : (
+                                <MenuItem isDisabled color="gray.500">
+                                  Delete restricted to Greg
+                                </MenuItem>
+                              )}
                             </MenuList>
                           </Menu>
                         </HStack>
@@ -8353,7 +8397,7 @@ const SequencesTab: React.FC = () => {
                 </Box>
               </Alert>
 
-              {canArchiveBlockedSequence ? (
+              {canArchiveBlockedSequence && canManageSequenceDestructiveActions ? (
                 <Alert status="info" variant="subtle">
                   <AlertIcon />
                   <Box>
@@ -8392,7 +8436,7 @@ const SequencesTab: React.FC = () => {
               ) : null}
 
               <Flex justify="flex-end" gap={3}>
-                {canArchiveBlockedSequence ? (
+                {canArchiveBlockedSequence && canManageSequenceDestructiveActions ? (
                   <Button
                     colorScheme="purple"
                     data-testid="sequence-delete-blocked-archive-button"
