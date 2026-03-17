@@ -388,7 +388,7 @@ router.delete('/:id', requireMarketingMutationAuth, async (req, res) => {
         })
       )
 
-      const details = buildSequenceDeleteBlockerDetails(enriched as any)
+      const details = buildSequenceDeleteBlockerDetails(enriched)
 
       // If ALL linked campaigns are disposable, allow deletion and cleanup
       const allDisposable = details.campaigns.every((cc) => cc.blockerReason === 'disposable_campaign_cleanup_possible')

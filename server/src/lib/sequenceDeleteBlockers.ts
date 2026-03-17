@@ -63,19 +63,28 @@ export function getSequenceDeleteBlockerReason(
     return 'historical_campaign'
   }
 
-  // If status is completed or paused but no event history, err on side of historical
-  if (status === 'completed' || status === 'paused') return 'historical_campaign'
+  // Completed/paused wrappers with zero send history are safe disposable cleanup candidates.
+  if (status === 'completed' || status === 'paused') {
+    return 'disposable_campaign_cleanup_possible'
+  }
 
-  // If draft/no-status and zero counts, mark as disposable candidate
-  return 'disposable_campaign_cleanup_possible'
+  // Draft/no-status wrappers with zero counts are also disposable.
+  if (status === 'draft' || !status) {
+    return 'disposable_campaign_cleanup_possible'
+  }
+
+  // Unknown statuses stay blocked conservatively.
+  return 'linked_campaign'
 }
 
 export function buildSequenceDeleteBlockerDetails(
-  campaigns: SequenceDeleteLinkedCampaign[]
+  campaigns: EnrichedCampaignForDelete[]
 ): SequenceDeleteBlockerDetails {
   const blockers = campaigns.map((campaign) => ({
-    ...campaign,
-    blockerReason: getSequenceDeleteBlockerReason(campaign.status),
+    id: campaign.id,
+    name: campaign.name || 'Untitled campaign',
+    status: campaign.status,
+    blockerReason: getSequenceDeleteBlockerReason(campaign),
   }))
 
   const summary = blockers.reduce<SequenceDeleteBlockerSummary>(
