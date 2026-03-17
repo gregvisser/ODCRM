@@ -137,6 +137,7 @@ type SequenceCampaign = {
     displayName?: string
   } | null
   metrics?: CampaignMetrics
+  stepCount?: number
   steps?: SequenceStep[]
   isArchived?: boolean
   archivedAt?: string | null
@@ -227,6 +228,11 @@ type SequenceOperatorStateSummary = {
 
 type SequenceOperatorQuickFilter = 'all' | 'ready' | 'needs_attention' | 'running' | 'archived'
 type SequenceEditorFocusTarget = 'details' | 'audience' | 'sender' | 'steps' | 'launch'
+type SequenceSendConfidenceSignal = {
+  label: 'Mailbox' | 'Audience' | 'Content' | 'Window'
+  value: 'Ready' | 'Missing' | 'Blocked' | 'Waiting' | 'Unknown' | 'Empty' | 'Not chosen' | 'Incomplete'
+  colorScheme: 'green' | 'red' | 'orange' | 'gray'
+}
 
 type StartPreview = {
   snapshot?: SnapshotOption
@@ -2679,6 +2685,7 @@ const SequencesTab: React.FC = () => {
           updatedAt: campaign.updatedAt ?? seq.updatedAt,
           senderIdentity: campaign.senderIdentity ?? seq.senderIdentity ?? null,
           metrics: campaign.metrics,
+          stepCount: seq.stepCount,
           isArchived: seq.isArchived ?? false,
           archivedAt: seq.archivedAt ?? null,
         }
@@ -2696,6 +2703,7 @@ const SequencesTab: React.FC = () => {
         updatedAt: seq.updatedAt,
         senderIdentity: seq.senderIdentity ?? null,
         metrics: undefined,
+        stepCount: seq.stepCount,
         isArchived: seq.isArchived ?? false,
         archivedAt: seq.archivedAt ?? null,
       }
@@ -3481,6 +3489,52 @@ const SequencesTab: React.FC = () => {
 
   const getSequenceNextAction = (sequence: SequenceCampaign) => {
     return getSequenceOperatorStateSummary(sequence).nextActionLabel
+  }
+
+  const getSequenceSendConfidenceSummary = (sequence: SequenceCampaign): SequenceSendConfidenceSignal[] => {
+    const operatorState = getSequenceOperatorStateSummary(sequence)
+    const hasActiveMailbox = sequence.senderIdentityId
+      ? senderIdentities.some((sender) => sender.id === sequence.senderIdentityId)
+      : false
+    const mailboxSignal: SequenceSendConfidenceSignal = activeMailboxCount === 0
+      ? { label: 'Mailbox', value: 'Missing', colorScheme: 'red' }
+      : !sequence.senderIdentityId
+        ? { label: 'Mailbox', value: 'Missing', colorScheme: 'red' }
+        : !hasActiveMailbox
+          ? { label: 'Mailbox', value: 'Blocked', colorScheme: 'orange' }
+          : { label: 'Mailbox', value: 'Ready', colorScheme: 'green' }
+
+    const audienceSignal: SequenceSendConfidenceSignal = !sequence.listId
+      ? {
+          label: 'Audience',
+          value: leadBatches.length === 0 ? 'Empty' : 'Not chosen',
+          colorScheme: 'red',
+        }
+      : editingSequence?.id === sequence.id && linkedListSummaryLoading
+        ? { label: 'Audience', value: 'Unknown', colorScheme: 'gray' }
+        : editingSequence?.id === sequence.id && linkedListSummary && linkedListSummary.contactCount === 0
+          ? { label: 'Audience', value: 'Empty', colorScheme: 'red' }
+          : { label: 'Audience', value: 'Ready', colorScheme: 'green' }
+
+    const contentSignal: SequenceSendConfidenceSignal =
+      sequence.stepCount === 0
+        ? { label: 'Content', value: 'Missing', colorScheme: 'red' }
+        : sequence.stepCount == null
+          ? { label: 'Content', value: 'Unknown', colorScheme: 'gray' }
+          : sequence.stepCount > 0
+            ? { label: 'Content', value: 'Ready', colorScheme: 'green' }
+            : { label: 'Content', value: 'Unknown', colorScheme: 'gray' }
+
+    const windowSignal: SequenceSendConfidenceSignal =
+      operatorState.reasonLabel === 'Waiting for send window' || sequence.status === 'scheduled'
+        ? { label: 'Window', value: 'Waiting', colorScheme: 'orange' }
+        : operatorState.label === 'Ready' || operatorState.label === 'Running'
+          ? { label: 'Window', value: 'Ready', colorScheme: 'green' }
+          : operatorState.label === 'Paused' || operatorState.label === 'Archived'
+            ? { label: 'Window', value: 'Waiting', colorScheme: 'orange' }
+            : { label: 'Window', value: 'Unknown', colorScheme: 'gray' }
+
+    return [mailboxSignal, audienceSignal, contentSignal, windowSignal]
   }
 
   const getSequenceFixBlockerFocusTarget = (
@@ -7191,6 +7245,7 @@ const SequencesTab: React.FC = () => {
               <Tbody>
                 {operatorVisibleSequences.map((sequence) => {
                   const rowStateSummary = getSequenceOperatorStateSummary(sequence)
+                  const rowSendConfidenceSummary = getSequenceSendConfidenceSummary(sequence)
                   const rowLiveAudienceSummary = getSequenceLiveAudienceSummary(sequence)
                   const rowTestAudienceSummary = getSequenceTestAudienceSummary(sequence)
                   const rowLastResultSummary = getSequenceLastResultSummary(sequence)
@@ -7234,6 +7289,13 @@ const SequencesTab: React.FC = () => {
                           <Text fontSize="xs" color="gray.600">
                             {rowStateSummary.detail}
                           </Text>
+                          <HStack spacing={1} flexWrap="wrap" align="start" pt={1} data-testid="sequence-row-send-confidence">
+                            {rowSendConfidenceSummary.map((signal) => (
+                              <Badge key={`${sequence.id}-${signal.label}`} variant="subtle" colorScheme={signal.colorScheme} size="sm">
+                                {signal.label}: {signal.value}
+                              </Badge>
+                            ))}
+                          </HStack>
                         </VStack>
                       </Td>
                       <Td>
