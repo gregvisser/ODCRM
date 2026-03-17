@@ -82,6 +82,7 @@ type Sequence = {
   createdAt: string
   updatedAt: string
   steps?: SequenceStep[]
+  isArchived: boolean
 }
 
 type SequenceFormState = {
@@ -366,6 +367,19 @@ export default function MarketingSequencesTab() {
                       >
                         Dry Run
                       </Button>
+                      {sequence.isArchived ? (
+                        <Button size="sm" variant="outline" onClick={async () => {
+                          const { error } = await api.post(`/api/sequences/${sequence.id}/unarchive`)
+                          if (error) toast({ title: 'Error', description: error, status: 'error' })
+                          else { toast({ title: 'Unarchived', status: 'success' }); fetchSequences() }
+                        }}>Unarchive</Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" colorScheme="gray" onClick={async () => {
+                          const { error } = await api.post(`/api/sequences/${sequence.id}/archive`)
+                          if (error) toast({ title: 'Error', description: error, status: 'error' })
+                          else { toast({ title: 'Archived', status: 'success' }); fetchSequences() }
+                        }}>Archive</Button>
+                      )}
                       <IconButton
                         aria-label="Delete sequence"
                         icon={<DeleteIcon />}
