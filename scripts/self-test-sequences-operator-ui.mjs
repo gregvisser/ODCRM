@@ -24,6 +24,8 @@ const required = [
   'Needs attention',
   'Running',
   'Archived',
+  'Fix now',
+  'Waiting',
 ]
 const forbidden = ['Stage 2A', 'Stage 3', '(Stage']
 

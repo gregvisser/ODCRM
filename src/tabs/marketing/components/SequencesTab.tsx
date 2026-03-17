@@ -218,6 +218,8 @@ type SequenceOperatorStateSummary = {
   icon: typeof CheckCircleIcon
   reasonLabel: string
   detail: string
+  attentionLabel?: 'Fix now' | 'Waiting'
+  attentionColorScheme?: 'red' | 'orange'
   nextActionLabel: 'Start' | 'Resume' | 'Open' | 'Fix blocker'
   nextActionColorScheme: 'green' | 'blue' | 'orange' | 'gray'
   nextActionVariant: 'solid' | 'outline'
@@ -3195,52 +3197,87 @@ const SequencesTab: React.FC = () => {
   const getSequenceBlockedReasonSummary = (
     sequence: SequenceCampaign,
     blockedReason: string
-  ): Pick<SequenceOperatorStateSummary, 'reasonLabel' | 'detail'> => {
+  ): Pick<SequenceOperatorStateSummary, 'reasonLabel' | 'detail' | 'nextActionLabel' | 'attentionLabel' | 'attentionColorScheme'> => {
     if (sequence.isArchived) {
       return {
         reasonLabel: 'Archived',
         detail: 'Restore it first if live outreach should use this sequence again.',
+        nextActionLabel: 'Open',
+        attentionLabel: 'Waiting',
+        attentionColorScheme: 'orange',
+      }
+    }
+    if (!sequence.name.trim()) {
+      return {
+        reasonLabel: 'Name missing',
+        detail: 'Name the sequence before starting live outreach.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (!sequence.listId) {
       return {
-        reasonLabel: 'No live recipients',
-        detail: 'Link a live recipient batch before starting this sequence.',
+        reasonLabel: leadBatches.length === 0 ? 'No live recipients' : 'Live recipients not chosen',
+        detail: leadBatches.length === 0
+          ? 'Sync a live lead batch in Lead Sources before starting.'
+          : 'Choose the live recipients for Start live sequence.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (senderIdentities.length === 0) {
       return {
         reasonLabel: 'No active mailbox',
         detail: 'Connect a sending mailbox before this sequence can go live.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (!sequence.senderIdentityId) {
       return {
-        reasonLabel: 'Choose mailbox',
-        detail: 'Pick the mailbox that should send this sequence.',
+        reasonLabel: 'Mailbox not selected',
+        detail: 'Choose which mailbox should send this sequence.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (templates.length === 0) {
       return {
         reasonLabel: 'No template ready',
         detail: 'Add at least one template before starting.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (!sequence.sequenceId || !sequence.campaignId) {
       return {
         reasonLabel: 'Save changes first',
-        detail: 'Save the sequence so live sending has the latest version.',
+        detail: 'Save the latest sequence setup before starting.',
+        nextActionLabel: 'Fix blocker',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     if (snapshotsError || templatesError || sendersError) {
       return {
         reasonLabel: 'Loading error',
-        detail: 'Fix the data loading errors before starting live outreach.',
+        detail: 'Refresh or fix the data loading errors before starting.',
+        nextActionLabel: 'Open',
+        attentionLabel: 'Fix now',
+        attentionColorScheme: 'red',
       }
     }
     return {
-      reasonLabel: 'Needs setup',
+      reasonLabel: 'Start requirements incomplete',
       detail: blockedReason,
+      nextActionLabel: 'Fix blocker',
+      attentionLabel: 'Fix now',
+      attentionColorScheme: 'red',
     }
   }
 
@@ -3267,7 +3304,9 @@ const SequencesTab: React.FC = () => {
         icon: InfoIcon,
         reasonLabel: blocker.reasonLabel,
         detail: blocker.detail,
-        nextActionLabel: 'Fix blocker',
+        attentionLabel: blocker.attentionLabel,
+        attentionColorScheme: blocker.attentionColorScheme,
+        nextActionLabel: blocker.nextActionLabel,
         nextActionColorScheme: 'orange',
         nextActionVariant: 'outline',
       }
@@ -3280,6 +3319,8 @@ const SequencesTab: React.FC = () => {
         icon: SettingsIcon,
         reasonLabel: 'Sequence paused',
         detail: 'Resume it before expecting more live sending.',
+        attentionLabel: 'Waiting',
+        attentionColorScheme: 'orange',
         nextActionLabel: 'Resume',
         nextActionColorScheme: 'blue',
         nextActionVariant: 'solid',
@@ -3306,6 +3347,8 @@ const SequencesTab: React.FC = () => {
         icon: CalendarIcon,
         reasonLabel: 'Waiting for send window',
         detail: 'Live recipients are queued and will send in the next allowed window.',
+        attentionLabel: 'Waiting',
+        attentionColorScheme: 'orange',
         nextActionLabel: 'Open',
         nextActionColorScheme: 'gray',
         nextActionVariant: 'outline',
@@ -7088,6 +7131,11 @@ const SequencesTab: React.FC = () => {
                             <Badge colorScheme={rowStateSummary.colorScheme} size="sm">
                               {rowStateSummary.label}
                             </Badge>
+                            {rowStateSummary.attentionLabel ? (
+                              <Badge variant="subtle" colorScheme={rowStateSummary.attentionColorScheme} size="sm">
+                                {rowStateSummary.attentionLabel}
+                              </Badge>
+                            ) : null}
                           </HStack>
                           <Text fontSize="sm" fontWeight="medium">
                             {rowStateSummary.reasonLabel}
