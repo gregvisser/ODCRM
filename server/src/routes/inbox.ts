@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js'
 import { z } from 'zod'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { randomUUID } from 'crypto'
+import { buildInboxThreadSummaries, type InboxThreadMessageRecord } from '../utils/inboxThreadSummaries.js'
 
 const router = express.Router()
 
@@ -159,6 +160,7 @@ router.get('/threads', async (req, res, next) => {
         toAddress: true,
         direction: true,
         createdAt: true,
+        isRead: true,
         senderIdentity: {
           select: {
             id: true,
@@ -190,69 +192,7 @@ router.get('/threads', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 2000,
     })
-
-    const threadMap = new Map<string, {
-      threadId: string
-      subject: string
-      participantEmail: string
-      participantName: string | null
-      mailboxEmail: string | null
-      mailboxName: string | null
-      campaignId: string | undefined
-      campaignName: string | undefined
-      latestMessageAt: Date
-      messageCount: number
-      hasReplies: boolean
-      unreadCount: number
-    }>()
-    for (const message of messages) {
-      if (!message.threadId) continue
-
-      const threadId = message.threadId
-      const existing = threadMap.get(threadId)
-
-      if (!existing) {
-        threadMap.set(threadId, {
-          threadId,
-          subject: message.subject,
-          participantEmail: message.direction === 'inbound' ? message.fromAddress : message.toAddress,
-          participantName: message.campaignProspect?.contact ?
-            `${message.campaignProspect.contact.firstName || ''} ${message.campaignProspect.contact.lastName || ''}`.trim() ||
-            message.campaignProspect.contact.companyName : null,
-          mailboxEmail: message.senderIdentity?.emailAddress,
-          mailboxName: message.senderIdentity?.displayName,
-          campaignId: message.campaignProspect?.campaign?.id,
-          campaignName: message.campaignProspect?.campaign?.name,
-          latestMessageAt: message.createdAt,
-          messageCount: 1,
-          hasReplies: message.direction === 'inbound',
-          unreadCount: message.direction === 'inbound' && (message as any).isRead === false ? 1 : 0,
-        })
-      } else {
-        existing.messageCount++
-        if (message.direction === 'inbound' && (message as any).isRead === false) {
-          existing.unreadCount++
-        }
-        if (message.createdAt > existing.latestMessageAt) {
-          existing.subject = message.subject
-          existing.participantEmail = message.direction === 'inbound' ? message.fromAddress : message.toAddress
-          existing.participantName = message.campaignProspect?.contact ?
-            `${message.campaignProspect.contact.firstName || ''} ${message.campaignProspect.contact.lastName || ''}`.trim() ||
-            message.campaignProspect.contact.companyName : null
-          existing.mailboxEmail = message.senderIdentity?.emailAddress || null
-          existing.mailboxName = message.senderIdentity?.displayName || null
-          existing.campaignId = message.campaignProspect?.campaign?.id
-          existing.campaignName = message.campaignProspect?.campaign?.name
-          existing.latestMessageAt = message.createdAt
-        }
-        if (message.direction === 'inbound') {
-          existing.hasReplies = true
-        }
-      }
-    }
-
-    let threadList = Array.from(threadMap.values())
-    threadList.sort((a, b) => b.latestMessageAt.getTime() - a.latestMessageAt.getTime())
+    let threadList = buildInboxThreadSummaries(messages as InboxThreadMessageRecord[])
     if (unreadOnly) {
       threadList = threadList.filter((t) => t.unreadCount > 0)
     }
