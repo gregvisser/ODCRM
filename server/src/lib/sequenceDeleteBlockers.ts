@@ -1,3 +1,4 @@
+// ...existing code...
 export type SequenceDeleteCampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | string | null | undefined
 
 export type SequenceDeleteLinkedCampaign = {

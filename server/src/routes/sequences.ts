@@ -87,6 +87,45 @@ router.get('/', async (req, res) => {
 
     res.setHeader('x-odcrm-customer-id', customerId)
     return res.json({ data: sequencesWithCount })
+  router.post('/:id/archive', requireMarketingMutationAuth, async (req, res) => {
+    try {
+      const customerId = requireCustomerId(req, res)
+      if (!customerId) return
+      const { id } = req.params
+      const now = new Date()
+      const updated = await prisma.emailSequence.updateMany({
+        where: { id, customerId, isArchived: false },
+        data: { isArchived: true, archivedAt: now },
+      })
+      if (updated.count === 0) {
+        return res.status(404).json({ error: 'Sequence not found or already archived' })
+      }
+      return res.json({ success: true })
+    } catch (error) {
+      console.error('Error archiving sequence:', error)
+      return res.status(500).json({ error: 'Failed to archive sequence' })
+    }
+  })
+
+  // POST /api/sequences/:id/unarchive - Unarchive sequence
+  router.post('/:id/unarchive', requireMarketingMutationAuth, async (req, res) => {
+    try {
+      const customerId = requireCustomerId(req, res)
+      if (!customerId) return
+      const { id } = req.params
+      const updated = await prisma.emailSequence.updateMany({
+        where: { id, customerId, isArchived: true },
+        data: { isArchived: false, archivedAt: null },
+      })
+      if (updated.count === 0) {
+        return res.status(404).json({ error: 'Sequence not found or not archived' })
+      }
+      return res.json({ success: true })
+    } catch (error) {
+      console.error('Error unarchiving sequence:', error)
+      return res.status(500).json({ error: 'Failed to unarchive sequence' })
+    }
+  })
   } catch (error) {
     console.error('Error fetching sequences:', error)
     return res.status(500).json({ error: 'Failed to fetch sequences' })

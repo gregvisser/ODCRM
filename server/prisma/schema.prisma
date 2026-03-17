@@ -176,7 +176,6 @@ model Customer {
   emailSequences        EmailSequence[]
   emailTemplates        EmailTemplate[]
   emailEvents           EmailEvent[]
-  leadRecords           LeadRecord[]
   leadSyncState         LeadSyncState?
   suppressionEntries    SuppressionEntry[]
   sheetSourceConfigs    SheetSourceConfig[]
@@ -184,6 +183,7 @@ model Customer {
   leadSourceSheetConfigs LeadSourceSheetConfig[]
   leadSourceRowSeen      LeadSourceRowSeen[]
   enrollments            Enrollment[]
+  outboundSendAttemptAudits OutboundSendAttemptAudit[]
 
   @@index([id])
   @@index([domain])
@@ -211,7 +211,6 @@ model Contact {
   customer                 Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
   emailCampaignProspects   EmailCampaignProspect[]
   contactListMembers       ContactListMember[]
-  convertedFromLead        LeadRecord[]               @relation("LeadToContact")
   sequenceEnrollments      SequenceEnrollment[]
   sourceRows               ContactSourceRow[]
 
@@ -731,72 +730,12 @@ model OutboundSendAttemptAudit {
   decision    OutboundSendAttemptDecision
   reason      String?
   snapshot    Json?
-  createdAt   DateTime                   @default(now())
+  isArchived  Boolean                    @default(false)
+  archivedAt  DateTime?
+  customer    Customer                   @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
-  @@index([queueItemId])
   @@map("outbound_send_attempt_audits")
-}
-
-// Marketing leads imported from customer Google Sheets
-model LeadRecord {
-  id         String   @id @default(cuid())
-  customerId String
-  accountName String
-  data       Json
-  normalizedData Json?
-  sourceUrl  String?
-  sheetGid   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-  // Sheet-derived fields for display and filtering
-  externalSourceType String? // google_sheets | manual | import
-  externalId String?  // Sheet row id or "sheetGid:rowNumber"
-  externalRowFingerprint String?
-  occurredAt DateTime? // Lead date from sheet (Date, Created At, etc.)
-  source     String?  // Channel/Source from sheet
-  owner      String?  // Owner/Team member from sheet
-  firstName  String?
-  lastName   String?
-  fullName   String?
-  email      String?
-  phone      String?
-  company    String?
-  jobTitle   String?
-  location   String?
-  notes      String?
-  lastInboundSyncAt DateTime?
-  lastOutboundSyncAt DateTime?
-  syncStatus String? // synced | error | pending
-  syncError  String?
-
-  // Lead status and conversion tracking
-  status     LeadStatus @default(new)
-  score      Int?       // Lead score based on channel/outcome (0-100)
-  convertedToContactId String? // ID of contact if converted
-  convertedAt DateTime?
-  qualifiedAt DateTime?
-  enrolledInSequenceId String? // ID of sequence if auto-enrolled
-  
-  // Relations
-  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  convertedContact Contact? @relation("LeadToContact", fields: [convertedToContactId], references: [id])
-
-  @@unique([customerId, externalId])
-  @@index([customerId])
-  @@index([customerId, occurredAt])
-  @@index([customerId, source])
-  @@index([customerId, owner])
-  @@index([customerId, externalSourceType])
-  @@index([customerId, email])
-  @@index([customerId, syncStatus])
-  @@index([accountName])
-  @@index([updatedAt])
-  @@index([status])
-  @@index([score])
-  @@index([convertedToContactId])
-  @@map("lead_records")
 }
 
 model LeadSyncState {
