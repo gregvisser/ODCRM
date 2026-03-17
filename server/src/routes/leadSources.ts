@@ -652,6 +652,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     if (!customerId) return
     const { sourceType: sourceTypeRaw } = req.params
     const batchKey = (req.query.batchKey as string)?.trim()
+    const searchQuery = String(req.query.q ?? '').trim().toLowerCase()
     const page = Math.max(1, parseInt(req.query.page as string, 10) || 1)
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string, 10) || 50))
     if (!isValidSourceType(sourceTypeRaw)) {
@@ -685,9 +686,12 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         spreadsheetId: config.spreadsheetId,
         batchKey,
       },
-      select: { fingerprint: true },
+      select: { fingerprint: true, firstSeenAt: true },
     })
     const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
+    const firstSeenByFingerprint = new Map(
+      fingerprintsInBatch.map((row) => [row.fingerprint, row.firstSeenAt.getTime()] as const)
+    )
     const rowSeenCount = fingerprintsInBatch.length
     const dataScope = getLeadSourceDataScope(config)
     let cached = getCachedContacts(dataScope)
@@ -731,7 +735,11 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       const fp = r['__fp']
       return typeof fp === 'string' && fpSet.has(fp)
     })
-    const total = filtered.length
+    filtered.sort((a, b) => {
+      const aTs = typeof a.__fp === 'string' ? firstSeenByFingerprint.get(a.__fp) ?? 0 : 0
+      const bTs = typeof b.__fp === 'string' ? firstSeenByFingerprint.get(b.__fp) ?? 0 : 0
+      return bTs - aTs
+    })
     let returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
     if (returnedColumns.length === 0 && cached.rows.length > 0) {
       const keySet = new Set<string>()
@@ -740,6 +748,16 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       }
       returnedColumns = Array.from(keySet)
     }
+    const searchFiltered = searchQuery
+      ? filtered.filter((row) =>
+          returnedColumns.some((column) =>
+            String(row[column] ?? '')
+              .toLowerCase()
+              .includes(searchQuery)
+          )
+        )
+      : filtered
+    const total = searchFiltered.length
     if (process.env.DEBUG_LEAD_SOURCES === '1') {
       const firstRow = cached.rows[0] as Record<string, string> | undefined
       const firstRowKeys = firstRow ? Object.keys(firstRow).filter((k) => k !== '__fp') : []
@@ -753,13 +771,14 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         customerId,
         sourceType,
         batchKey,
+        searchQuery,
         rowSeenCount,
         cachedRowCount: cached.rows.length,
-        filteredRowCount: filtered.length,
+        filteredRowCount: searchFiltered.length,
       })
     }
     const start = (page - 1) * pageSize
-    const slice = filtered.slice(start, start + pageSize).map((r: Record<string, string>) => {
+    const slice = searchFiltered.slice(start, start + pageSize).map((r: Record<string, string>) => {
       const { __fp, ...rest } = r
       return normalizeRowKeepKeys(rest as Record<string, string>, returnedColumns)
     })

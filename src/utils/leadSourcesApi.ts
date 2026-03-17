@@ -121,9 +121,12 @@ export async function getLeadSourceContacts(
   sourceType: LeadSourceType,
   batchKey: string,
   page: number,
-  pageSize: number
+  pageSize: number,
+  search?: string
 ): Promise<LeadSourceContactsResponse> {
   const params = new URLSearchParams({ batchKey, page: String(page), pageSize: String(pageSize) })
+  const query = String(search ?? '').trim()
+  if (query) params.set('q', query)
   const res = await fetch(
     `${API_BASE}/api/lead-sources/${sourceType}/contacts?${params}`,
     { headers: headers(customerId) }
