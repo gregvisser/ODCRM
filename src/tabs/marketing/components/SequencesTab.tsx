@@ -226,6 +226,7 @@ type SequenceOperatorStateSummary = {
 }
 
 type SequenceOperatorQuickFilter = 'all' | 'ready' | 'needs_attention' | 'running' | 'archived'
+type SequenceEditorFocusTarget = 'details' | 'audience' | 'sender' | 'steps' | 'launch'
 
 type StartPreview = {
   snapshot?: SnapshotOption
@@ -383,11 +384,20 @@ const SequencesTab: React.FC = () => {
   const [linkedListSummaryLoading, setLinkedListSummaryLoading] = useState(false)
   const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
   const [isSequenceSetupOpen, setIsSequenceSetupOpen] = useState(false)
+  const [sequenceEditorFocusTarget, setSequenceEditorFocusTarget] = useState<SequenceEditorFocusTarget | null>(null)
   const [sequenceValidationVisible, setSequenceValidationVisible] = useState(false)
   const [sequenceStepAiLoading, setSequenceStepAiLoading] = useState<Record<number, boolean>>({})
   const [sequenceStepAiError, setSequenceStepAiError] = useState<Record<number, string | null>>({})
   const [sequenceStepAiSuggestion, setSequenceStepAiSuggestion] = useState<Record<number, StepContentSnapshot | null>>({})
   const [sequenceStepOriginals, setSequenceStepOriginals] = useState<Record<number, StepContentSnapshot>>({})
+  const sequenceStepsSectionRef = useRef<HTMLDivElement | null>(null)
+  const sequenceDetailsSectionRef = useRef<HTMLDivElement | null>(null)
+  const sequenceAudienceSectionRef = useRef<HTMLDivElement | null>(null)
+  const sequenceSenderSectionRef = useRef<HTMLDivElement | null>(null)
+  const sequenceLaunchSectionRef = useRef<HTMLDivElement | null>(null)
+  const sequenceNameInputRef = useRef<HTMLInputElement | null>(null)
+  const sequenceAudienceSelectRef = useRef<HTMLSelectElement | null>(null)
+  const sequenceSenderSelectRef = useRef<HTMLSelectElement | null>(null)
   const { isOpen: isCreateEnrollmentOpen, onOpen: onCreateEnrollmentOpen, onClose: onCreateEnrollmentClose } = useDisclosure()
   const [createEnrollmentName, setCreateEnrollmentName] = useState('')
   const [createEnrollmentRecipients, setCreateEnrollmentRecipients] = useState('')
@@ -478,6 +488,7 @@ const SequencesTab: React.FC = () => {
   const handleCloseSequenceEditor = useCallback(() => {
     resetSequenceStepAiState()
     setSequenceValidationVisible(false)
+    setSequenceEditorFocusTarget(null)
     onClose()
   }, [onClose, resetSequenceStepAiState])
 
@@ -3472,6 +3483,82 @@ const SequencesTab: React.FC = () => {
     return getSequenceOperatorStateSummary(sequence).nextActionLabel
   }
 
+  const getSequenceFixBlockerFocusTarget = (
+    sequence: SequenceCampaign,
+    reasonLabel: string
+  ): SequenceEditorFocusTarget => {
+    switch (reasonLabel) {
+      case 'No live recipients':
+      case 'Live recipients not chosen':
+        return 'audience'
+      case 'No active mailbox':
+      case 'Mailbox not selected':
+        return 'sender'
+      case 'Name missing':
+      case 'Save changes first':
+        return 'details'
+      case 'No template ready':
+        return 'steps'
+      case 'Start requirements incomplete':
+        if (!sequence.name.trim() || !sequence.sequenceId || !sequence.campaignId) return 'details'
+        if (!sequence.listId) return 'audience'
+        if (senderIdentities.length === 0 || !sequence.senderIdentityId) return 'sender'
+        if (templates.length === 0) return 'steps'
+        return 'launch'
+      case 'Loading error':
+      case 'Archived':
+      default:
+        return 'launch'
+    }
+  }
+
+  useEffect(() => {
+    if (!isOpen || !editingSequence || !sequenceEditorFocusTarget) return
+
+    const needsSetupOpen = sequenceEditorFocusTarget !== 'launch'
+    if (editingSequence.id && needsSetupOpen && !isSequenceSetupOpen) return
+
+    const focusTargetRef =
+      sequenceEditorFocusTarget === 'details'
+        ? sequenceNameInputRef.current
+        : sequenceEditorFocusTarget === 'audience'
+          ? sequenceAudienceSelectRef.current
+          : sequenceEditorFocusTarget === 'sender'
+            ? sequenceSenderSelectRef.current
+            : null
+
+    const scrollTarget =
+      sequenceEditorFocusTarget === 'steps'
+        ? sequenceStepsSectionRef.current
+        : sequenceEditorFocusTarget === 'details'
+          ? sequenceDetailsSectionRef.current
+          : sequenceEditorFocusTarget === 'audience'
+            ? sequenceAudienceSectionRef.current
+            : sequenceEditorFocusTarget === 'sender'
+              ? sequenceSenderSectionRef.current
+              : sequenceLaunchSectionRef.current
+
+    const frameId = window.requestAnimationFrame(() => {
+      scrollTarget?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      focusTargetRef?.focus()
+      setSequenceEditorFocusTarget(null)
+    })
+
+    return () => window.cancelAnimationFrame(frameId)
+  }, [editingSequence, isOpen, isSequenceSetupOpen, sequenceEditorFocusTarget])
+
+  const handleSequencePrimaryAction = (sequence: SequenceCampaign) => {
+    const operatorState = getSequenceOperatorStateSummary(sequence)
+    const focusTarget =
+      operatorState.nextActionLabel === 'Fix blocker'
+        ? getSequenceFixBlockerFocusTarget(sequence, operatorState.reasonLabel)
+        : operatorState.nextActionLabel === 'Open'
+          ? 'launch'
+          : null
+
+    void handleEditSequence(sequence, focusTarget)
+  }
+
   const handleCreateSequence = useCallback(() => {
     // Check if templates exist
     if (templates.length === 0) {
@@ -3660,9 +3747,13 @@ const SequencesTab: React.FC = () => {
     })
   }
 
-  const handleEditSequence = async (sequence: SequenceCampaign) => {
+  const handleEditSequence = async (
+    sequence: SequenceCampaign,
+    focusTarget: SequenceEditorFocusTarget | null = null
+  ) => {
     setMaterializedBatchKey(null)
-    setIsSequenceSetupOpen(false)
+    setIsSequenceSetupOpen(focusTarget !== null && focusTarget !== 'launch')
+    setSequenceEditorFocusTarget(focusTarget)
     setSequenceValidationVisible(false)
     const nextSequence: SequenceCampaign = {
       ...sequence,
@@ -7169,7 +7260,8 @@ const SequencesTab: React.FC = () => {
                             size="sm"
                             colorScheme={rowStateSummary.nextActionColorScheme}
                             variant={rowStateSummary.nextActionVariant}
-                            onClick={() => handleEditSequence(sequence)}
+                            title={nextActionLabel === 'Fix blocker' ? 'Open the section most likely to fix this blocker.' : undefined}
+                            onClick={() => handleSequencePrimaryAction(sequence)}
                           >
                             {nextActionLabel}
                           </Button>
@@ -7263,6 +7355,7 @@ const SequencesTab: React.FC = () => {
               <SimpleGrid columns={{ base: 1, lg: 2 }} minH="0" h="full">
                 {/* LEFT COLUMN — Sequence steps */}
                 <Box
+                  ref={sequenceStepsSectionRef}
                   borderRight={{ lg: '1px solid' }}
                   borderColor={{ lg: 'gray.200' }}
                   p={6}
@@ -7503,9 +7596,10 @@ const SequencesTab: React.FC = () => {
                   )}
 
                   <VStack spacing={5} align="stretch">
-                    <FormControl isRequired>
+                    <FormControl ref={sequenceDetailsSectionRef} isRequired>
                       <FormLabel>Sequence Name</FormLabel>
                       <Input
+                        ref={sequenceNameInputRef}
                         value={editingSequence.name}
                         onChange={(e) =>
                           setEditingSequence({ ...editingSequence, name: e.target.value })
@@ -7514,9 +7608,10 @@ const SequencesTab: React.FC = () => {
                       />
                     </FormControl>
 
-                    <FormControl isRequired>
+                    <FormControl ref={sequenceAudienceSectionRef} isRequired>
                       <FormLabel>Leads Snapshot</FormLabel>
                       <Select
+                        ref={sequenceAudienceSelectRef}
                         value={materializedBatchKey ?? ''}
                         onChange={async (e) => {
                           const batchKey = e.target.value || ''
@@ -7572,9 +7667,10 @@ const SequencesTab: React.FC = () => {
                       )}
                     </FormControl>
 
-                    <FormControl isRequired>
+                    <FormControl ref={sequenceSenderSectionRef} isRequired>
                       <FormLabel>Sender</FormLabel>
                       <Select
+                        ref={sequenceSenderSelectRef}
                         value={editingSequence.senderIdentityId || ''}
                         onChange={(e) =>
                           setEditingSequence({
@@ -7613,7 +7709,7 @@ const SequencesTab: React.FC = () => {
               {editingSequence.id && (
                 <Box borderTop="1px solid" borderColor="gray.200" p={6}>
                   <VStack align="stretch" spacing={4} mb={6}>
-                    <Box>
+                    <Box ref={sequenceLaunchSectionRef}>
                       <Heading size="sm">Launch workflow</Heading>
                       <Text fontSize="sm" color="gray.600">
                         Review the sender mailbox, live audience, test audience, and readiness, then send a test batch or start the live sequence.
