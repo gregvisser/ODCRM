@@ -183,6 +183,7 @@ model Customer {
   contactSourceRows     ContactSourceRow[]
   leadSourceSheetConfigs LeadSourceSheetConfig[]
   leadSourceRowSeen      LeadSourceRowSeen[]
+  leadSourceBatchMetadata LeadSourceBatchMetadata[]
   enrollments            Enrollment[]
 
   @@index([id])
@@ -1070,4 +1071,23 @@ model LeadSourceRowSeen {
   @@index([customerId, sourceType, firstSeenAt])
   @@index([customerId, sourceType, batchKey])
   @@map("lead_source_row_seen")
+}
+
+model LeadSourceBatchMetadata {
+  id            String         @id @default(cuid())
+  customerId    String
+  sourceType    LeadSourceType
+  spreadsheetId String
+  batchKey      String
+  operatorName  String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, sourceType, spreadsheetId, batchKey])
+  @@index([customerId])
+  @@index([customerId, sourceType])
+  @@index([customerId, sourceType, spreadsheetId])
+  @@map("lead_source_batch_metadata")
 }

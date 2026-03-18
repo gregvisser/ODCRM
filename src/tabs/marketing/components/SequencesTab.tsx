@@ -92,7 +92,12 @@ import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { isAgencyUI } from '../../../platform/mode'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
-import { getLeadSourceContacts } from '../../../utils/leadSourcesApi'
+import {
+  getLeadSourceContacts,
+  getLeadSourceBatchesAggregate,
+  materializeLeadSourceBatchList,
+  type LeadSourceType as LeadSourceApiType,
+} from '../../../utils/leadSourcesApi'
 import { visibleColumns } from '../../../utils/visibleColumns'
 
 type CampaignMetrics = {
@@ -179,10 +184,20 @@ type SnapshotOption = SnapshotList & {
   source: 'cognism' | 'apollo' | 'blackbook'
 }
 
+const LEAD_SOURCE_BATCH_VALUE_SEP = '\t'
+function encodeLeadSourceBatchIdentity(sourceType: string, batchKey: string): string {
+  return `${sourceType}${LEAD_SOURCE_BATCH_VALUE_SEP}${batchKey}`
+}
+function parseLeadSourceBatchIdentity(value: string): { sourceType: string; batchKey: string } | null {
+  if (!value || !value.includes(LEAD_SOURCE_BATCH_VALUE_SEP)) return null
+  const idx = value.indexOf(LEAD_SOURCE_BATCH_VALUE_SEP)
+  return { sourceType: value.slice(0, idx), batchKey: value.slice(idx + 1) }
+}
+
 type LeadSourceBatchOption = {
   batchKey: string
   sourceType: string
-  displayLabel: string
+  displayLabel?: string
   count?: number
 }
 
@@ -393,6 +408,17 @@ const SequencesTab: React.FC = () => {
   const [enrollmentActionId, setEnrollmentActionId] = useState<string | null>(null)
   const [linkedListSummary, setLinkedListSummary] = useState<LinkedListSummary | null>(null)
   const [linkedListSummaryLoading, setLinkedListSummaryLoading] = useState(false)
+  const selectedLeadBatchOption = useMemo(() => {
+    const parsed = parseLeadSourceBatchIdentity(materializedBatchKey ?? '')
+    if (parsed) {
+      const found = leadBatches.find((b) => b.sourceType === parsed.sourceType && b.batchKey === parsed.batchKey)
+      if (found) return found
+    }
+    if (materializedBatchKey && !materializedBatchKey.includes(LEAD_SOURCE_BATCH_VALUE_SEP)) {
+      return leadBatches.find((b) => b.batchKey === materializedBatchKey) ?? null
+    }
+    return null
+  }, [leadBatches, materializedBatchKey])
   const [isSequenceLaunchAdvancedOpen, setIsSequenceLaunchAdvancedOpen] = useState(false)
   const [isSequenceSetupOpen, setIsSequenceSetupOpen] = useState(false)
   const [sequenceEditorFocusTarget, setSequenceEditorFocusTarget] = useState<SequenceEditorFocusTarget | null>(null)
@@ -2756,12 +2782,19 @@ const SequencesTab: React.FC = () => {
     setSendersError(null)
 
     const headers = selectedCustomerId?.startsWith('cust_') ? { 'X-Customer-Id': selectedCustomerId } : {}
-    const [, batchesRes, templatesRes, sendersRes] = await Promise.all([
-      loadSnapshots(),
-      api.get<LeadSourceBatchOption[]>('/api/lead-sources/batches', { headers }),
+    let batchesData: LeadSourceBatchOption[] = []
+    if (selectedCustomerId?.startsWith('cust_')) {
+      try {
+        batchesData = await getLeadSourceBatchesAggregate(selectedCustomerId)
+      } catch {
+        batchesData = []
+      }
+    }
+    const [templatesRes, sendersRes] = await Promise.all([
       api.get<EmailTemplate[]>('/api/templates', { headers }),
       api.get<EmailIdentity[]>('/api/outlook/identities', { headers })
     ])
+    await loadSnapshots()
 
     if (templatesRes.error) {
       setTemplatesError(templatesRes.error)
@@ -2775,11 +2808,7 @@ const SequencesTab: React.FC = () => {
       setSenderIdentities((Array.isArray(sendersRes.data) ? sendersRes.data : []).filter((sender) => sender.isActive !== false))
     }
 
-    if (!batchesRes.error && Array.isArray(batchesRes.data)) {
-      setLeadBatches(batchesRes.data)
-    } else {
-      setLeadBatches([])
-    }
+    setLeadBatches(Array.isArray(batchesData) ? batchesData : [])
 
     setSnapshotsLoading(false)
     setLeadBatchesLoading(false)
@@ -4869,7 +4898,7 @@ const SequencesTab: React.FC = () => {
           <Box flex="1">
             <AlertTitle>Lead source batch selected</AlertTitle>
             <AlertDescription>
-              {leadSourceSelection.sourceType} — {leadSourceSelection.batchKey}. Preview recipients or clear to choose another.
+              {leadSourceSelection.displayLabel ?? `${leadSourceSelection.sourceType} — ${leadSourceSelection.batchKey}`}. Preview recipients or clear to choose another.
             </AlertDescription>
           </Box>
           <Button size="sm" colorScheme="blue" mr={2} onClick={handlePreviewRecipients} isLoading={previewLoading}>
@@ -7937,26 +7966,28 @@ const SequencesTab: React.FC = () => {
                         ref={sequenceAudienceSelectRef}
                         value={materializedBatchKey ?? ''}
                         onChange={async (e) => {
-                          const batchKey = e.target.value || ''
-                          if (!batchKey || !selectedCustomerId?.startsWith('cust_')) return
+                          const rawValue = e.target.value || ''
+                          if (!rawValue || !selectedCustomerId?.startsWith('cust_')) return
+                          const parsed = parseLeadSourceBatchIdentity(rawValue)
+                          const sourceType = parsed?.sourceType
+                          const batchKey = parsed?.batchKey ?? (rawValue.includes(LEAD_SOURCE_BATCH_VALUE_SEP) ? '' : rawValue)
+                          if (!batchKey) return
+                          const effectiveSourceType = sourceType ?? leadBatches.find((b) => b.batchKey === batchKey)?.sourceType
+                          if (!effectiveSourceType) {
+                            toast({ title: 'Failed to load list', description: 'Unknown batch source', status: 'error' })
+                            return
+                          }
                           try {
-                            const { data, error: matError } = await api.post<{
-                              listId: string
-                              name: string
-                            }>(
-                              `/api/lead-sources/batches/${encodeURIComponent(batchKey)}/materialize-list`,
-                              {},
-                              { headers: { 'X-Customer-Id': selectedCustomerId } }
+                            const adminSecret = (import.meta.env as { VITE_ADMIN_SECRET?: string }).VITE_ADMIN_SECRET
+                            const data = await materializeLeadSourceBatchList(
+                              selectedCustomerId,
+                              effectiveSourceType as LeadSourceApiType,
+                              batchKey,
+                              adminSecret
                             )
-                            if (matError || !data?.listId) {
-                              toast({
-                                title: 'Failed to load list',
-                                description: matError ?? 'No list returned',
-                                status: 'error',
-                              })
-                              return
-                            }
-                            setMaterializedBatchKey(batchKey)
+                            setMaterializedBatchKey(
+                              sourceType ? rawValue : encodeLeadSourceBatchIdentity(effectiveSourceType, batchKey)
+                            )
                             setEditingSequence((prev) =>
                               prev ? { ...prev, listId: data.listId } : prev
                             )
@@ -7973,8 +8004,8 @@ const SequencesTab: React.FC = () => {
                         }
                       >
                         {leadBatches.map((b) => (
-                          <option key={b.batchKey} value={b.batchKey}>
-                            {b.displayLabel} ({b.count ?? 0} leads)
+                          <option key={encodeLeadSourceBatchIdentity(b.sourceType, b.batchKey)} value={encodeLeadSourceBatchIdentity(b.sourceType, b.batchKey)}>
+                            {(b as { displayLabel?: string }).displayLabel ?? b.batchKey} ({b.count ?? 0} leads)
                           </option>
                         ))}
                       </Select>
@@ -7985,7 +8016,7 @@ const SequencesTab: React.FC = () => {
                       )}
                       {materializedBatchKey && (
                         <FormHelperText>
-                          Preview recipients: {leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0}. Enrolling this sequence will generate queue items for these recipients.
+                          Preview recipients: {selectedLeadBatchOption?.count ?? 0}. Enrolling this sequence will generate queue items for these recipients.
                         </FormHelperText>
                       )}
                     </FormControl>
@@ -8442,7 +8473,7 @@ const SequencesTab: React.FC = () => {
                   </Alert>
                 )}
                 <Text fontSize="xs" color="gray.500" mt={2}>
-                  Recipient preview: {linkedListSummary?.contactCount ?? leadBatches.find((b) => b.batchKey === materializedBatchKey)?.count ?? 0} recipients from the linked lead batch.
+                  Recipient preview: {linkedListSummary?.contactCount ?? selectedLeadBatchOption?.count ?? 0} recipients from the linked lead batch.
                 </Text>
               </Box>
             ) : (

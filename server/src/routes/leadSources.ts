@@ -88,6 +88,99 @@ function getLeadSourceDataScope(config: ResolvedLeadSourceConfig): {
   }
 }
 
+type LeadSourceDataScope = ReturnType<typeof getLeadSourceDataScope>
+type LeadSourceBatchGroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
+
+const MAX_OPERATOR_BATCH_NAME_LENGTH = 120
+const BATCHES_NO_DATE_TAKE = 200
+const BATCHES_AGGREGATE_TAKE = 200
+
+const updateLeadSourceBatchNameSchema = z.object({
+  operatorName: z.string().trim().max(MAX_OPERATOR_BATCH_NAME_LENGTH).nullable().optional(),
+})
+
+function getBatchMetadataKey(
+  scope: Pick<LeadSourceDataScope, 'configCustomerId' | 'sourceType' | 'spreadsheetId'>,
+  batchKey: string
+): string {
+  return `${scope.configCustomerId}|${scope.sourceType}|${scope.spreadsheetId}|${batchKey}`
+}
+
+function buildFallbackBatchLabel(sourceType: LeadSourceType, batchKey: string): string {
+  const parsed = parseBatchKey(batchKey)
+  return `${sourceType} — ${parsed.date}${parsed.client ? ` · ${parsed.client}` : ''}${parsed.jobTitle ? ` · ${parsed.jobTitle}` : ''}`.trim()
+}
+
+function buildBatchDisplayLabel(sourceType: LeadSourceType, batchKey: string, operatorName?: string | null): string {
+  const fallbackLabel = buildFallbackBatchLabel(sourceType, batchKey)
+  const normalizedName = typeof operatorName === 'string' ? operatorName.trim() : ''
+  return normalizedName ? `${normalizedName} · ${fallbackLabel}` : fallbackLabel
+}
+
+function buildMaterializedLeadBatchListName(
+  sourceType: LeadSourceType,
+  batchKey: string,
+  operatorName?: string | null
+): string {
+  const normalizedName = typeof operatorName === 'string' ? operatorName.trim() : ''
+  return normalizedName ? `Lead batch: ${normalizedName}` : `Lead batch: ${sourceType} — ${batchKey.slice(0, 120)}`
+}
+
+function buildMaterializedLeadBatchListMarker(scope: LeadSourceDataScope, batchKey: string): string {
+  return `lead-source-batch:${scope.configCustomerId}:${scope.sourceType}:${scope.spreadsheetId}:${batchKey}`
+}
+
+function buildMaterializedLeadBatchListDescription(
+  scope: LeadSourceDataScope,
+  batchKey: string,
+  displayLabel: string
+): string {
+  return `${buildMaterializedLeadBatchListMarker(scope, batchKey)}\nMaterialized from ${displayLabel}`
+}
+
+async function loadBatchMetadataMap(
+  entries: Array<{ scope: LeadSourceDataScope; batchKey: string }>
+): Promise<Map<string, string | null>> {
+  const uniqueEntries = Array.from(
+    new Map(entries.map((entry) => [`${getBatchMetadataKey(entry.scope, entry.batchKey)}`, entry])).values()
+  )
+  if (uniqueEntries.length === 0) return new Map()
+
+  const rows = await prisma.leadSourceBatchMetadata.findMany({
+    where: {
+      OR: uniqueEntries.map((entry) => ({
+        customerId: entry.scope.configCustomerId,
+        sourceType: entry.scope.sourceType,
+        spreadsheetId: entry.scope.spreadsheetId,
+        batchKey: entry.batchKey,
+      })),
+    },
+    select: {
+      customerId: true,
+      sourceType: true,
+      spreadsheetId: true,
+      batchKey: true,
+      operatorName: true,
+    },
+  })
+
+  const byKey = new Map<string, string | null>()
+  for (const row of rows) {
+    byKey.set(
+      getBatchMetadataKey(
+        {
+          configCustomerId: row.customerId,
+          sourceType: row.sourceType,
+          spreadsheetId: row.spreadsheetId,
+        },
+        row.batchKey
+      ),
+      row.operatorName ?? null
+    )
+  }
+  return byKey
+}
+
 function getContactsCacheKey(scope: {
   configCustomerId: string
   sourceType: LeadSourceType
@@ -198,15 +291,13 @@ async function ensureCustomerExists(customerId: string): Promise<void> {
 }
 
 // GET /api/lead-sources/batches — all batches across source types for this customer (for Sequences Leads Snapshot)
-const BATCHES_AGGREGATE_TAKE = 200
 router.get('/batches', async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
     await ensureCustomerExists(customerId)
 
-    type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
-    const allBatches: Array<GroupRow & { sourceType: LeadSourceType }> = []
+    const allBatches: Array<LeadSourceBatchGroupRow & { sourceType: LeadSourceType; scope: LeadSourceDataScope }> = []
 
     for (const sourceType of SOURCE_TYPES) {
       const config = await resolveLeadSourceConfig(customerId, sourceType)
@@ -222,23 +313,28 @@ router.get('/batches', async (req: Request, res: Response) => {
         _count: { _all: true },
         _max: { firstSeenAt: true },
       })
-      const typed = grouped as unknown as GroupRow[]
-      for (const g of typed) allBatches.push({ ...g, sourceType })
+      const typed = grouped as unknown as LeadSourceBatchGroupRow[]
+      for (const g of typed) allBatches.push({ ...g, sourceType, scope: dataScope })
     }
 
-    const sorted = allBatches
+    const topBatches = allBatches
       .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
       .slice(0, BATCHES_AGGREGATE_TAKE)
-      .map((g) => {
-        const parsed = parseBatchKey(g.batchKey)
-        const label = `${g.sourceType} — ${parsed.date}${parsed.client ? ` · ${parsed.client}` : ''}${parsed.jobTitle ? ` · ${parsed.jobTitle}` : ''}`
-        return {
-          batchKey: g.batchKey,
-          sourceType: g.sourceType,
-          displayLabel: label.trim(),
-          count: g._count._all,
-        }
-      })
+    const metadataByKey = await loadBatchMetadataMap(
+      topBatches.map((batch) => ({ scope: batch.scope, batchKey: batch.batchKey }))
+    )
+    const sorted = topBatches.map((g) => {
+      const batchName = metadataByKey.get(getBatchMetadataKey(g.scope, g.batchKey)) ?? null
+      const fallbackLabel = buildFallbackBatchLabel(g.sourceType, g.batchKey)
+      return {
+        batchKey: g.batchKey,
+        sourceType: g.sourceType,
+        batchName,
+        fallbackLabel,
+        displayLabel: buildBatchDisplayLabel(g.sourceType, g.batchKey, batchName),
+        count: g._count._all,
+      }
+    })
 
     res.json(sorted)
   } catch (e) {
@@ -247,7 +343,156 @@ router.get('/batches', async (req: Request, res: Response) => {
   }
 })
 
-// POST /api/lead-sources/batches/:batchKey/materialize-list — create or reuse list from lead batch (idempotent)
+async function materializeLeadSourceBatchList(
+  customerId: string,
+  sourceType: LeadSourceType,
+  batchKey: string
+): Promise<{ listId: string; name: string }> {
+  const config = await resolveLeadSourceConfig(customerId, sourceType)
+  if (!config?.spreadsheetId) throw Object.assign(new Error('Source not connected'), { status: 404 })
+  const dataScope = getLeadSourceDataScope(config)
+
+  const metadataRow = await prisma.leadSourceBatchMetadata.findUnique({
+    where: {
+      customerId_sourceType_spreadsheetId_batchKey: {
+        customerId: dataScope.configCustomerId,
+        sourceType: dataScope.sourceType,
+        spreadsheetId: dataScope.spreadsheetId,
+        batchKey,
+      },
+    },
+    select: { operatorName: true },
+  })
+  const operatorName = metadataRow?.operatorName ?? null
+  const displayLabel = buildBatchDisplayLabel(sourceType, batchKey, operatorName)
+  const listName = buildMaterializedLeadBatchListName(sourceType, batchKey, operatorName)
+  const marker = buildMaterializedLeadBatchListMarker(dataScope, batchKey)
+  const legacyListName = `Lead batch: ${sourceType} — ${batchKey.slice(0, 120)}`
+
+  let list = await prisma.contactList.findFirst({
+    where: {
+      customerId,
+      OR: [
+        { description: { contains: marker } },
+        { name: legacyListName },
+      ],
+    },
+    select: { id: true, name: true },
+  })
+  if (list) return { listId: list.id, name: list.name }
+
+  const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
+    where: {
+      customerId: dataScope.configCustomerId,
+      sourceType,
+      spreadsheetId: dataScope.spreadsheetId,
+      batchKey,
+    },
+    select: { fingerprint: true },
+  })
+  const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
+  if (fpSet.size === 0) throw Object.assign(new Error('Batch has no contacts'), { status: 400 })
+
+  let cached = getCachedContacts(dataScope)
+  if (!cached) {
+    const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
+    const csvText = await fetchCsvFromUrl(csvUrl)
+    const { columnKeys, rows } = csvToMappedRows(csvText)
+    const flat = rows.map((r) => {
+      const canonical = { ...r.canonical }
+      const fingerprint = computeFingerprint(canonical)
+      return { ...canonical, ...r.extraFields, __fp: fingerprint }
+    })
+    setCachedContacts(dataScope, columnKeys, flat)
+    cached = { columnKeys, rows: flat }
+  }
+  const filtered = cached.rows.filter((r: Record<string, string>) => {
+    const fp = r['__fp']
+    return typeof fp === 'string' && fpSet.has(fp)
+  }) as Array<Record<string, string>>
+
+  list = await prisma.contactList.create({
+    data: {
+      id: `list_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+      customerId,
+      name: listName,
+      description: buildMaterializedLeadBatchListDescription(dataScope, batchKey, displayLabel),
+      updatedAt: new Date(),
+    },
+    select: { id: true, name: true },
+  })
+
+  const sourceValue = sourceType.toLowerCase()
+  for (const row of filtered) {
+    const email = (row.email ?? row.Email ?? '').toString().trim()
+    if (!email) continue
+    const firstName = (row.firstName ?? row.first_name ?? '').toString().trim() || 'Unknown'
+    const lastName = (row.lastName ?? row.last_name ?? '').toString().trim() || 'Unknown'
+    const companyName = (row.companyName ?? row.company_name ?? '').toString().trim() || 'Unknown'
+    const jobTitle = (row.jobTitle ?? row.job_title ?? '').toString().trim() || null
+    const phone = (row.mobile ?? row.phone ?? row.directPhone ?? row.officePhone ?? '').toString().trim() || null
+
+    let contact = await prisma.contact.findFirst({
+      where: { customerId, email },
+      select: { id: true },
+    })
+    if (!contact) {
+      contact = await prisma.contact.create({
+        data: {
+          customerId,
+          email,
+          firstName,
+          lastName,
+          companyName,
+          jobTitle: jobTitle ?? undefined,
+          phone: phone ?? undefined,
+          source: sourceValue,
+          updatedAt: new Date(),
+        },
+        select: { id: true },
+      })
+    }
+    await prisma.contactListMember.upsert({
+      where: {
+        listId_contactId: { listId: list!.id, contactId: contact.id },
+      },
+      create: {
+        id: `member_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        listId: list!.id,
+        contactId: contact.id,
+      },
+      update: {},
+    })
+  }
+  return { listId: list!.id, name: list!.name }
+}
+
+// POST /api/lead-sources/:sourceType/batches/:batchKey/materialize-list — source-aware materialize (preferred)
+router.post(
+  '/:sourceType/batches/:batchKey/materialize-list',
+  requireMarketingMutationAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const customerId = requireCustomerId(req, res)
+      if (!customerId) return
+      await ensureCustomerExists(customerId)
+      const sourceTypeRaw = (req.params.sourceType ?? '').trim()
+      const batchKey = (req.params.batchKey ?? '').trim()
+      if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
+      if (!isValidSourceType(sourceTypeRaw)) {
+        return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
+      }
+      const sourceType = sourceTypeRaw
+      const result = await materializeLeadSourceBatchList(customerId, sourceType, batchKey)
+      res.status(201).json({ listId: result.listId, name: result.name })
+    } catch (e) {
+      const err = e as Error & { status?: number }
+      res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to materialize list' })
+    }
+  }
+)
+
+// POST /api/lead-sources/batches/:batchKey/materialize-list — legacy: resolve source from batchKey, then materialize
 router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
@@ -269,110 +514,11 @@ router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth,
           spreadsheetId: config.spreadsheetId,
         })),
       },
-      select: { sourceType: true, spreadsheetId: true, customerId: true },
+      select: { sourceType: true },
     })
     if (!anyRow) return res.status(404).json({ error: 'Batch not found' })
-    const sourceType = anyRow.sourceType
-    const config = await resolveLeadSourceConfig(customerId, sourceType)
-    if (!config?.spreadsheetId) return res.status(404).json({ error: 'Source not connected' })
-    const dataScope = getLeadSourceDataScope(config)
-
-    const listName = `Lead batch: ${sourceType} — ${batchKey.slice(0, 120)}`
-    let list = await prisma.contactList.findFirst({
-      where: { customerId, name: listName },
-      select: { id: true, name: true },
-    })
-    if (list) {
-      return res.json({ listId: list.id, name: list.name })
-    }
-
-    // Get all rows in this batch (fingerprints)
-    const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
-      where: {
-        customerId: dataScope.configCustomerId,
-        sourceType,
-        spreadsheetId: dataScope.spreadsheetId,
-        batchKey,
-      },
-      select: { fingerprint: true },
-    })
-    const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
-    if (fpSet.size === 0) return res.status(400).json({ error: 'Batch has no contacts' })
-
-    // Load CSV-derived rows (same as contacts endpoint)
-    let cached = getCachedContacts(dataScope)
-    if (!cached) {
-      const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
-      const csvText = await fetchCsvFromUrl(csvUrl)
-      const { columnKeys, rows } = csvToMappedRows(csvText)
-      const flat = rows.map((r) => {
-        const canonical = { ...r.canonical }
-        const fingerprint = computeFingerprint(canonical)
-        return { ...canonical, ...r.extraFields, __fp: fingerprint }
-      })
-      setCachedContacts(dataScope, columnKeys, flat)
-      cached = { columnKeys, rows: flat }
-    }
-    const filtered = cached.rows.filter((r: Record<string, string>) => {
-      const fp = r['__fp']
-      return typeof fp === 'string' && fpSet.has(fp)
-    }) as Array<Record<string, string>>
-
-    list = await prisma.contactList.create({
-      data: {
-        id: `list_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-        customerId,
-        name: listName,
-        description: `Materialized from ${sourceType} batch`,
-        updatedAt: new Date(),
-      },
-      select: { id: true, name: true },
-    })
-
-    const sourceValue = sourceType.toLowerCase()
-    for (const row of filtered) {
-      const email = (row.email ?? row.Email ?? '').toString().trim()
-      if (!email) continue
-      const firstName = (row.firstName ?? row.first_name ?? '').toString().trim() || 'Unknown'
-      const lastName = (row.lastName ?? row.last_name ?? '').toString().trim() || 'Unknown'
-      const companyName = (row.companyName ?? row.company_name ?? '').toString().trim() || 'Unknown'
-      const jobTitle = (row.jobTitle ?? row.job_title ?? '').toString().trim() || null
-      const phone = (row.mobile ?? row.phone ?? row.directPhone ?? row.officePhone ?? '').toString().trim() || null
-
-      let contact = await prisma.contact.findFirst({
-        where: { customerId, email },
-        select: { id: true },
-      })
-      if (!contact) {
-        contact = await prisma.contact.create({
-          data: {
-            customerId,
-            email,
-            firstName,
-            lastName,
-            companyName,
-            jobTitle: jobTitle ?? undefined,
-            phone: phone ?? undefined,
-            source: sourceValue,
-            updatedAt: new Date(),
-          },
-          select: { id: true },
-        })
-      }
-      await prisma.contactListMember.upsert({
-        where: {
-          listId_contactId: { listId: list!.id, contactId: contact.id },
-        },
-        create: {
-          id: `member_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          listId: list!.id,
-          contactId: contact.id,
-        },
-        update: {},
-      })
-    }
-
-    res.status(201).json({ listId: list.id, name: list.name })
+    const result = await materializeLeadSourceBatchList(customerId, anyRow.sourceType, batchKey)
+    res.status(201).json({ listId: result.listId, name: result.name })
   } catch (e) {
     const err = e as Error & { status?: number }
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to materialize list' })
@@ -525,9 +671,8 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
   }
 })
 
-// GET /api/lead-sources/:sourceType/batches?date=YYYY-MM-DD — distinct batches (groupBy), never raw row_seen rows
+// GET /api/lead-sources/:sourceType/batches?date=YYYY-MM-DD — distinct batches (groupBy), with batch name metadata
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
-const BATCHES_NO_DATE_TAKE = 200
 
 router.get('/:sourceType/batches', async (req: Request, res: Response) => {
   try {
@@ -551,8 +696,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
       sourceType,
       spreadsheetId: dataScope.spreadsheetId,
     }
-    type GroupRow = { batchKey: string; _count: { _all: number }; _max: { firstSeenAt: Date | null } }
-    let grouped: GroupRow[]
+    let grouped: LeadSourceBatchGroupRow[]
     let fallback = false
 
     if (isIsoDate) {
@@ -562,7 +706,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
         _count: { _all: true },
         _max: { firstSeenAt: true },
       })
-      grouped = r1 as GroupRow[]
+      grouped = r1 as LeadSourceBatchGroupRow[]
       if (grouped.length === 0) {
         const r2 = await prisma.leadSourceRowSeen.groupBy({
           by: ['batchKey'],
@@ -570,7 +714,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
           _count: { _all: true },
           _max: { firstSeenAt: true },
         })
-        grouped = (r2 as GroupRow[])
+        grouped = (r2 as LeadSourceBatchGroupRow[])
           .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
           .slice(0, BATCHES_NO_DATE_TAKE)
         fallback = true
@@ -582,17 +726,26 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
         _count: { _all: true },
         _max: { firstSeenAt: true },
       })
-      grouped = (r3 as GroupRow[])
+      grouped = (r3 as LeadSourceBatchGroupRow[])
         .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
         .slice(0, BATCHES_NO_DATE_TAKE)
     }
 
+    const metadataByKey = await loadBatchMetadataMap(
+      grouped.map((g) => ({ scope: dataScope, batchKey: g.batchKey }))
+    )
     const batches = grouped
       .sort((a, b) => (b._max.firstSeenAt?.getTime() ?? 0) - (a._max.firstSeenAt?.getTime() ?? 0))
       .map((g) => {
         const parsed = parseBatchKey(g.batchKey)
+        const batchName = metadataByKey.get(getBatchMetadataKey(dataScope, g.batchKey)) ?? null
+        const fallbackLabel = buildFallbackBatchLabel(sourceType, g.batchKey)
         return {
           batchKey: g.batchKey,
+          sourceType,
+          batchName,
+          fallbackLabel,
+          displayLabel: buildBatchDisplayLabel(sourceType, g.batchKey, batchName),
           client: parsed.client && parsed.client.trim() !== '' ? parsed.client : '(none)',
           jobTitle: parsed.jobTitle && parsed.jobTitle.trim() !== '' ? parsed.jobTitle : '(none)',
           count: g._count._all,
@@ -608,6 +761,70 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
     res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to load batches' })
   }
 })
+
+// PATCH /api/lead-sources/:sourceType/batches/:batchKey — set or clear operator batch name
+router.patch(
+  '/:sourceType/batches/:batchKey',
+  requireMarketingMutationAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const customerId = requireCustomerId(req, res)
+      if (!customerId) return
+      const sourceTypeRaw = (req.params.sourceType ?? '').trim()
+      const batchKey = (req.params.batchKey ?? '').trim()
+      if (!batchKey) return res.status(400).json({ error: 'batchKey is required' })
+      if (!isValidSourceType(sourceTypeRaw)) {
+        return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
+      }
+      const sourceType = sourceTypeRaw
+      const body = updateLeadSourceBatchNameSchema.safeParse(req.body)
+      if (!body.success) {
+        return res.status(400).json({ error: 'Invalid input', details: body.error.flatten() })
+      }
+      const operatorName = body.data.operatorName !== undefined ? body.data.operatorName : undefined
+
+      const config = await resolveLeadSourceConfig(customerId, sourceType)
+      if (!config?.spreadsheetId) return res.status(404).json({ error: 'Source not connected' })
+      const dataScope = getLeadSourceDataScope(config)
+
+      const exists = await prisma.leadSourceRowSeen.findFirst({
+        where: {
+          customerId: dataScope.configCustomerId,
+          sourceType,
+          spreadsheetId: dataScope.spreadsheetId,
+          batchKey,
+        },
+        select: { batchKey: true },
+      })
+      if (!exists) return res.status(404).json({ error: 'Batch not found' })
+
+      const meta = await prisma.leadSourceBatchMetadata.upsert({
+        where: {
+          customerId_sourceType_spreadsheetId_batchKey: {
+            customerId: dataScope.configCustomerId,
+            sourceType,
+            spreadsheetId: dataScope.spreadsheetId,
+            batchKey,
+          },
+        },
+        create: {
+          customerId: dataScope.configCustomerId,
+          sourceType,
+          spreadsheetId: dataScope.spreadsheetId,
+          batchKey,
+          operatorName: operatorName ?? null,
+        },
+        update: { operatorName: operatorName ?? null },
+        select: { operatorName: true },
+      })
+      const displayLabel = buildBatchDisplayLabel(sourceType, batchKey, meta.operatorName)
+      res.json({ operatorName: meta.operatorName, displayLabel })
+    } catch (e) {
+      const err = e as Error & { status?: number }
+      res.status(err.status ?? 500).json({ error: err.message ?? 'Failed to update batch name' })
+    }
+  }
+)
 
 // GET /api/lead-sources/:sourceType/open-sheet — redirect to sheet (spreadsheetId is always an ID)
 router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {

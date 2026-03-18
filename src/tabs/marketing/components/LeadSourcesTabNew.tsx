@@ -63,6 +63,7 @@ import {
   getLeadSourceBatches,
   getLeadSourceContacts,
   buildOpenSheetUrl,
+  updateLeadSourceBatchName,
   type LeadSourceType,
   type LeadSourceBatch,
 } from '../../../utils/leadSourcesApi'
@@ -104,6 +105,10 @@ function isIsoDate(s: string): boolean {
 
 function normalizeBatchDate(s: string): string {
   return isIsoDate(s) ? s : isoToday()
+}
+
+function getLeadSourceBatchDisplayLabel(batch: LeadSourceBatch): string {
+  return batch.displayLabel ?? batch.fallbackLabel ?? batch.batchKey ?? ''
 }
 
 function isoYesterday(): string {
@@ -244,11 +249,101 @@ function SourcesOverview({
   )
 }
 
+function BatchRow({
+  batch,
+  sourceType,
+  activeBatchKey,
+  savingBatchKey,
+  onViewContacts,
+  onUseInSequence,
+  onSaveBatchName,
+}: {
+  batch: LeadSourceBatch
+  sourceType: LeadSourceType
+  activeBatchKey?: string | null
+  savingBatchKey?: string | null
+  onViewContacts: (batchKey: string) => void
+  onUseInSequence: (batch: LeadSourceBatch) => void
+  onSaveBatchName?: (batchKey: string, operatorName: string | null) => Promise<void>
+}) {
+  const [draft, setDraft] = useState<string>(() => (batch.batchName ?? '').trim())
+  const fallbackLabel = batch.fallbackLabel ?? ''
+  const isSaving = savingBatchKey === batch.batchKey
+  const isDirty = draft !== (batch.batchName ?? '').trim()
+
+  useEffect(() => {
+    setDraft((batch.batchName ?? '').trim())
+  }, [batch.batchKey, batch.batchName])
+
+  const handleSave = useCallback(() => {
+    if (!onSaveBatchName) return
+    const value = draft.trim() || null
+    onSaveBatchName(batch.batchKey, value).catch(() => {})
+  }, [batch.batchKey, draft, onSaveBatchName])
+
+  const handleClear = useCallback(() => {
+    setDraft('')
+    if (onSaveBatchName) onSaveBatchName(batch.batchKey, null).catch(() => {})
+  }, [batch.batchKey, onSaveBatchName])
+
+  return (
+    <Tr>
+      <Td maxW="320px">
+        <VStack align="stretch" spacing={1}>
+          <HStack spacing={2} align="center" flexWrap="wrap">
+            <Input
+              size="sm"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Optional batch name"
+              maxW="200px"
+              isDisabled={!onSaveBatchName || isSaving}
+            />
+            {onSaveBatchName && (
+              <HStack spacing={1}>
+                <Button size="xs" colorScheme="blue" onClick={handleSave} isLoading={isSaving} isDisabled={!isDirty}>
+                  Save
+                </Button>
+                <Button size="xs" variant="outline" onClick={handleClear} isDisabled={isSaving}>
+                  Clear
+                </Button>
+              </HStack>
+            )}
+          </HStack>
+          <Text fontSize="xs" color="gray.500" noOfLines={2}>
+            {fallbackLabel || batch.batchKey}
+          </Text>
+        </VStack>
+      </Td>
+      <Td>{batch.client ?? '(none)'}</Td>
+      <Td>{batch.jobTitle ?? '(none)'}</Td>
+      <Td isNumeric>{batch.count ?? 0}</Td>
+      <Td>{batch.lastSeenAt ? new Date(batch.lastSeenAt).toLocaleString() : '—'}</Td>
+      <Td>
+        <HStack spacing={2}>
+          <Button
+            size="xs"
+            variant={activeBatchKey === batch.batchKey ? 'solid' : 'outline'}
+            colorScheme={activeBatchKey === batch.batchKey ? 'blue' : undefined}
+            onClick={() => onViewContacts(batch.batchKey)}
+          >
+            {activeBatchKey === batch.batchKey ? 'Reviewing contacts' : 'Review contacts'}
+          </Button>
+          <Button size="xs" variant="outline" onClick={() => onUseInSequence(batch)}>
+            Use in sequence
+          </Button>
+        </HStack>
+      </Td>
+    </Tr>
+  )
+}
+
 function BatchesBlock({
   batches,
   batchesLoading,
   batchesFallback,
   sourceLabel,
+  sourceType,
   activeBatchKey,
   batchDate,
   openSheetUrl,
@@ -258,11 +353,14 @@ function BatchesBlock({
   onViewContacts,
   onUseInSequence,
   onRefreshSource,
+  onSaveBatchName,
+  savingBatchKey,
 }: {
   batches: LeadSourceBatch[]
   batchesLoading: boolean
   batchesFallback?: boolean
   sourceLabel: string
+  sourceType: LeadSourceType
   activeBatchKey?: string | null
   batchDate: string
   openSheetUrl: string
@@ -272,6 +370,8 @@ function BatchesBlock({
   onViewContacts: (batchKey: string) => void
   onUseInSequence: (batch: LeadSourceBatch) => void
   onRefreshSource: () => void
+  onSaveBatchName?: (batchKey: string, operatorName: string | null) => Promise<void>
+  savingBatchKey?: string | null
 }) {
   const safeBatches = asArray<LeadSourceBatch>(batches)
   const [searchTerm, setSearchTerm] = useState('')
@@ -279,9 +379,14 @@ function BatchesBlock({
     const query = searchTerm.trim().toLowerCase()
     if (!query) return safeBatches
     return safeBatches.filter((batch) =>
-      [batch.client, batch.jobTitle, batch.batchKey].some((value) =>
-        String(value ?? '').toLowerCase().includes(query)
-      )
+      [
+        batch.client,
+        batch.jobTitle,
+        batch.batchKey,
+        batch.batchName ?? '',
+        batch.displayLabel ?? '',
+        batch.fallbackLabel ?? '',
+      ].some((value) => String(value ?? '').toLowerCase().includes(query))
     )
   }, [safeBatches, searchTerm])
   return (
@@ -344,7 +449,7 @@ function BatchesBlock({
             <Table size="sm">
               <Thead>
                 <Tr>
-                  <Th>Batch key</Th>
+                  <Th>Batch name</Th>
                   <Th>Client</Th>
                   <Th>Job Title</Th>
                   <Th isNumeric>Count</Th>
@@ -381,28 +486,16 @@ function BatchesBlock({
                 </Tr>
               ) : (
                 filteredBatches.map((b) => (
-                  <Tr key={b.batchKey}>
-                    <Td fontFamily="mono" fontSize="xs">{b.batchKey}</Td>
-                    <Td>{b.client ?? '(none)'}</Td>
-                    <Td>{b.jobTitle ?? '(none)'}</Td>
-                    <Td isNumeric>{b.count ?? 0}</Td>
-                    <Td>{b.lastSeenAt ? new Date(b.lastSeenAt).toLocaleString() : '—'}</Td>
-                    <Td>
-                      <HStack spacing={2}>
-                        <Button
-                          size="xs"
-                          variant={activeBatchKey === b.batchKey ? 'solid' : 'outline'}
-                          colorScheme={activeBatchKey === b.batchKey ? 'blue' : undefined}
-                          onClick={() => onViewContacts(b.batchKey)}
-                        >
-                          {activeBatchKey === b.batchKey ? 'Reviewing contacts' : 'Review contacts'}
-                        </Button>
-                        <Button size="xs" variant="outline" onClick={() => onUseInSequence(b)}>
-                          Use in sequence
-                        </Button>
-                      </HStack>
-                    </Td>
-                  </Tr>
+                  <BatchRow
+                    key={b.batchKey}
+                    batch={b}
+                    sourceType={sourceType}
+                    activeBatchKey={activeBatchKey}
+                    savingBatchKey={savingBatchKey}
+                    onViewContacts={onViewContacts}
+                    onUseInSequence={onUseInSequence}
+                    onSaveBatchName={onSaveBatchName}
+                  />
                 ))
               )}
             </Tbody>
@@ -666,6 +759,7 @@ export default function LeadSourcesTabNew({
   const [connectUrlError, setConnectUrlError] = useState<string | null>(null)
   const [connectApplyToAllAccounts, setConnectApplyToAllAccounts] = useState(false)
   const [pollingSourceType, setPollingSourceType] = useState<LeadSourceType | null>(null)
+  const [savingBatchKey, setSavingBatchKey] = useState<string | null>(null)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
 
@@ -883,9 +977,14 @@ export default function LeadSourcesTabNew({
   }
 
   const handleUseInSequence = (batch: LeadSourceBatch) => {
-    const key = contactsBatchKey?.batchKey ?? batch.batchKey
-    const source = viewBatchesSource ?? (contactsBatchKey?.sourceType as LeadSourceType)
-    leadSourceSelectionStore.setLeadSourceBatchSelection({ sourceType: source, batchKey: key })
+    const source = viewBatchesSource ?? (batch.sourceType ?? contactsBatchKey?.sourceType as LeadSourceType)
+    const key = batch.batchKey
+    leadSourceSelectionStore.setLeadSourceBatchSelection({
+      sourceType: source,
+      batchKey: key,
+      batchName: batch.batchName ?? null,
+      displayLabel: batch.displayLabel ?? batch.fallbackLabel ?? undefined,
+    })
     toast({
       title: 'Batch selected for sequence',
       description: 'Go to Sequences to preview recipients and use this batch.',
@@ -894,6 +993,31 @@ export default function LeadSourcesTabNew({
     })
     onNavigateToSequences?.()
   }
+
+  const handleSaveBatchName = useCallback(
+    async (batchKey: string, operatorName: string | null) => {
+      if (!customerId || !viewBatchesSource) return
+      setSavingBatchKey(batchKey)
+      const adminSecret = import.meta.env.VITE_ADMIN_SECRET as string | undefined
+      try {
+        await updateLeadSourceBatchName(customerId, viewBatchesSource, batchKey, operatorName, adminSecret)
+        toast({ title: 'Batch name saved', status: 'success', duration: 3000 })
+        const data = await getLeadSourceBatches(customerId, viewBatchesSource, normalizeBatchDate(batchDate))
+        const list = Array.isArray(data) ? data : (data?.batches ?? [])
+        setBatches(asArray<LeadSourceBatch>(list))
+      } catch (e) {
+        toast({
+          title: 'Failed to save batch name',
+          description: e instanceof Error ? e.message : 'Error',
+          status: 'error',
+          duration: 5000,
+        })
+      } finally {
+        setSavingBatchKey(null)
+      }
+    },
+    [customerId, viewBatchesSource, batchDate, toast]
+  )
 
   const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
   const sourceSummary = useMemo(() => {
@@ -1050,6 +1174,7 @@ export default function LeadSourcesTabNew({
                 {viewBatchesSource ? (
                   <BatchesBlock
                     sourceLabel={SOURCE_LABELS[viewBatchesSource]}
+                    sourceType={viewBatchesSource}
                     batches={batches}
                     batchesLoading={batchesLoading}
                     batchesFallback={batchesFallback}
@@ -1079,6 +1204,8 @@ export default function LeadSourcesTabNew({
                       setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
                     }}
                     onUseInSequence={(batch) => handleUseInSequence(batch)}
+                    onSaveBatchName={handleSaveBatchName}
+                    savingBatchKey={savingBatchKey}
                   />
                 ) : null}
                 {contactsBatchKey ? (
