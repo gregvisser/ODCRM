@@ -148,6 +148,9 @@ const InboxTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [threadsLoading, setThreadsLoading] = useState(false)
+  const [hasMoreThreads, setHasMoreThreads] = useState(false)
+  const [threadsNextOffset, setThreadsNextOffset] = useState(0)
+  const [threadsLoadingMore, setThreadsLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [view, setView] = useState<'replies' | 'threads'>('threads')
@@ -226,6 +229,8 @@ const InboxTab: React.FC = () => {
     }
   }, [setSelectedCustomerId])
 
+  const THREADS_PAGE_SIZE = 50
+
   const loadThreads = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
@@ -233,20 +238,46 @@ const InboxTab: React.FC = () => {
     setError(null)
 
     const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
-      `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
+      `/api/inbox/threads?limit=${THREADS_PAGE_SIZE}&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
       { headers: customerHeaders }
     )
 
     if (apiError) {
       setError(apiError)
     } else {
-      setThreads(data?.threads || [])
+      const list = data?.threads || []
+      setThreads(list)
+      setHasMoreThreads(!!data?.hasMore)
+      setThreadsNextOffset(data?.offset ?? list.length)
       setLastUpdatedAt(new Date().toISOString())
     }
 
     setThreadsLoading(false)
     setLoading(false)
   }, [selectedCustomerId, unreadOnly, customerHeaders])
+
+  const loadMoreThreads = useCallback(async () => {
+    if (!selectedCustomerId) return
+    setThreadsLoadingMore(true)
+    setError(null)
+
+    const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
+      `/api/inbox/threads?limit=${THREADS_PAGE_SIZE}&offset=${threadsNextOffset}&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
+      { headers: customerHeaders }
+    )
+
+    if (apiError) {
+      setError(apiError)
+    } else {
+      const list = data?.threads || []
+      setThreads((prev) => [...prev, ...list])
+      setHasMoreThreads(!!data?.hasMore)
+      setThreadsNextOffset(data?.offset ?? threadsNextOffset + list.length)
+      setLastUpdatedAt(new Date().toISOString())
+    }
+
+    setThreadsLoadingMore(false)
+  }, [selectedCustomerId, unreadOnly, customerHeaders, threadsNextOffset])
 
   useEffect(() => {
     void loadCustomers()
@@ -601,46 +632,65 @@ const InboxTab: React.FC = () => {
                   </HStack>
                 </VStack>
               ) : (
-                <VStack spacing={0} align="stretch">
-                  {threads.map(thread => (
-                    <Box
-                      key={thread.threadId}
-                      p={4}
-                      borderBottom="1px"
-                      borderColor="gray.100"
-                      cursor="pointer"
-                      bg={selectedThreadId === thread.threadId ? "blue.50" : "white"}
-                      _hover={{ bg: "gray.50" }}
-                      onClick={() => loadThreadMessages(thread.threadId)}
-                    >
-                      <HStack spacing={3} align="start">
-                        <Avatar size="sm" name={thread.participantName || thread.participantEmail} />
-                        <VStack align="start" spacing={1} flex={1}>
-                          <HStack justify="space-between" w="full">
-                            <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
-                              {thread.participantName || thread.participantEmail}
+                <>
+                  <VStack spacing={0} align="stretch">
+                    {threads.map(thread => (
+                      <Box
+                        key={thread.threadId}
+                        p={4}
+                        borderBottom="1px"
+                        borderColor="gray.100"
+                        cursor="pointer"
+                        bg={selectedThreadId === thread.threadId ? "blue.50" : "white"}
+                        _hover={{ bg: "gray.50" }}
+                        onClick={() => loadThreadMessages(thread.threadId)}
+                      >
+                        <HStack spacing={3} align="start">
+                          <Avatar size="sm" name={thread.participantName || thread.participantEmail} />
+                          <VStack align="start" spacing={1} flex={1}>
+                            <HStack justify="space-between" w="full">
+                              <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
+                                {thread.participantName || thread.participantEmail}
+                              </Text>
+                              <Text fontSize="xs" color="gray.500">
+                                {new Date(thread.latestMessageAt).toLocaleDateString()}
+                              </Text>
+                            </HStack>
+                            <Text fontSize="sm" color="gray.600" noOfLines={1}>
+                              {thread.subject}
                             </Text>
-                            <Text fontSize="xs" color="gray.500">
-                              {new Date(thread.latestMessageAt).toLocaleDateString()}
-                            </Text>
-                          </HStack>
-                          <Text fontSize="sm" color="gray.600" noOfLines={1}>
-                            {thread.subject}
-                          </Text>
-                          <HStack spacing={2}>
-                            <Badge size="sm" colorScheme="blue">
-                              {thread.mailboxName || thread.mailboxEmail}
-                            </Badge>
-                            {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
-                            {(thread.unreadCount || 0) > 0 ? (
-                              <Badge size="sm" colorScheme="orange">{thread.unreadCount} unread</Badge>
-                            ) : null}
-                          </HStack>
-                        </VStack>
-                      </HStack>
+                            <HStack spacing={2}>
+                              <Badge size="sm" colorScheme="blue">
+                                {thread.mailboxName || thread.mailboxEmail}
+                              </Badge>
+                              {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
+                              {(thread.unreadCount || 0) > 0 ? (
+                                <Badge size="sm" colorScheme="orange">{thread.unreadCount} unread</Badge>
+                              ) : null}
+                            </HStack>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    ))}
+                  </VStack>
+                  {hasMoreThreads && (
+                    <Box p={3} borderTop="1px" borderColor="gray.100">
+                      <Text fontSize="xs" color="gray.500" mb={2}>
+                        Showing {threads.length} loaded
+                      </Text>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        width="full"
+                        onClick={() => loadMoreThreads()}
+                        isLoading={threadsLoadingMore}
+                        isDisabled={threadsLoadingMore}
+                      >
+                        Load more conversations
+                      </Button>
                     </Box>
-                  ))}
-                </VStack>
+                  )}
+                </>
               )}
             </CardBody>
           </Card>
