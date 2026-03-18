@@ -326,10 +326,10 @@ const InboxTab: React.FC = () => {
         toast({ title: 'Refresh failed', description: error, status: 'error', duration: 3000 })
       } else {
         toast({
-          title: 'Inbox refreshed',
-          description: `Checked ${(data as any)?.identitiesChecked ?? 0} mailbox(es) for new messages`,
+          title: 'Inbox messages refreshed',
+          description: `Checked ${(data as any)?.identitiesChecked ?? 0} mailbox(es) for recent inbox messages. Recent replies may appear after reply detection runs.`,
           status: 'success',
-          duration: 3000,
+          duration: 4000,
         })
       }
       setLastUpdatedAt(new Date().toISOString())
@@ -694,8 +694,9 @@ const InboxTab: React.FC = () => {
                       </Button>
                       {selectedThread && selectedThread.length > 0 && (() => {
                         const firstInbound = selectedThread.find((m) => m.direction === 'inbound')
+                        const inboxMessageId = firstInbound?.id
                         const contactEmail = firstInbound?.fromAddress
-                        if (!contactEmail) return null
+                        if (!contactEmail || !inboxMessageId) return null
                         return (
                           <Button
                             leftIcon={<NotAllowedIcon />}
@@ -704,13 +705,8 @@ const InboxTab: React.FC = () => {
                             size="sm"
                             onClick={async () => {
                               const { error } = await api.post(
-                                `/api/suppression?customerId=${selectedCustomerId}`,
-                                {
-                                  type: 'email',
-                                  value: contactEmail,
-                                  reason: 'Opted out via inbox',
-                                  source: 'inbox-optout',
-                                },
+                                `/api/inbox/messages/${inboxMessageId}/optout`,
+                                {},
                                 {
                                   headers: { 'X-Customer-Id': selectedCustomerId },
                                 }
