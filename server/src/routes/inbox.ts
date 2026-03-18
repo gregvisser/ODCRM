@@ -5,6 +5,7 @@ import { requireMarketingMutationAuth } from '../middleware/marketingMutationAut
 import { randomUUID } from 'crypto'
 import { buildInboxThreadSummaries, type InboxThreadMessageRecord } from '../utils/inboxThreadSummaries.js'
 import { deriveInboxOptOutTarget } from '../utils/inboxOptOut.js'
+import { resolveReplySender } from '../utils/inboxReplySender.js'
 
 const router = express.Router()
 
@@ -294,9 +295,38 @@ router.get('/threads/:threadId/messages', async (req, res, next) => {
       })
     }
 
+    const messagesForResolution = messages.map((msg: any) => ({
+      createdAt: msg.createdAt,
+      senderIdentityId: msg.senderIdentityId ?? msg.senderIdentity?.id,
+      senderIdentity: msg.senderIdentity,
+    }))
+    const resolved = resolveReplySender(messagesForResolution)
+
+    let replySender: { id: string; emailAddress: string; displayName: string | null; signatureAvailable: boolean } | null = null
+    let replySenderAmbiguous = false
+    if (resolved) {
+      replySenderAmbiguous = resolved.ambiguous
+      let signatureAvailable = false
+      try {
+        const identity = await prisma.emailIdentity.findUnique({
+          where: { id: resolved.senderIdentityId },
+          select: { signatureHtml: true },
+        })
+        signatureAvailable = !!(identity as any)?.signatureHtml?.trim()
+      } catch {
+        // ignore; signature status remains false
+      }
+      replySender = {
+        id: resolved.senderIdentityId,
+        emailAddress: resolved.emailAddress,
+        displayName: resolved.displayName,
+        signatureAvailable,
+      }
+    }
+
     res.json({
       threadId,
-      messages: messages.map(msg => ({
+      messages: messages.map((msg: any) => ({
         id: msg.id,
         threadId: msg.threadId,
         direction: msg.direction,
@@ -310,6 +340,8 @@ router.get('/threads/:threadId/messages', async (req, res, next) => {
         senderIdentity: msg.senderIdentity,
         campaignProspect: msg.campaignProspect,
       })),
+      replySender,
+      replySenderAmbiguous,
     })
   } catch (error) {
     next(error)
@@ -620,6 +652,20 @@ router.post('/threads/:threadId/reply', requireMarketingMutationAuth, async (req
     if (threadMessages.length === 0) {
       return res.status(404).json({ error: 'Thread not found' })
     }
+
+    const messagesForResolution = threadMessages.map((m: any) => ({
+      createdAt: m.createdAt,
+      senderIdentityId: m.senderIdentityId,
+      senderIdentity: m.senderIdentity,
+    }))
+    const resolvedSender = resolveReplySender(messagesForResolution)
+    if (resolvedSender?.ambiguous) {
+      return res.status(409).json({
+        error: 'Reply blocked: multiple mailboxes in this thread',
+        code: 'REPLY_SENDER_AMBIGUOUS',
+      })
+    }
+
     const latest = threadMessages[0]
     const latestInbound = threadMessages.find((m) => m.direction === 'inbound') || null
     const toAddress = latestInbound?.fromAddress || latest.toAddress

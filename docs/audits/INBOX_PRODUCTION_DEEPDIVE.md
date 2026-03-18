@@ -186,12 +186,12 @@ Core Inbox routes in `server/src/routes/inbox.ts`:
 
 - `POST /api/inbox/threads/:threadId/reply`
   - Sends a reply using Outlook Graph and stores outbound metadata.
-  - Status: `production-real but fragile`
+  - Status: `production-real`
   - Mounted UI usage: yes.
-  - Problems:
-    - No mailbox chooser is exposed in UI; backend deterministically picks the latest thread sender identity.
-    - No signature lookup/appending is done.
-    - Creates `emailEvent` with type `replied`, which overlaps with inbound reply-detection event semantics.
+  - Reply sender: backend uses the latest message’s sender identity in the thread; if the thread has messages from more than one identity, reply is blocked (409 REPLY_SENDER_AMBIGUOUS).
+  - GET thread messages returns `replySender` and `replySenderAmbiguous` so the mounted Inbox can show “Reply will send from: X” and block send when ambiguous.
+  - Signature: not appended in Inbox reply flow; UI surfaces “Signature: not appended in Inbox” and optionally that a signature is configured for the mailbox elsewhere.
+  - Creates `emailEvent` with type `replied`, which overlaps with inbound reply-detection event semantics.
 
 Related Outlook/identity routes in `server/src/routes/outlook.ts`:
 
@@ -280,8 +280,8 @@ What is misleading:
 
 What is incomplete or fragile:
 
-- No mailbox/identity selection before reply.
-- No visible sender signature handling in the mounted Inbox.
+- No mailbox/identity selection before reply (sender is now explicit: “Reply will send from: X”; ambiguous threads block reply).
+- Signature is not appended in Inbox; the UI now states that explicitly.
 - No pagination support in mounted UI.
 - No explicit unread toggle/reset behavior beyond auto-mark-read on open.
 - Reply path writes `emailEvent.type = 'replied'`, which risks mixing operator replies with prospect replies in reporting.
@@ -299,23 +299,18 @@ Backend routes that exist but are not surfaced cleanly:
 ## Gaps / risks
 
 - Refresh contract risk: operator can pull recent inbox messages and still not see new items in replies view until the background worker catches up.
-- Identity ambiguity risk: a customer with multiple mailboxes can reply from an implicit backend-chosen identity with no UI confirmation.
-- Signature omission risk: configured signatures exist elsewhere in the system but are not applied by mounted Inbox reply flow.
+- Identity ambiguity: when a thread has messages from more than one mailbox, reply is blocked (409) and the UI shows “Reply blocked: multiple mailboxes in this thread.”
+- Signature: not applied in Inbox reply flow; UI states “Signature: not appended in Inbox.”
 - Reporting contamination risk: operator-sent Inbox replies emit `emailEvent.type = 'replied'`, the same event type used for inbound prospect replies.
 - Auth-mode risk: mutation auth middleware defaults to `warn`, so protection depends on environment configuration.
 - UX drift risk: mounted Inbox and legacy `MarketingInboxTab` both exist, increasing confusion over what the real screen is.
 
 ## Recommended next PRs in priority order
 
-1. Make reply identity explicit and safe
-   - Surface which mailbox will send the reply
-   - Prevent ambiguous reply identity selection when multiple mailboxes exist
-   - Wire signature lookup/application into the Inbox reply path, or explicitly show that signatures are not used
-
-2. Add explicit Inbox pagination / operator controls only if needed
+1. Add explicit Inbox pagination / operator controls only if needed
    - Surface `hasMore` / `offset` cleanly if thread volume warrants it
    - Keep the mounted screen aligned with the existing route contract
 
-3. Revisit refresh semantics only if a fuller replies refresh is worth the extra backend risk
+2. Revisit refresh semantics only if a fuller replies refresh is worth the extra backend risk
    - Keep any future expansion tied to the existing reply-detection path
    - Avoid introducing a parallel refresh pipeline

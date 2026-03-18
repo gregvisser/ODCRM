@@ -68,6 +68,14 @@ type EmailThread = {
   unreadCount?: number
 }
 
+// Resolved reply sender from GET /api/inbox/threads/:threadId/messages
+type ReplySenderInfo = {
+  id: string
+  emailAddress: string
+  displayName: string | null
+  signatureAvailable: boolean
+}
+
 type EmailMessage = {
   id: string
   threadId?: string
@@ -148,6 +156,8 @@ const InboxTab: React.FC = () => {
   const [unreadOnly, setUnreadOnly] = useState(false)
   const [isSendingReply, setIsSendingReply] = useState(false)
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
+  const [replySender, setReplySender] = useState<ReplySenderInfo | null>(null)
+  const [replySenderAmbiguous, setReplySenderAmbiguous] = useState(false)
 
   const openMarketingTab = (view: 'readiness' | 'reports' | 'sequences', focusPanel?: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -257,6 +267,8 @@ const InboxTab: React.FC = () => {
     setSelectedThreadId(null)
     setReplyContent('')
     setSearchQuery('')
+    setReplySender(null)
+    setReplySenderAmbiguous(false)
   }, [selectedCustomerId])
 
   const loadThreadMessages = async (threadId: string) => {
@@ -298,7 +310,7 @@ const InboxTab: React.FC = () => {
         title: 'Failed to send reply',
         description: apiError,
         status: 'error',
-        duration: 3000,
+        duration: 5000,
       })
       setIsSendingReply(false)
       return
@@ -675,6 +687,29 @@ const InboxTab: React.FC = () => {
                   {/* Reply Form */}
                   <Box borderTop="1px" borderColor="gray.200" pt={4} data-testid="inbox-tab-reply-composer">
                     <Heading size="sm" mb={3}>{t('marketing.replyComposerTitle')}</Heading>
+                    {replySenderAmbiguous && (
+                      <Alert status="warning" mb={3} size="sm">
+                        <AlertIcon />
+                        <Box>
+                          <AlertTitle fontSize="sm">Reply blocked</AlertTitle>
+                          <AlertDescription fontSize="sm">
+                            Multiple mailboxes appear in this thread. Reply is disabled to avoid sending from the wrong account.
+                          </AlertDescription>
+                        </Box>
+                      </Alert>
+                    )}
+                    {replySender && !replySenderAmbiguous && (
+                      <Text fontSize="sm" color="gray.600" mb={2} data-testid="inbox-tab-reply-sender">
+                        Reply will send from: {replySender.displayName || replySender.emailAddress}
+                        {replySender.displayName && replySender.emailAddress ? ` (${replySender.emailAddress})` : ''}
+                      </Text>
+                    )}
+                    {replySender && (
+                      <Text fontSize="xs" color="gray.500" mb={2}>
+                        Signature: not appended in Inbox
+                        {replySender.signatureAvailable ? ' (configured for this mailbox elsewhere)' : ''}
+                      </Text>
+                    )}
                     <Textarea
                       placeholder={t('marketing.typeYourReply')}
                       value={replyContent}
@@ -687,7 +722,7 @@ const InboxTab: React.FC = () => {
                         data-testid="inbox-tab-send-reply-btn"
                         colorScheme="blue"
                         onClick={sendReply}
-                        isDisabled={!replyContent.trim() || isSendingReply}
+                        isDisabled={!replyContent.trim() || isSendingReply || replySenderAmbiguous}
                         isLoading={isSendingReply}
                       >
                         {t('marketing.sendReply')}
