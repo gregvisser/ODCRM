@@ -53,6 +53,7 @@ type CampaignSchedule = {
   status: 'draft' | 'running' | 'paused' | 'completed'
   sequenceId: string | null
   sequenceName: string | null
+  listName?: string | null
   senderIdentity: SenderIdentity | null
   sequenceSenderIdentity: SenderIdentity | null
   mailboxMismatch: boolean
@@ -800,6 +801,9 @@ const SchedulesTab: React.FC = () => {
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Status</StatLabel><StatNumber fontSize="sm">{selectedOperatorStatus?.label || humanizeStatus(selectedSchedule.status)}</StatNumber></Stat></CardBody></Card>
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Mailbox</StatLabel><StatNumber fontSize="sm">{selectedSchedule.senderIdentity?.emailAddress || 'Not connected'}</StatNumber></Stat></CardBody></Card>
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Linked sequence</StatLabel><StatNumber fontSize="sm">{selectedSchedule.sequenceName || 'Not linked'}</StatNumber></Stat></CardBody></Card>
+                      {selectedSchedule.listName ? (
+                        <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Audience</StatLabel><StatNumber fontSize="sm">{selectedSchedule.listName}</StatNumber></Stat></CardBody></Card>
+                      ) : null}
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Next send</StatLabel><StatNumber fontSize="sm">{formatDateTime(scheduleStats?.nextScheduledAt ?? selectedSchedule.nextScheduledAt)}</StatNumber></Stat></CardBody></Card>
                     </SimpleGrid>
 

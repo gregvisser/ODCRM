@@ -37,6 +37,11 @@ export interface LeadSourceBatch {
   firstSeenMin?: string
   firstSeenMax?: string
   lastSeenAt?: string
+  /** Present when API returns metadata (per-source batches and aggregate). */
+  sourceType?: LeadSourceType
+  batchName?: string | null
+  fallbackLabel?: string
+  displayLabel?: string
 }
 
 export interface LeadSourceBatchesResponse {
@@ -148,4 +153,53 @@ export async function getLeadSourceContacts(
 export function buildOpenSheetUrl(apiBase: string, sourceType: LeadSourceType, customerId: string): string {
   const base = apiBase.replace(/\/$/, '')
   return `${base}/api/lead-sources/${sourceType}/open-sheet?customerId=${encodeURIComponent(customerId)}`
+}
+
+/** GET /api/lead-sources/batches — all batches across sources (for Sequences Leads Snapshot). */
+export async function getLeadSourceBatchesAggregate(customerId: string): Promise<LeadSourceBatch[]> {
+  const res = await fetch(`${API_BASE}/api/lead-sources/batches`, { headers: headers(customerId) })
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
+  return res.json()
+}
+
+/** PATCH /api/lead-sources/:sourceType/batches/:batchKey — set or clear operator batch name. */
+export async function updateLeadSourceBatchName(
+  customerId: string,
+  sourceType: LeadSourceType,
+  batchKey: string,
+  operatorName: string | null,
+  adminSecret?: string
+): Promise<{ operatorName: string | null; displayLabel: string }> {
+  const h: Record<string, string> = { ...headers(customerId), 'Content-Type': 'application/json' }
+  if (adminSecret) h['x-admin-secret'] = adminSecret
+  const res = await fetch(`${API_BASE}/api/lead-sources/${sourceType}/batches/${encodeURIComponent(batchKey)}`, {
+    method: 'PATCH',
+    headers: h,
+    body: JSON.stringify({ operatorName }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+/** POST /api/lead-sources/:sourceType/batches/:batchKey/materialize-list — source-aware materialize. */
+export async function materializeLeadSourceBatchList(
+  customerId: string,
+  sourceType: LeadSourceType,
+  batchKey: string,
+  adminSecret?: string
+): Promise<{ listId: string; name: string }> {
+  const h: Record<string, string> = { ...headers(customerId), 'Content-Type': 'application/json' }
+  if (adminSecret) h['x-admin-secret'] = adminSecret
+  const res = await fetch(
+    `${API_BASE}/api/lead-sources/${sourceType}/batches/${encodeURIComponent(batchKey)}/materialize-list`,
+    { method: 'POST', headers: h }
+  )
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `HTTP ${res.status}`)
+  }
+  return res.json()
 }

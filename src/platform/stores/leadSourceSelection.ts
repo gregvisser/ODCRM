@@ -10,6 +10,10 @@ export type LeadSourceType = 'COGNISM' | 'APOLLO' | 'SOCIAL' | 'BLACKBOOK'
 export interface LeadSourceBatchSelection {
   sourceType: LeadSourceType
   batchKey: string
+  /** Operator-defined batch name, if set. */
+  batchName?: string | null
+  /** Display label (name + fallback) for UI. */
+  displayLabel?: string
 }
 
 let selection: LeadSourceBatchSelection | null = null

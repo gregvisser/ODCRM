@@ -83,6 +83,9 @@ router.get('/', async (req, res, next) => {
             },
           },
         },
+        list: {
+          select: { name: true },
+        },
         _count: {
           select: {
             prospects: true,
@@ -128,6 +131,7 @@ router.get('/', async (req, res, next) => {
       status: campaign.status,
       sequenceId: campaign.sequenceId ?? null,
       sequenceName: campaign.sequence?.name ?? null,
+      listName: campaign.list?.name ?? null,
       senderIdentity: campaign.senderIdentity
         ? {
             ...campaign.senderIdentity,
