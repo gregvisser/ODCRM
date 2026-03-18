@@ -38,6 +38,18 @@ if (batchesRes.status !== 404 && !Array.isArray(batchesRes.body?.batches)) {
   fail('/api/lead-sources/COGNISM/batches payload missing batches array')
 }
 
+// Phase 2: aggregate batches (returns array); items have batchKey and optional displayLabel/fallbackLabel
+const aggregateRes = await getJson('/api/lead-sources/batches')
+if (aggregateRes.status !== 404 && aggregateRes.body != null) {
+  if (!Array.isArray(aggregateRes.body)) fail('/api/lead-sources/batches must return an array')
+  if (aggregateRes.body.length > 0) {
+    const first = aggregateRes.body[0]
+    if (!first || typeof first.batchKey !== 'string') {
+      fail('/api/lead-sources/batches items must have batchKey')
+    }
+  }
+}
+
 const repoRoot = process.cwd()
 const tabPath = join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'LeadSourcesTabNew.tsx')
 const homePath = join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingHomePage.tsx')
@@ -74,5 +86,8 @@ if (!homeSource.includes('LeadSourcesTabNew')) fail('MarketingHomePage missing L
 
 console.log(`PASS lead-sources endpoint reachable sources=${listRes.body.sources.length}`)
 console.log(`PASS lead-sources batches route checked status=${batchesRes.status}`)
+if (aggregateRes.status !== 404 && Array.isArray(aggregateRes.body)) {
+  console.log(`PASS lead-sources aggregate batches array length=${aggregateRes.body.length}`)
+}
 console.log('PASS lead sources tab markers present')
 console.log('self-test-lead-sources-tab-runtime: PASS')

@@ -492,7 +492,9 @@ router.post(
   }
 )
 
-// POST /api/lead-sources/batches/:batchKey/materialize-list — legacy: resolve source from batchKey, then materialize
+// POST /api/lead-sources/batches/:batchKey/materialize-list — legacy: resolve source from batchKey, then materialize.
+// When the same batchKey exists under multiple source types, findFirst picks one arbitrarily. Prefer the source-aware
+// POST /:sourceType/batches/:batchKey/materialize-list when sourceType is known.
 router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   try {
     const customerId = requireCustomerId(req, res)
