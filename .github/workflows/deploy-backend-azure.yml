@@ -132,6 +132,8 @@ jobs:
           npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
           # Drift migrations — mark as applied so they don't block deploy
           npx prisma migrate resolve --applied "20260220140000_add_lead_source_applies_to" || true
+          # Phase 2 batch metadata: table/index already exist in prod; align history (P3018/42P07 recovery)
+          npx prisma migrate resolve --applied "20260318100000_add_lead_source_batch_metadata" || true
           echo "Baseline complete - existing migrations marked as applied"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
