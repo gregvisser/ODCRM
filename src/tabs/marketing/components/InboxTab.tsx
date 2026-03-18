@@ -129,6 +129,8 @@ type RepliesResponse = {
     end: string
   }
   items: ReplyItem[]
+  hasMore?: boolean
+  offset?: number
 }
 
 const InboxTab: React.FC = () => {
@@ -158,6 +160,12 @@ const InboxTab: React.FC = () => {
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null)
   const [replySender, setReplySender] = useState<ReplySenderInfo | null>(null)
   const [replySenderAmbiguous, setReplySenderAmbiguous] = useState(false)
+  const [hasMoreThreads, setHasMoreThreads] = useState(false)
+  const [threadsNextOffset, setThreadsNextOffset] = useState(0)
+  const [hasMoreReplies, setHasMoreReplies] = useState(false)
+  const [repliesNextOffset, setRepliesNextOffset] = useState(0)
+  const [repliesLoadingMore, setRepliesLoadingMore] = useState(false)
+  const [threadsLoadingMore, setThreadsLoadingMore] = useState(false)
 
   const openMarketingTab = (view: 'readiness' | 'reports' | 'sequences', focusPanel?: string) => {
     const params = new URLSearchParams(window.location.search)
@@ -166,12 +174,12 @@ const InboxTab: React.FC = () => {
     window.location.search = params.toString()
   }
 
+  const REPLIES_PAGE_SIZE = 50
+
   const loadReplies = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
     setError(null)
-
-    // Calculate date range
     const end = new Date()
     const start = new Date()
     switch (dateRange) {
@@ -185,21 +193,54 @@ const InboxTab: React.FC = () => {
         start.setDate(start.getDate() - 90)
         break
     }
-
     const { data, error: apiError } = await api.get<RepliesResponse>(
-      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}`,
+      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}&limit=${REPLIES_PAGE_SIZE}&offset=0`,
       { headers: customerHeaders }
     )
-    
     if (apiError) {
       setError(apiError)
     } else {
-      setReplies(data?.items || [])
+      const items = data?.items || []
+      setReplies(items)
+      setHasMoreReplies(!!data?.hasMore)
+      setRepliesNextOffset(data?.offset ?? items.length)
       setLastUpdatedAt(new Date().toISOString())
     }
-    
     setLoading(false)
   }, [selectedCustomerId, dateRange, customerHeaders])
+
+  const loadMoreReplies = useCallback(async () => {
+    if (!selectedCustomerId) return
+    setRepliesLoadingMore(true)
+    setError(null)
+    const end = new Date()
+    const start = new Date()
+    switch (dateRange) {
+      case '7d':
+        start.setDate(start.getDate() - 7)
+        break
+      case '30d':
+        start.setDate(start.getDate() - 30)
+        break
+      case '90d':
+        start.setDate(start.getDate() - 90)
+        break
+    }
+    const { data, error: apiError } = await api.get<RepliesResponse>(
+      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}&limit=${REPLIES_PAGE_SIZE}&offset=${repliesNextOffset}`,
+      { headers: customerHeaders }
+    )
+    if (apiError) {
+      setError(apiError)
+    } else {
+      const items = data?.items || []
+      setReplies((prev) => [...prev, ...items])
+      setHasMoreReplies(!!data?.hasMore)
+      setRepliesNextOffset(data?.offset ?? repliesNextOffset + items.length)
+      setLastUpdatedAt(new Date().toISOString())
+    }
+    setRepliesLoadingMore(false)
+  }, [selectedCustomerId, dateRange, customerHeaders, repliesNextOffset])
 
   const loadCustomers = useCallback(async () => {
     setLoading(true)
@@ -226,27 +267,49 @@ const InboxTab: React.FC = () => {
     }
   }, [setSelectedCustomerId])
 
+  const THREADS_PAGE_SIZE = 50
+
   const loadThreads = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
     setThreadsLoading(true)
     setError(null)
-
     const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
-      `/api/inbox/threads?limit=50&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
+      `/api/inbox/threads?limit=${THREADS_PAGE_SIZE}&offset=0&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
       { headers: customerHeaders }
     )
-
     if (apiError) {
       setError(apiError)
     } else {
-      setThreads(data?.threads || [])
+      const list = data?.threads || []
+      setThreads(list)
+      setHasMoreThreads(!!data?.hasMore)
+      setThreadsNextOffset(data?.offset ?? list.length)
       setLastUpdatedAt(new Date().toISOString())
     }
-
     setThreadsLoading(false)
     setLoading(false)
   }, [selectedCustomerId, unreadOnly, customerHeaders])
+
+  const loadMoreThreads = useCallback(async () => {
+    if (!selectedCustomerId) return
+    setThreadsLoadingMore(true)
+    setError(null)
+    const { data, error: apiError } = await api.get<{ threads: EmailThread[]; hasMore: boolean; offset: number }>(
+      `/api/inbox/threads?limit=${THREADS_PAGE_SIZE}&offset=${threadsNextOffset}&unreadOnly=${unreadOnly ? 'true' : 'false'}`,
+      { headers: customerHeaders }
+    )
+    if (apiError) {
+      setError(apiError)
+    } else {
+      const list = data?.threads || []
+      setThreads((prev) => [...prev, ...list])
+      setHasMoreThreads(!!data?.hasMore)
+      setThreadsNextOffset(data?.offset ?? threadsNextOffset + list.length)
+      setLastUpdatedAt(new Date().toISOString())
+    }
+    setThreadsLoadingMore(false)
+  }, [selectedCustomerId, unreadOnly, customerHeaders, threadsNextOffset])
 
   useEffect(() => {
     void loadCustomers()
@@ -269,6 +332,8 @@ const InboxTab: React.FC = () => {
     setSearchQuery('')
     setReplySender(null)
     setReplySenderAmbiguous(false)
+    setThreadsNextOffset(0)
+    setRepliesNextOffset(0)
   }, [selectedCustomerId])
 
   const loadThreadMessages = async (threadId: string) => {
@@ -626,46 +691,65 @@ const InboxTab: React.FC = () => {
                   </HStack>
                 </VStack>
               ) : (
-                <VStack spacing={0} align="stretch">
-                  {threads.map(thread => (
-                    <Box
-                      key={thread.threadId}
-                      p={4}
-                      borderBottom="1px"
-                      borderColor="gray.100"
-                      cursor="pointer"
-                      bg={selectedThreadId === thread.threadId ? "blue.50" : "white"}
-                      _hover={{ bg: "gray.50" }}
-                      onClick={() => loadThreadMessages(thread.threadId)}
-                    >
-                      <HStack spacing={3} align="start">
-                        <Avatar size="sm" name={thread.participantName || thread.participantEmail} />
-                        <VStack align="start" spacing={1} flex={1}>
-                          <HStack justify="space-between" w="full">
-                            <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
-                              {thread.participantName || thread.participantEmail}
+                <>
+                  <VStack spacing={0} align="stretch">
+                    {threads.map(thread => (
+                      <Box
+                        key={thread.threadId}
+                        p={4}
+                        borderBottom="1px"
+                        borderColor="gray.100"
+                        cursor="pointer"
+                        bg={selectedThreadId === thread.threadId ? "blue.50" : "white"}
+                        _hover={{ bg: "gray.50" }}
+                        onClick={() => loadThreadMessages(thread.threadId)}
+                      >
+                        <HStack spacing={3} align="start">
+                          <Avatar size="sm" name={thread.participantName || thread.participantEmail} />
+                          <VStack align="start" spacing={1} flex={1}>
+                            <HStack justify="space-between" w="full">
+                              <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
+                                {thread.participantName || thread.participantEmail}
+                              </Text>
+                              <Text fontSize="xs" color="gray.500">
+                                {new Date(thread.latestMessageAt).toLocaleDateString()}
+                              </Text>
+                            </HStack>
+                            <Text fontSize="sm" color="gray.600" noOfLines={1}>
+                              {thread.subject}
                             </Text>
-                            <Text fontSize="xs" color="gray.500">
-                              {new Date(thread.latestMessageAt).toLocaleDateString()}
-                            </Text>
-                          </HStack>
-                          <Text fontSize="sm" color="gray.600" noOfLines={1}>
-                            {thread.subject}
-                          </Text>
-                          <HStack spacing={2}>
-                            <Badge size="sm" colorScheme="blue">
-                              {thread.mailboxName || thread.mailboxEmail}
-                            </Badge>
-                            {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
-                            {(thread.unreadCount || 0) > 0 ? (
-                              <Badge size="sm" colorScheme="orange">{thread.unreadCount} unread</Badge>
-                            ) : null}
-                          </HStack>
-                        </VStack>
-                      </HStack>
+                            <HStack spacing={2}>
+                              <Badge size="sm" colorScheme="blue">
+                                {thread.mailboxName || thread.mailboxEmail}
+                              </Badge>
+                              {thread.hasReplies && <Badge size="sm" colorScheme="green">Reply</Badge>}
+                              {(thread.unreadCount || 0) > 0 ? (
+                                <Badge size="sm" colorScheme="orange">{thread.unreadCount} unread</Badge>
+                              ) : null}
+                            </HStack>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    ))}
+                  </VStack>
+                  {hasMoreThreads && (
+                    <Box p={3} borderTop="1px" borderColor="gray.100">
+                      <Text fontSize="xs" color="gray.500" mb={2}>
+                        Showing {threads.length} loaded
+                      </Text>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        width="full"
+                        onClick={() => loadMoreThreads()}
+                        isLoading={threadsLoadingMore}
+                        isDisabled={threadsLoadingMore}
+                      >
+                        Load more conversations
+                      </Button>
                     </Box>
-                  ))}
-                </VStack>
+                  )}
+                </>
               )}
             </CardBody>
           </Card>
@@ -952,6 +1036,23 @@ const InboxTab: React.FC = () => {
                 ))}
               </Tbody>
             </Table>
+            {hasMoreReplies && (
+              <Box p={3} borderTop="1px" borderColor="gray.200">
+                <Text fontSize="xs" color="gray.500" mb={2}>
+                  Showing {replies.length} loaded
+                </Text>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  width="full"
+                  onClick={() => loadMoreReplies()}
+                  isLoading={repliesLoadingMore}
+                  isDisabled={repliesLoadingMore}
+                >
+                  Load more replies
+                </Button>
+              </Box>
+            )}
           </CardBody>
         </Card>
       )}
