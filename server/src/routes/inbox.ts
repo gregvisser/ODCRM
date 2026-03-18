@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { randomUUID } from 'crypto'
 import { buildInboxThreadSummaries, type InboxThreadMessageRecord } from '../utils/inboxThreadSummaries.js'
+import { deriveInboxOptOutTarget } from '../utils/inboxOptOut.js'
 
 const router = express.Router()
 
@@ -458,10 +459,7 @@ router.post('/messages/:id/optout', requireMarketingMutationAuth, async (req, re
 
     if (!message) return res.status(404).json({ error: 'Message not found' })
 
-    const email = message.fromAddress.trim().toLowerCase()
-    const domain = email.split('@')[1]
-
-    const { randomUUID } = await import('crypto')
+    const { email, domain } = deriveInboxOptOutTarget(message.fromAddress)
 
     await prisma.suppressionEntry.upsert({
       where: { customerId_type_value: { customerId, type: 'email', value: email } },
