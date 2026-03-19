@@ -363,6 +363,28 @@ const InboxTab: React.FC = () => {
     }
   }
 
+  const markMessageReadStatus = async (messageId: string, isRead: boolean) => {
+    if (!selectedCustomerId) return
+    const { error: apiError } = await api.post(
+      `/api/inbox/messages/${messageId}/read`,
+      { isRead },
+      { headers: customerHeaders }
+    )
+    if (apiError) {
+      toast({
+        title: isRead ? 'Failed to mark read' : 'Failed to mark unread',
+        description: apiError,
+        status: 'error',
+        duration: 3000,
+      })
+      return
+    }
+    setSelectedThread((prev) =>
+      prev?.map((m) => (m.id === messageId ? { ...m, isRead } : m)) ?? null
+    )
+    loadThreads()
+  }
+
   const filteredReplies = useMemo(() => {
     if (!searchQuery) return replies
     
@@ -672,6 +694,16 @@ const InboxTab: React.FC = () => {
                             <Badge size="sm" colorScheme="blue">
                               {message.senderIdentity.displayName || message.senderIdentity.emailAddress}
                             </Badge>
+                          )}
+                          {message.direction === 'inbound' && (
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              colorScheme="gray"
+                              onClick={() => markMessageReadStatus(message.id, message.isRead !== false ? false : true)}
+                            >
+                              {message.isRead !== false ? 'Mark unread' : 'Mark read'}
+                            </Button>
                           )}
                         </HStack>
                         <Text fontSize="sm" color="gray.500">
