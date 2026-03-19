@@ -8,9 +8,9 @@ Evidence from repo at `origin/main` (branch `codex/sequences-truth-and-safe-fixe
 
 **Mounted Marketing Sequences** is a single large surface: `src/tabs/marketing/components/SequencesTab.tsx` (~9.2k lines), rendered from `MarketingHomePage` when `view === 'sequences'`. It is wrapped in `RequireActiveClient` and uses `useScopedCustomerSelection()` for `customerHeaders` / `selectedCustomerId`. The UI implements the full operator loop: sequence + **EmailCampaign** linking, steps CRUD, enrollments, send-queue preview/worker consoles, dry-run, audits, archive/unarchive, suppression checks, lead-source batch materialization, and templated AI tweak.
 
-**Verdict:** The mounted screen is **real** and **deeply wired** to production APIs — not a stub. Complexity and density create **partial/misleading** spots (merged “sequence vs campaign” mental model, many panels, legacy parallel file). One **guardrail bug** was found: `scripts/self-test-sequences-archive-contract.mjs` pointed at **`src/components/MarketingSequencesTab.tsx`** (unused in nav) instead of the **mounted** `SequencesTab.tsx` — fixed in this run.
+**Verdict:** The mounted screen is **real** and **deeply wired** to production APIs — not a stub. Complexity and density create **partial/misleading** spots (merged “sequence vs campaign” mental model, many panels). One **guardrail bug** was found earlier: `scripts/self-test-sequences-archive-contract.mjs` pointed at a legacy unmounted file instead of **mounted** `SequencesTab.tsx` — fixed in PR #333. The legacy file **`src/components/MarketingSequencesTab.tsx`** was **removed** in a follow-up cleanup PR (no imports; drift risk only).
 
-**Deferred:** Removing unused `MarketingSequencesTab.tsx` (not imported anywhere), broad UX simplification, schema/worker changes.
+**Deferred:** Broad UX simplification, schema/worker changes (no product direction in-repo).
 
 ---
 
@@ -35,7 +35,7 @@ Evidence from repo at `origin/main` (branch `codex/sequences-truth-and-safe-fixe
 - **Send worker / operator:** console, sequence-readiness, preflight, launch-preview, run-history, preview-vs-outcome, exception-center, identity-capacity, queue-workbench, audits + CSV, dry-run + live-tick + sequence-test-send.
 - **Supporting:** `GET /api/customers` (picker), `GET /api/campaigns`, `GET/PUT/POST/DELETE /api/sequences*`, `GET /api/lists/*`, `GET /api/sheets/sources/*/lists`, lead-source APIs, `GET /api/templates`, `GET /api/outlook/identities`, `POST /api/suppression/check`, `GET /api/reports/outreach`, `POST /api/templates/ai/tweak`.
 
-**Parallel / legacy:** `src/components/MarketingSequencesTab.tsx` exists in tree but **is not imported** by `App.tsx` or `MarketingHomePage.tsx` — **drift risk** only.
+**Legacy:** ~~`src/components/MarketingSequencesTab.tsx`~~ **removed** — was never mounted; mounted UI is only `SequencesTab.tsx`.
 
 ---
 
@@ -78,8 +78,8 @@ Evidence from repo at `origin/main` (branch `codex/sequences-truth-and-safe-fixe
 
 | Area | Assessment |
 |------|------------|
-| **Self-test archive contract** | **Broken guardrail:** tested wrong file (`MarketingSequencesTab` vs mounted `SequencesTab`) — **fixed** this run. |
-| **Unused `MarketingSequencesTab.tsx`** | Misleading for contributors searching “Sequences UI”; safe removal **deferred** (separate tiny PR). |
+| **Self-test archive contract** | **Broken guardrail:** tested wrong file (legacy unmounted tab vs mounted `SequencesTab`) — **fixed** PR #333. |
+| ~~**Unused `MarketingSequencesTab.tsx`**~~ | **Removed** — unmounted duplicate; cleanup PR after audit. |
 | **Monolith file** | Partial — hard to reason about “minimum path” for new operators (documentation helps). |
 | **Lead-source + sheets** | Partial — many paths; `api.ts` injects tenant for snapshot list GETs when client selected. |
 
@@ -103,7 +103,7 @@ Strings checked (`Show archived`, `Archive`, `Unarchive`) still exist in mounted
 
 ## 9. Deferred larger issues
 
-- Remove or archive `src/components/MarketingSequencesTab.tsx` if product confirms no external entry.
+- *(done)* Legacy `MarketingSequencesTab.tsx` removed when proven unreferenced.
 - UX: split operator vs diagnostics (product direction).
 - Any send-engine semantics changes (worker, tick, limits) — needs explicit ops/product sign-off.
 - Schema / migration work — out of scope.

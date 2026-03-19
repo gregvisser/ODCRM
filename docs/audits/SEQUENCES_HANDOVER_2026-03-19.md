@@ -19,7 +19,7 @@
 
 ## 4. What remains deferred
 
-- Optional removal of unused `src/components/MarketingSequencesTab.tsx` (not mounted; verify no external docs/tools depend on it).
+- ~~Optional removal of unused `src/components/MarketingSequencesTab.tsx`~~ **Done** — file removed after grep proved zero imports.
 - Any Sequences UX split / simplification (product).
 - Deeper worker/send policy changes (ops/product).
 
@@ -30,7 +30,7 @@
 
 ## 6. Recommended next Sequences/product step
 
-- Decide whether to **delete or document** `MarketingSequencesTab.tsx` to stop contributor confusion.
+- ~~Legacy `MarketingSequencesTab.tsx`~~ **Removed** — only mounted `SequencesTab.tsx` remains.
 
 ## 7. Recommended next repo/ops step
 
