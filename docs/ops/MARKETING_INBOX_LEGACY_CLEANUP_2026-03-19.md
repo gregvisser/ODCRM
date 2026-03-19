@@ -21,9 +21,9 @@
 
 ## 4. Final parity result
 
-- **After merge of the cleanup PR:** Run  
-  `npx --yes cross-env EXPECT_SHA=<cleanup-merge-sha> node scripts/prod-check.cjs`  
-  and confirm **PARITY_OK**. *(This section is updated in-repo after that merge with the exact SHA and snippet.)*
+- **Cleanup PR:** [#330](https://github.com/gregvisser/ODCRM/pull/330) — merge commit SHA `3bcccb4f037927376e6659facb435354025c538b`
+- **Command:** `npx --yes cross-env EXPECT_SHA=3bcccb4f037927376e6659facb435354025c538b node scripts/prod-check.cjs`
+- **Result:** **PARITY_OK** — frontend `__build.json` and backend `/api/_build` both reported SHA `3bcccb4f037927376e6659facb435354025c538b` (verified after frontend + backend deploy workflows completed).
 
 ## 5. Why this reduces future drift
 
