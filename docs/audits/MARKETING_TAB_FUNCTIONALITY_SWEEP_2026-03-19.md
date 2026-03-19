@@ -2,7 +2,7 @@
 
 ## 1. Executive summary
 
-The Marketing tab is mounted at **Marketing Home** (`?tab=marketing-home` or path `/marketing` where applicable). All nine subviews are mounted and wired to backend routes. The **mounted** Inbox is `InboxTab` in `src/tabs/marketing/components/InboxTab.tsx`. A legacy, **unmounted** component `MarketingInboxTab` exists in `src/components/MarketingInboxTab.tsx` and is not referenced anywhere; it is a drift risk only (no runtime impact). No speculative redesign was done; one documentation clarification and guardrail are recommended (see Safe fixes / Deferred).
+The Marketing tab is mounted at **Marketing Home** (`?tab=marketing-home` or path `/marketing` where applicable). All nine subviews are mounted and wired to backend routes. The **mounted** Inbox is `InboxTab` in `src/tabs/marketing/components/InboxTab.tsx`. The legacy unmounted `MarketingInboxTab` was **removed** from the repo on 2026-03-19 (see `docs/ops/MARKETING_INBOX_LEGACY_CLEANUP_2026-03-19.md`).
 
 ## 2. Mounted Marketing path
 
@@ -33,7 +33,7 @@ The Marketing tab is mounted at **Marketing Home** (`?tab=marketing-home` or pat
 
 ## 5. What is partially working
 
-- **MarketingInboxTab** (`src/components/MarketingInboxTab.tsx`): Not mounted; calls `/api/inbox/replies` and `/api/campaigns` but does **not** send `X-Customer-Id`. If ever mounted, it would violate tenant isolation. Recommendation: treat as legacy/dead code; document only in this sweep; removal deferred to a dedicated change with product confirmation.
+- **None** in the mounted Marketing surfaces (legacy `MarketingInboxTab` removed 2026-03-19).
 
 ## 6. What is broken or misleading
 
@@ -41,18 +41,16 @@ The Marketing tab is mounted at **Marketing Home** (`?tab=marketing-home` or pat
 
 ## 7. Safe fixes completed in this run
 
-- **None** required. Existing copy and wiring for the mounted Inbox are accurate. No small/medium safe code changes were identified that fit the “self-contained, no product-direction” rule.
+- **None** required at sweep time. Follow-up: legacy `MarketingInboxTab` was removed 2026-03-19 (see MARKETING_INBOX_LEGACY_CLEANUP doc).
 
 ## 8. Larger deferred work
 
-- **Legacy MarketingInboxTab:** Remove or clearly deprecate `src/components/MarketingInboxTab.tsx` in a separate PR (document only in this run).
 - **Inbox UX:** Any Outlook-style or major Inbox redesign is out of scope; requires explicit product direction (see INBOX_CLOSEOUT_2026-03-19.md).
 
 ## 9. Recommended next Marketing priorities
 
-1. **Remove or deprecate** `MarketingInboxTab` to eliminate drift risk (single, low-risk file; confirm no other references).
-2. **Product-led:** If Inbox UX is to evolve, define scope and then implement (no speculative redesign in this repo).
-3. **Continue** using the current Marketing tab as the single source of truth for readiness, reports, lists, compliance, email-accounts, templates, sequences, schedules, and inbox.
+1. **Product-led:** If Inbox UX is to evolve, define scope and then implement (no speculative redesign in this repo).
+2. **Continue** using the current Marketing tab as the single source of truth for readiness, reports, lists, compliance, email-accounts, templates, sequences, schedules, and inbox.
 
 ---
 

@@ -56,8 +56,7 @@ Important truth:
 
 Dead/legacy parallel Inbox UI:
 
-- `src/components/MarketingInboxTab.tsx` exists, but it is not imported by `src/App.tsx` or `src/tabs/marketing/MarketingHomePage.tsx`.
-- It is legacy/dead from the mounted path perspective.
+- **Removed (2026-03-19):** `src/components/MarketingInboxTab.tsx` was an unmounted legacy screen; it was deleted to eliminate drift. The only mounted Marketing Inbox is `src/tabs/marketing/components/InboxTab.tsx`. See `docs/ops/MARKETING_INBOX_LEGACY_CLEANUP_2026-03-19.md`.
 
 ## Frontend Inbox surface map
 
@@ -288,7 +287,6 @@ What is incomplete or fragile:
 
 Dead or legacy paths:
 
-- Frontend: `src/components/MarketingInboxTab.tsx`
 - Backend unsurfaced: `GET /api/inbox`, `GET /api/inbox/messages`
 
 Backend routes that exist but are not surfaced cleanly:
@@ -303,8 +301,6 @@ Backend routes that exist but are not surfaced cleanly:
 - Signature: not applied in Inbox reply flow; UI states “Signature: not appended in Inbox.”
 - Reporting contamination risk: operator-sent Inbox replies emit `emailEvent.type = 'replied'`, the same event type used for inbound prospect replies.
 - Auth-mode risk: mutation auth middleware defaults to `warn`, so protection depends on environment configuration.
-- UX drift risk: mounted Inbox and legacy `MarketingInboxTab` both exist, increasing confusion over what the real screen is.
-
 ## Recommended next PRs in priority order
 
 1. Revisit refresh semantics only if a fuller replies refresh is worth the extra backend risk
