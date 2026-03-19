@@ -87,7 +87,7 @@ Filters/search/sorting actually present:
 - Search box: yes, but only in replies view
 - Unread-only toggle in threads view: yes in UI, backed by `/api/inbox/threads` unread counts
 - Sorting: implicit only; thread list is sorted by latest message server-side, replies are sorted by `replyDetectedAt desc`
-- Pagination controls: no frontend pagination UI
+- Pagination controls: “Load more” for threads and replies; “Showing N loaded” when more available
 
 What the mounted Inbox supports today:
 
@@ -99,7 +99,7 @@ What the mounted Inbox supports today:
 - Opt-out handling: partial
 - Signature handling: no
 - Mailbox switching / identity selection: no
-- Pagination: no frontend support
+- Pagination: minimal (Load more conversations / Load more replies using backend limit/offset)
 - Message detail view: yes, inline thread detail view
 
 Evidence-based feature truth:
@@ -128,7 +128,7 @@ Misleading or unsafe frontend behavior:
 - Manual refresh should still be read as a message-metadata pull, not a full replies refresh; the mounted copy now needs to stay explicit about that limit.
 - Replying happens with no visible mailbox/identity chooser even though a customer may have multiple connected mailboxes.
 - Replying does not surface or append any configured mailbox signature in the mounted Inbox UI.
-- Backend pagination data (`hasMore`, `offset`) is returned by `/api/inbox/threads`, but the mounted UI always requests `offset=0` and ignores pagination.
+- Mounted Inbox uses backend `hasMore` and `offset` for both threads and replies; “Load more” requests next page and appends; pagination state resets when customer or view/filter changes.
 
 ## Backend route map
 
@@ -148,13 +148,13 @@ Core Inbox routes in `server/src/routes/inbox.ts`:
 
 - `GET /api/inbox/replies`
   - Reads reply-detected prospects from `emailCampaignProspect` where `replyDetectedAt` is set.
-  - Includes contact, campaign, sender identity display fields.
+  - Supports `limit` and `offset`; returns `hasMore` and `offset`. Mounted UI uses these for “Load more replies”.
   - Status: `production-real`
   - Mounted UI usage: yes, replies view.
 
 - `GET /api/inbox/threads`
-  - Reads `emailMessageMetadata`, groups by `threadId`, returns thread summaries.
-  - Status: `partial`
+  - Reads `emailMessageMetadata`, groups by `threadId`, returns thread summaries. Supports `limit` and `offset`; returns `hasMore` and `offset`. Mounted UI uses these for “Load more conversations”.
+  - Status: `production-real`
   - Mounted UI usage: yes, threads view.
   - Current truth: route now explicitly selects `isRead`, so unread counts can be computed from DB state instead of implicit/undefined values.
 
@@ -282,7 +282,7 @@ What is incomplete or fragile:
 
 - No mailbox/identity selection before reply (sender is now explicit: “Reply will send from: X”; ambiguous threads block reply).
 - Signature is not appended in Inbox; the UI now states that explicitly.
-- No pagination support in mounted UI.
+- Pagination: minimal “Load more” for threads and replies (no full datagrid).
 - (Explicit unread controls: done — per-message Mark read / Mark unread in thread detail.)
 - Reply path writes `emailEvent.type = 'replied'`, which risks mixing operator replies with prospect replies in reporting.
 
@@ -307,10 +307,6 @@ Backend routes that exist but are not surfaced cleanly:
 
 ## Recommended next PRs in priority order
 
-1. Add explicit Inbox pagination / operator controls only if needed
-   - Surface `hasMore` / `offset` cleanly if thread volume warrants it
-   - Keep the mounted screen aligned with the existing route contract
-
-2. Revisit refresh semantics only if a fuller replies refresh is worth the extra backend risk
+1. Revisit refresh semantics only if a fuller replies refresh is worth the extra backend risk
    - Keep any future expansion tied to the existing reply-detection path
    - Avoid introducing a parallel refresh pipeline
