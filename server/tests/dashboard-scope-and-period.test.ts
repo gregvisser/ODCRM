@@ -103,6 +103,13 @@ function testMarketingReportsRemainsSeparate(): void {
   assert.match(marketingHomeSource, /content: <ReportsTab \/>/)
 }
 
+function testMarketingReportsDoesNotDoubleUnwrapApiPayload(): void {
+  // api.get uses unwrapResponsePayload: server { success, data: T } becomes response.data === T
+  assert.ok(!reportsTabSource.includes('outreachRes.data?.data'))
+  assert.ok(!reportsTabSource.includes('runHistoryRes.data?.data'))
+  assert.match(reportsTabSource, /setOutreachData\(outreachRes\.data/)
+}
+
 function testDashboardRemainsFirstTopLevelTab(): void {
   const reportingIndex = navSource.indexOf("{ id: 'reporting-home'")
   const customersIndex = navSource.indexOf("{ id: 'customers-home'")
@@ -121,6 +128,7 @@ const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'All Clients works with calendar period modes', fn: testAllClientsCalendarModesRemainSupported },
   { name: 'dashboard labels match selected period', fn: testDashboardLabelsMatchSelectedPeriod },
   { name: 'Marketing > Reports remains separate', fn: testMarketingReportsRemainsSeparate },
+  { name: 'Marketing > Reports uses single api.get unwrap level', fn: testMarketingReportsDoesNotDoubleUnwrapApiPayload },
   { name: 'Dashboard remains first top-level tab', fn: testDashboardRemainsFirstTopLevelTab },
 ]
 
