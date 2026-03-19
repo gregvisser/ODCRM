@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
 const routesFile = join(root, 'server', 'src', 'routes', 'sequences.ts')
-// Mounted Marketing Sequences UI (not src/components/MarketingSequencesTab.tsx)
+// Mounted Marketing Sequences UI only (src/tabs/marketing/components/SequencesTab.tsx)
 const uiFile = join(root, 'src', 'tabs', 'marketing', 'components', 'SequencesTab.tsx')
 
 const routes = readFileSync(routesFile, 'utf8')
