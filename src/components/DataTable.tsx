@@ -281,7 +281,9 @@ export function DataTable<T extends Record<string, any>>({
     }))
   }, [columnsProp, enableSorting, enableFiltering, columnSizing])
   
-  // TanStack Table instance
+  // TanStack Table v8: useReactTable() returns refs that react-hooks/incompatible-library
+  // flags as non-memoizable — expected for this API; behavior unchanged.
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack useReactTable
   const table = useReactTable({
     data,
     columns,
