@@ -225,13 +225,15 @@ const ReportsTab: React.FC = () => {
     else setLoading(true)
     setError(null)
 
+    // send-worker routes clamp sinceHours to SUMMARY_SINCE_HOURS_MAX (168) on the server — operational
+    // panels cannot span 30/90d even when outreach sinceDays does.
     const sinceHours = Math.min(windowDays * 24, 168)
     const [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes] = await Promise.all([
-      api.get<{ data?: OutreachReportResponse }>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers: customerHeaders }),
-      api.get<{ success?: boolean; data?: RunHistoryResponse }>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers: customerHeaders }),
-      api.get<{ success?: boolean; data?: IdentityCapacityResponse }>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers: customerHeaders }),
-      api.get<{ success?: boolean; data?: OperatorConsoleResponse }>(`/api/send-worker/console?sinceHours=${sinceHours}`, { headers: customerHeaders }),
-      api.get<{ success?: boolean; data?: QueueWorkbenchResponse }>(`/api/send-worker/queue-workbench?state=scheduled&limit=5&sinceHours=${sinceHours}`, { headers: customerHeaders }),
+      api.get<OutreachReportResponse>(`/api/reports/outreach?customerId=${encodeURIComponent(selectedCustomerId)}&sinceDays=${windowDays}`, { headers: customerHeaders }),
+      api.get<RunHistoryResponse>(`/api/send-worker/run-history?sinceHours=${sinceHours}&limit=80`, { headers: customerHeaders }),
+      api.get<IdentityCapacityResponse>(`/api/send-worker/identity-capacity?sinceHours=${sinceHours}`, { headers: customerHeaders }),
+      api.get<OperatorConsoleResponse>(`/api/send-worker/console?sinceHours=${sinceHours}`, { headers: customerHeaders }),
+      api.get<QueueWorkbenchResponse>(`/api/send-worker/queue-workbench?state=scheduled&limit=5&sinceHours=${sinceHours}`, { headers: customerHeaders }),
     ])
 
     const firstErr = [outreachRes, runHistoryRes, identityRes, consoleRes, scheduledQueueRes].find((row) => row.error)
@@ -242,11 +244,12 @@ const ReportsTab: React.FC = () => {
       return
     }
 
-    setOutreachData(outreachRes.data?.data ?? null)
-    setRunHistoryData(runHistoryRes.data?.data ?? null)
-    setIdentityData(identityRes.data?.data ?? null)
-    setConsoleData(consoleRes.data?.data ?? null)
-    setScheduledQueueData(scheduledQueueRes.data?.data ?? null)
+    // api.get unwraps { data: T } once — payload is response.data, not response.data.data
+    setOutreachData(outreachRes.data ?? null)
+    setRunHistoryData(runHistoryRes.data ?? null)
+    setIdentityData(identityRes.data ?? null)
+    setConsoleData(consoleRes.data ?? null)
+    setScheduledQueueData(scheduledQueueRes.data ?? null)
     setLastUpdatedAt(new Date().toISOString())
     setLoading(false)
     setRefreshing(false)
@@ -326,6 +329,9 @@ const ReportsTab: React.FC = () => {
                   <Heading size="md">Outreach reporting</Heading>
                   <Text fontSize="sm" color="gray.600" data-testid="reports-tab-operator-cue">
                     Review send volume, replies, opt-outs, mailbox performance, and recent outcomes. Queue detail and follow-up tools are kept in a secondary section.
+                  </Text>
+                  <Text fontSize="xs" color="gray.500" mt={1} data-testid="reports-tab-window-scope-note">
+                    Outreach totals (cards and sequence/mailbox tables) use the window above. Latest send outcomes, queue outlook, and mailbox capacity use at most the last 7 days — send-worker APIs cap history at 168 hours.
                   </Text>
                 </VStack>
                 <HStack>
