@@ -13,9 +13,14 @@
 - **Output:** `COLUMN_EXISTS=yes` and exit 0 if column exists; otherwise exit 1 (workflow fails).
 - **No secrets printed.**
 
+## Post-merge workflow run
+
+- **Run:** Backend deploy triggered by merge of PR #327 (chore(ops): verify isRead column against prod db in deploy). Run ID: 23288166048. URL: https://github.com/gregvisser/ODCRM/actions/runs/23288166048
+- **To confirm permanent fix:** When that run (or any subsequent deploy run) completes, open the run log and find the step **"Verify isRead column (production)"**. If the step succeeded and the log shows `COLUMN_EXISTS=yes`, then the production database has `email_message_metadata.is_read` and classification is **A. PERMANENT FIX CONFIRMED**.
+
 ## Final classification
 
-- **After the first successful backend deploy run that includes this step:** If the "Verify isRead column (production)" step passes and logs `COLUMN_EXISTS=yes`, then **A. PERMANENT FIX CONFIRMED** — the column exists in the same DB the deployed backend uses.
+- **After the first successful backend deploy run that includes this step:** If "Verify isRead column (production)" passes and logs `COLUMN_EXISTS=yes`, then **A. PERMANENT FIX CONFIRMED** — the column exists in the same DB the deployed backend uses.
 - **Until that run is confirmed:** Classification remains **B. STILL NOT FULLY PROVEN** (column verified only on local/env DB previously).
 
 ## Manual check (if needed)
