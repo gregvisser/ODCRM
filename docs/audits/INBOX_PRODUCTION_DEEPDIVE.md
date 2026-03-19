@@ -83,7 +83,7 @@ Filters/search/sorting actually present:
 
 - Customer select: yes
 - View toggle (`threads` / `replies`): yes
-- Date range filter: yes, but only affects `/api/inbox/replies`
+- Date range filter: yes, shown only in replies view; affects `/api/inbox/replies` only (threads view does not show it)
 - Search box: yes, but only in replies view
 - Unread-only toggle in threads view: yes in UI, backed by `/api/inbox/threads` unread counts
 - Sorting: implicit only; thread list is sorted by latest message server-side, replies are sorted by `replyDetectedAt desc`
@@ -123,7 +123,7 @@ Mounted-code remnants / signals:
 
 Misleading or unsafe frontend behavior:
 
-- The date-range control remains visible in threads view even though threads loading does not use `dateRange`.
+- Date-range control is shown only in replies view so thread results are not misleading (threads route does not accept date params).
 - The "Needs action only" toggle depends on unread counts from `/api/inbox/threads`; after the unread fix, those counts can now be derived from `emailMessageMetadata.isRead`.
 - Manual refresh should still be read as a message-metadata pull, not a full replies refresh; the mounted copy now needs to stay explicit about that limit.
 - Replying happens with no visible mailbox/identity chooser even though a customer may have multiple connected mailboxes.
@@ -275,7 +275,7 @@ What works end-to-end right now:
 
 What is misleading:
 
-- Date-range selector is visible even in threads mode, but threads do not use it.
+- Resolved: date-range selector is shown only in replies view; threads view no longer implies date filtering.
 - Manual refresh is intentionally narrower than a full replies refresh; it only ingests recent messages into metadata and does not fully refresh reply-detected state.
 
 What is incomplete or fragile:
