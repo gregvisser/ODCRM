@@ -478,16 +478,19 @@ const InboxTab: React.FC = () => {
             <option value="threads">{t('marketing.conversations')}</option>
             <option value="replies">{t('marketing.recentReplies')}</option>
           </Select>
-          <Select
-            size="sm"
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d')}
-            w="140px"
-          >
-            <option value="7d">{t('marketing.last7Days')}</option>
-            <option value="30d">{t('marketing.last30Days')}</option>
-            <option value="90d">{t('marketing.last90Days')}</option>
-          </Select>
+          {view === 'replies' && (
+            <Select
+              size="sm"
+              value={dateRange}
+              onChange={(e) => setDateRange(e.target.value as '7d' | '30d' | '90d')}
+              w="140px"
+              aria-label="Date range for replies"
+            >
+              <option value="7d">{t('marketing.last7Days')}</option>
+              <option value="30d">{t('marketing.last30Days')}</option>
+              <option value="90d">{t('marketing.last90Days')}</option>
+            </Select>
+          )}
         </HStack>
       </Flex>
 
