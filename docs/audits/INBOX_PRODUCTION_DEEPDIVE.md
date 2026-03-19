@@ -87,7 +87,7 @@ Filters/search/sorting actually present:
 - Search box: yes, but only in replies view
 - Unread-only toggle in threads view: yes in UI, backed by `/api/inbox/threads` unread counts
 - Sorting: implicit only; thread list is sorted by latest message server-side, replies are sorted by `replyDetectedAt desc`
-- Pagination controls: no frontend pagination UI
+- Pagination controls: replies view has “Load more replies” and “Showing N loaded”; thread list has load-more where implemented.
 
 What the mounted Inbox supports today:
 
@@ -99,7 +99,7 @@ What the mounted Inbox supports today:
 - Opt-out handling: partial
 - Signature handling: no
 - Mailbox switching / identity selection: no
-- Pagination: no frontend support
+- Pagination: replies view has load-more (backend limit/offset/hasMore); thread list per backend contract.
 - Message detail view: yes, inline thread detail view
 
 Evidence-based feature truth:
@@ -148,9 +148,10 @@ Core Inbox routes in `server/src/routes/inbox.ts`:
 
 - `GET /api/inbox/replies`
   - Reads reply-detected prospects from `emailCampaignProspect` where `replyDetectedAt` is set.
+  - Supports optional `limit` and `offset`; returns `hasMore` and next `offset`.
   - Includes contact, campaign, sender identity display fields.
   - Status: `production-real`
-  - Mounted UI usage: yes, replies view.
+  - Mounted UI usage: yes, replies view with load-more.
 
 - `GET /api/inbox/threads`
   - Reads `emailMessageMetadata`, groups by `threadId`, returns thread summaries.
@@ -282,7 +283,7 @@ What is incomplete or fragile:
 
 - No mailbox/identity selection before reply (sender is now explicit: “Reply will send from: X”; ambiguous threads block reply).
 - Signature is not appended in Inbox; the UI now states that explicitly.
-- No pagination support in mounted UI.
+- Replies view: load-more present (hasMore/offset). Thread list: per backend contract.
 - No explicit unread toggle/reset behavior beyond auto-mark-read on open.
 - Reply path writes `emailEvent.type = 'replied'`, which risks mixing operator replies with prospect replies in reporting.
 

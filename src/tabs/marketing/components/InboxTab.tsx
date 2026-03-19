@@ -129,6 +129,8 @@ type RepliesResponse = {
     end: string
   }
   items: ReplyItem[]
+  hasMore?: boolean
+  offset?: number
 }
 
 const InboxTab: React.FC = () => {
@@ -148,6 +150,9 @@ const InboxTab: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [threadsLoading, setThreadsLoading] = useState(false)
+  const [hasMoreReplies, setHasMoreReplies] = useState(false)
+  const [repliesNextOffset, setRepliesNextOffset] = useState(0)
+  const [repliesLoadingMore, setRepliesLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dateRange, setDateRange] = useState<'7d' | '30d' | '90d'>('30d')
   const [view, setView] = useState<'replies' | 'threads'>('threads')
@@ -166,12 +171,13 @@ const InboxTab: React.FC = () => {
     window.location.search = params.toString()
   }
 
+  const REPLIES_PAGE_SIZE = 100
+
   const loadReplies = useCallback(async () => {
     if (!selectedCustomerId) return
     setLoading(true)
     setError(null)
 
-    // Calculate date range
     const end = new Date()
     const start = new Date()
     switch (dateRange) {
@@ -187,19 +193,59 @@ const InboxTab: React.FC = () => {
     }
 
     const { data, error: apiError } = await api.get<RepliesResponse>(
-      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}`,
+      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}&limit=${REPLIES_PAGE_SIZE}&offset=0`,
       { headers: customerHeaders }
     )
     
     if (apiError) {
       setError(apiError)
     } else {
-      setReplies(data?.items || [])
+      const list = data?.items || []
+      setReplies(list)
+      setHasMoreReplies(!!data?.hasMore)
+      setRepliesNextOffset(data?.offset ?? list.length)
       setLastUpdatedAt(new Date().toISOString())
     }
     
     setLoading(false)
   }, [selectedCustomerId, dateRange, customerHeaders])
+
+  const loadMoreReplies = useCallback(async () => {
+    if (!selectedCustomerId) return
+    setRepliesLoadingMore(true)
+    setError(null)
+
+    const end = new Date()
+    const start = new Date()
+    switch (dateRange) {
+      case '7d':
+        start.setDate(start.getDate() - 7)
+        break
+      case '30d':
+        start.setDate(start.getDate() - 30)
+        break
+      case '90d':
+        start.setDate(start.getDate() - 90)
+        break
+    }
+
+    const { data, error: apiError } = await api.get<RepliesResponse>(
+      `/api/inbox/replies?start=${start.toISOString()}&end=${end.toISOString()}&limit=${REPLIES_PAGE_SIZE}&offset=${repliesNextOffset}`,
+      { headers: customerHeaders }
+    )
+
+    if (apiError) {
+      setError(apiError)
+    } else {
+      const list = data?.items || []
+      setReplies((prev) => [...prev, ...list])
+      setHasMoreReplies(!!data?.hasMore)
+      setRepliesNextOffset(data?.offset ?? repliesNextOffset + list.length)
+      setLastUpdatedAt(new Date().toISOString())
+    }
+
+    setRepliesLoadingMore(false)
+  }, [selectedCustomerId, dateRange, customerHeaders, repliesNextOffset])
 
   const loadCustomers = useCallback(async () => {
     setLoading(true)
@@ -920,6 +966,22 @@ const InboxTab: React.FC = () => {
           </CardBody>
         </Card>
       )}
+          {hasMoreReplies && (
+            <Box mt={3}>
+              <Text fontSize="xs" color="gray.500" mb={2}>
+                Showing {replies.length} loaded
+              </Text>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => loadMoreReplies()}
+                isLoading={repliesLoadingMore}
+                isDisabled={repliesLoadingMore}
+              >
+                Load more replies
+              </Button>
+            </Box>
+          )}
         </>
       )}
 

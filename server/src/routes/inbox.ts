@@ -24,6 +24,7 @@ const listRepliesSchema = z.object({
   end: z.string().optional(),
   campaignId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 })
 
 function isMissingColumnError(err: unknown, columnName: string): boolean {
@@ -94,8 +95,10 @@ router.get('/', async (req, res, next) => {
 router.get('/replies', async (req, res, next) => {
   try {
     const customerId = getCustomerId(req)
-    const { start, end, campaignId, limit } = listRepliesSchema.parse(req.query)
+    const { start, end, campaignId, limit, offset } = listRepliesSchema.parse(req.query)
     const { startDate, endDate } = parseRange(start, end)
+    const pageSize = Math.min(limit ?? 100, 200)
+    const skip = Math.max(offset ?? 0, 0)
 
     const rows = await prisma.emailCampaignProspect.findMany({
       where: {
@@ -114,7 +117,8 @@ router.get('/replies', async (req, res, next) => {
         },
       },
       orderBy: { replyDetectedAt: 'desc' },
-      take: limit || 100,
+      take: pageSize,
+      skip,
     })
 
     res.json({
@@ -136,6 +140,8 @@ router.get('/replies', async (req, res, next) => {
         replyCount: p.replyCount,
         lastReplySnippet: p.lastReplySnippet,
       })),
+      hasMore: rows.length === pageSize,
+      offset: skip + rows.length,
     })
   } catch (error) {
     next(error)
