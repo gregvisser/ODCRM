@@ -227,12 +227,13 @@ const ReadinessTab: React.FC = () => {
       return
     }
 
-    setExceptionCenterData(results[0]?.data?.data ?? null)
-    setIdentityCapacityData(results[1]?.data?.data ?? null)
-    setRunHistoryData(results[2]?.data?.data ?? null)
-    setPreflightData(results[3]?.data?.data ?? null)
-    setLaunchPreviewData(results[4]?.data?.data ?? null)
-    setComparisonData(results[5]?.data?.data ?? null)
+    // api.get unwraps { data: T } — payload is results[i].data, not .data.data
+    setExceptionCenterData(results[0]?.data ?? null)
+    setIdentityCapacityData(results[1]?.data ?? null)
+    setRunHistoryData(results[2]?.data ?? null)
+    setPreflightData(results[3]?.data ?? null)
+    setLaunchPreviewData(results[4]?.data ?? null)
+    setComparisonData(results[5]?.data ?? null)
     setLastUpdatedAt(new Date().toISOString())
     setLoading(false)
     setRefreshing(false)

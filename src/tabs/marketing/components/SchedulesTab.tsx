@@ -403,14 +403,14 @@ const SchedulesTab: React.FC = () => {
           setDetailError((current) => current || preflightRes.error)
           setPreflightData(null)
         } else {
-          setPreflightData(preflightRes?.data?.data ?? null)
+          setPreflightData(preflightRes?.data ?? null)
         }
 
         if (historyRes?.error) {
           setDetailError((current) => current || historyRes.error)
           setRunHistoryData(null)
         } else {
-          setRunHistoryData(historyRes?.data?.data ?? { rows: [] })
+          setRunHistoryData(historyRes?.data ?? { rows: [] })
         }
       } else {
         setPreflightData(null)
@@ -498,13 +498,14 @@ const SchedulesTab: React.FC = () => {
         })
         return
       }
+      const payload = res.data
       const summary =
-        res.data?.data?.message ||
-        `Processed ${res.data?.data?.processed ?? 0}; sent ${res.data?.data?.sent ?? 0}; failed ${res.data?.data?.failed ?? 0}.`
+        payload?.message ||
+        `Processed ${payload?.processed ?? 0}; sent ${payload?.sent ?? 0}; failed ${payload?.failed ?? 0}.`
       toast({
-        title: (res.data?.data?.sent ?? 0) > 0 ? 'Test batch sent' : 'Test batch checked',
+        title: (payload?.sent ?? 0) > 0 ? 'Test batch sent' : 'Test batch checked',
         description: summary,
-        status: (res.data?.data?.sent ?? 0) > 0 ? 'success' : 'info',
+        status: (payload?.sent ?? 0) > 0 ? 'success' : 'info',
         duration: 6000,
       })
       await loadData(true)

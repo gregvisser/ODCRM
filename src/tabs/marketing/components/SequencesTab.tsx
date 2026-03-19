@@ -1729,8 +1729,8 @@ const SequencesTab: React.FC = () => {
       if (!cursor) setAuditItems([])
       return
     }
-    const items = res.data?.data?.items ?? []
-    const next = res.data?.data?.nextCursor ?? null
+    const items = res.data?.items ?? []
+    const next = res.data?.nextCursor ?? null
     if (cursor) {
       setAuditItems((prev) => [...prev, ...items])
     } else {
@@ -1758,7 +1758,7 @@ const SequencesTab: React.FC = () => {
       setAuditSummary(null)
       return
     }
-    const d = res.data?.data
+    const d = res.data
     setAuditSummary(d ? { total: d.total, byDecision: d.byDecision ?? {}, sinceHours: d.sinceHours } : null)
   }, [selectedCustomerId, auditSummarySinceHours, auditQueueItemIdFilter, auditDecisionFilter])
 
@@ -2340,7 +2340,7 @@ const SequencesTab: React.FC = () => {
         toast({ title: 'Tick failed', description: res.error, status: 'error' })
         return
       }
-      const d = res.data?.data
+      const d = res.data
       toast({
         title: 'Tick (dry-run) done',
         description: d ? `scanned=${d.scanned ?? 0} locked=${d.locked ?? 0} requeued=${d.requeued ?? 0} errors=${d.errors ?? 0}` : undefined,
@@ -2381,7 +2381,7 @@ const SequencesTab: React.FC = () => {
         })
         return
       }
-      const d = res.data?.data
+      const d = res.data
       const summary = d ? `processed=${d.processedCount ?? 0} audits=${d.auditsCreated ?? 0}` : 'completed'
       toast({
         title: 'Dry-run worker done',
@@ -2442,7 +2442,7 @@ const SequencesTab: React.FC = () => {
         })
         return
       }
-      const d = res.data?.data
+      const d = res.data
       const summary = d ? `processed=${d.processed ?? 0} sent=${d.sent ?? 0} failed=${d.failed ?? 0} skipped=${d.skipped ?? 0}` : 'completed'
       toast({
         title: 'Live send complete',
@@ -2515,7 +2515,7 @@ const SequencesTab: React.FC = () => {
         })
         return
       }
-      const d = res.data?.data
+      const d = res.data
       const summary = d?.message || `processed=${d?.processed ?? 0} sent=${d?.sent ?? 0} requeued=${d?.requeued ?? 0} failed=${d?.failed ?? 0}`
       toast({
         title: (d?.sent ?? 0) > 0 ? 'Live test batch sent' : 'Test batch checked',
