@@ -93,7 +93,7 @@ What the mounted Inbox supports today:
 
 - Viewing inbox threads/messages: yes
 - Recent replies list: yes
-- Read/unread: partial
+- Read/unread: yes (explicit Mark read / Mark unread per inbound message in thread detail)
 - Refresh/sync: partial
 - Reply: yes
 - Opt-out handling: partial
@@ -171,7 +171,7 @@ Core Inbox routes in `server/src/routes/inbox.ts`:
 - `POST /api/inbox/messages/:id/read`
   - Marks a message read/unread.
   - Status: `production-real`
-  - Mounted UI usage: yes, but only for mark-read on open; no unread toggle is surfaced.
+  - Mounted UI usage: yes; mark-read on open plus explicit Mark read / Mark unread per inbound message in thread detail.
 
 - `POST /api/inbox/messages/:id/optout`
   - Adds sender email/domain to tenant-scoped suppression list.
@@ -283,7 +283,7 @@ What is incomplete or fragile:
 - No mailbox/identity selection before reply (sender is now explicit: “Reply will send from: X”; ambiguous threads block reply).
 - Signature is not appended in Inbox; the UI now states that explicitly.
 - No pagination support in mounted UI.
-- No explicit unread toggle/reset behavior beyond auto-mark-read on open.
+- (Explicit unread controls: done — per-message Mark read / Mark unread in thread detail.)
 - Reply path writes `emailEvent.type = 'replied'`, which risks mixing operator replies with prospect replies in reporting.
 
 Dead or legacy paths:
