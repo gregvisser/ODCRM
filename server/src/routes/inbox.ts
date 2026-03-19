@@ -150,51 +150,108 @@ router.get('/threads', async (req, res, next) => {
     const offset = Math.max(parseInt(req.query.offset as string) || 0, 0)
     const unreadOnly = req.query.unreadOnly === 'true'
 
-    const messages = await prisma.emailMessageMetadata.findMany({
-      where: {
-        senderIdentity: { customerId },
-        threadId: { not: null },
-      },
-      select: {
-        threadId: true,
-        subject: true,
-        fromAddress: true,
-        toAddress: true,
-        direction: true,
-        createdAt: true,
-        isRead: true,
-        senderIdentity: {
-          select: {
-            id: true,
-            emailAddress: true,
-            displayName: true,
-          },
+    const threadSelectWithIsRead = {
+      threadId: true,
+      subject: true,
+      fromAddress: true,
+      toAddress: true,
+      direction: true,
+      createdAt: true,
+      isRead: true,
+      senderIdentity: {
+        select: {
+          id: true,
+          emailAddress: true,
+          displayName: true,
         },
-        campaignProspect: {
-          select: {
-            id: true,
-            contact: {
-              select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                companyName: true,
-                email: true,
-              },
+      },
+      campaignProspect: {
+        select: {
+          id: true,
+          contact: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+              email: true,
             },
-            campaign: {
-              select: {
-                id: true,
-                name: true,
-              },
+          },
+          campaign: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 2000,
-    })
-    let threadList = buildInboxThreadSummaries(messages as InboxThreadMessageRecord[])
+    }
+
+    const threadSelectWithoutIsRead = {
+      threadId: true,
+      subject: true,
+      fromAddress: true,
+      toAddress: true,
+      direction: true,
+      createdAt: true,
+      senderIdentity: {
+        select: {
+          id: true,
+          emailAddress: true,
+          displayName: true,
+        },
+      },
+      campaignProspect: {
+        select: {
+          id: true,
+          contact: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+              email: true,
+            },
+          },
+          campaign: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    }
+
+    let messages: InboxThreadMessageRecord[]
+    try {
+      const rows = await prisma.emailMessageMetadata.findMany({
+        where: {
+          senderIdentity: { customerId },
+          threadId: { not: null },
+        },
+        select: threadSelectWithIsRead,
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+      })
+      messages = rows as InboxThreadMessageRecord[]
+    } catch (err) {
+      if (!isMissingColumnError(err, 'email_message_metadata.isRead')) {
+        throw err
+      }
+      const rows = await prisma.emailMessageMetadata.findMany({
+        where: {
+          senderIdentity: { customerId },
+          threadId: { not: null },
+        },
+        select: threadSelectWithoutIsRead,
+        orderBy: { createdAt: 'desc' },
+        take: 2000,
+      })
+      messages = (rows as any[]).map((r) => ({ ...r, isRead: false })) as InboxThreadMessageRecord[]
+    }
+
+    let threadList = buildInboxThreadSummaries(messages)
     if (unreadOnly) {
       threadList = threadList.filter((t) => t.unreadCount > 0)
     }
