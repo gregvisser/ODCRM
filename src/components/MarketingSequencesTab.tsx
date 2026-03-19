@@ -185,17 +185,11 @@ export default function MarketingSequencesTab() {
       setSequences(data)
     }
     setLoading(false)
-  }, [customerId, toast])
+  }, [customerId, toast, showArchived])
 
   useEffect(() => {
     fetchSequences()
-  }, [showArchived])
-
-  useEffect(() => {
-    if (customerId) {
-      fetchSequences()
-    }
-  }, [customerId, fetchSequences])
+  }, [fetchSequences])
 
   const handleCreateSequence = async () => {
     if (!sequenceForm.name.trim()) {
