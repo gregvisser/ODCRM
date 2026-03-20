@@ -33,6 +33,7 @@ import {
 import { RepeatIcon } from '@chakra-ui/icons'
 import { useLocale } from '../../../contexts/LocaleContext'
 import RequireActiveClient from '../../../components/RequireActiveClient'
+import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import { api } from '../../../utils/api'
 
 type SenderIdentity = {
@@ -309,6 +310,7 @@ function getOperatorScheduleStatus(schedule: CampaignSchedule): {
 
 const SchedulesTab: React.FC = () => {
   const { t } = useLocale()
+  const { customerId: scopedCustomerId, customerHeaders } = useScopedCustomerSelection()
   const [schedules, setSchedules] = useState<CampaignSchedule[]>([])
   const [scheduledEmails, setScheduledEmails] = useState<ScheduledEmail[]>([])
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -326,14 +328,24 @@ const SchedulesTab: React.FC = () => {
   const toast = useToast()
 
   const loadData = useCallback(async (isManualRefresh = false) => {
+    if (!scopedCustomerId?.startsWith('cust_')) {
+      setSchedules([])
+      setScheduledEmails([])
+      setSelectedScheduleId(null)
+      setError(null)
+      setLoading(false)
+      setRefreshing(false)
+      return
+    }
+
     try {
       if (isManualRefresh) setRefreshing(true)
       else setLoading(true)
       setError(null)
 
       const [schedulesRes, emailsRes] = await Promise.all([
-        api.get<CampaignSchedule[]>('/api/schedules'),
-        api.get<ScheduledEmail[]>('/api/schedules/emails?limit=200'),
+        api.get<CampaignSchedule[]>('/api/schedules', { headers: customerHeaders }),
+        api.get<ScheduledEmail[]>('/api/schedules/emails?limit=200', { headers: customerHeaders }),
       ])
 
       const firstError = schedulesRes.error || emailsRes.error || null
@@ -357,7 +369,7 @@ const SchedulesTab: React.FC = () => {
       setRefreshing(false)
       setLoading(false)
     }
-  }, [])
+  }, [scopedCustomerId, customerHeaders])
 
   const selectedSchedule = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null,
@@ -373,19 +385,31 @@ const SchedulesTab: React.FC = () => {
       return
     }
 
+    if (!scopedCustomerId?.startsWith('cust_')) {
+      setScheduleStats(null)
+      setPreflightData(null)
+      setRunHistoryData(null)
+      setDetailError(null)
+      return
+    }
+
     setDetailLoading(true)
     setDetailError(null)
     try {
-      const requests: Array<Promise<any>> = [api.get<ScheduleStats>(`/api/schedules/${schedule.id}/stats`)]
+      const requests: Array<Promise<any>> = [
+        api.get<ScheduleStats>(`/api/schedules/${schedule.id}/stats`, { headers: customerHeaders }),
+      ]
       if (schedule.sequenceId) {
         requests.push(
-          api.get<{ success?: boolean; data?: SequencePreflightData }>(
+          api.get<SequencePreflightData>(
             `/api/send-worker/sequence-preflight?sequenceId=${encodeURIComponent(schedule.sequenceId)}&sinceHours=${DETAIL_SINCE_HOURS}`,
+            { headers: customerHeaders },
           ),
         )
         requests.push(
-          api.get<{ success?: boolean; data?: RunHistoryData }>(
+          api.get<RunHistoryData>(
             `/api/send-worker/run-history?sequenceId=${encodeURIComponent(schedule.sequenceId)}&sinceHours=${DETAIL_SINCE_HOURS}&limit=12`,
+            { headers: customerHeaders },
           ),
         )
       }
@@ -425,7 +449,7 @@ const SchedulesTab: React.FC = () => {
     } finally {
       setDetailLoading(false)
     }
-  }, [])
+  }, [scopedCustomerId, customerHeaders])
 
   useEffect(() => {
     void loadData()
@@ -439,7 +463,7 @@ const SchedulesTab: React.FC = () => {
     const action = schedule.status === 'running' ? 'pause' : 'resume'
     setBusyScheduleId(schedule.id)
     try {
-      const res = await api.post(`/api/schedules/${schedule.id}/${action}`, {})
+      const res = await api.post(`/api/schedules/${schedule.id}/${action}`, {}, { headers: customerHeaders })
       if (res.error) {
         toast({
           title: `Failed to ${action} schedule`,
@@ -488,7 +512,7 @@ const SchedulesTab: React.FC = () => {
       }>('/api/send-worker/sequence-test-send', {
         sequenceId: schedule.sequenceId,
         limit: 3,
-      })
+      }, { headers: customerHeaders })
       if (res.error) {
         toast({
           title: 'Test batch failed',
@@ -606,7 +630,7 @@ const SchedulesTab: React.FC = () => {
             <Box>
               <AlertTitle>No schedules to review yet</AlertTitle>
               <AlertDescription>
-                Start from a live outreach campaign or linked sequence, then return here to monitor sending and manage schedule status.
+                This list only shows <strong>running or paused</strong> campaigns that are <strong>linked to a sequence</strong>. Draft or completed campaigns won’t appear here. Start from a live outreach campaign or linked sequence, then return here to monitor sending and manage schedule status.
               </AlertDescription>
             </Box>
           </Alert>
@@ -682,7 +706,7 @@ const SchedulesTab: React.FC = () => {
             <CardBody>
               <Text fontWeight="semibold">No schedules yet</Text>
               <Text fontSize="sm" color="gray.600" mt={1}>
-                Start from a live outreach campaign or linked sequence, then return here to monitor sending and manage schedule status.
+                Only running or paused campaigns with a linked sequence are listed. Draft or completed campaigns are hidden. Start from a live outreach campaign or linked sequence, then return here to monitor sending and manage schedule status.
               </Text>
             </CardBody>
           </Card>
