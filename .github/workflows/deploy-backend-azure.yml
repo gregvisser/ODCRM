@@ -74,6 +74,9 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
+      - name: Verify lead source batch metadata migration artifacts (no DB)
+        run: node server/scripts/verify-lead-source-batch-metadata-artifacts.mjs
+
       - name: Validate Prisma setup
         run: |
           cd server
@@ -132,8 +135,9 @@ jobs:
           npx prisma migrate resolve --applied "20260210183204_add_agreement_blob_fields" || true
           # Drift migrations — mark as applied so they don't block deploy
           npx prisma migrate resolve --applied "20260220140000_add_lead_source_applies_to" || true
-          # Phase 2 batch metadata: table/index already exist in prod; align history (P3018/42P07 recovery)
-          npx prisma migrate resolve --applied "20260318100000_add_lead_source_batch_metadata" || true
+          # Do NOT `migrate resolve --applied` for 20260318100000_add_lead_source_batch_metadata:
+          # that marks the migration applied without running SQL and skips the table creation on deploy.
+          # Recovery when history is wrong: 20260320100000_ensure_lead_source_batch_metadata_table (idempotent CREATE IF NOT EXISTS).
           echo "Baseline complete - existing migrations marked as applied"
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -158,6 +162,11 @@ jobs:
 
       - name: Verify isRead column (production)
         run: cd server && node scripts/verify-isread-column.cjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Verify lead_source_batch_metadata table exists
+        run: cd server && node scripts/verify-lead-source-batch-metadata-table.cjs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
 
