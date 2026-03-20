@@ -98,7 +98,14 @@ import {
   materializeLeadSourceBatchList,
   type LeadSourceType as LeadSourceApiType,
 } from '../../../utils/leadSourcesApi'
-import { visibleColumns } from '../../../utils/visibleColumns'
+import { normKey } from '../../../utils/visibleColumns'
+import {
+  buildReviewColumnDefs,
+  contactNumberCell,
+  humanizeLeadSourceNormHeader,
+  REVIEW_COLUMN_BATCH,
+  REVIEW_COLUMN_CONTACT_NUMBER,
+} from '../../../utils/leadSourceReviewColumns'
 
 type CampaignMetrics = {
   totalProspects: number
@@ -402,6 +409,7 @@ const SequencesTab: React.FC = () => {
   const [previewContacts, setPreviewContacts] = useState<Record<string, string>[]>([])
   const [previewColumns, setPreviewColumns] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const [enrollments, setEnrollments] = useState<EnrollmentListItem[]>([])
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false)
   const [enrollmentsError, setEnrollmentsError] = useState<string | null>(null)
@@ -2614,6 +2622,7 @@ const SequencesTab: React.FC = () => {
     const cid = selectedCustomerId?.startsWith('cust_') ? selectedCustomerId : ''
     if (!sel || !cid) return
     setPreviewLoading(true)
+    setPreviewError(null)
     setPreviewContacts([])
     setPreviewColumns([])
     onPreviewOpen()
@@ -2622,6 +2631,7 @@ const SequencesTab: React.FC = () => {
       setPreviewContacts(data.contacts)
       setPreviewColumns(data.columns)
     } catch (e) {
+      setPreviewError(e instanceof Error ? e.message : 'Error')
       toast({ title: 'Preview failed', description: e instanceof Error ? e.message : 'Error', status: 'error' })
     } finally {
       setPreviewLoading(false)
@@ -9210,33 +9220,58 @@ const SequencesTab: React.FC = () => {
               <Text>Loading...</Text>
             ) : (
               (() => {
-                const computed = previewContacts.length ? visibleColumns(previewColumns, previewContacts) : previewColumns
-                const previewCols = computed.length ? computed : previewColumns
+                const normalizedColumns = previewColumns.map((c) => normKey(c))
+                const normalizedContacts = previewContacts.map((row) => {
+                  const out: Record<string, string> = {}
+                  for (const [k, v] of Object.entries(row ?? {})) out[normKey(k)] = typeof v === 'string' ? v : String(v ?? '')
+                  return out
+                })
+                const reviewColumnDefs = buildReviewColumnDefs(new Set(normalizedColumns))
+                const batchLabel =
+                  leadSourceSelection?.displayLabel ??
+                  selectedLeadBatchOption?.displayLabel ??
+                  (leadSourceSelection ? `${leadSourceSelection.sourceType} — ${leadSourceSelection.batchKey}` : '')
+                const reviewCell = (columnNormKey: string, row: Record<string, string>): string => {
+                  if (columnNormKey === REVIEW_COLUMN_BATCH) return batchLabel
+                  if (columnNormKey === REVIEW_COLUMN_CONTACT_NUMBER) return contactNumberCell(row)
+                  return row[columnNormKey] ?? ''
+                }
+                const wideCols = normalizedColumns
                 return (
-                  <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
-                    <Table size="sm" minW="max-content">
+                  <VStack align="stretch" spacing={4}>
+                    {previewError ? (
+                      <Alert status="error">
+                        <AlertIcon />
+                        <AlertDescription>{previewError}</AlertDescription>
+                      </Alert>
+                    ) : null}
+                    <Text fontSize="sm" color="gray.600">
+                      Default preview columns: Batch name, First Name, Last Name, Company, Role, Email, Contact number.
+                    </Text>
+                    <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
+                    <Table size="sm" minW="1100px">
                       <Thead position="sticky" top={0} zIndex={2} bg="gray.50" _dark={{ bg: 'gray.800' }}>
                         <Tr>
-                          {previewCols.map((col) => (
-                            <Th key={col} whiteSpace="nowrap">
-                              {col}
+                          {reviewColumnDefs.map((def) => (
+                            <Th key={def.normKey} whiteSpace="nowrap">
+                              {def.header}
                             </Th>
                           ))}
                         </Tr>
                       </Thead>
                       <Tbody>
-                        {previewContacts.length === 0 ? (
+                        {normalizedContacts.length === 0 ? (
                           <Tr>
-                            <Td colSpan={previewCols.length || 1} color="gray.500">
+                            <Td colSpan={reviewColumnDefs.length || 1} color="gray.500">
                               No contacts
                             </Td>
                           </Tr>
                         ) : (
-                          previewContacts.map((row, i) => (
+                          normalizedContacts.map((row, i) => (
                             <Tr key={i}>
-                              {previewCols.map((col) => (
-                                <Td key={col} whiteSpace="nowrap">
-                                  {row[col] ?? ''}
+                              {reviewColumnDefs.map((def) => (
+                                <Td key={def.normKey} whiteSpace="nowrap">
+                                  {reviewCell(def.normKey, row)}
                                 </Td>
                               ))}
                             </Tr>
@@ -9244,7 +9279,40 @@ const SequencesTab: React.FC = () => {
                         )}
                       </Tbody>
                     </Table>
-                  </Box>
+                    </Box>
+                    <Box overflowX="auto" borderWidth="1px" borderRadius="md">
+                      <Table size="sm" minW="1100px">
+                        <Thead>
+                          <Tr>
+                            {wideCols.map((col) => (
+                              <Th key={col} whiteSpace="nowrap">
+                                {humanizeLeadSourceNormHeader(col, col)}
+                              </Th>
+                            ))}
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {normalizedContacts.length === 0 ? (
+                            <Tr>
+                              <Td colSpan={wideCols.length || 1} color="gray.500">
+                                No contacts
+                              </Td>
+                            </Tr>
+                          ) : (
+                            normalizedContacts.slice(0, 20).map((row, i) => (
+                              <Tr key={i}>
+                                {wideCols.map((col) => (
+                                  <Td key={col} whiteSpace="nowrap">
+                                    {row[col] ?? ''}
+                                  </Td>
+                                ))}
+                              </Tr>
+                            ))
+                          )}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                  </VStack>
                 )
               })()
             )}
