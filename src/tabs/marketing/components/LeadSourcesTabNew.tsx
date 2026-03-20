@@ -68,6 +68,14 @@ import {
   type LeadSourceBatch,
 } from '../../../utils/leadSourcesApi'
 import { normKey } from '../../../utils/visibleColumns'
+import {
+  buildReviewColumnDefs,
+  contactPersonCell,
+  getRecommendedContactNormKeys,
+  humanizeLeadSourceNormHeader,
+  REVIEW_COLUMN_BATCH,
+  REVIEW_COLUMN_PERSON,
+} from '../../../utils/leadSourceReviewColumns'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
 const SOURCE_LABELS: Record<LeadSourceType, string> = {
@@ -77,21 +85,6 @@ const SOURCE_LABELS: Record<LeadSourceType, string> = {
   BLACKBOOK: 'Blackbook',
 }
 const POLL_INTERVAL_MS = 45 * 1000
-const CONTACT_COLUMN_PRIORITY = [
-  'firstname',
-  'lastname',
-  'email',
-  'companyname',
-  'jobtitle',
-  'client',
-  'campaigns',
-  'mobile',
-  'directphone',
-  'officephone',
-  'linkedinurl',
-  'country',
-  'city',
-]
 
 const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? v : [])
 
@@ -143,12 +136,6 @@ function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>
       ? `Last refreshed ${new Date(src.lastFetchAt).toLocaleString()}.`
       : 'Connected and ready to review batches.',
   }
-}
-
-function getPreferredContactsColumns(normalizedColumns: string[]): string[] {
-  const priority = CONTACT_COLUMN_PRIORITY.filter((column) => normalizedColumns.includes(column))
-  const remaining = normalizedColumns.filter((column) => !priority.includes(column))
-  return [...priority, ...remaining]
 }
 
 function SourcesOverview({
@@ -518,6 +505,7 @@ function ContactsBlock({
   contactsSearchQuery,
   sourceLabel,
   batchIdentity,
+  batchDisplayLabel,
   onContactsSearchChange,
   onPrevPage,
   onNextPage,
@@ -533,12 +521,14 @@ function ContactsBlock({
   contactsSearchQuery: string
   sourceLabel: string
   batchIdentity: string
+  /** Operator-facing batch title (not a sheet column — avoids mistaking row data for headers). */
+  batchDisplayLabel: string
   onContactsSearchChange: (value: string) => void
   onPrevPage: () => void
   onNextPage: () => void
   onBack: () => void
 }) {
-  // Normalize keys so columns and row lookups match (backend may send camelCase, sheet headers vary)
+  // Normalize keys so columns and row lookups match (API uses canonical camelCase from csvToMappedRows)
   const normalizedColumns = contactsColumns.map((c) => normKey(c))
   const normToDisplay: Record<string, string> = {}
   contactsColumns.forEach((c) => {
@@ -550,23 +540,39 @@ function ContactsBlock({
     for (const [k, v] of Object.entries(row ?? {})) out[normKey(k)] = typeof v === 'string' ? v : String(v ?? '')
     return out
   })
-  const preferredCols = useMemo(() => {
-    const ordered = getPreferredContactsColumns(normalizedColumns)
-    return ordered.length > 0 ? ordered : normalizedColumns
-  }, [normalizedColumns])
-  const [selectedCols, setSelectedCols] = useState<string[]>(preferredCols)
+
+  const normalizedColumnSet = useMemo(() => new Set(normalizedColumns), [normalizedColumns])
+  const reviewColumnDefs = useMemo(() => buildReviewColumnDefs(normalizedColumnSet), [normalizedColumnSet])
+
+  const recommendedCols = useMemo(() => getRecommendedContactNormKeys(normalizedColumns), [normalizedColumns])
+  const [wideColumnMode, setWideColumnMode] = useState(false)
+  const [selectedCols, setSelectedCols] = useState<string[]>([])
   const [showColumnChooser, setShowColumnChooser] = useState(false)
+
   useEffect(() => {
-    setSelectedCols((current) => {
-      const safeCurrent = current.filter((col) => normalizedColumns.includes(col))
-      return safeCurrent.length > 0 ? safeCurrent : preferredCols
-    })
-  }, [normalizedColumns, preferredCols])
-  useEffect(() => {
+    setWideColumnMode(false)
     setShowColumnChooser(false)
+    setSelectedCols([])
   }, [batchIdentity])
-  const cols = selectedCols.length ? selectedCols : preferredCols
+
+  useEffect(() => {
+    if (!wideColumnMode) return
+    setSelectedCols((current) => {
+      const safe = current.filter((col) => normalizedColumns.includes(col))
+      return safe.length > 0 ? safe : normalizedColumns
+    })
+  }, [wideColumnMode, normalizedColumns])
+
   const displayLabel = (normCol: string) => normToDisplay[normCol] ?? normCol
+
+  const wideCols = selectedCols.length > 0 ? selectedCols : normalizedColumns
+
+  const reviewCell = (columnNormKey: string, row: Record<string, string>): string => {
+    if (columnNormKey === REVIEW_COLUMN_BATCH) return batchDisplayLabel
+    if (columnNormKey === REVIEW_COLUMN_PERSON) return contactPersonCell(row)
+    return row[columnNormKey] ?? ''
+  }
+
   return (
     <Card id="lead-sources-contacts-panel" data-testid="lead-sources-contacts-panel" overflow="visible">
       <CardHeader>
@@ -576,13 +582,41 @@ function ContactsBlock({
             <Text fontSize="sm" color="gray.600" mt={1}>
               {contactsConfigScope === 'all_accounts'
                 ? 'Using the shared source sheet for accounts that do not have their own source.'
-                : "Using this client's connected source sheet."} Page 1 shows the newest added rows first.
+                : "Using this client's connected source sheet."}{' '}
+              Default view shows priority columns for sequencing review (stable headers). Use “All sheet columns” for the full export.
             </Text>
           </Box>
-          <HStack>
-            <Button size="sm" variant="outline" onClick={() => setShowColumnChooser((v) => !v)}>
-              {showColumnChooser ? 'Hide columns' : 'Choose columns'}
-            </Button>
+          <HStack flexWrap="wrap">
+            {!wideColumnMode ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setWideColumnMode(true)
+                  setSelectedCols(normalizedColumns)
+                  setShowColumnChooser(false)
+                }}
+              >
+                All sheet columns
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="solid"
+                  colorScheme="blue"
+                  onClick={() => {
+                    setWideColumnMode(false)
+                    setShowColumnChooser(false)
+                  }}
+                >
+                  Priority columns
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowColumnChooser((v) => !v)}>
+                  {showColumnChooser ? 'Hide column picker' : 'Choose columns'}
+                </Button>
+              </>
+            )}
             <Button size="sm" onClick={onBack}>
               Back
             </Button>
@@ -610,20 +644,24 @@ function ContactsBlock({
                 Showing {contacts.length} row{contacts.length === 1 ? '' : 's'} on this page, {contactsTotal} match{contactsTotal === 1 ? '' : 'es'} overall.
               </Text>
             </Flex>
-            {showColumnChooser && (
+            {wideColumnMode && showColumnChooser && (
               <Box borderWidth="1px" borderRadius="md" p={3} mb={4}>
                 <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap" mb={3}>
                   <Box>
                     <Text fontSize="sm" fontWeight="semibold">
-                      Visible columns
+                      Visible columns (full sheet)
                     </Text>
                     <Text fontSize="sm" color="gray.600">
-                      Showing {cols.length} of {normalizedColumns.length} source columns in this preview.
+                      Showing {wideCols.length} of {normalizedColumns.length} columns.
                     </Text>
                   </Box>
                   <HStack>
-                    <Button size="xs" variant="ghost" onClick={() => setSelectedCols(preferredCols)}>
-                      Recommended
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => setSelectedCols(recommendedCols.length ? recommendedCols : normalizedColumns)}
+                    >
+                      Recommended subset
                     </Button>
                     <Button size="xs" variant="ghost" onClick={() => setSelectedCols(normalizedColumns)}>
                       Show all
@@ -632,7 +670,7 @@ function ContactsBlock({
                 </Flex>
                 <Wrap spacing={3}>
                   {normalizedColumns.map((col) => {
-                    const checked = cols.includes(col)
+                    const checked = wideCols.includes(col)
                     return (
                       <WrapItem key={col}>
                         <Checkbox
@@ -640,13 +678,14 @@ function ContactsBlock({
                           onChange={(e) => {
                             const nextChecked = e.target.checked
                             setSelectedCols((current) => {
-                              if (nextChecked) return current.includes(col) ? current : [...current, col]
-                              if (current.length <= 1) return current
-                              return current.filter((item) => item !== col)
+                              const base = current.length > 0 ? current : normalizedColumns
+                              if (nextChecked) return base.includes(col) ? base : [...base, col]
+                              if (base.length <= 1) return base
+                              return base.filter((item) => item !== col)
                             })
                           }}
                         >
-                          {displayLabel(col)}
+                          {humanizeLeadSourceNormHeader(col, displayLabel(col))}
                         </Checkbox>
                       </WrapItem>
                     )
@@ -656,7 +695,7 @@ function ContactsBlock({
             )}
             <TableContainer
               id="lead-sources-contacts-table"
-              data-testid="lead-sources-contacts-table"
+              data-testid={wideColumnMode ? 'lead-sources-contacts-table-wide' : 'lead-sources-contacts-table-review'}
               w="100%"
               overflowX="auto"
               overflowY="auto"
@@ -666,37 +705,68 @@ function ContactsBlock({
               bg="white"
               _dark={{ bg: 'gray.800' }}
             >
-              <Table size="sm" minW="1100px">
+              <Table size="sm" minW={wideColumnMode ? '1100px' : '720px'}>
                 <Thead>
                   <Tr>
-                    {cols.map((col) => (
-                      <Th
-                        key={col}
-                        whiteSpace="nowrap"
-                        minW="120px"
-                        position="sticky"
-                        top={0}
-                        zIndex={2}
-                        bg="gray.50"
-                        _dark={{ bg: 'gray.800' }}
-                        boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
-                      >
-                        {displayLabel(col)}
-                      </Th>
-                    ))}
+                    {!wideColumnMode
+                      ? reviewColumnDefs.map((def) => (
+                          <Th
+                            key={def.normKey}
+                            whiteSpace="nowrap"
+                            minW="120px"
+                            position="sticky"
+                            top={0}
+                            zIndex={2}
+                            bg="gray.50"
+                            _dark={{ bg: 'gray.800' }}
+                            boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                          >
+                            {def.header}
+                          </Th>
+                        ))
+                      : wideCols.map((col) => (
+                          <Th
+                            key={col}
+                            whiteSpace="nowrap"
+                            minW="120px"
+                            position="sticky"
+                            top={0}
+                            zIndex={2}
+                            bg="gray.50"
+                            _dark={{ bg: 'gray.800' }}
+                            boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                          >
+                            {humanizeLeadSourceNormHeader(col, displayLabel(col))}
+                          </Th>
+                        ))}
                   </Tr>
                 </Thead>
                 <Tbody>
                   {normalizedContacts.length === 0 ? (
                     <Tr>
-                      <Td colSpan={cols.length || 1} color="gray.500">
+                      <Td
+                        colSpan={
+                          wideColumnMode ? wideCols.length || 1 : Math.max(1, reviewColumnDefs.length)
+                        }
+                        color="gray.500"
+                      >
                         {contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
                       </Td>
                     </Tr>
+                  ) : !wideColumnMode ? (
+                    normalizedContacts.map((row, i) => (
+                      <Tr key={i}>
+                        {reviewColumnDefs.map((def) => (
+                          <Td key={def.normKey} whiteSpace="nowrap" minW="120px">
+                            {reviewCell(def.normKey, row)}
+                          </Td>
+                        ))}
+                      </Tr>
+                    ))
                   ) : (
                     normalizedContacts.map((row, i) => (
                       <Tr key={i}>
-                        {cols.map((col) => (
+                        {wideCols.map((col) => (
                           <Td key={col} whiteSpace="nowrap" minW="120px">
                             {row[col] ?? ''}
                           </Td>
@@ -1212,6 +1282,10 @@ export default function LeadSourcesTabNew({
                   <ContactsBlock
                     key={`${contactsBatchKey.sourceType}:${contactsBatchKey.batchKey}`}
                     batchIdentity={`${contactsBatchKey.sourceType}:${contactsBatchKey.batchKey}`}
+                    batchDisplayLabel={getLeadSourceBatchDisplayLabel(
+                      batches.find((b) => b.batchKey === contactsBatchKey.batchKey) ??
+                        ({ batchKey: contactsBatchKey.batchKey } as LeadSourceBatch),
+                    )}
                     sourceLabel={SOURCE_LABELS[contactsBatchKey.sourceType]}
                     contacts={contacts}
                     contactsColumns={contactsColumns}
