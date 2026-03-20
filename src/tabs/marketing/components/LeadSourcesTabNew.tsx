@@ -70,11 +70,11 @@ import {
 import { normKey } from '../../../utils/visibleColumns'
 import {
   buildReviewColumnDefs,
-  contactPersonCell,
+  contactNumberCell,
   getRecommendedContactNormKeys,
   humanizeLeadSourceNormHeader,
   REVIEW_COLUMN_BATCH,
-  REVIEW_COLUMN_PERSON,
+  REVIEW_COLUMN_CONTACT_NUMBER,
 } from '../../../utils/leadSourceReviewColumns'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
@@ -506,6 +506,7 @@ function ContactsBlock({
   sourceLabel,
   batchIdentity,
   batchDisplayLabel,
+  contactsError,
   onContactsSearchChange,
   onPrevPage,
   onNextPage,
@@ -523,6 +524,7 @@ function ContactsBlock({
   batchIdentity: string
   /** Operator-facing batch title (not a sheet column — avoids mistaking row data for headers). */
   batchDisplayLabel: string
+  contactsError: string | null
   onContactsSearchChange: (value: string) => void
   onPrevPage: () => void
   onNextPage: () => void
@@ -569,7 +571,7 @@ function ContactsBlock({
 
   const reviewCell = (columnNormKey: string, row: Record<string, string>): string => {
     if (columnNormKey === REVIEW_COLUMN_BATCH) return batchDisplayLabel
-    if (columnNormKey === REVIEW_COLUMN_PERSON) return contactPersonCell(row)
+    if (columnNormKey === REVIEW_COLUMN_CONTACT_NUMBER) return contactNumberCell(row)
     return row[columnNormKey] ?? ''
   }
 
@@ -644,6 +646,12 @@ function ContactsBlock({
                 Showing {contacts.length} row{contacts.length === 1 ? '' : 's'} on this page, {contactsTotal} match{contactsTotal === 1 ? '' : 'es'} overall.
               </Text>
             </Flex>
+            {contactsError ? (
+              <Alert status="error" mb={4}>
+                <AlertIcon />
+                <AlertDescription>{contactsError}</AlertDescription>
+              </Alert>
+            ) : null}
             {wideColumnMode && showColumnChooser && (
               <Box borderWidth="1px" borderRadius="md" p={3} mb={4}>
                 <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} gap={3} wrap="wrap" mb={3}>
@@ -821,6 +829,7 @@ export default function LeadSourcesTabNew({
   const [contactsTotal, setContactsTotal] = useState(0)
   const [contactsPageSize] = useState(50)
   const [contactsLoading, setContactsLoading] = useState(false)
+  const [contactsError, setContactsError] = useState<string | null>(null)
   const [contactsSearchQuery, setContactsSearchQuery] = useState('')
   const [connectSource, setConnectSource] = useState<LeadSourceType | null>(null)
   const [connectUrl, setConnectUrl] = useState('')
@@ -900,6 +909,7 @@ export default function LeadSourcesTabNew({
             setContacts([])
             setContactsColumns([])
             setContactsConfigScope(null)
+            setContactsError(null)
             setContactsTotal(0)
             setContactsPage(1)
           } else {
@@ -913,6 +923,7 @@ export default function LeadSourcesTabNew({
               setContacts([])
               setContactsColumns([])
               setContactsConfigScope(null)
+              setContactsError(null)
               setContactsTotal(0)
               setContactsPage(1)
             }
@@ -940,6 +951,7 @@ export default function LeadSourcesTabNew({
     async (opts?: { keepPrevious: boolean }) => {
       if (!customerId || !contactsBatchKey) return
       if (!opts?.keepPrevious) setContactsLoading(true)
+      setContactsError(null)
       try {
         const data = await getLeadSourceContacts(
           customerId,
@@ -959,6 +971,7 @@ export default function LeadSourcesTabNew({
         setContactsConfigScope(data?.configScope ?? null)
         setContactsTotal(Number(data?.total ?? 0))
       } catch {
+        setContactsError('Failed to load contacts for this batch. Try refreshing the source and opening this batch again.')
         if (!opts?.keepPrevious) {
           setContacts([])
           setContactsColumns([])
@@ -992,6 +1005,7 @@ export default function LeadSourcesTabNew({
     setViewBatchesSource(null)
     setContactsBatchKey(null)
     setContactsConfigScope(null)
+    setContactsError(null)
     setContactsSearchQuery('')
   }
 
@@ -1261,6 +1275,7 @@ export default function LeadSourcesTabNew({
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
+                      setContactsError(null)
                       setContactsTotal(0)
                       setContactsPage(1)
                     }}
@@ -1269,9 +1284,13 @@ export default function LeadSourcesTabNew({
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
+                      setContactsError(null)
                       setContactsTotal(0)
                       setContactsPage(1)
                       setContactsBatchKey({ sourceType: viewBatchesSource, batchKey })
+                      requestAnimationFrame(() => {
+                        document.getElementById('lead-sources-contacts-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                      })
                     }}
                     onUseInSequence={(batch) => handleUseInSequence(batch)}
                     onSaveBatchName={handleSaveBatchName}
@@ -1295,6 +1314,7 @@ export default function LeadSourcesTabNew({
                     contactsPage={contactsPage}
                     contactsPageSize={contactsPageSize}
                     contactsSearchQuery={contactsSearchQuery}
+                    contactsError={contactsError}
                     onContactsSearchChange={(value) => setContactsSearchQuery(value)}
                     onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
                     onNextPage={() => setContactsPage((p) => p + 1)}
@@ -1304,6 +1324,7 @@ export default function LeadSourcesTabNew({
                       setContacts([])
                       setContactsColumns([])
                       setContactsConfigScope(null)
+                      setContactsError(null)
                       setContactsTotal(0)
                       setContactsPage(1)
                     }}

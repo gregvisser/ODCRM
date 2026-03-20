@@ -4,30 +4,33 @@
 import assert from 'node:assert/strict'
 import {
   buildReviewColumnDefs,
-  contactPersonCell,
+  contactNumberCell,
   getRecommendedContactNormKeys,
   humanizeLeadSourceNormHeader,
   REVIEW_COLUMN_BATCH,
-  REVIEW_COLUMN_PERSON,
+  REVIEW_COLUMN_CONTACT_NUMBER,
 } from './leadSourceReviewColumns'
 
 const defs = buildReviewColumnDefs(
-  new Set(['companyname', 'email', 'firstname', 'lastname', 'jobtitle']),
+  new Set(['companyname', 'email', 'firstname', 'lastname', 'jobtitle', 'mobile']),
 )
 assert.equal(defs[0].normKey, REVIEW_COLUMN_BATCH)
 assert.equal(defs[0].header, 'Batch name')
+assert.equal(defs[1].normKey, 'firstname')
+assert.equal(defs[2].normKey, 'lastname')
 assert.ok(defs.some((d) => d.normKey === 'companyname' && d.header === 'Company'))
 assert.ok(defs.some((d) => d.normKey === 'email'))
-assert.ok(defs.some((d) => d.normKey === REVIEW_COLUMN_PERSON))
+assert.ok(defs.some((d) => d.normKey === REVIEW_COLUMN_CONTACT_NUMBER))
 assert.ok(defs.some((d) => d.normKey === 'jobtitle'))
 
-assert.equal(contactPersonCell({ firstname: 'Ada', lastname: 'Lovelace' }), 'Ada Lovelace')
-assert.equal(contactPersonCell({ firstname: 'Madonna', lastname: '' }), 'Madonna')
+assert.equal(contactNumberCell({ mobile: '123', directphone: '456' }), '123')
+assert.equal(contactNumberCell({ directphone: '456' }), '456')
+assert.equal(contactNumberCell({}), '')
 
 const rec = getRecommendedContactNormKeys(['email', 'jobtitle', 'noise'])
-assert.deepEqual(rec, ['email', 'jobtitle'])
+assert.deepEqual(rec, ['jobtitle', 'email'])
 
-assert.equal(humanizeLeadSourceNormHeader('email', 'Email'), 'Email address')
+assert.equal(humanizeLeadSourceNormHeader('email', 'Email'), 'Email')
 assert.equal(humanizeLeadSourceNormHeader('unknown', 'Raw header'), 'Raw header')
 
 console.log('✅ leadSourceReviewColumns tests passed')
