@@ -431,16 +431,81 @@ function BatchesBlock({
           <Text fontSize="sm" color="gray.600" mb={2}>
             Showing {filteredBatches.length} of {safeBatches.length} batch{safeBatches.length === 1 ? '' : 'es'}, newest batch first.
           </Text>
-          <Box id="lead-sources-batches-table" data-testid="lead-sources-batches-table" overflowX="auto" borderWidth="1px" borderRadius="md">
-            <Table size="sm">
+          <TableContainer
+            id="lead-sources-batches-table"
+            data-testid="lead-sources-batches-table"
+            maxH="55vh"
+            overflowY="auto"
+            overflowX="auto"
+            borderWidth="1px"
+            borderRadius="md"
+            bg="white"
+            _dark={{ bg: 'gray.800' }}
+          >
+            <Table size="sm" minW="720px">
               <Thead>
                 <Tr>
-                  <Th>Batch name</Th>
-                  <Th>Client</Th>
-                  <Th>Job Title</Th>
-                  <Th isNumeric>Count</Th>
-                  <Th>Last updated</Th>
-                  <Th>Actions</Th>
+                  <Th
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Batch name
+                  </Th>
+                  <Th
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Client
+                  </Th>
+                  <Th
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Job Title
+                  </Th>
+                  <Th
+                    isNumeric
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Count
+                  </Th>
+                  <Th
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Last updated
+                  </Th>
+                  <Th
+                    position="sticky"
+                    top={0}
+                    zIndex={2}
+                    bg="gray.50"
+                    _dark={{ bg: 'gray.800' }}
+                    boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
+                  >
+                    Actions
+                  </Th>
                 </Tr>
               </Thead>
               <Tbody>
@@ -486,7 +551,7 @@ function BatchesBlock({
               )}
             </Tbody>
           </Table>
-        </Box>
+          </TableContainer>
         </>
       )}
     </Box>
@@ -571,6 +636,12 @@ function ContactsBlock({
   const reviewCell = (columnNormKey: string, row: Record<string, string>): string => {
     if (columnNormKey === REVIEW_COLUMN_BATCH) return batchDisplayLabel
     if (columnNormKey === REVIEW_COLUMN_CONTACT_NUMBER) return contactNumberCell(row)
+    if (columnNormKey === 'odcrmfirstseenat') {
+      const raw = (row[columnNormKey] ?? '').trim()
+      if (!raw) return ''
+      const d = Date.parse(raw)
+      return Number.isNaN(d) ? raw : new Date(d).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+    }
     return row[columnNormKey] ?? ''
   }
 
@@ -987,10 +1058,6 @@ export default function LeadSourcesTabNew({
     if (contactsBatchKey) loadContacts()
   }, [contactsBatchKey, contactsPage, loadContacts])
 
-  useEffect(() => {
-    setContactsPage(1)
-  }, [contactsSearchQuery])
-
   // Poll contacts every 45s when viewing a batch; keep previous data while refreshing (no flicker)
   useEffect(() => {
     if (!customerId || !contactsBatchKey) return
@@ -1313,7 +1380,10 @@ export default function LeadSourcesTabNew({
                     contactsPageSize={contactsPageSize}
                     contactsSearchQuery={contactsSearchQuery}
                     contactsError={contactsError}
-                    onContactsSearchChange={(value) => setContactsSearchQuery(value)}
+                    onContactsSearchChange={(value) => {
+                      setContactsPage(1)
+                      setContactsSearchQuery(value)
+                    }}
                     onPrevPage={() => setContactsPage((p) => Math.max(1, p - 1))}
                     onNextPage={() => setContactsPage((p) => p + 1)}
                     onBack={() => {

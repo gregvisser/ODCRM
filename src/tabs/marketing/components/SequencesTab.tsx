@@ -9234,6 +9234,12 @@ const SequencesTab: React.FC = () => {
                 const reviewCell = (columnNormKey: string, row: Record<string, string>): string => {
                   if (columnNormKey === REVIEW_COLUMN_BATCH) return batchLabel
                   if (columnNormKey === REVIEW_COLUMN_CONTACT_NUMBER) return contactNumberCell(row)
+                  if (columnNormKey === 'odcrmfirstseenat') {
+                    const raw = (row[columnNormKey] ?? '').trim()
+                    if (!raw) return ''
+                    const d = Date.parse(raw)
+                    return Number.isNaN(d) ? raw : new Date(d).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
+                  }
                   return row[columnNormKey] ?? ''
                 }
                 const wideCols = normalizedColumns
@@ -9246,7 +9252,7 @@ const SequencesTab: React.FC = () => {
                       </Alert>
                     ) : null}
                     <Text fontSize="sm" color="gray.600">
-                      Default preview columns: Batch name, First Name, Last Name, Company, Role, Email, Contact number.
+                      Default preview columns: Batch name, First seen (import), names, company, role, email, contact number.
                     </Text>
                     <Box overflowX="auto" overflowY="auto" maxH="70vh" borderWidth="1px" borderRadius="md">
                     <Table size="sm" minW="1100px">
