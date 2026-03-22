@@ -25,20 +25,33 @@ assert(
 )
 assert(
   manualStartDateAutoTick.accountData?.progressTracker?.sales?.sales_client_agreement !== true,
-  'expected agreement upload auto-tick to remain disabled',
+  'expected agreement items to stay off without hasAgreement',
 )
 assert(
   manualStartDateAutoTick.accountData?.progressTracker?.sales?.sales_contract_signed !== true,
-  'expected contract-signed auto-tick to remain disabled',
+  'expected contract-signed to stay off without hasAgreement',
 )
 
-const paymentEvidenceDoesNotAutoTick = applyAutoTicksToAccountData({
+const agreementAutoTick = applyAutoTicksToAccountData({
+  accountData: {},
+  hasAgreement: true,
+  hasLeadGoogleSheet: false,
+  actorUserId: 'tester@example.com',
+  nowIso: '2026-03-10T12:00:00.000Z',
+})
+
+assert(
+  agreementAutoTick.accountData?.progressTracker?.sales?.sales_client_agreement === true,
+  'expected hasAgreement to auto-tick sales_client_agreement',
+)
+assert(
+  agreementAutoTick.accountData?.progressTracker?.sales?.sales_contract_signed === true,
+  'expected hasAgreement to auto-tick sales_contract_signed',
+)
+
+const paymentEvidenceAutoTick = applyAutoTicksToAccountData({
   accountData: {
     attachments: [{ id: 'att_payment', type: 'payment_confirmation', fileName: 'payment.pdf' }],
-    firstPaymentEvidence: {
-      attachmentId: 'att_payment',
-      fileName: 'payment.pdf',
-    },
   },
   hasAgreement: false,
   hasLeadGoogleSheet: false,
@@ -47,8 +60,8 @@ const paymentEvidenceDoesNotAutoTick = applyAutoTicksToAccountData({
 })
 
 assert(
-  paymentEvidenceDoesNotAutoTick.accountData?.progressTracker?.sales?.sales_first_payment !== true,
-  'expected payment confirmation evidence upload path not to auto-tick sales_first_payment',
+  paymentEvidenceAutoTick.accountData?.progressTracker?.sales?.sales_first_payment === true,
+  'expected payment_confirmation attachment to auto-tick sales_first_payment',
 )
 
 async function runExtractionGuardTests() {
