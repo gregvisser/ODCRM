@@ -10,6 +10,7 @@ import {
   Button,
   Checkbox,
   Divider,
+  Flex,
   FormControl,
   FormErrorMessage,
   FormLabel,
@@ -51,7 +52,23 @@ import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
 import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
-import OnboardingProgressSections from './components/OnboardingProgressSections'
+import RemainingProgressAccordion from './components/RemainingProgressAccordion'
+import { OnboardingProgressProvider } from './progress/OnboardingProgressContext'
+import { StickyProgressSummary } from './progress/StickyProgressSummary'
+import { OpsDocumentsInlineCard } from './progress/OpsDocumentsInlineCard'
+import { TargetingReadinessStrip } from './progress/TargetingReadinessStrip'
+import {
+  InlineAgreementContractStatus,
+  InlineAssignAmStatus,
+  InlineCrmAddedStatus,
+  InlineDdiStatus,
+  InlineEmailsLinkedStatus,
+  InlineFirstPaymentRow,
+  InlineLeadTrackerStatus,
+  InlineStartDateStatus,
+  InlineSuppressionDncStatus,
+  InlineWeeklyTargetProgress,
+} from './progress/InlineProgressWidgets'
 import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
 import type {
   Account,
@@ -1250,7 +1267,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   return (
+    <OnboardingProgressProvider
+      customerId={customer.id}
+      accountData={(customer.accountData as Record<string, unknown>) || {}}
+      linkedEmailCount={linkedEmailCount}
+      leadsGoogleSheetUrl={leadsGoogleSheetUrl}
+      assignedClientDdiNumber={accountDetails.assignedClientDdiNumber || ''}
+      accountDetails={{
+        startDateAgreed: accountDetails.startDateAgreed,
+        startDateAgreedSetAt: (accountDetails as any).startDateAgreedSetAt,
+        startDateAgreedSetBy: (accountDetails as any).startDateAgreedSetBy,
+      }}
+      dbUsers={Array.isArray(dbUsers) ? dbUsers : []}
+      onRefresh={() => fetchCustomer()}
+    >
     <Stack spacing={6}>
+      <StickyProgressSummary />
       {/* Account Details Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
@@ -1314,6 +1346,89 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           <Divider />
 
+          <Box id="onb-commercial" borderRadius="lg" bg="gray.50" p={4} borderWidth="1px" borderColor="gray.100">
+            <Text fontSize="md" fontWeight="semibold" mb={3}>
+              Commercial &amp; contract
+            </Text>
+            <Stack spacing={4}>
+              <FormControl maxW="md">
+                <FormLabel>{"Monthly Revenue from Customer (£)"}</FormLabel>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={monthlyRevenueFromCustomer}
+                  onChange={(e) => {
+                    setMonthlyRevenueFromCustomer(e.target.value)
+                    markDirty()
+                  }}
+                  placeholder={"e.g. 5000.00"}
+                />
+              </FormControl>
+              <Box>
+                <HStack justify="space-between" align="flex-start" flexWrap="wrap" spacing={3} mb={2}>
+                  <Text fontSize="sm" fontWeight="medium">
+                    Customer agreement (PDF/Word)
+                  </Text>
+                  <InlineAgreementContractStatus />
+                </HStack>
+                <Stack spacing={2}>
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx"
+                    display="none"
+                    id="agreement-upload"
+                    onChange={(e) => void handleAgreementFileChange(e.target.files?.[0] || null)}
+                  />
+                  <HStack spacing={3} flexWrap="wrap">
+                    <Button
+                      as="label"
+                      htmlFor="agreement-upload"
+                      leftIcon={<AttachmentIcon />}
+                      variant="outline"
+                      size="sm"
+                      colorScheme="teal"
+                      isLoading={uploadingAgreement}
+                      isDisabled={uploadingAgreement}
+                    >
+                      {agreementData ? 'Replace Agreement' : 'Upload Agreement'}
+                    </Button>
+                    {agreementData ? (
+                      <HStack spacing={2}>
+                        <Button
+                          as={Link}
+                          size="sm"
+                          variant="link"
+                          colorScheme="teal"
+                          fontWeight="medium"
+                          href={`${apiBaseUrl}/api/customers/${customer.id}/agreement/download`}
+                          isExternal
+                          rel="noopener noreferrer"
+                        >
+                          {agreementData.fileName || 'View agreement'}
+                        </Button>
+                        {agreementData.uploadedAt && (
+                          <Text fontSize="xs" color="gray.500">
+                            (Uploaded {new Date(agreementData.uploadedAt).toLocaleDateString()})
+                          </Text>
+                        )}
+                      </HStack>
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">
+                        No agreement uploaded
+                      </Text>
+                    )}
+                  </HStack>
+                </Stack>
+              </Box>
+              <InlineFirstPaymentRow />
+            </Stack>
+          </Box>
+
+          <Box id="onb-team" mt={2}>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.700" mb={3}>
+              Team, targets &amp; lead data
+            </Text>
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
               <FormLabel>{"Web Address"}</FormLabel>
@@ -1332,72 +1447,85 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 placeholder={"e.g. Facilities Management"}
               />
             </FormControl>
-            <FormControl>
-              <FormLabel>{"Assigned Account Manager"}</FormLabel>
-              <Select
-                placeholder={assignedUsers.length ? "Select user" : "No users found"}
-                value={accountDetails.assignedAccountManagerId || ''}
-                onChange={(e) => {
-                  const nextId = e.target.value
-                  const user = assignedUsers.find((u) => u.id === nextId) || null
-                  updateAccountDetails({
-                    assignedAccountManagerId: nextId,
-                    assignedAccountManagerName: user ? `${user.firstName} ${user.lastName}`.trim() : '',
-                  })
-                }}
-              >
-                {assignedUsers.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {`${user.firstName} ${user.lastName}`.trim()} ({user.email})
-                  </option>
-                ))}
-              </Select>
+            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
+              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-end' }} flexWrap="wrap">
+                <Box flex="1" minW={0}>
+                  <FormLabel>{"Assigned Account Manager"}</FormLabel>
+                  <Select
+                    placeholder={assignedUsers.length ? "Select user" : "No users found"}
+                    value={accountDetails.assignedAccountManagerId || ''}
+                    onChange={(e) => {
+                      const nextId = e.target.value
+                      const user = assignedUsers.find((u) => u.id === nextId) || null
+                      updateAccountDetails({
+                        assignedAccountManagerId: nextId,
+                        assignedAccountManagerName: user ? `${user.firstName} ${user.lastName}`.trim() : '',
+                      })
+                    }}
+                  >
+                    {assignedUsers.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {`${user.firstName} ${user.lastName}`.trim()} ({user.email})
+                      </option>
+                    ))}
+                  </Select>
+                </Box>
+                <InlineAssignAmStatus />
+              </Flex>
             </FormControl>
-            <FormControl>
-              <FormLabel>{"Start Date Agreed"}</FormLabel>
-              <Input
-                type="date"
-                value={String(accountDetails.startDateAgreed || '').slice(0, 10)}
-                onChange={(e) => {
-                  const next = e.target.value
-                  updateAccountDetails({ startDateAgreed: next })
-                }}
-                placeholder="YYYY-MM-DD"
-              />
-              <Text fontSize="xs" color="gray.500" mt={1}>
-                {"When this is set, the onboarding checklist will auto-complete \"Start Date Agreed\"."}
-              </Text>
+            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
+              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-end' }} flexWrap="wrap">
+                <Box flex="1" minW={0}>
+                  <FormLabel>{"Start Date Agreed"}</FormLabel>
+                  <Input
+                    type="date"
+                    value={String(accountDetails.startDateAgreed || '').slice(0, 10)}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      updateAccountDetails({ startDateAgreed: next })
+                    }}
+                    placeholder="YYYY-MM-DD"
+                  />
+                </Box>
+                <InlineStartDateStatus />
+              </Flex>
             </FormControl>
-            <FormControl>
-              <FormLabel>{"Client Created on CRM"}</FormLabel>
-              <Checkbox
-                isChecked={Boolean(String(accountDetails.clientCreatedOnCrmAt || '').trim())}
-                onChange={(e) => {
-                  const checked = e.target.checked
-                  updateAccountDetails({
-                    clientCreatedOnCrmAt: checked ? new Date().toISOString() : '',
-                  })
-                }}
-              >
-                <Text fontSize="sm">{"Mark as created"}</Text>
-              </Checkbox>
-              {accountDetails.clientCreatedOnCrmAt ? (
-                <Text fontSize="xs" color="gray.500" mt={1}>
-                  Set {new Date(accountDetails.clientCreatedOnCrmAt).toLocaleString()}
-                </Text>
-              ) : (
-                <Text fontSize="xs" color="gray.500" mt={1}>
-                  {"When this is set, the onboarding checklist will auto-complete \"Client Added to CRM\"."}
-                </Text>
-              )}
+            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
+              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-start' }} flexWrap="wrap">
+                <Box flex="1" minW={0}>
+                  <FormLabel>{"Client Created on CRM"}</FormLabel>
+                  <Checkbox
+                    isChecked={Boolean(String(accountDetails.clientCreatedOnCrmAt || '').trim())}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      updateAccountDetails({
+                        clientCreatedOnCrmAt: checked ? new Date().toISOString() : '',
+                      })
+                    }}
+                  >
+                    <Text fontSize="sm">{"Mark as created"}</Text>
+                  </Checkbox>
+                  {accountDetails.clientCreatedOnCrmAt ? (
+                    <Text fontSize="xs" color="gray.500" mt={1}>
+                      Set {new Date(accountDetails.clientCreatedOnCrmAt).toLocaleString()}
+                    </Text>
+                  ) : null}
+                </Box>
+                <InlineCrmAddedStatus />
+              </Flex>
             </FormControl>
-            <FormControl>
-              <FormLabel>{"Assigned Client DDI & Number"}</FormLabel>
-              <Input
-                value={accountDetails.assignedClientDdiNumber}
-                onChange={(e) => updateAccountDetails({ assignedClientDdiNumber: e.target.value })}
-                placeholder="DDI / Number"
-              />
+            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
+              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-end' }} flexWrap="wrap">
+                <Box flex="1" minW={0}>
+                  <FormLabel>{"Assigned Client DDI & Number"}</FormLabel>
+                  <Input
+                    value={accountDetails.assignedClientDdiNumber}
+                    onChange={(e) => updateAccountDetails({ assignedClientDdiNumber: e.target.value })}
+                    placeholder="DDI / Number"
+                  />
+                </Box>
+                <InlineDdiStatus />
+              </Flex>
             </FormControl>
             <FormControl>
               <FormLabel>{"Days a Week"}</FormLabel>
@@ -1415,33 +1543,24 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 <option value="5">{"5 days"}</option>
               </Select>
             </FormControl>
-            <FormControl>
-              <FormLabel>{"Monthly Revenue from Customer (£)"}</FormLabel>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={monthlyRevenueFromCustomer}
-                onChange={(e) => {
-                  setMonthlyRevenueFromCustomer(e.target.value)
-                  markDirty()
-                }}
-                placeholder={"e.g. 5000.00"}
-              />
-            </FormControl>
-            <FormControl>
-              <FormLabel>{"Weekly Lead Target"}</FormLabel>
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={weeklyLeadTarget}
-                onChange={(e) => {
-                  setWeeklyLeadTarget(e.target.value)
-                  markDirty()
-                }}
-                placeholder={"Manual weekly target (e.g. 25)"}
-              />
+            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
+              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-end' }} flexWrap="wrap">
+                <Box flex="1" minW={0}>
+                  <FormLabel>{"Weekly Lead Target"}</FormLabel>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={weeklyLeadTarget}
+                    onChange={(e) => {
+                      setWeeklyLeadTarget(e.target.value)
+                      markDirty()
+                    }}
+                    placeholder={"Manual weekly target (e.g. 25)"}
+                  />
+                </Box>
+                <InlineWeeklyTargetProgress />
+              </Flex>
             </FormControl>
             <FormControl>
               <FormLabel>{"Monthly Lead Target"}</FormLabel>
@@ -1474,6 +1593,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
           </SimpleGrid>
+          </Box>
 
           <Divider my={4} />
 
@@ -1489,6 +1609,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 }}
                 placeholder="https://docs.google.com/spreadsheets/d/..."
               />
+              <Box mt={2}>
+                <InlineLeadTrackerStatus />
+              </Box>
             </FormControl>
             <FormControl>
               <FormLabel>{"Leads Google Sheet Label"}</FormLabel>
@@ -1571,6 +1694,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             >
               {"Open Suppression List"}
             </Button>
+            <Box mt={3}>
+              <InlineSuppressionDncStatus />
+            </Box>
           </FormControl>
         </Stack>
       </Box>
@@ -1587,7 +1713,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       </Box>
 
       {/* Email Accounts Section */}
-      <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+      <Box id="onb-emails" border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+        <InlineEmailsLinkedStatus />
+        <Box mt={4}>
         <EmailAccountsEnhancedTab
           customerId={customerId}
           onBeforeConnectOutlook={async () => {
@@ -1596,10 +1724,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             )
           }}
         />
+        </Box>
       </Box>
 
+      <OpsDocumentsInlineCard />
+
       {/* Client Profile Section */}
-      <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
+      <Box id="onb-profile" border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
           <Text fontSize="lg" fontWeight="semibold">{"Client Profile"}</Text>
 
@@ -1992,6 +2123,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             />
           </FormControl>
 
+          <TargetingReadinessStrip />
+
           <FormControl>
             <FormLabel>Case Studies or Testimonials</FormLabel>
             <Stack spacing={3}>
@@ -2043,80 +2176,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               </Stack>
             </Stack>
           </FormControl>
-
-          <Divider />
-
-          {/* Phase 2 Item 4: Agreement Upload */}
-          <FormControl>
-            <FormLabel>Customer Agreement (PDF/Word)</FormLabel>
-            <Stack spacing={3}>
-              <Stack spacing={2}>
-                <Input
-                  type="file"
-                  accept=".pdf,.doc,.docx"
-                  display="none"
-                  id="agreement-upload"
-                  onChange={(e) => void handleAgreementFileChange(e.target.files?.[0] || null)}
-                />
-                <HStack spacing={3}>
-                  <Button
-                    as="label"
-                    htmlFor="agreement-upload"
-                    leftIcon={<AttachmentIcon />}
-                    variant="outline"
-                    size="sm"
-                    colorScheme="teal"
-                    isLoading={uploadingAgreement}
-                    isDisabled={uploadingAgreement}
-                  >
-                    {agreementData ? 'Replace Agreement' : 'Upload Agreement'}
-                  </Button>
-                  {agreementData ? (
-                    <HStack spacing={2}>
-                      <Button
-                        as={Link}
-                        size="sm"
-                        variant="link"
-                        colorScheme="teal"
-                        fontWeight="medium"
-                        href={`${apiBaseUrl}/api/customers/${customer.id}/agreement/download`}
-                        isExternal
-                        rel="noopener noreferrer"
-                      >
-                        {agreementData.fileName || 'View agreement'}
-                      </Button>
-                      {agreementData.uploadedAt && (
-                        <Text fontSize="xs" color="gray.500">
-                          (Uploaded {new Date(agreementData.uploadedAt).toLocaleDateString()})
-                        </Text>
-                      )}
-                    </HStack>
-                  ) : (
-                    <Text fontSize="sm" color="gray.500">
-                      No agreement uploaded
-                    </Text>
-                  )}
-                </HStack>
-              </Stack>
-            </Stack>
-          </FormControl>
         </Stack>
       </Box>
 
-      <OnboardingProgressSections
-        customerId={customer.id}
-        accountData={(customer.accountData as Record<string, unknown>) || {}}
-        linkedEmailCount={linkedEmailCount}
-        leadsGoogleSheetUrl={leadsGoogleSheetUrl}
-        assignedClientDdiNumber={accountDetails.assignedClientDdiNumber || ''}
-        accountDetails={{
-          startDateAgreed: accountDetails.startDateAgreed,
-          startDateAgreedSetAt: (accountDetails as any).startDateAgreedSetAt,
-          startDateAgreedSetBy: (accountDetails as any).startDateAgreedSetBy,
-        }}
-        dbUsers={Array.isArray(dbUsers) ? dbUsers : []}
-        onRefresh={() => fetchCustomer()}
-      />
+      <RemainingProgressAccordion />
 
       {/* Single bottom save action (unified form) */}
       <Box pt={2} pb={2}>
@@ -2282,5 +2345,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         </ModalContent>
       </Modal>
     </Stack>
+    </OnboardingProgressProvider>
   )
 }
