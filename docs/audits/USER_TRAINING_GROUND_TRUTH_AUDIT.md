@@ -54,7 +54,6 @@ Source files:
 - `src/App.tsx`
 - `src/contracts/nav.ts`
 - `src/utils/crmTopTabsVisibility.ts`
-- `src/i18n/en.ts`
 
 ### Sub-tabs actually wired today
 #### OpensDoors Clients
@@ -244,7 +243,7 @@ These are implemented, but are not the recommended day-one operator workflow:
 Browser automation tooling was not available in this session, and the production app requires sign-in. The training docs are therefore grounded primarily in repo truth, with live-prod confirmation limited to build/version parity and the public sign-in surface.
 
 ## Terminology decisions used in the training set
-- Use the user-visible names from `src/contracts/nav.ts` and `src/i18n/en.ts`.
+- Use the user-visible names from `src/contracts/nav.ts` and the in-app English labels on each screen.
 - Use `Lead Sources` in user docs, even though the internal view id is `lists`.
 - Use `Suppression List` for the sub-tab name and `Compliance` for the page body because both appear in the current UI.
 - Use `sequence` for the reusable definition and `Start live sequence` for the live-launch action.

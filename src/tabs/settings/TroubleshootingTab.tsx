@@ -40,7 +40,6 @@ import {
 } from '@chakra-ui/react'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
-import { useLocale } from '../../contexts/LocaleContext'
 
 const REPORT_TYPES = ['Bug', 'Issue', 'Suggestion', 'Ease of Use', 'Feature Request', 'Other'] as const
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'] as const
@@ -92,7 +91,6 @@ const MAX_PROOF_SIZE_MB = 5
 
 export default function TroubleshootingTab() {
   const toast = useToast()
-  const { t } = useLocale()
   const { isOpen: isDetailOpen, onOpen: onDetailOpen, onClose: onDetailClose } = useDisclosure()
 
   const [me, setMe] = useState<{ user: MeUser; email: string } | null>(null)
@@ -139,12 +137,12 @@ export default function TroubleshootingTab() {
     const { data, error } = await api.get<TroubleshootingReportDto[]>('/api/settings/troubleshooting')
     setReportsLoading(false)
     if (error) {
-      toast({ title: t('common.error'), description: error, status: 'error' })
+      toast({ title: 'Error', description: error, status: 'error' })
       setReports([])
       return
     }
     setReports(Array.isArray(data) ? data : [])
-  }, [t, toast])
+  }, [toast])
 
   useEffect(() => {
     loadMe()
@@ -163,8 +161,8 @@ export default function TroubleshootingTab() {
     }
     if (!ALLOWED_PROOF_TYPES.includes(file.type)) {
       toast({
-        title: t('settings.troubleshooting.invalidFileType'),
-        description: t('settings.troubleshooting.invalidFileTypeDescription'),
+        title: 'Invalid file type',
+        description: 'Use PNG, JPEG, or WebP only.',
         status: 'warning',
       })
       setProofFile(null)
@@ -173,7 +171,7 @@ export default function TroubleshootingTab() {
     }
     if (file.size > MAX_PROOF_SIZE_MB * 1024 * 1024) {
       toast({
-        title: t('settings.troubleshooting.fileTooLarge'),
+        title: 'File too large',
         description: `Max ${MAX_PROOF_SIZE_MB}MB.`,
         status: 'warning',
       })
@@ -204,8 +202,8 @@ export default function TroubleshootingTab() {
       }>('/api/settings/troubleshooting/upload', { fileName: proofFile.name, dataUrl })
       if (error || !data) {
         toast({
-          title: t('settings.troubleshooting.uploadFailed'),
-          description: error || t('settings.troubleshooting.couldNotUploadProof'),
+          title: 'Upload failed',
+          description: error || 'Could not upload proof',
           status: 'error',
         })
         return null
@@ -215,17 +213,17 @@ export default function TroubleshootingTab() {
     } finally {
       setUploadingProof(false)
     }
-  }, [proofFile, t, toast])
+  }, [proofFile, toast])
 
   const handleSubmit = async () => {
     if (!formTitle.trim()) {
-      toast({ title: t('settings.troubleshooting.required'), description: t('settings.troubleshooting.enterTitle'), status: 'warning' })
+      toast({ title: 'Required', description: 'Please enter a title.', status: 'warning' })
       return
     }
     if (!formDescription.trim()) {
       toast({
-        title: t('settings.troubleshooting.required'),
-        description: t('settings.troubleshooting.enterDescription'),
+        title: 'Required',
+        description: 'Please enter a description.',
         status: 'warning',
       })
       return
@@ -257,12 +255,12 @@ export default function TroubleshootingTab() {
         payload
       )
       if (error) {
-        toast({ title: t('common.error'), description: error, status: 'error' })
+        toast({ title: 'Error', description: error, status: 'error' })
         return
       }
       toast({
-        title: t('settings.troubleshooting.submitted'),
-        description: t('settings.troubleshooting.submittedDescription'),
+        title: 'Submitted',
+        description: 'Your report has been submitted.',
         status: 'success',
       })
       setFormTitle('')
@@ -297,10 +295,10 @@ export default function TroubleshootingTab() {
         }
       )
       if (error) {
-        toast({ title: t('common.error'), description: error, status: 'error' })
+        toast({ title: 'Error', description: error, status: 'error' })
         return
       }
-      toast({ title: t('common.save'), status: 'success' })
+      toast({ title: 'Save', status: 'success' })
       onDetailClose()
       loadReports()
     } finally {
@@ -341,7 +339,7 @@ export default function TroubleshootingTab() {
     return (
       <Box p={4}>
         <Spinner size="sm" mr={2} />
-        <Text as="span">{t('state.loading')}</Text>
+        <Text as="span">{'Loading...'}</Text>
       </Box>
     )
   }
@@ -349,26 +347,26 @@ export default function TroubleshootingTab() {
   return (
     <Box p={4}>
       <Text fontSize="sm" color="gray.700" mb={4}>
-        {t('settings.troubleshootingIntro')}
+        {'Report bugs, ease-of-use problems, or suggest improvements. Your identity is recorded from your sign-in.'}
       </Text>
 
       {/* Identity strip */}
       <Box mb={4} p={3} bg="gray.50" borderRadius="md" borderWidth="1px" borderColor="gray.200">
         <Text fontSize="xs" color="gray.500" mb={1}>
-          {t('settings.troubleshooting.submittingAs')}
+          {'Submitting as'}
         </Text>
         <HStack spacing={4} flexWrap="wrap">
           <Text fontSize="sm" fontWeight="medium">
-            {t('common.userId')}: {me.user.userId ?? me.user.id}
+            {'User ID'}: {me.user.userId ?? me.user.id}
           </Text>
-          <Text fontSize="sm">{t('common.email')}: {me.user.email}</Text>
+          <Text fontSize="sm">{'Email'}: {me.user.email}</Text>
         </HStack>
       </Box>
 
       {/* Form */}
       <VStack align="stretch" spacing={4} mb={6}>
         <FormControl>
-          <FormLabel>{t('common.type')}</FormLabel>
+          <FormLabel>Type</FormLabel>
           <Select
             value={formType}
             onChange={(e) => setFormType(e.target.value as ReportType)}
@@ -383,7 +381,7 @@ export default function TroubleshootingTab() {
           </Select>
         </FormControl>
         <FormControl>
-          <FormLabel>{t('common.priority')}</FormLabel>
+          <FormLabel>Priority</FormLabel>
           <Select
             value={formPriority}
             onChange={(e) => setFormPriority(e.target.value as Priority)}
@@ -398,40 +396,40 @@ export default function TroubleshootingTab() {
           </Select>
         </FormControl>
         <FormControl>
-          <FormLabel>{t('settings.troubleshooting.appArea')}</FormLabel>
+          <FormLabel>{'App area / module'}</FormLabel>
           <Input
             value={formAppArea}
             onChange={(e) => setFormAppArea(e.target.value)}
-            placeholder={t('settings.troubleshooting.appAreaPlaceholder')}
+            placeholder={'e.g. Marketing, Leads, Settings'}
             size="sm"
             maxW="320px"
           />
         </FormControl>
         <FormControl isRequired>
-          <FormLabel>{t('common.title')}</FormLabel>
+          <FormLabel>Title</FormLabel>
           <Input
             value={formTitle}
             onChange={(e) => setFormTitle(e.target.value)}
-            placeholder={t('settings.troubleshooting.titlePlaceholder')}
+            placeholder={'Short summary'}
             size="sm"
             maxW="400px"
           />
         </FormControl>
         <FormControl isRequired>
-          <FormLabel>{t('common.description')}</FormLabel>
+          <FormLabel>{'Description'}</FormLabel>
           <Textarea
             value={formDescription}
             onChange={(e) => setFormDescription(e.target.value)}
-            placeholder={t('settings.troubleshooting.descriptionPlaceholder')}
+            placeholder={'Describe the issue or suggestion in plain English.'}
             size="sm"
             rows={4}
             maxW="500px"
           />
         </FormControl>
         <FormControl>
-          <FormLabel>{t('settings.troubleshooting.optionalScreenshot')}</FormLabel>
+          <FormLabel>{'Optional screenshot or image'}</FormLabel>
           <FormHelperText mb={2}>
-            {t('settings.troubleshooting.optionalScreenshotHelp', { size: MAX_PROOF_SIZE_MB })}
+            {`Optional: upload a screenshot or image to help explain the issue. PNG, JPEG, or WebP, max ${MAX_PROOF_SIZE_MB}MB.`}
           </FormHelperText>
           <HStack>
             <Input
@@ -456,7 +454,7 @@ export default function TroubleshootingTab() {
           isLoading={submitting || (!!proofFile && uploadingProof)}
           isDisabled={!formTitle.trim() || !formDescription.trim()}
         >
-          {t('settings.troubleshooting.submitReport')}
+          {'Submit report'}
         </Button>
       </VStack>
 
@@ -464,34 +462,34 @@ export default function TroubleshootingTab() {
 
       {/* Reports table */}
       <Text fontWeight="semibold" mb={2}>
-        {t('settings.troubleshooting.yourReports')}
+        {'Your reports'}
         {isAdmin && ' (all)'}
       </Text>
       {reportsLoading ? (
         <HStack>
           <Spinner size="sm" />
-          <Text fontSize="sm">{t('settings.troubleshooting.loadingReports')}</Text>
+          <Text fontSize="sm">{'Loading reports...'}</Text>
         </HStack>
       ) : reports.length === 0 ? (
         <Alert status="info" borderRadius="md">
           <AlertIcon />
-          {t('settings.troubleshooting.noReports')}
+          {'No reports yet. Submit one above.'}
         </Alert>
       ) : (
         <Box overflowX="auto">
           <Table size="sm" variant="simple">
             <Thead>
               <Tr>
-                <Th>{t('common.created')}</Th>
-                <Th>{t('common.type')}</Th>
-                <Th>{t('common.priority')}</Th>
-                <Th>{t('common.status')}</Th>
-                <Th>{t('common.title')}</Th>
-                <Th>{t('settings.troubleshooting.appAreaShort')}</Th>
-                <Th>{t('settings.troubleshooting.submittedBy')}</Th>
-                {isAdmin && <Th>{t('common.client')}</Th>}
-                <Th>{t('common.updated')}</Th>
-                <Th>{t('common.proof')}</Th>
+                <Th>Created</Th>
+                <Th>Type</Th>
+                <Th>Priority</Th>
+                <Th>Status</Th>
+                <Th>Title</Th>
+                <Th>App area</Th>
+                <Th>Submitted by</Th>
+                {isAdmin && <Th>Client</Th>}
+                <Th>Updated</Th>
+                <Th>Proof</Th>
                 <Th />
               </Tr>
             </Thead>
@@ -515,14 +513,14 @@ export default function TroubleshootingTab() {
                   <Td fontSize="xs">{r.createdByEmail}</Td>
                   {isAdmin && <Td fontSize="xs">{r.customerId ?? '—'}</Td>}
                   <Td fontSize="xs">{new Date(r.updatedAt).toLocaleDateString()}</Td>
-                  <Td>{r.hasProof ? t('common.yes') : '—'}</Td>
+                  <Td>{r.hasProof ? 'Yes' : '—'}</Td>
                   <Td>
                     <Button
                       size="xs"
                       variant="outline"
                       onClick={() => openDetail(r)}
                     >
-                      {isAdmin ? t('common.viewEdit') : t('common.view')}
+                      {isAdmin ? 'View / Edit' : 'View'}
                     </Button>
                   </Td>
                 </Tr>
@@ -536,7 +534,7 @@ export default function TroubleshootingTab() {
       <Modal isOpen={isDetailOpen} onClose={onDetailClose} size="lg" scrollBehavior="inside">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{t('settings.troubleshooting.reportTitle')}</ModalHeader>
+          <ModalHeader>{'Troubleshooting report'}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             {selectedReport && (
@@ -548,19 +546,15 @@ export default function TroubleshootingTab() {
                   {selectedReport.description}
                 </Text>
                 <Text fontSize="xs" color="gray.500">
-                  {t('settings.troubleshooting.byLine', {
-                    email: selectedReport.createdByEmail,
-                    name: selectedReport.createdByName ? `(${selectedReport.createdByName})` : '',
-                    createdAt: selectedReport.createdAt,
-                  })}
+                  {`By ${selectedReport.createdByEmail} ${selectedReport.createdByName ? `(${selectedReport.createdByName})` : ''} · ${selectedReport.createdAt}`}
                 </Text>
                 {selectedReport.pagePath && (
-                  <Text fontSize="xs">{t('settings.troubleshooting.page')}: {selectedReport.pagePath}</Text>
+                  <Text fontSize="xs">{'Page'}: {selectedReport.pagePath}</Text>
                 )}
                 {selectedReport.hasProof && (
                   <Box>
                     <Text fontSize="xs" fontWeight="medium" mb={1}>
-                      {t('common.proof')}
+                      Proof
                     </Text>
                     <Button
                       size="xs"
@@ -574,13 +568,13 @@ export default function TroubleshootingTab() {
                         if (data?.url) window.open(data.url, '_blank')
                       }}
                     >
-                      {t('settings.troubleshooting.openProof')}
+                      {'Open proof (new tab)'}
                     </Button>
                   </Box>
                 )}
                 {selectedReport.resolutionNotes && (
                   <Box>
-                    <Text fontSize="xs" fontWeight="medium" mb={1}>{t('settings.troubleshooting.resolution')}</Text>
+                    <Text fontSize="xs" fontWeight="medium" mb={1}>{'Resolution'}</Text>
                     <Text fontSize="sm" whiteSpace="pre-wrap">{selectedReport.resolutionNotes}</Text>
                   </Box>
                 )}
@@ -588,7 +582,7 @@ export default function TroubleshootingTab() {
                   <>
                     <Divider />
                     <FormControl>
-                      <FormLabel>{t('common.status')}</FormLabel>
+                      <FormLabel>Status</FormLabel>
                       <Select
                         value={adminDetailStatus ?? selectedReport.status}
                         onChange={(e) => setAdminDetailStatus(e.target.value as Status)}
@@ -602,23 +596,23 @@ export default function TroubleshootingTab() {
                       </Select>
                     </FormControl>
                     <FormControl>
-                      <FormLabel>{t('settings.troubleshooting.internalNotes')}</FormLabel>
+                      <FormLabel>{'Internal notes (admin only)'}</FormLabel>
                       <Textarea
                         value={adminDetailInternalNotes}
                         onChange={(e) => setAdminDetailInternalNotes(e.target.value)}
                         size="sm"
                         rows={2}
-                        placeholder={t('settings.troubleshooting.internalNotesPlaceholder')}
+                        placeholder={'Developer notes'}
                       />
                     </FormControl>
                     <FormControl>
-                      <FormLabel>{t('settings.troubleshooting.resolutionNotes')}</FormLabel>
+                      <FormLabel>{'Resolution notes'}</FormLabel>
                       <Textarea
                         value={adminDetailResolutionNotes}
                         onChange={(e) => setAdminDetailResolutionNotes(e.target.value)}
                         size="sm"
                         rows={2}
-                        placeholder={t('settings.troubleshooting.resolutionNotesPlaceholder')}
+                        placeholder={'Summary of resolution'}
                       />
                     </FormControl>
                   </>
@@ -628,7 +622,7 @@ export default function TroubleshootingTab() {
           </ModalBody>
           <ModalFooter>
             <Button variant="ghost" mr={2} onClick={onDetailClose}>
-              {t('common.close')}
+              {'Close'}
             </Button>
             {isAdmin && (
               <Button colorScheme="blue" onClick={saveAdminDetail} isLoading={savingAdmin}>

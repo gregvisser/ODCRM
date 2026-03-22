@@ -51,7 +51,6 @@ import { getCurrentCustomerId, onSettingsUpdated } from '../platform/stores/sett
 import { emit } from '../platform/events'
 import { api } from '../utils/api'
 import RequireActiveClient from './RequireActiveClient'
-import { useLocale } from '../contexts/LocaleContext'
 
 interface EmailIdentity {
   id: string
@@ -96,7 +95,6 @@ type EmailAccountsEnhancedTabProps = {
 }
 
 export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, onBeforeConnectOutlook }: EmailAccountsEnhancedTabProps) {
-  const { t } = useLocale()
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState<string>(customerIdProp || (getCurrentCustomerId() ?? ''))
@@ -120,12 +118,12 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     setLoading(true)
     const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
     if (error) {
-      toast({ title: t('common.error'), description: error, status: 'error' })
+      toast({ title: 'Error', description: error, status: 'error' })
     } else if (data) {
       setIdentities(data)
     }
     setLoading(false)
-  }, [customerId, t, toast])
+  }, [customerId, toast])
 
   useEffect(() => {
     if (customerId) {
@@ -156,8 +154,9 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
   const handleConnectOutlook = async () => {
     if (!customerId || customerId.startsWith('test-')) {
       toast({
-        title: t('onboarding.selectClientFirst'),
-        description: t('marketing.selectClientMailboxStatusDescription'),
+        title: 'Select a client first.',
+        description:
+          'Choose a client to review connected mailboxes, see which ones are ready, and manage mailbox actions.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -189,8 +188,8 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
       if (url.searchParams.get('emailConnected') !== '1') return
       const connectedEmail = url.searchParams.get('connectedEmail') || url.searchParams.get('email') || ''
       toast({
-        title: t('common.connected'),
-        description: connectedEmail ? `Connected ${connectedEmail}` : t('marketing.connectOutlookMailbox'),
+        title: 'Connected',
+        description: connectedEmail ? `Connected ${connectedEmail}` : 'Connect Outlook mailbox',
         status: 'success',
         duration: 4500,
         isClosable: true,
@@ -205,7 +204,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
     } catch {
       // ignore
     }
-  }, [customerId, fetchIdentities, t, toast])
+  }, [customerId, fetchIdentities, toast])
 
   const handleCreateSMTP = () => {
     setSmtpForm({
@@ -225,7 +224,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
   const handleSaveSMTP = async () => {
     if (!smtpForm.emailAddress || !smtpForm.smtpHost || !smtpForm.smtpUsername || !smtpForm.smtpPassword) {
       toast({
-        title: t('settings.userAuth.validationError'),
+        title: 'Validation Error',
         description: 'Email, SMTP host, username, and password are required',
         status: 'error',
       })
@@ -251,7 +250,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
       const { error } = await api.post('/api/outlook/identities', payload)
       if (error) throw new Error(error)
       toast({
-        title: t('common.create'),
+        title: 'Create',
         description: 'SMTP account created',
         status: 'success',
       })
@@ -261,7 +260,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
       if (smtpForm.customerId) emit('customerUpdated', { id: smtpForm.customerId })
     } catch (error: any) {
       toast({
-        title: t('common.error'),
+        title: 'Error',
         description: error.message || 'Failed to create SMTP account',
         status: 'error',
       })
@@ -352,9 +351,9 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
 
     const { error } = await api.delete(`/api/outlook/identities/${id}?customerId=${customerId}`)
     if (error) {
-      toast({ title: t('common.error'), description: error, status: 'error' })
+      toast({ title: 'Error', description: error, status: 'error' })
     } else {
-      toast({ title: t('common.update'), description: 'Account disconnected', status: 'success' })
+      toast({ title: 'Update', description: 'Account disconnected', status: 'success' })
       fetchIdentities()
       if (customerId) emit('customerUpdated', { id: customerId })
     }
@@ -371,13 +370,13 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
       <HStack justify="space-between" mb={6}>
         <Box>
           <HStack spacing={2} mb={1}>
-            <Heading size="lg">{t('marketing.mailboxesTitle')}</Heading>
+            <Heading size="lg">Email Accounts</Heading>
             <Badge colorScheme={identities.length >= 5 ? 'orange' : 'green'} fontSize="xs" px={2} py={1}>
               {identities.length}/5
             </Badge>
           </HStack>
           <Text fontSize="sm" color="gray.600">
-            {t('marketing.mailboxesIntro')}
+            Review connected mailboxes, see which ones are usable, and manage what needs attention next.
           </Text>
         </Box>
         <HStack>
@@ -388,14 +387,14 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
             size="sm"
             isDisabled={!isValidCustomer || identities.length >= 5}
             title={
-              !isValidCustomer 
-                ? t('onboarding.selectClientFirst')
-                : identities.length >= 5 
+              !isValidCustomer
+                ? 'Select a client first.'
+                : identities.length >= 5
                   ? 'Limit reached (5). Disconnect one to add another.'
-                  : t('marketing.connectOutlookMailbox')
+                  : 'Connect Outlook mailbox'
             }
           >
-            {t('marketing.connectOutlookMailbox')}
+            Connect Outlook mailbox
           </Button>
         </HStack>
       </HStack>
@@ -412,12 +411,12 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
         <Table size="sm">
           <Thead bg="gray.50">
             <Tr>
-              <Th>{t('settings.userAuth.emailAddress')}</Th>
+              <Th>Email Address</Th>
               <Th>Display Name</Th>
-              <Th>{t('common.type')}</Th>
+              <Th>Type</Th>
               <Th>Daily Limit</Th>
-              <Th>{t('common.status')}</Th>
-              <Th>{t('settings.userAuth.actions')}</Th>
+              <Th>Status</Th>
+              <Th>Actions</Th>
             </Tr>
           </Thead>
           <Tbody>
@@ -425,11 +424,11 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
               <Tr>
                 <Td colSpan={6} textAlign="center" py={8}>
                   <Text color="gray.500" mb={3}>
-                    {t('marketing.noMailboxConnected')}
+                    No mailbox connected yet
                   </Text>
                   {!isValidCustomer && (
                     <Text color="orange.500" fontSize="sm" mb={3}>
-                      {t('marketing.selectClientMailboxStatusDescription')}
+                      Choose a client to review connected mailboxes, see which ones are ready, and manage mailbox actions.
                     </Text>
                   )}
                   <HStack justify="center" spacing={3}>
@@ -439,7 +438,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                       onClick={handleConnectOutlook} 
                       isDisabled={!isValidCustomer}
                     >
-                      {t('marketing.connectOutlookMailbox')}
+                      Connect Outlook mailbox
                     </Button>
                   </HStack>
                 </Td>
@@ -461,7 +460,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                       </Badge>
                       {needsReconnect ? (
                         <Badge colorScheme="orange" variant="subtle">
-                          {t('common.refresh')}
+                          Refresh
                         </Badge>
                       ) : null}
                     </HStack>
@@ -476,15 +475,15 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
                     <HStack spacing={1}>
                       {needsReconnect ? (
                         <Button size="xs" colorScheme="orange" variant="ghost" onClick={handleConnectOutlook}>
-                          {t('common.refresh')}
+                          Refresh
                         </Button>
                       ) : (
                         <Button size="xs" variant="ghost" onClick={() => handleTestSend(identity)}>
-                        {t('common.sendTest')}
+                        Send Test
                         </Button>
                       )}
                       <IconButton
-                        aria-label={t('common.delete')}
+                        aria-label="Delete"
                         icon={<DeleteIcon />}
                         size="xs"
                         variant="ghost"
@@ -518,7 +517,7 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
               </Alert>
 
               <FormControl isRequired>
-              <FormLabel fontSize="sm">{t('settings.userAuth.emailAddress')}</FormLabel>
+              <FormLabel fontSize="sm">Email Address</FormLabel>
                 <Input
                   value={smtpForm.emailAddress}
                   onChange={(e) => setSmtpForm({ ...smtpForm, emailAddress: e.target.value })}
@@ -609,10 +608,10 @@ export default function EmailAccountsEnhancedTab({ customerId: customerIdProp, o
           </ModalBody>
           <ModalFooter>
             <Button variant="ghost" mr={3} onClick={onSmtpClose}>
-              {t('common.cancel')}
+              Cancel
             </Button>
             <Button colorScheme="teal" onClick={handleSaveSMTP}>
-              {t('common.create')}
+              Create
             </Button>
           </ModalFooter>
         </ModalContent>

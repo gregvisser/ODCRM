@@ -52,7 +52,6 @@ import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
 import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
 import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
-import { useLocale } from '../../contexts/LocaleContext'
 import type {
   Account,
   Accreditation,
@@ -288,7 +287,6 @@ interface CustomerOnboardingTabProps {
 }
 
 export default function CustomerOnboardingTab({ customerId }: CustomerOnboardingTabProps) {
-  const { t } = useLocale()
   const toast = useToast()
   const apiBaseUrl = import.meta.env.VITE_API_URL || ''
   // CRITICAL: Use the same DB-backed source as Settings → User Authorization
@@ -1207,7 +1205,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       <Box p={6} textAlign="center">
         <Spinner size="lg" />
         <Text mt={4} color="gray.600">
-          {t('onboarding.loadingCustomerData')}
+          {"Loading customer data..."}
         </Text>
       </Box>
     )
@@ -1238,27 +1236,27 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       {/* Account Details Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
-          <Text fontSize="lg" fontWeight="semibold">{t('onboarding.accountDetails')}</Text>
+          <Text fontSize="lg" fontWeight="semibold">{"Account Details"}</Text>
 
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
-              <FormLabel>{t('onboarding.contactFirstName')}</FormLabel>
+              <FormLabel>{"Contact First Name"}</FormLabel>
               <Input
                 value={accountDetails.primaryContact.firstName}
                 onChange={(e) => updatePrimaryContact({ firstName: e.target.value })}
-                placeholder={t('onboarding.firstNamePlaceholder')}
+                placeholder={"First name"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.contactLastName')}</FormLabel>
+              <FormLabel>{"Contact Last Name"}</FormLabel>
               <Input
                 value={accountDetails.primaryContact.lastName}
                 onChange={(e) => updatePrimaryContact({ lastName: e.target.value })}
-                placeholder={t('onboarding.lastNamePlaceholder')}
+                placeholder={"Last name"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.contactEmail')}</FormLabel>
+              <FormLabel>{"Contact Email"}</FormLabel>
               <Input
                 type="email"
                 value={accountDetails.primaryContact.email}
@@ -1267,23 +1265,23 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.contactNumber')}</FormLabel>
+              <FormLabel>{"Contact Number"}</FormLabel>
               <Input
                 value={accountDetails.primaryContact.phone}
                 onChange={(e) => updatePrimaryContact({ phone: e.target.value })}
-                placeholder={t('onboarding.phoneNumberPlaceholder')}
+                placeholder={"Phone number"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.roleAtCompany')}</FormLabel>
+              <FormLabel>{"Role at Company"}</FormLabel>
               <Input
                 value={accountDetails.primaryContact.roleLabel || ''}
                 onChange={(e) => updatePrimaryContact({ roleId: '', roleLabel: e.target.value })}
-                placeholder={t('onboarding.roleAtCompanyPlaceholder')}
+                placeholder={"e.g. Marketing Manager"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.contactStatus')}</FormLabel>
+              <FormLabel>{"Contact Status"}</FormLabel>
               <Select
                 value={accountDetails.primaryContact.status}
                 onChange={(e) =>
@@ -1300,7 +1298,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
-              <FormLabel>{t('onboarding.webAddress')}</FormLabel>
+              <FormLabel>{"Web Address"}</FormLabel>
               <Input
                 type="url"
                 value={customer.website || ''}
@@ -1309,17 +1307,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.sector')}</FormLabel>
+              <FormLabel>{"Sector"}</FormLabel>
               <Input
                 value={customer.sector || ''}
                 onChange={(e) => updateCustomerFields({ sector: e.target.value })}
-                placeholder={t('onboarding.sectorPlaceholder')}
+                placeholder={"e.g. Facilities Management"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.assignedAccountManager')}</FormLabel>
+              <FormLabel>{"Assigned Account Manager"}</FormLabel>
               <Select
-                placeholder={assignedUsers.length ? t('onboarding.selectUser') : t('onboarding.noUsersFound')}
+                placeholder={assignedUsers.length ? "Select user" : "No users found"}
                 value={accountDetails.assignedAccountManagerId || ''}
                 onChange={(e) => {
                   const nextId = e.target.value
@@ -1338,7 +1336,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               </Select>
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.startDateAgreed')}</FormLabel>
+              <FormLabel>{"Start Date Agreed"}</FormLabel>
               <Input
                 type="date"
                 value={String(accountDetails.startDateAgreed || '').slice(0, 10)}
@@ -1349,11 +1347,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 placeholder="YYYY-MM-DD"
               />
               <Text fontSize="xs" color="gray.500" mt={1}>
-                {t('onboarding.startDateAgreedHelp')}
+                {"When this is set, the Progress Tracker will auto-tick \"Start Date Agreed\"."}
               </Text>
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.clientCreatedOnCrm')}</FormLabel>
+              <FormLabel>{"Client Created on CRM"}</FormLabel>
               <Checkbox
                 isChecked={Boolean(String(accountDetails.clientCreatedOnCrmAt || '').trim())}
                 onChange={(e) => {
@@ -1363,7 +1361,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   })
                 }}
               >
-                <Text fontSize="sm">{t('onboarding.markAsCreated')}</Text>
+                <Text fontSize="sm">{"Mark as created"}</Text>
               </Checkbox>
               {accountDetails.clientCreatedOnCrmAt ? (
                 <Text fontSize="xs" color="gray.500" mt={1}>
@@ -1371,12 +1369,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 </Text>
               ) : (
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  {t('onboarding.clientCreatedOnCrmHelp')}
+                  {"When this is set, the Progress Tracker will auto-tick \"Client Added to CRM System & Back Up Folder\"."}
                 </Text>
               )}
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.assignedClientDdiNumber')}</FormLabel>
+              <FormLabel>{"Assigned Client DDI & Number"}</FormLabel>
               <Input
                 value={accountDetails.assignedClientDdiNumber}
                 onChange={(e) => updateAccountDetails({ assignedClientDdiNumber: e.target.value })}
@@ -1384,7 +1382,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.daysAWeek')}</FormLabel>
+              <FormLabel>{"Days a Week"}</FormLabel>
               <Select
                 value={String(accountDetails.daysPerWeek)}
                 onChange={(e) => {
@@ -1392,15 +1390,15 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   updateAccountDetails({ daysPerWeek: Number.isFinite(next) ? next : 1 })
                 }}
               >
-                <option value="1">{t('onboarding.oneDay')}</option>
-                <option value="2">{t('onboarding.twoDays')}</option>
-                <option value="3">{t('onboarding.threeDays')}</option>
-                <option value="4">{t('onboarding.fourDays')}</option>
-                <option value="5">{t('onboarding.fiveDays')}</option>
+                <option value="1">{"1 day"}</option>
+                <option value="2">{"2 days"}</option>
+                <option value="3">{"3 days"}</option>
+                <option value="4">{"4 days"}</option>
+                <option value="5">{"5 days"}</option>
               </Select>
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.monthlyRevenueFromCustomer')}</FormLabel>
+              <FormLabel>{"Monthly Revenue from Customer (£)"}</FormLabel>
               <Input
                 type="number"
                 min="0"
@@ -1410,11 +1408,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   setMonthlyRevenueFromCustomer(e.target.value)
                   markDirty()
                 }}
-                placeholder={t('onboarding.monthlyRevenuePlaceholder')}
+                placeholder={"e.g. 5000.00"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.weeklyLeadTarget')}</FormLabel>
+              <FormLabel>{"Weekly Lead Target"}</FormLabel>
               <Input
                 type="number"
                 min="0"
@@ -1424,11 +1422,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   setWeeklyLeadTarget(e.target.value)
                   markDirty()
                 }}
-                placeholder={t('onboarding.weeklyLeadTargetPlaceholder')}
+                placeholder={"Manual weekly target (e.g. 25)"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.monthlyLeadTarget')}</FormLabel>
+              <FormLabel>{"Monthly Lead Target"}</FormLabel>
               <Input
                 type="number"
                 min="0"
@@ -1438,23 +1436,23 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   setMonthlyLeadTarget(e.target.value)
                   markDirty()
                 }}
-                placeholder={t('onboarding.monthlyLeadTargetPlaceholder')}
+                placeholder={"Manual monthly target (e.g. 100)"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.weeklyLeadActual')}</FormLabel>
+              <FormLabel>{"Weekly Lead Actual (this week)"}</FormLabel>
               <Input
                 value={typeof (customer as any)?.weeklyLeadActual === 'number' ? String((customer as any).weeklyLeadActual) : ''}
                 isReadOnly
-                placeholder={t('onboarding.syncedFromGoogleSheets')}
+                placeholder={"Synced from Google Sheets"}
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.monthlyLeadActual')}</FormLabel>
+              <FormLabel>{"Monthly Lead Actual (this month)"}</FormLabel>
               <Input
                 value={typeof (customer as any)?.monthlyLeadActual === 'number' ? String((customer as any).monthlyLeadActual) : ''}
                 isReadOnly
-                placeholder={t('onboarding.syncedFromGoogleSheets')}
+                placeholder={"Synced from Google Sheets"}
               />
             </FormControl>
           </SimpleGrid>
@@ -1463,7 +1461,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
-              <FormLabel>{t('onboarding.leadsGoogleSheetUrl')}</FormLabel>
+              <FormLabel>{"Leads Google Sheet URL"}</FormLabel>
               <Input
                 type="url"
                 value={leadsGoogleSheetUrl}
@@ -1475,20 +1473,20 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               />
             </FormControl>
             <FormControl>
-              <FormLabel>{t('onboarding.leadsGoogleSheetLabel')}</FormLabel>
+              <FormLabel>{"Leads Google Sheet Label"}</FormLabel>
               <Input
                 value={leadsGoogleSheetLabel}
                 onChange={(e) => {
                   setLeadsGoogleSheetLabel(e.target.value)
                   markDirty()
                 }}
-                placeholder={t('onboarding.leadsGoogleSheetLabelPlaceholder')}
+                placeholder={"e.g. Customer Lead Sheet"}
               />
             </FormControl>
           </SimpleGrid>
 
           <FormControl>
-            <FormLabel>{t('onboarding.headOfficeAddress')}</FormLabel>
+            <FormLabel>{"Head Office Address"}</FormLabel>
             <Stack spacing={2}>
               <Input
                 value={headOfficeQuery}
@@ -1504,13 +1502,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                         : accountDetails.headOfficePlaceId,
                   })
                 }}
-                placeholder={t('onboarding.searchCompanyOrPostcode')}
+                placeholder={"Search by company name or postcode"}
               />
               {headOfficeLoading ? (
                 <HStack spacing={2}>
                   <Spinner size="xs" />
                   <Text fontSize="xs" color="gray.500">
-                    {t('onboarding.searchingAddresses')}
+                    {"Searching addresses..."}
                   </Text>
                 </HStack>
               ) : null}
@@ -1545,7 +1543,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           {/* Customer-scoped DNC suppression list */}
           <FormControl>
-            <FormLabel>{t('onboarding.connectSuppressionList')}</FormLabel>
+            <FormLabel>{"Connect Suppression List"}</FormLabel>
             <Button
               size="sm"
               variant="solid"
@@ -1553,7 +1551,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               onClick={openSuppressionSetup}
               data-testid="onboarding-go-suppression-setup"
             >
-              {t('onboarding.openSuppressionList')}
+              {"Open Suppression List"}
             </Button>
           </FormControl>
         </Stack>
@@ -1585,40 +1583,40 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       {/* Client Profile Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
-          <Text fontSize="lg" fontWeight="semibold">{t('onboarding.clientProfile')}</Text>
+          <Text fontSize="lg" fontWeight="semibold">{"Client Profile"}</Text>
 
           <FormControl>
-            <FormLabel>{t('onboarding.clientHistory')}</FormLabel>
+            <FormLabel>{"Client History"}</FormLabel>
             <Textarea
               value={clientProfile.clientHistory}
               onChange={(e) => updateProfile({ clientHistory: e.target.value })}
               minH="120px"
-              placeholder={t('onboarding.clientHistoryPlaceholder')}
+              placeholder={"Write a narrative history of the client..."}
             />
           </FormControl>
 
           <FormControl>
-            <FormLabel>{t('onboarding.whatTheyDo')}</FormLabel>
+            <FormLabel>{"What they do"}</FormLabel>
             <Textarea
               value={customer?.whatTheyDo || ''}
               onChange={(e) => updateCustomerFields({ whatTheyDo: e.target.value })}
               minH="90px"
-              placeholder={t('onboarding.whatTheyDoPlaceholder')}
+              placeholder={"Short description of what the company does..."}
             />
           </FormControl>
 
           <FormControl>
-            <FormLabel>{t('onboarding.companyProfile')}</FormLabel>
+            <FormLabel>{"Company profile"}</FormLabel>
             <Textarea
               value={customer?.companyProfile || ''}
               onChange={(e) => updateCustomerFields({ companyProfile: e.target.value })}
               minH="140px"
-              placeholder={t('onboarding.companyProfilePlaceholder')}
+              placeholder={"Longer profile / overview..."}
             />
           </FormControl>
 
           <FormControl>
-            <FormLabel>{t('onboarding.accreditations')}</FormLabel>
+            <FormLabel>{"Accreditations"}</FormLabel>
             <Stack spacing={4}>
               {clientProfile.accreditations.map((accreditation) => (
                 <Box
@@ -1631,11 +1629,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   <Stack spacing={3}>
                     <HStack justify="space-between" align="flex-start">
                       <FormControl>
-                        <FormLabel fontSize="sm">{t('onboarding.accreditationName')}</FormLabel>
+                        <FormLabel fontSize="sm">{"Accreditation name"}</FormLabel>
                         <Input
                           value={accreditation.name}
                           onChange={(e) => handleAccreditationNameChange(accreditation.id, e.target.value)}
-                          placeholder={t('onboarding.accreditationPlaceholder')}
+                          placeholder={"e.g. ISO 9001"}
                         />
                       </FormControl>
                       <IconButton
@@ -1716,13 +1714,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               ))}
 
               <Button leftIcon={<AddIcon />} variant="outline" size="sm" onClick={handleAddAccreditation}>
-                {t('onboarding.addAccreditation')}
+                {"Add accreditation"}
               </Button>
             </Stack>
           </FormControl>
 
           <FormControl>
-            <FormLabel>{t('onboarding.targetGeographicalArea')}</FormLabel>
+            <FormLabel>{"Target Geographical Area"}</FormLabel>
             <Stack spacing={2}>
               {targetGeographicalAreas.length > 0 ? (
                 <HStack spacing={2} flexWrap="wrap">
@@ -1752,7 +1750,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <Input
                 value={geoQuery}
                 onChange={(e) => setGeoQuery(e.target.value)}
-                placeholder={t('onboarding.startTypingUkArea')}
+                placeholder={"Start typing a UK city, county, or town..."}
               />
               {geoLoading ? (
                 <HStack spacing={2}>

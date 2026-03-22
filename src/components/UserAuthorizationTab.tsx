@@ -40,7 +40,6 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons'
 import { useUsersFromDatabase, type DatabaseUser } from '../hooks/useUsersFromDatabase'
-import { useLocale } from '../contexts/LocaleContext'
 
 export type User = DatabaseUser
 
@@ -114,8 +113,7 @@ const generateUserId = (existingUserIds: string[]): string => {
 function UserAuthorizationTab() {
   // Use database hook for user management
   const { users, loading, error, createUser, updateUser, deleteUser } = useUsersFromDatabase()
-  const { t } = useLocale()
-  
+
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -236,7 +234,7 @@ function UserAuthorizationTab() {
       
       if (error) {
         toast({
-          title: t('common.error'),
+          title: 'Error',
           description: error,
           status: 'error',
           duration: 5000,
@@ -246,10 +244,8 @@ function UserAuthorizationTab() {
       }
       
       toast({
-        title: t('settings.userAuth.userDeleted'),
-        description: t('settings.userAuth.userDeletedDescription', {
-          name: `${selectedUser.firstName} ${selectedUser.lastName}`,
-        }),
+        title: 'User deleted',
+        description: `${selectedUser.firstName} ${selectedUser.lastName} has been deleted.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -270,8 +266,8 @@ function UserAuthorizationTab() {
       !formData.department
     ) {
       toast({
-        title: t('settings.userAuth.validationError'),
-        description: t('settings.userAuth.requiredFields'),
+        title: 'Validation Error',
+        description: 'Please fill in all required fields.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -283,8 +279,8 @@ function UserAuthorizationTab() {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(formData.email || '')) {
       toast({
-        title: t('settings.userAuth.validationError'),
-        description: t('settings.userAuth.invalidEmail'),
+        title: 'Validation Error',
+        description: 'Please enter a valid email address.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -310,7 +306,7 @@ function UserAuthorizationTab() {
       
       if (error) {
         toast({
-          title: t('common.error'),
+          title: 'Error',
           description: error,
           status: 'error',
           duration: 5000,
@@ -320,10 +316,8 @@ function UserAuthorizationTab() {
       }
       
       toast({
-        title: t('settings.userAuth.userUpdated'),
-        description: t('settings.userAuth.userUpdatedDescription', {
-          name: `${formData.firstName} ${formData.lastName}`,
-        }),
+        title: 'User updated',
+        description: `${formData.firstName} ${formData.lastName} has been updated.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -348,7 +342,7 @@ function UserAuthorizationTab() {
       
       if (error) {
         toast({
-          title: t('common.error'),
+          title: 'Error',
           description: error,
           status: 'error',
           duration: 5000,
@@ -358,10 +352,8 @@ function UserAuthorizationTab() {
       }
       
       toast({
-        title: t('settings.userAuth.userCreated'),
-        description: t('settings.userAuth.userCreatedDescription', {
-          name: `${formData.firstName} ${formData.lastName}`,
-        }),
+        title: 'User created',
+        description: `${formData.firstName} ${formData.lastName} has been created.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -759,7 +751,7 @@ function UserAuthorizationTab() {
           wrap="wrap"
         >
           <Heading size="md" color="text.muted">
-            {t('settings.userAuth.heading')}
+            User Authorization Management
           </Heading>
           <HStack spacing={3} flexWrap="wrap">
             <Button
@@ -768,7 +760,7 @@ function UserAuthorizationTab() {
               isDisabled={users.length === 0 || loading}
               size={{ base: 'sm', md: 'md' }}
             >
-              {t('common.exportCsv')}
+              Export CSV
             </Button>
             <Button
               leftIcon={<AddIcon />}
@@ -777,7 +769,7 @@ function UserAuthorizationTab() {
               isDisabled={loading}
               size={{ base: 'sm', md: 'md' }}
             >
-              {t('common.createUser')}
+              Create User
             </Button>
           </HStack>
         </Flex>
@@ -786,18 +778,18 @@ function UserAuthorizationTab() {
       {loading ? (
         <Box textAlign="center" py={10} flex="1">
           <Spinner size="xl" color="blue.500" mb={4} />
-          <Text color="gray.500">{t('settings.userAuth.loading')}</Text>
+          <Text color="gray.500">Loading users from database...</Text>
         </Box>
       ) : error ? (
         <Box textAlign="center" py={10} flex="1">
           <Text color="red.500" mb={4}>
-            {t('settings.userAuth.errorLoading', { error })}
+            {`Error loading users: ${error}`}
           </Text>
         </Box>
       ) : users.length === 0 ? (
         <Box textAlign="center" py={10} flex="1">
           <Text color="gray.500" mb={4}>
-            {t('settings.userAuth.empty')}
+            No users found. Create your first user to get started.
           </Text>
         </Box>
       ) : (
@@ -826,12 +818,12 @@ function UserAuthorizationTab() {
           <Table variant="simple" size="md" minW="800px">
             <Thead>
               <Tr>
-                <Th whiteSpace="nowrap">{t('settings.userAuth.name')}</Th>
-                <Th whiteSpace="nowrap">{t('settings.userAuth.surname')}</Th>
-                <Th whiteSpace="nowrap">{t('common.role')}</Th>
-                <Th whiteSpace="nowrap">{t('settings.userAuth.contactNumber')}</Th>
-                <Th whiteSpace="nowrap">{t('settings.userAuth.emailAddress')}</Th>
-                <Th whiteSpace="nowrap">{t('settings.userAuth.actions')}</Th>
+                <Th whiteSpace="nowrap">Name</Th>
+                <Th whiteSpace="nowrap">Surname</Th>
+                <Th whiteSpace="nowrap">Role</Th>
+                <Th whiteSpace="nowrap">Contact Number</Th>
+                <Th whiteSpace="nowrap">Email Address</Th>
+                <Th whiteSpace="nowrap">Actions</Th>
               </Tr>
             </Thead>
             <Tbody>
@@ -873,7 +865,7 @@ function UserAuthorizationTab() {
                   <Td>
                     <HStack spacing={2}>
                       <IconButton
-                        aria-label={t('settings.userAuth.editUserAria')}
+                        aria-label="Edit user"
                         icon={<EditIcon />}
                         size="sm"
                         variant="ghost"
@@ -881,7 +873,7 @@ function UserAuthorizationTab() {
                         onClick={() => handleEdit(user)}
                       />
                       <IconButton
-                        aria-label={t('settings.userAuth.deleteUserAria')}
+                        aria-label="Delete user"
                         icon={<DeleteIcon />}
                         size="sm"
                         variant="ghost"
@@ -901,12 +893,12 @@ function UserAuthorizationTab() {
       <Modal isOpen={isOpen} onClose={onClose} size="lg">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>{isEditing ? t('settings.userAuth.editUser') : t('settings.userAuth.createNewUser')}</ModalHeader>
+          <ModalHeader>{isEditing ? 'Edit User' : 'Create New User'}</ModalHeader>
           <ModalCloseButton />
           <ModalBody>
             <VStack spacing={4}>
               <FormControl isRequired>
-                <FormLabel>{t('settings.userAuth.userId')}</FormLabel>
+                <FormLabel>User ID</FormLabel>
                 <Input
                   value={formData.userId}
                   isReadOnly
@@ -915,13 +907,13 @@ function UserAuthorizationTab() {
                   fontSize="sm"
                 />
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  {t('settings.userAuth.userIdHelp')}
+                  Auto-generated unique identifier (ODS + 8 numbers)
                 </Text>
               </FormControl>
 
               {/* Profile Photo */}
               <FormControl>
-                <FormLabel>{t('settings.userAuth.profilePhoto')}</FormLabel>
+                <FormLabel>Profile Photo</FormLabel>
                 <HStack spacing={4}>
                   <Avatar
                     size="lg"
@@ -936,31 +928,31 @@ function UserAuthorizationTab() {
                     pt={1}
                   />
                 </HStack>
-                <FormHelperText>{t('settings.userAuth.profilePhotoHelp')}</FormHelperText>
+                <FormHelperText>Upload a profile photo for the user</FormHelperText>
               </FormControl>
 
               <HStack spacing={4} w="100%">
                 <FormControl isRequired>
-                  <FormLabel>{t('settings.userAuth.firstName')}</FormLabel>
+                  <FormLabel>First Name</FormLabel>
                   <Input
                     value={formData.firstName}
                     onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                    placeholder={t('settings.userAuth.firstNameInput')}
+                    placeholder="Enter first name"
                   />
                 </FormControl>
 
                 <FormControl isRequired>
-                  <FormLabel>{t('settings.userAuth.lastName')}</FormLabel>
+                  <FormLabel>Last Name</FormLabel>
                   <Input
                     value={formData.lastName}
                     onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                    placeholder={t('settings.userAuth.lastNameInput')}
+                    placeholder="Enter last name"
                   />
                 </FormControl>
               </HStack>
 
               <FormControl isRequired>
-                <FormLabel>{t('settings.userAuth.emailAddress')}</FormLabel>
+                <FormLabel>Email Address</FormLabel>
                 <Input
                   type="email"
                   value={formData.email}
@@ -970,25 +962,25 @@ function UserAuthorizationTab() {
               </FormControl>
 
               <FormControl isRequired>
-                <FormLabel>{t('settings.userAuth.username')}</FormLabel>
+                <FormLabel>Username</FormLabel>
                 <Input
                   value={formData.username}
                   onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  placeholder={t('settings.userAuth.usernamePlaceholder')}
+                  placeholder="Username (defaults to email)"
                 />
-                <FormHelperText>{t('settings.userAuth.usernameHelp')}</FormHelperText>
+                <FormHelperText>Username will be used for login (defaults to email address)</FormHelperText>
               </FormControl>
 
               <FormControl>
-                <FormLabel>{t('settings.userAuth.password')}</FormLabel>
-                <Input type="text" value={t('settings.userAuth.passwordManaged')} isReadOnly isDisabled />
+                <FormLabel>Password</FormLabel>
+                <Input type="text" value="Managed by Microsoft SSO" isReadOnly isDisabled />
                 <FormHelperText>
-                  {t('settings.userAuth.passwordHelp')}
+                  Passwords are not stored here. Microsoft account MFA controls access.
                 </FormHelperText>
               </FormControl>
 
               <FormControl>
-                <FormLabel>{t('settings.userAuth.phoneNumber')}</FormLabel>
+                <FormLabel>Phone Number</FormLabel>
                 <Input
                   type="tel"
                   value={formData.phoneNumber}
@@ -998,11 +990,11 @@ function UserAuthorizationTab() {
               </FormControl>
 
               <FormControl isRequired>
-                <FormLabel>{t('common.role')}</FormLabel>
+                <FormLabel>Role</FormLabel>
                 <Select
                   value={formData.role}
                   onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  placeholder={t('settings.userAuth.selectRole')}
+                  placeholder="Select role"
                 >
                   <option value="Chief Financial Officer">Chief Financial Officer</option>
                   <option value="Telemarketing Executive">Telemarketing Executive</option>
@@ -1019,11 +1011,11 @@ function UserAuthorizationTab() {
               </FormControl>
 
               <FormControl isRequired>
-                <FormLabel>{t('settings.userAuth.department')}</FormLabel>
+                <FormLabel>Department</FormLabel>
                 <Select
                   value={formData.department}
                   onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                  placeholder={t('settings.userAuth.selectDepartment')}
+                  placeholder="Select department"
                 >
                   <option value="Management">Management</option>
                   <option value="Operations">Operations</option>
@@ -1037,7 +1029,7 @@ function UserAuthorizationTab() {
               </FormControl>
 
               <FormControl isRequired>
-                <FormLabel>{t('settings.userAuth.accountStatus')}</FormLabel>
+                <FormLabel>Account Status</FormLabel>
                 <Select
                   value={formData.accountStatus}
                   onChange={(e) =>
@@ -1054,19 +1046,19 @@ function UserAuthorizationTab() {
 
               <HStack spacing={4} w="100%">
                 <FormControl>
-                  <FormLabel>{t('settings.userAuth.lastLoginDate')}</FormLabel>
+                  <FormLabel>Last Login Date</FormLabel>
                   <Input
                     type="date"
                     value={formData.lastLoginDate}
                     onChange={(e) => setFormData({ ...formData, lastLoginDate: e.target.value })}
                   />
                   <Text fontSize="xs" color="gray.500" mt={1}>
-                    {t('settings.userAuth.lastLoginDateHelp')}
+                    {'Leave empty for "Never"'}
                   </Text>
                 </FormControl>
 
                 <FormControl>
-                  <FormLabel>{t('settings.userAuth.createdDate')}</FormLabel>
+                  <FormLabel>Created Date</FormLabel>
                   <Input
                     type="date"
                     value={formData.createdDate}
@@ -1079,10 +1071,10 @@ function UserAuthorizationTab() {
 
           <ModalFooter>
             <Button variant="ghost" mr={3} onClick={onClose}>
-              {t('common.cancel')}
+              Cancel
             </Button>
             <Button colorScheme="gray" onClick={handleSave}>
-              {isEditing ? t('common.update') : t('common.create')}
+              {isEditing ? 'Update' : 'Create'}
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -1093,23 +1085,23 @@ function UserAuthorizationTab() {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              {t('settings.userAuth.deleteUser')}
+              Delete User
             </AlertDialogHeader>
 
             <AlertDialogBody>
-              {t('settings.userAuth.deleteUserConfirm', {
-                user: selectedUser
+              {`Are you sure you want to delete ${
+                selectedUser
                   ? `${selectedUser.firstName} ${selectedUser.lastName} (${selectedUser.email})`
-                  : 'this user',
-              })}
+                  : 'this user'
+              }? This action cannot be undone.`}
             </AlertDialogBody>
 
             <AlertDialogFooter>
               <Button ref={cancelRef} onClick={onDeleteClose}>
-                {t('common.cancel')}
+                {Cancel}
               </Button>
               <Button colorScheme="gray" onClick={confirmDelete} ml={3}>
-                {t('common.delete')}
+                Delete
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>

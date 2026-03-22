@@ -2,14 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Flex,
-  HStack,
   Tab,
   TabList,
   Tabs,
   Text,
   Button,
   Badge,
-  Switch,
 } from '@chakra-ui/react'
 import { useMsal } from '@azure/msal-react'
 import { CRM_TOP_TABS, type CrmTopTabId } from './contracts/nav'
@@ -17,7 +15,6 @@ import { getVisibleCrmTopTabs, resolveClientModeTab } from './utils/crmTopTabsVi
 import { isClientUI } from './platform/mode'
 import { getMe, type MeResponse } from './platform/me'
 import { clearApiAuthToken } from './auth/apiAuthToken'
-import { useLocale } from './contexts/LocaleContext'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
 import DashboardHomePage, { type DashboardViewId } from './tabs/reporting/ReportingHomePage'
@@ -42,7 +39,6 @@ function isSafeInternalRedirect(value: string): boolean {
 
 function App() {
   const { instance } = useMsal()
-  const { t, locale, setLocale } = useLocale()
   const [activeTab, setActiveTab] = useState<CrmTopTabId>('customers-home')
   const [activeView, setActiveView] = useState<string>('accounts')
   const [focusAccountName, setFocusAccountName] = useState<string | undefined>(undefined)
@@ -289,14 +285,14 @@ function App() {
     if (!me) {
       return (
         <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
-          <Text>{t('shell.loading')}</Text>
+          <Text>Loading...</Text>
         </Flex>
       )
     }
     if (me.uiMode !== 'client' || !me.fixedCustomerId) {
       return (
         <Flex minH="100vh" bg={semanticColor.bgCanvas} align="center" justify="center" p={6}>
-          <Text>{t('shell.clientModeNotConfigured')}</Text>
+          <Text>Client mode is not configured yet. Contact admin.</Text>
         </Flex>
       )
     }
@@ -386,7 +382,7 @@ function App() {
                         bg: 'accent.50',
                       }}
                     >
-                      {t(`nav.${tab.id}`)}
+                      {tab.label}
                     </Tab>
                   ))}
                 </TabList>
@@ -404,29 +400,6 @@ function App() {
                 >
                   {import.meta.env.PROD ? 'PRODUCTION' : 'DEV'}
                 </Badge>
-                <HStack
-                  spacing={2}
-                  px={spacing[2]}
-                  py={spacing[1]}
-                  border="1px solid"
-                  borderColor={semanticColor.borderSubtle}
-                  borderRadius={radius.md}
-                  bg={semanticColor.bgSurface}
-                >
-                  <Text fontSize="xs" fontWeight="600" color={locale === 'en' ? semanticColor.textPrimary : semanticColor.textMuted}>
-                    {t('locale.english')}
-                  </Text>
-                  <Switch
-                    size="md"
-                    colorScheme="accent"
-                    isChecked={locale === 'ar'}
-                    onChange={(e) => setLocale(e.target.checked ? 'ar' : 'en')}
-                    aria-label={t('locale.switchAria')}
-                  />
-                  <Text fontSize="xs" fontWeight="600" color={locale === 'ar' ? semanticColor.textPrimary : semanticColor.textMuted}>
-                    {t('locale.arabic')}
-                  </Text>
-                </HStack>
                 <Button
                   variant="outline"
                   size="xs"
@@ -439,7 +412,7 @@ function App() {
                   _hover={{ color: semanticColor.textPrimary, bg: semanticColor.bgSubtle }}
                   onClick={() => void handleSignOut()}
                 >
-                  {t('shell.signOut')}
+                  Sign out
                 </Button>
               </Flex>
             </Flex>
@@ -464,7 +437,7 @@ function App() {
       </Box>
       <Box px={{ base: spacing[3], md: spacing[4], lg: spacing[6] }} pb={{ base: spacing[3], md: spacing[4] }}>
         <Text fontSize="xs" color={semanticColor.textMuted} textAlign="center">
-          {import.meta.env.PROD ? `${t('shell.build')} ${__BUILD_STAMP__}` : `${t('shell.build')}: ${BUILD_SHA} ${BUILD_TIME}`}
+          {import.meta.env.PROD ? `Build ${__BUILD_STAMP__}` : `Build: ${BUILD_SHA} ${BUILD_TIME}`}
         </Text>
       </Box>
     </Flex>

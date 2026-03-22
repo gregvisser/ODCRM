@@ -38,7 +38,7 @@ The tab loads **campaign-scoped stats** (`GET /api/schedules/:id/stats`), **upco
 - **Summary cards:** counts of schedules, active, “need attention”, earliest `nextScheduledAt` across listed rows.
 - **Schedule list:** per-row status, mailbox, sequence, mismatch flag, pause/resume, select for detail.
 - **Detail (selected):** stats card, preflight GO/WARNING/NO_GO, run-history table, upcoming emails slice, “Test now”.
-- **Locales:** `useLocale` for loading string only; primary copy is English inline.
+- **Copy:** English UI strings inline (schedules loading state and actions).
 
 **Nested components:** None — single file, Chakra primitives only.
 

@@ -65,7 +65,6 @@ import {
 import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
-import { useLocale } from '../../../contexts/LocaleContext'
 import RequireActiveClient from '../../../components/RequireActiveClient'
 
 // Backend EmailIdentity shape from /api/outlook/identities
@@ -171,7 +170,6 @@ function describeMailboxReason(reason: string): string {
 }
 
 const EmailAccountsTab: React.FC = () => {
-  const { t } = useLocale()
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
   const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -504,10 +502,10 @@ const EmailAccountsTab: React.FC = () => {
       <RequireActiveClient>
       <Box id="email-accounts-tab-panel" data-testid="email-accounts-tab-panel">
         <VStack align="start" spacing={1} mb={4}>
-          <Text fontSize="2xl" fontWeight="bold">{t('marketing.mailboxesTitle')}</Text>
-          <Text color="gray.600">{t('marketing.mailboxesIntro')}</Text>
+          <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
+          <Text color="gray.600">Review connected mailboxes, see which ones are usable, and manage what needs attention next.</Text>
           <FormControl w="300px" mt={2}>
-            <FormLabel fontSize="sm">{t('common.client')}</FormLabel>
+            <FormLabel fontSize="sm">Client</FormLabel>
             <Select
               value=""
               onChange={(e) => {
@@ -516,7 +514,7 @@ const EmailAccountsTab: React.FC = () => {
                   setSelectedCustomerId(id)
                 }
               }}
-              placeholder={t('common.selectClient')}
+              placeholder="Select client"
               isDisabled={!canSelectCustomer}
             >
               {customers.map((customer) => (
@@ -530,9 +528,9 @@ const EmailAccountsTab: React.FC = () => {
         <Card id="email-accounts-tab-no-customer" data-testid="email-accounts-tab-no-customer">
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
-            <Text fontSize="lg" fontWeight="semibold" mb={2}>{t('marketing.selectClientMailboxStatus')}</Text>
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>Select a client to review mailbox status</Text>
             <Text color="gray.600">
-              {t('marketing.selectClientMailboxStatusDescription')}
+              Choose a client to review connected mailboxes, see which ones are ready, and manage mailbox actions.
             </Text>
           </CardBody>
         </Card>
@@ -546,7 +544,7 @@ const EmailAccountsTab: React.FC = () => {
       <RequireActiveClient>
         <Box textAlign="center" py={10}>
           <Spinner size="lg" mb={4} />
-          <Text>{t('marketing.loadingEmailAccounts')}</Text>
+          <Text>Loading email accounts...</Text>
         </Box>
       </RequireActiveClient>
     )
@@ -560,11 +558,11 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="error" mb={4}>
           <AlertIcon />
           <Box flex="1">
-            <AlertTitle>{t('marketing.failedToLoadEmailAccounts')}</AlertTitle>
+            <AlertTitle>Failed to load email accounts</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
           <Button size="sm" onClick={loadIdentities} ml={4}>
-            {t('common.retry')}
+            Retry
           </Button>
         </Alert>
       )}
@@ -572,20 +570,20 @@ const EmailAccountsTab: React.FC = () => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Text fontSize="2xl" fontWeight="bold">{t('marketing.mailboxesTitle')}</Text>
+          <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
-            {t('marketing.mailboxesIntro')}
+            Review connected mailboxes, see which ones are usable, and manage what needs attention next.
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
-              <FormLabel fontSize="sm">{t('common.client')}</FormLabel>
+              <FormLabel fontSize="sm">Client</FormLabel>
               <Select
                 value={selectedCustomerId}
                 onChange={(e) => {
                   const id = e.target.value
                   setSelectedCustomerId(id)
                 }}
-                placeholder={t('common.selectClient')}
+                placeholder="Select client"
                 isDisabled={!canSelectCustomer}
               >
                 {customers.map((customer) => (
@@ -606,7 +604,7 @@ const EmailAccountsTab: React.FC = () => {
             onClick={handleConnectOutlook}
             isDisabled={identities.filter(i => i.isActive).length >= 5}
           >
-            {t('marketing.connectOutlookMailbox')}
+            Connect Outlook mailbox
           </Button>
         </HStack>
       </Flex>
@@ -615,9 +613,9 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="info" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.noMailboxConnected')}</AlertTitle>
+            <AlertTitle>No mailbox connected yet</AlertTitle>
             <AlertDescription>
-              {t('marketing.noMailboxConnectedDescription')}
+              Connect a mailbox to start sending and to see mailbox health on this page.
             </AlertDescription>
           </Box>
         </Alert>
@@ -625,9 +623,9 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="warning" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.noMailboxReady')}</AlertTitle>
+            <AlertTitle>No mailbox is ready to send</AlertTitle>
             <AlertDescription>
-              {t('marketing.noMailboxReadyDescription')}
+              Review the mailbox list below first. The follow-up section contains the deeper guardrail detail.
             </AlertDescription>
           </Box>
         </Alert>
@@ -635,12 +633,9 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="warning" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.someMailboxesNeedAttention')}</AlertTitle>
+            <AlertTitle>Some mailboxes need attention</AlertTitle>
             <AlertDescription>
-              {t('marketing.mailboxesNeedAttentionDescription', {
-                ready: mailboxSummary.readyMailboxes,
-                attention: mailboxSummary.needsAttention,
-              })}
+              {`${mailboxSummary.readyMailboxes} ready to send, and ${mailboxSummary.needsAttention} need review.`}
             </AlertDescription>
           </Box>
         </Alert>
@@ -648,9 +643,9 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="success" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.mailboxesLookReady')}</AlertTitle>
+            <AlertTitle>Mailboxes look ready</AlertTitle>
             <AlertDescription>
-              {t('marketing.mailboxesLookReadyDescription')}
+              Connected mailboxes are currently available for normal sending within their configured limits.
             </AlertDescription>
           </Box>
         </Alert>
@@ -660,7 +655,7 @@ const EmailAccountsTab: React.FC = () => {
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>{t('marketing.connectedMailboxes')}</StatLabel>
+              <StatLabel>Connected mailboxes</StatLabel>
               <StatNumber>{mailboxSummary.connectedMailboxes}</StatNumber>
             </Stat>
           </CardBody>
@@ -668,7 +663,7 @@ const EmailAccountsTab: React.FC = () => {
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>{t('marketing.readyToSend')}</StatLabel>
+              <StatLabel>Ready to send</StatLabel>
               <StatNumber>{mailboxSummary.readyMailboxes}</StatNumber>
             </Stat>
           </CardBody>
@@ -676,7 +671,7 @@ const EmailAccountsTab: React.FC = () => {
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>{t('marketing.needAttention')}</StatLabel>
+              <StatLabel>Need attention</StatLabel>
               <StatNumber>{mailboxSummary.needsAttention}</StatNumber>
             </Stat>
           </CardBody>
@@ -684,7 +679,7 @@ const EmailAccountsTab: React.FC = () => {
         <Card>
           <CardBody>
             <Stat>
-              <StatLabel>{t('marketing.outlookMailboxes')}</StatLabel>
+              <StatLabel>Outlook mailboxes</StatLabel>
               <StatNumber>{mailboxSummary.outlookMailboxes}</StatNumber>
             </Stat>
           </CardBody>
@@ -695,7 +690,7 @@ const EmailAccountsTab: React.FC = () => {
         <Alert status="warning" mb={4}>
           <AlertIcon />
           <AlertDescription>
-            {t('marketing.activeSenderLimitReached')}
+            You&apos;ve reached the maximum of 5 active sender accounts. Disconnect one before connecting another mailbox.
           </AlertDescription>
         </Alert>
       )}
@@ -706,7 +701,7 @@ const EmailAccountsTab: React.FC = () => {
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder={t('marketing.searchMailboxes')}
+            placeholder="Search mailboxes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -717,9 +712,9 @@ const EmailAccountsTab: React.FC = () => {
           onChange={(e) => setStatusFilter(e.target.value)}
           maxW="180px"
         >
-          <option value="all">{t('marketing.allMailboxes')}</option>
-          <option value="ready">{t('marketing.readyToSend')}</option>
-          <option value="attention">{t('marketing.needAttention')}</option>
+          <option value="all">All mailboxes</option>
+          <option value="ready">Ready to send</option>
+          <option value="attention">Need attention</option>
         </Select>
 
         <Spacer />
@@ -731,12 +726,12 @@ const EmailAccountsTab: React.FC = () => {
         <Card mb={6}>
           <CardBody textAlign="center" py={10}>
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
-            <Text fontSize="lg" fontWeight="semibold" mb={2}>{t('marketing.noMailboxesConnected')}</Text>
+            <Text fontSize="lg" fontWeight="semibold" mb={2}>No mailboxes connected</Text>
             <Text color="gray.600" mb={4}>
-              {t('marketing.noMailboxesConnectedDescription')}
+              Connect an Outlook mailbox to start sending and reviewing mailbox health for this client.
             </Text>
             <Button colorScheme="blue" onClick={handleConnectOutlook}>
-              {t('marketing.connectOutlookMailbox')}
+              Connect Outlook mailbox
             </Button>
           </CardBody>
         </Card>
@@ -749,10 +744,10 @@ const EmailAccountsTab: React.FC = () => {
               <Table size="sm">
                 <Thead>
                   <Tr>
-                    <Th>{t('marketing.mailbox')}</Th>
-                    <Th>{t('marketing.health')}</Th>
-                    <Th>{t('marketing.sendingLimits')}</Th>
-                    <Th>{t('marketing.connectedColumn')}</Th>
+                    <Th>Mailbox</Th>
+                    <Th>Health</Th>
+                    <Th>Sending limits</Th>
+                    <Th>Connected</Th>
                     <Th w="50px"></Th>
                   </Tr>
                 </Thead>
@@ -813,18 +808,18 @@ const EmailAccountsTab: React.FC = () => {
                             />
                             <MenuList>
                               <MenuItem icon={<EditIcon />} onClick={() => handleEditIdentity(identity)}>
-                                {t('marketing.manageMailbox')}
+                                Manage mailbox
                               </MenuItem>
                               {identity.provider === 'outlook' && (
                                 <MenuItem icon={<EmailIcon />} onClick={() => handleTestSend(identity)}>
-                                  {t('marketing.sendTestEmail')}
+                                  Send test email
                                 </MenuItem>
                               )}
                               <MenuItem
                                 icon={identity.isActive ? <WarningIcon /> : <CheckCircleIcon />}
                                 onClick={() => handleToggleActive(identity)}
                               >
-                                {identity.isActive ? t('marketing.turnOffMailbox') : t('marketing.turnOnMailbox')}
+                                {identity.isActive ? 'Turn off mailbox' : 'Turn on mailbox'}
                               </MenuItem>
                               <MenuDivider />
                               <MenuItem
@@ -832,7 +827,7 @@ const EmailAccountsTab: React.FC = () => {
                                 color="red.500"
                                 onClick={() => handleDeleteIdentity(identity)}
                               >
-                                {t('marketing.disconnectMailbox')}
+                                Disconnect mailbox
                               </MenuItem>
                             </MenuList>
                           </Menu>
@@ -851,9 +846,9 @@ const EmailAccountsTab: React.FC = () => {
         <CardBody>
           <Flex justify="space-between" align="center" mb={4} wrap="wrap" gap={3}>
             <VStack align="start" spacing={1}>
-              <Text fontSize="lg" fontWeight="semibold">{t('marketing.followUpTroubleshooting')}</Text>
+              <Text fontSize="lg" fontWeight="semibold">Follow-up &amp; troubleshooting</Text>
               <Text fontSize="sm" color="gray.600">
-                {t('marketing.followUpTroubleshootingDescription')}
+                Secondary detail for deeper mailbox checks, technical guardrails, and manual inbox-message pulls.
               </Text>
             </VStack>
             <Button
