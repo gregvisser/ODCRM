@@ -274,16 +274,14 @@ export function applyAutoTicksToAccountData(params: ApplyAutoTickParams): {
 
   if (coerceTruthyString(firstOutreachSentAtIso)) {
     markComplete('am', 'am_client_live')
-    const metaGroup = getObject((nextMeta as any).am) as Record<string, any>
-    const prev = getObject(metaGroup.am_client_live) as ProgressItemMeta
-    ;(nextMeta as any).am = {
-      ...metaGroup,
-      am_client_live: {
-        ...prev,
-        value: {
-          ...(typeof prev.value === 'object' ? prev.value : {}),
-          firstOutreachSentAt: firstOutreachSentAtIso,
-        },
+    // Merge outreach timestamp into existing item meta in-place (do not replace the whole `am` map).
+    const amRoot = getObject((nextMeta as any).am) as Record<string, any>
+    const curLive = getObject(amRoot.am_client_live) as ProgressItemMeta
+    amRoot.am_client_live = {
+      ...curLive,
+      value: {
+        ...(typeof curLive.value === 'object' && curLive.value ? curLive.value : {}),
+        firstOutreachSentAt: firstOutreachSentAtIso,
       },
     }
   }

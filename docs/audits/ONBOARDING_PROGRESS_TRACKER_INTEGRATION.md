@@ -61,7 +61,7 @@
 - **am_weekly_target:** `Customer.weeklyLeadTarget` > 0 (passed into auto-tick on save).
 - **am_campaign_template / am_templates_reviewed:** `emailTemplate.count(customerId) >= 1`.
 - **am_populate_icp:** ICP rule: geography + targeting + at least one of objectives / qualifying / USPs (see `icpPopulatedFromProfile`).
-- **am_client_live:** earliest `EmailEvent` with `type = sent` for customer; `firstOutreachSentAt` stored in meta `value`.
+- **am_client_live:** earliest `EmailEvent` with `type = sent` for customer; `firstOutreachSentAt` is merged into `progressTrackerMeta.am.am_client_live.value` **without** replacing completion fields (`completedAt`, `completionSource`, `completedByUserId`) set by the same auto-tick pass.
 
 **Manual date fields (valuePayload keys):**
 

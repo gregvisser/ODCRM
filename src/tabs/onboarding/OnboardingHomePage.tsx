@@ -32,17 +32,13 @@ function getNextStepButtonLabel(
   }
 }
 
-function coerceViewId(view?: string): OnboardingViewId {
-  return 'customer-onboarding'
-}
-
 interface OnboardingHomePageProps {
+  /** Accepted for URL/parent compatibility; onboarding is a single view. */
   view?: string
   onNavigate?: (view: OnboardingViewId) => void
 }
 
-export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
-  coerceViewId(view)
+export default function OnboardingHomePage({ onNavigate }: OnboardingHomePageProps) {
   const { customerId: selectedCustomerId, setCustomerId: setSelectedCustomerId } = useScopedCustomerSelection()
   const { signal, interpretation: readiness } = useClientReadinessState(selectedCustomerId || null)
 
