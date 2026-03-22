@@ -25,20 +25,33 @@ assert(
 )
 assert(
   manualStartDateAutoTick.accountData?.progressTracker?.sales?.sales_client_agreement !== true,
-  'expected agreement upload auto-tick to remain disabled',
+  'expected agreement items to stay off without hasAgreement',
 )
 assert(
   manualStartDateAutoTick.accountData?.progressTracker?.sales?.sales_contract_signed !== true,
-  'expected contract-signed auto-tick to remain disabled',
+  'expected contract-signed to stay off without hasAgreement',
 )
 
-const paymentEvidenceDoesNotAutoTick = applyAutoTicksToAccountData({
+const agreementAutoTick = applyAutoTicksToAccountData({
+  accountData: {},
+  hasAgreement: true,
+  hasLeadGoogleSheet: false,
+  actorUserId: 'tester@example.com',
+  nowIso: '2026-03-10T12:00:00.000Z',
+})
+
+assert(
+  agreementAutoTick.accountData?.progressTracker?.sales?.sales_client_agreement === true,
+  'expected hasAgreement to auto-tick sales_client_agreement',
+)
+assert(
+  agreementAutoTick.accountData?.progressTracker?.sales?.sales_contract_signed === true,
+  'expected hasAgreement to auto-tick sales_contract_signed',
+)
+
+const paymentEvidenceAutoTick = applyAutoTicksToAccountData({
   accountData: {
     attachments: [{ id: 'att_payment', type: 'payment_confirmation', fileName: 'payment.pdf' }],
-    firstPaymentEvidence: {
-      attachmentId: 'att_payment',
-      fileName: 'payment.pdf',
-    },
   },
   hasAgreement: false,
   hasLeadGoogleSheet: false,
@@ -47,8 +60,33 @@ const paymentEvidenceDoesNotAutoTick = applyAutoTicksToAccountData({
 })
 
 assert(
-  paymentEvidenceDoesNotAutoTick.accountData?.progressTracker?.sales?.sales_first_payment !== true,
-  'expected payment confirmation evidence upload path not to auto-tick sales_first_payment',
+  paymentEvidenceAutoTick.accountData?.progressTracker?.sales?.sales_first_payment === true,
+  'expected payment_confirmation attachment to auto-tick sales_first_payment',
+)
+
+const clientLiveOutreach = applyAutoTicksToAccountData({
+  accountData: {},
+  hasAgreement: false,
+  hasLeadGoogleSheet: false,
+  linkedEmailCount: null,
+  weeklyLeadTarget: null,
+  templateCount: null,
+  firstOutreachSentAtIso: '2026-01-15T10:00:00.000Z',
+  actorUserId: 'actor@example.com',
+  nowIso: '2026-03-10T12:00:00.000Z',
+})
+
+assert(
+  clientLiveOutreach.accountData?.progressTracker?.am?.am_client_live === true,
+  'expected first outreach signal to auto-tick am_client_live',
+)
+const liveMeta = (clientLiveOutreach.accountData as any)?.progressTrackerMeta?.am?.am_client_live
+assert(!!liveMeta?.completedAt, 'expected am_client_live meta completedAt after auto-tick')
+assert(liveMeta?.completionSource === 'AUTO', 'expected am_client_live completionSource AUTO')
+assert(liveMeta?.completedByUserId === 'actor@example.com', 'expected am_client_live completedByUserId')
+assert(
+  liveMeta?.value?.firstOutreachSentAt === '2026-01-15T10:00:00.000Z',
+  'expected firstOutreachSentAt on am_client_live meta value',
 )
 
 async function runExtractionGuardTests() {

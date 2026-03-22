@@ -1,17 +1,15 @@
 import { useMemo, useCallback, useEffect } from 'react'
 import { Alert, AlertDescription, AlertIcon, AlertTitle, Badge, Box, Button, Flex, HStack, SimpleGrid, Text, VStack } from '@chakra-ui/react'
-import { EditIcon, CheckCircleIcon } from '@chakra-ui/icons'
-import { SubNavigation, type SubNavItem } from '../../design-system'
-import { isClientUI } from '../../platform/mode'
+import { EditIcon } from '@chakra-ui/icons'
 import CustomerSelector from './components/CustomerSelector'
-import ProgressTrackerTab from './ProgressTrackerTab'
 import CustomerOnboardingTab from './CustomerOnboardingTab'
 import { onboardingDebug } from './utils/debug'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
 import { useScopedCustomerSelection } from '../../hooks/useCustomerScope'
+import { isClientUI } from '../../platform/mode'
 
-export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'
+export type OnboardingViewId = 'customer-onboarding'
 
 function getNextStepButtonLabel(
   target: OnboardingViewId | 'onboarding' | 'clients' | 'marketing-readiness' | 'marketing-inbox' | 'marketing-reports' | 'marketing-sequences',
@@ -28,26 +26,19 @@ function getNextStepButtonLabel(
     case 'marketing-readiness':
       return 'Review marketing readiness'
     case 'customer-onboarding':
-    case 'progress-tracker':
     case 'onboarding':
     default:
       return 'Continue onboarding'
   }
 }
 
-function coerceViewId(view?: string): OnboardingViewId {
-  if (view === 'progress-tracker' || view === 'customer-onboarding') return view
-  // Legacy deep-link compatibility: old "overview" routes now land in the unified onboarding form.
-  return 'customer-onboarding'
-}
-
 interface OnboardingHomePageProps {
+  /** Accepted for URL/parent compatibility; onboarding is a single view. */
   view?: string
   onNavigate?: (view: OnboardingViewId) => void
 }
 
-export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomePageProps) {
-  const activeView = coerceViewId(view)
+export default function OnboardingHomePage({ onNavigate }: OnboardingHomePageProps) {
   const { customerId: selectedCustomerId, setCustomerId: setSelectedCustomerId } = useScopedCustomerSelection()
   const { signal, interpretation: readiness } = useClientReadinessState(selectedCustomerId || null)
 
@@ -55,13 +46,14 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     onboardingDebug('🔄 OnboardingHomePage: Initial customerId from settingsStore:', selectedCustomerId)
   }, [selectedCustomerId])
 
-  const handleCustomerChange = useCallback((customerId: string) => {
-    onboardingDebug('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
-    setSelectedCustomerId(customerId)
-
-    // UX: after selecting/creating a customer, keep user in the unified onboarding form.
-    onNavigate?.('customer-onboarding')
-  }, [onNavigate, setSelectedCustomerId])
+  const handleCustomerChange = useCallback(
+    (customerId: string) => {
+      onboardingDebug('🔄 OnboardingHomePage: Customer changed via selector:', customerId)
+      setSelectedCustomerId(customerId)
+      onNavigate?.('customer-onboarding')
+    },
+    [onNavigate, setSelectedCustomerId],
+  )
 
   const handleContinueToMarketingReadiness = useCallback(() => {
     window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'readiness' } }))
@@ -91,33 +83,6 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
     }
   }, [handleContinueToMarketingReadiness, onNavigate, readiness.nextStep.target])
 
-  const navItems: SubNavItem[] = useMemo(() => {
-    const items: SubNavItem[] = [
-      {
-        id: 'progress-tracker',
-        label: 'Progress Tracker',
-        icon: CheckCircleIcon,
-        content: <ProgressTrackerTab />,
-        sortOrder: 2,
-      },
-    ]
-
-    // Only show the unified onboarding form when a customer is selected.
-    if (selectedCustomerId) {
-      items.push(
-        {
-          id: 'customer-onboarding',
-          label: 'Client Onboarding',
-          icon: EditIcon,
-          content: <CustomerOnboardingTab customerId={selectedCustomerId} />,
-          sortOrder: 1,
-        },
-      )
-    }
-
-    return items
-  }, [selectedCustomerId])
-
   const activationChecks = useMemo(() => {
     const mapCheck = (label: string, value: boolean | null) => ({
       label,
@@ -135,7 +100,6 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
   const canProceedToOperations = readiness.state === 'ready-for-outreach' || readiness.state === 'outreach-active'
   const blockersCount = activationChecks.filter((item) => !item.complete).length
   const readyCheckCount = activationChecks.filter((item) => item.complete).length
-  const effectiveActiveView: OnboardingViewId = selectedCustomerId ? activeView : 'progress-tracker'
 
   return (
     <Flex direction="column" h="100%">
@@ -156,18 +120,23 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
           data-testid="onboarding-marketing-bridge"
         >
           <VStack align="start" spacing={1}>
-            <Text fontSize="sm" fontWeight="semibold" color="blue.900">
-              Onboarding status
-            </Text>
+            <HStack spacing={2}>
+              <EditIcon color="blue.700" />
+              <Text fontSize="sm" fontWeight="semibold" color="blue.900">
+                Onboarding
+              </Text>
+            </HStack>
             <Text fontSize="sm" color="blue.800">
-              See whether this client should stay in onboarding or move on to the next workflow.
+              Select a client, then complete account details and the embedded checklist in one place.
             </Text>
           </VStack>
           <HStack mt={2} spacing={2}>
             <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="onboarding-client-readiness-state">
               {readiness.label}
             </Badge>
-            <Text fontSize="sm" color="blue.900">{readiness.reason}</Text>
+            <Text fontSize="sm" color="blue.900">
+              {readiness.reason}
+            </Text>
           </HStack>
           <HStack mt={3}>
             <Button
@@ -212,9 +181,7 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
                 <Badge colorScheme={canProceedToOperations ? 'green' : 'orange'} data-testid="onboarding-activation-state">
                   {canProceedToOperations ? 'Ready to move forward' : `${blockersCount} follow-up item(s) left`}
                 </Badge>
-                <Badge colorScheme="blue">
-                  {`${readyCheckCount} of ${activationChecks.length} checks ready`}
-                </Badge>
+                <Badge colorScheme="blue">{`${readyCheckCount} of ${activationChecks.length} checks ready`}</Badge>
               </HStack>
               <Text fontSize="sm" color="blue.900">
                 These checks help confirm the client can move safely from onboarding into live outreach.
@@ -225,7 +192,9 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
                     <Badge colorScheme={item.complete ? 'green' : item.unknown ? 'gray' : 'red'} minW="90px" textAlign="center">
                       {item.complete ? 'Ready' : item.unknown ? 'Pending' : 'Missing'}
                     </Badge>
-                    <Text fontSize="xs" color="blue.900">{item.label}</Text>
+                    <Text fontSize="xs" color="blue.900">
+                      {item.label}
+                    </Text>
                   </HStack>
                 ))}
               </SimpleGrid>
@@ -243,16 +212,9 @@ export default function OnboardingHomePage({ view, onNavigate }: OnboardingHomeP
               </AlertDescription>
             </Box>
           </Alert>
-        ) : null}
-
-        <SubNavigation
-          key={`onboarding-${selectedCustomerId || 'no-customer'}`}
-          items={navItems}
-          activeId={effectiveActiveView}
-          onChange={(id) => onNavigate?.(id as OnboardingViewId)}
-          title="Onboarding"
-          enableDragDrop={false}
-        />
+        ) : (
+          <CustomerOnboardingTab customerId={selectedCustomerId} />
+        )}
       </Box>
     </Flex>
   )

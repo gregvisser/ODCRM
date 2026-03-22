@@ -40,20 +40,20 @@ if (onboardingHomeSource.includes("id: 'overview'")) {
 if (onboardingHomeSource.includes('OnboardingOverview')) {
   fail('OnboardingHomePage still references OnboardingOverview in the live tab flow')
 }
-if (!onboardingHomeSource.includes("export type OnboardingViewId = 'customer-onboarding' | 'progress-tracker'")) {
-  fail('OnboardingHomePage OnboardingViewId is not constrained to live sub-views')
+if (!onboardingHomeSource.includes("export type OnboardingViewId = 'customer-onboarding'")) {
+  fail('OnboardingHomePage OnboardingViewId should be unified onboarding-only')
 }
-if (!onboardingHomeSource.includes("return 'customer-onboarding'")) {
-  fail('OnboardingHomePage legacy/default view coercion missing customer-onboarding fallback')
+if (onboardingHomeSource.includes('ProgressTrackerTab') || onboardingHomeSource.includes('progress-tracker')) {
+  fail('OnboardingHomePage must not reference standalone Progress Tracker tab')
 }
-if (!onboardingHomeSource.includes('const effectiveActiveView: OnboardingViewId = selectedCustomerId ? activeView : \'progress-tracker\'')) {
-  fail('OnboardingHomePage missing no-client fallback to progress-tracker active view')
+if (!onboardingHomeSource.includes('<CustomerOnboardingTab customerId={selectedCustomerId} />')) {
+  fail('OnboardingHomePage should render CustomerOnboardingTab when a client is selected')
 }
-if (!onboardingHomeSource.includes('Select a client (or create one from the dropdown) to begin onboarding.')) {
+if (!onboardingHomeSource.includes('Select a client to begin')) {
   fail('OnboardingHomePage missing no-client onboarding guidance')
 }
 
 console.log('PASS onboarding live UI flow excludes Overview sub-tab')
-console.log('PASS onboarding defaults/legacy deep-links resolve to live views safely')
-console.log('PASS onboarding no-client fallback state remains safe')
+console.log('PASS onboarding unified client onboarding without separate Progress Tracker tab')
+console.log('PASS onboarding no-client state shows selector guidance')
 console.log('self-test-onboarding-ui-flow-runtime: PASS')

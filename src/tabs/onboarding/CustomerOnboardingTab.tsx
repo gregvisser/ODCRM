@@ -51,6 +51,7 @@ import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
 import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
+import OnboardingProgressSections from './components/OnboardingProgressSections'
 import { useUsersFromDatabase, type DatabaseUser } from '../../hooks/useUsersFromDatabase'
 import type {
   Account,
@@ -96,6 +97,9 @@ type AccountDetails = {
   assignedAccountManagerName?: string
   /** Start date agreed with client (YYYY-MM-DD or ISO string; stored in DB under accountData.accountDetails) */
   startDateAgreed?: string
+  /** Server-stamped when start date is first saved (additive, for checklist attribution). */
+  startDateAgreedSetAt?: string
+  startDateAgreedSetBy?: string | null
   /** Timestamp when client was created on CRM (ISO string). Presence drives auto-tick. */
   clientCreatedOnCrmAt?: string
   assignedClientDdiNumber: string
@@ -154,6 +158,8 @@ const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
   assignedAccountManagerId: '',
   assignedAccountManagerName: '',
   startDateAgreed: '',
+  startDateAgreedSetAt: '',
+  startDateAgreedSetBy: '',
   clientCreatedOnCrmAt: '',
   assignedClientDdiNumber: '',
   emailAccounts: ['', '', '', '', ''],
@@ -193,6 +199,10 @@ const normalizeAccountDetails = (raw?: Partial<AccountDetails> | null): AccountD
       ? safe.emailAccounts
       : [...EMPTY_ACCOUNT_DETAILS.emailAccounts],
     daysPerWeek: typeof safe.daysPerWeek === 'number' ? safe.daysPerWeek : 1,
+    startDateAgreedSetAt:
+      typeof (safe as any).startDateAgreedSetAt === 'string' ? (safe as any).startDateAgreedSetAt : '',
+    startDateAgreedSetBy:
+      typeof (safe as any).startDateAgreedSetBy === 'string' ? (safe as any).startDateAgreedSetBy : '',
   }
 }
 
@@ -330,6 +340,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [leadsGoogleSheetLabel, setLeadsGoogleSheetLabel] = useState<string>('')
   const [weeklyLeadTarget, setWeeklyLeadTarget] = useState<string>('')
   const [monthlyLeadTarget, setMonthlyLeadTarget] = useState<string>('')
+  const [linkedEmailCount, setLinkedEmailCount] = useState<number | null>(0)
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
   const editVersionRef = useRef(0)
 
@@ -368,6 +379,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         hasAccountData: !!data.accountData,
       })
       setCustomer(data)
+      setLinkedEmailCount(
+        typeof (data as any).linkedEmailCount === 'number'
+          ? (data as any).linkedEmailCount
+          : (data as any).linkedEmailCount === null
+            ? null
+            : 0,
+      )
       setCustomerUpdatedAt(typeof (data as any).updatedAt === 'string' ? ((data as any).updatedAt as string) : null)
       // Initialize additional contacts from DB (exclude primary; primary lives in accountDetails.primaryContact)
       const rows = Array.isArray((data as any).customerContacts) ? (data as any).customerContacts : []
@@ -1347,7 +1365,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 placeholder="YYYY-MM-DD"
               />
               <Text fontSize="xs" color="gray.500" mt={1}>
-                {"When this is set, the Progress Tracker will auto-tick \"Start Date Agreed\"."}
+                {"When this is set, the onboarding checklist will auto-complete \"Start Date Agreed\"."}
               </Text>
             </FormControl>
             <FormControl>
@@ -1369,7 +1387,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 </Text>
               ) : (
                 <Text fontSize="xs" color="gray.500" mt={1}>
-                  {"When this is set, the Progress Tracker will auto-tick \"Client Added to CRM System & Back Up Folder\"."}
+                  {"When this is set, the onboarding checklist will auto-complete \"Client Added to CRM\"."}
                 </Text>
               )}
             </FormControl>
@@ -2084,6 +2102,21 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           </FormControl>
         </Stack>
       </Box>
+
+      <OnboardingProgressSections
+        customerId={customer.id}
+        accountData={(customer.accountData as Record<string, unknown>) || {}}
+        linkedEmailCount={linkedEmailCount}
+        leadsGoogleSheetUrl={leadsGoogleSheetUrl}
+        assignedClientDdiNumber={accountDetails.assignedClientDdiNumber || ''}
+        accountDetails={{
+          startDateAgreed: accountDetails.startDateAgreed,
+          startDateAgreedSetAt: (accountDetails as any).startDateAgreedSetAt,
+          startDateAgreedSetBy: (accountDetails as any).startDateAgreedSetBy,
+        }}
+        dbUsers={Array.isArray(dbUsers) ? dbUsers : []}
+        onRefresh={() => fetchCustomer()}
+      />
 
       {/* Single bottom save action (unified form) */}
       <Box pt={2} pb={2}>

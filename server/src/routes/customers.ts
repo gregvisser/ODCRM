@@ -128,6 +128,46 @@ async function countLinkedOutreachEmailIdentities(
   }
 }
 
+/** DB-derived signals for onboarding progress auto-ticks (tenant-scoped by customerId). */
+async function applyProgressAutoTicksInTransaction(
+  tx: {
+    emailIdentity: PrismaClient['emailIdentity']
+    emailTemplate: PrismaClient['emailTemplate']
+    emailEvent: PrismaClient['emailEvent']
+  },
+  customerId: string,
+  accountDataIn: Record<string, any>,
+  opts: {
+    hasAgreement: boolean
+    leadsReportingUrl: string | null | undefined
+    weeklyLeadTarget: number | null | undefined
+    actorUserId: string | null
+    nowIso: string
+  },
+) {
+  const hasLeadGoogleSheet = typeof opts.leadsReportingUrl === 'string' && opts.leadsReportingUrl.trim().length > 0
+  const [linkedEmailCount, templateCount, firstSent] = await Promise.all([
+    countLinkedOutreachEmailIdentities(tx, customerId),
+    tx.emailTemplate.count({ where: { customerId } }),
+    tx.emailEvent.findFirst({
+      where: { customerId, type: 'sent' },
+      orderBy: { occurredAt: 'asc' },
+      select: { occurredAt: true },
+    }),
+  ])
+  return applyAutoTicksToAccountData({
+    accountData: accountDataIn,
+    hasAgreement: opts.hasAgreement,
+    hasLeadGoogleSheet,
+    linkedEmailCount,
+    weeklyLeadTarget: opts.weeklyLeadTarget ?? null,
+    templateCount,
+    firstOutreachSentAtIso: firstSent?.occurredAt?.toISOString() ?? null,
+    actorUserId: opts.actorUserId,
+    nowIso: opts.nowIso,
+  })
+}
+
 function enforceTenantHeaderForCustomerRoute(
   req: any,
   res: any,
@@ -1037,6 +1077,7 @@ router.put('/:id/onboarding', async (req, res) => {
           agreementContainerName: true,
           agreementFileUrl: true, // legacy
           leadsReportingUrl: true,
+          weeklyLeadTarget: true,
         },
       })
       if (!existing) {
@@ -1059,23 +1100,46 @@ router.put('/:id/onboarding', async (req, res) => {
       const incomingAccountDataRaw =
         validated.accountData && typeof validated.accountData === 'object' ? (validated.accountData as any) : {}
       const incomingAccountData = stripUndefinedDeep(incomingAccountDataRaw)
-      const mergedAccountDataBase = deepMergePreserve(existingAccountData, incomingAccountData)
+      let mergedAccountDataBase = deepMergePreserve(existingAccountData, incomingAccountData)
+
+      // Keep progressTracker.updatedAt consistent with Customer.updatedAt for this save.
+      const nowIso = updateData.updatedAt instanceof Date ? updateData.updatedAt.toISOString() : new Date().toISOString()
+
+      // Additive: record who set start date the first time it becomes non-empty (for onboarding checklist display).
+      try {
+        const det = mergedAccountDataBase?.accountDetails && typeof mergedAccountDataBase.accountDetails === 'object'
+          ? (mergedAccountDataBase.accountDetails as any)
+          : {}
+        const sd = typeof det.startDateAgreed === 'string' ? det.startDateAgreed.trim() : ''
+        if (sd && !det.startDateAgreedSetAt) {
+          mergedAccountDataBase = {
+            ...mergedAccountDataBase,
+            accountDetails: {
+              ...det,
+              startDateAgreedSetAt: nowIso,
+              startDateAgreedSetBy: onboardingActorUserId || null,
+            },
+          }
+        }
+      } catch {
+        // ignore
+      }
 
       // AUTO-TICK (idempotent): apply progress tracker ticks based on DB truth.
       // IMPORTANT: This must happen inside this transaction so the response updatedAt matches final DB updatedAt.
       const hasAgreement =
         Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl)
-      const nextLeadsReportingUrl =
-        Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl') ? updateData.leadsReportingUrl : existing.leadsReportingUrl
-      const hasLeadGoogleSheet = typeof nextLeadsReportingUrl === 'string' ? nextLeadsReportingUrl.trim().length > 0 : false
+      const nextLeadsReportingUrl = Object.prototype.hasOwnProperty.call(updateData, 'leadsReportingUrl')
+        ? updateData.leadsReportingUrl
+        : existing.leadsReportingUrl
+      const nextWeeklyLeadTarget = Object.prototype.hasOwnProperty.call(updateData, 'weeklyLeadTarget')
+        ? updateData.weeklyLeadTarget
+        : existing.weeklyLeadTarget
 
-      // Keep progressTracker.updatedAt consistent with Customer.updatedAt for this save.
-      const nowIso = updateData.updatedAt instanceof Date ? updateData.updatedAt.toISOString() : new Date().toISOString()
-
-      const autoTickResult = applyAutoTicksToAccountData({
-        accountData: mergedAccountDataBase,
+      const autoTickResult = await applyProgressAutoTicksInTransaction(tx, id, mergedAccountDataBase, {
         hasAgreement,
-        hasLeadGoogleSheet,
+        leadsReportingUrl: nextLeadsReportingUrl,
+        weeklyLeadTarget: nextWeeklyLeadTarget,
         actorUserId: onboardingActorUserId,
         nowIso,
       })
@@ -2634,6 +2698,7 @@ router.put('/:id/progress-tracker', async (req, res) => {
       group: z.enum(['sales', 'ops', 'am']),
       itemKey: z.string().min(1),
       checked: z.boolean(),
+      valuePayload: z.record(z.string(), z.unknown()).optional(),
     })
 
     const parsed = bodySchema.safeParse(req.body)
@@ -2641,7 +2706,7 @@ router.put('/:id/progress-tracker', async (req, res) => {
       return res.status(400).json({ error: 'Invalid input', details: parsed.error.errors })
     }
 
-    const { group, itemKey, checked } = parsed.data
+    const { group, itemKey, checked, valuePayload } = parsed.data
 
     const actor = getActorIdentity(req)
     const updatedByUserId = (actor?.userId || actor?.email || 'unknown') as string
@@ -2651,7 +2716,16 @@ router.put('/:id/progress-tracker', async (req, res) => {
 
       const existing = await tx.customer.findUnique({
         where: { id },
-        select: { id: true, isArchived: true, accountData: true },
+        select: {
+          id: true,
+          isArchived: true,
+          accountData: true,
+          agreementBlobName: true,
+          agreementContainerName: true,
+          agreementFileUrl: true,
+          leadsReportingUrl: true,
+          weeklyLeadTarget: true,
+        },
       })
       if (!existing) {
         const err: any = new Error('not_found')
@@ -2675,6 +2749,7 @@ router.put('/:id/progress-tracker', async (req, res) => {
         checked,
         actorUserId: updatedByUserId,
         nowIso,
+        valuePayload: valuePayload ?? null,
       })
 
       // Preserve existing debug metadata style on progressTracker root (non-breaking)
@@ -2684,9 +2759,28 @@ router.put('/:id/progress-tracker', async (req, res) => {
         updatedByUserId,
       }
 
-      const nextAccountData = {
+      let nextAccountData = {
         ...manualApplied.accountData,
         progressTracker: nextProgressTracker,
+      }
+
+      // Recompute auto-ticks after manual change so derived items stay aligned with DB truth.
+      const hasAgreement =
+        Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl)
+      const autoTicked = await applyProgressAutoTicksInTransaction(tx, id, nextAccountData, {
+        hasAgreement,
+        leadsReportingUrl: existing.leadsReportingUrl,
+        weeklyLeadTarget: existing.weeklyLeadTarget,
+        actorUserId: updatedByUserId,
+        nowIso,
+      })
+      nextAccountData = {
+        ...autoTicked.accountData,
+        progressTracker: {
+          ...(autoTicked.accountData.progressTracker || {}),
+          updatedAt: nowIso,
+          updatedByUserId,
+        },
       }
 
       await tx.customer.update({
@@ -2706,7 +2800,7 @@ router.put('/:id/progress-tracker', async (req, res) => {
         // ignore
       }
 
-      return nextProgressTracker
+      return nextAccountData.progressTracker
     })
 
     return res.status(200).json({ success: true, progressTracker: result })
@@ -2881,6 +2975,41 @@ router.post('/:id/agreement', async (req, res) => {
         error: 'database_update_incomplete',
         message: 'Agreement metadata not persisted correctly'
       })
+    }
+
+    // Merge onboarding progress auto-ticks (agreement present) into accountData JSON.
+    try {
+      const actorForProgress = (actorIdentity?.userId || actorIdentity?.email || null) as string | null
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
+        const row = await tx.customer.findUnique({
+          where: { id },
+          select: {
+            accountData: true,
+            agreementBlobName: true,
+            agreementContainerName: true,
+            agreementFileUrl: true,
+            leadsReportingUrl: true,
+            weeklyLeadTarget: true,
+          },
+        })
+        if (!row) return
+        const ad = row.accountData && typeof row.accountData === 'object' ? (row.accountData as any) : {}
+        const nowIso = new Date().toISOString()
+        const ticked = await applyProgressAutoTicksInTransaction(tx, id, ad, {
+          hasAgreement: true,
+          leadsReportingUrl: row.leadsReportingUrl,
+          weeklyLeadTarget: row.weeklyLeadTarget,
+          actorUserId: actorForProgress,
+          nowIso,
+        })
+        await tx.customer.update({
+          where: { id },
+          data: { accountData: ticked.accountData, updatedAt: new Date() },
+        })
+      })
+    } catch (e) {
+      console.warn('[agreement] progress auto-tick merge failed (non-fatal)', e)
     }
 
     console.log(`[agreement] ✅ AFTER UPDATE: customerId=${id}`)
@@ -3155,6 +3284,7 @@ router.post('/:id/attachments', (req, res) => {
           agreementContainerName: true,
           agreementFileUrl: true,
           leadsReportingUrl: true,
+          weeklyLeadTarget: true,
         },
       })
       if (!customer) {
@@ -3220,6 +3350,7 @@ router.post('/:id/attachments', (req, res) => {
             agreementContainerName: true,
             agreementFileUrl: true,
             leadsReportingUrl: true,
+            weeklyLeadTarget: true,
           },
         })
         if (!existing) return null
@@ -3230,10 +3361,22 @@ router.post('/:id/attachments', (req, res) => {
           ? currentAccountData.attachments
           : []
 
-        const nextAccountData: any = {
+        let nextAccountData: any = {
           ...currentAccountData,
           attachments: [...currentAttachments, attachment],
         }
+
+        const nowIsoInner = new Date().toISOString()
+        const hasAgreement =
+          Boolean(existing.agreementBlobName && existing.agreementContainerName) || Boolean(existing.agreementFileUrl)
+        const autoTicked = await applyProgressAutoTicksInTransaction(tx, id, nextAccountData, {
+          hasAgreement,
+          leadsReportingUrl: existing.leadsReportingUrl,
+          weeklyLeadTarget: existing.weeklyLeadTarget,
+          actorUserId: actorEmail,
+          nowIso: nowIsoInner,
+        })
+        nextAccountData = autoTicked.accountData
 
         // Optional: also wire known onboarding fields to keep UX consistent after DB rehydrate.
         // This allows existing UI fields (accreditations evidence + case studies file) to keep working,
@@ -3595,6 +3738,7 @@ router.post('/:id/suppression-import', (req, res) => {
             agreementContainerName: true,
             agreementFileUrl: true,
             leadsReportingUrl: true,
+            weeklyLeadTarget: true,
           },
         })
         if (!customer) {
@@ -3678,11 +3822,10 @@ router.post('/:id/suppression-import', (req, res) => {
         // Apply auto-ticks idempotently (e.g., DNC uploaded -> am_send_dnc)
         const hasAgreement =
           Boolean(customer.agreementBlobName && customer.agreementContainerName) || Boolean(customer.agreementFileUrl)
-        const hasLeadGoogleSheet = typeof customer.leadsReportingUrl === 'string' ? customer.leadsReportingUrl.trim().length > 0 : false
-        const autoTicked = applyAutoTicksToAccountData({
-          accountData: nextAccountData,
+        const autoTicked = await applyProgressAutoTicksInTransaction(tx, id, nextAccountData, {
           hasAgreement,
-          hasLeadGoogleSheet,
+          leadsReportingUrl: customer.leadsReportingUrl,
+          weeklyLeadTarget: customer.weeklyLeadTarget,
           actorUserId,
           nowIso,
         })

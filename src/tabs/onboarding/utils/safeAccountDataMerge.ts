@@ -3,7 +3,7 @@
  * 
  * Ensures updates to accountData don't accidentally wipe other nested fields.
  * This is critical for onboarding where different tabs update different sections:
- * - ProgressTrackerTab updates: accountData.progressTracker
+ * - Progress tracker updates: accountData.progressTracker (via /api/customers/:id/progress-tracker or auto-tick on save)
  * - CustomerOnboardingTab updates: accountData.clientProfile, accountData.accountDetails
  * 
  * Without proper merging, updating progressTracker could wipe clientProfile and vice versa.
