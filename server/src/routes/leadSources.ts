@@ -227,6 +227,9 @@ function deleteCachedContacts(scope: {
   contactsCache.delete(getContactsCacheKey(scope))
 }
 
+/** Canonical field on each contact row: ISO time from LeadSourceRowSeen.firstSeenAt (not from the sheet). */
+const LEAD_SOURCE_CONTACT_META_FIRST_SEEN_KEY = 'odcrmFirstSeenAt'
+
 /** Resolve sheet config: exact customer first, then any config with appliesTo ALL_ACCOUNTS for this sourceType. */
 async function resolveLeadSourceConfig(
   customerId: string,
@@ -240,6 +243,57 @@ async function resolveLeadSourceConfig(
     where: { sourceType, appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS },
   })
   return fallback?.spreadsheetId ? fallback : null
+}
+
+/**
+ * Load the current sheet export, map to canonical rows + fingerprints, and optionally refresh the in-memory cache.
+ */
+async function loadLeadSourceContactsCsvIntoCache(
+  config: ResolvedLeadSourceConfig,
+  dataScope: LeadSourceDataScope,
+  options?: { forceRefresh?: boolean }
+): Promise<{ columnKeys: string[]; rows: Array<Record<string, string>> }> {
+  if (options?.forceRefresh) {
+    deleteCachedContacts(dataScope)
+  }
+  const hit = getCachedContacts(dataScope)
+  if (hit && !options?.forceRefresh) {
+    return { columnKeys: hit.columnKeys, rows: hit.rows }
+  }
+  const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
+  const csvText = await fetchCsvFromUrl(csvUrl)
+  const firstLine = csvText.split(/\r?\n/)[0] ?? ''
+  if (process.env.DEBUG_LEAD_SOURCES === '1') {
+    const commaCount = (firstLine.match(/,/g) || []).length
+    const tabCount = (firstLine.match(/\t/g) || []).length
+    const semicolonCount = (firstLine.match(/;/g) || []).length
+    const inferred = detectDelimiter(firstLine)
+    console.debug('[lead-sources contacts] raw CSV', {
+      csvUrl,
+      firstLineTrunc500: firstLine.slice(0, 500),
+      commaCount,
+      tabCount,
+      semicolonCount,
+      inferredDelimiter: inferred === '\t' ? 'TAB' : inferred === ';' ? 'SEMICOLON' : 'COMMA',
+    })
+  }
+  const { columnKeys, rows } = csvToMappedRows(csvText)
+  if (process.env.DEBUG_LEAD_SOURCES === '1') {
+    const firstRowKeys = rows[0] ? Object.keys({ ...rows[0].canonical, ...rows[0].extraFields }) : []
+    console.debug('[lead-sources contacts] parser output', {
+      parsedHeadersLength: columnKeys.length,
+      first30Headers: columnKeys.slice(0, 30),
+      firstRowKeysCount: firstRowKeys.length,
+      firstRowKeysList: firstRowKeys.slice(0, 30),
+    })
+  }
+  const flat = rows.map((r) => {
+    const canonical = { ...r.canonical }
+    const fingerprint = computeFingerprint(canonical)
+    return { ...canonical, ...r.extraFields, __fp: fingerprint }
+  })
+  setCachedContacts(dataScope, columnKeys, flat)
+  return { columnKeys, rows: flat }
 }
 
 /** Resolve configs for all source types (for list endpoint). */
@@ -898,11 +952,12 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         appliesTo: (config as { appliesTo?: string }).appliesTo,
       })
     }
+    const dataScope = getLeadSourceDataScope(config)
     const fingerprintsInBatch = await prisma.leadSourceRowSeen.findMany({
       where: {
-        customerId: config.customerId,
+        customerId: dataScope.configCustomerId,
         sourceType,
-        spreadsheetId: config.spreadsheetId,
+        spreadsheetId: dataScope.spreadsheetId,
         batchKey,
       },
       select: { fingerprint: true, firstSeenAt: true },
@@ -912,69 +967,45 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       fingerprintsInBatch.map((row) => [row.fingerprint, row.firstSeenAt.getTime()] as const)
     )
     const rowSeenCount = fingerprintsInBatch.length
-    const dataScope = getLeadSourceDataScope(config)
-    let cached = getCachedContacts(dataScope)
-    if (!cached) {
-      const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
-      const csvText = await fetchCsvFromUrl(csvUrl)
-      const firstLine = csvText.split(/\r?\n/)[0] ?? ''
-      if (process.env.DEBUG_LEAD_SOURCES === '1') {
-        const commaCount = (firstLine.match(/,/g) || []).length
-        const tabCount = (firstLine.match(/\t/g) || []).length
-        const semicolonCount = (firstLine.match(/;/g) || []).length
-        const inferred = detectDelimiter(firstLine)
-        console.debug('[lead-sources contacts] raw CSV', {
-          csvUrl,
-          firstLineTrunc500: firstLine.slice(0, 500),
-          commaCount,
-          tabCount,
-          semicolonCount,
-          inferredDelimiter: inferred === '\t' ? 'TAB' : inferred === ';' ? 'SEMICOLON' : 'COMMA',
-        })
-      }
-      const { columnKeys, rows } = csvToMappedRows(csvText)
-      if (process.env.DEBUG_LEAD_SOURCES === '1') {
-        const firstRowKeys = rows[0] ? Object.keys({ ...rows[0].canonical, ...rows[0].extraFields }) : []
-        console.debug('[lead-sources contacts] parser output', {
-          parsedHeadersLength: columnKeys.length,
-          first30Headers: columnKeys.slice(0, 30),
-          firstRowKeysCount: firstRowKeys.length,
-          firstRowKeysList: firstRowKeys.slice(0, 30),
-        })
-      }
-      const flat = rows.map((r) => {
-        const canonical = { ...r.canonical }
-        const fingerprint = computeFingerprint(canonical)
-        return { ...canonical, ...r.extraFields, __fp: fingerprint }
-      })
-      setCachedContacts(dataScope, columnKeys, flat)
-      cached = { columnKeys, rows: flat }
-    }
-    const filtered = cached.rows.filter((r: Record<string, string>) => {
+    let cached = await loadLeadSourceContactsCsvIntoCache(config, dataScope)
+    let filtered = cached.rows.filter((r: Record<string, string>) => {
       const fp = r['__fp']
       return typeof fp === 'string' && fpSet.has(fp)
     })
+    // Stale in-memory CSV vs current sheet: fingerprints from DB don't match cached export (e.g. sheet edited).
+    if (filtered.length === 0 && fpSet.size > 0) {
+      cached = await loadLeadSourceContactsCsvIntoCache(config, dataScope, { forceRefresh: true })
+      filtered = cached.rows.filter((r: Record<string, string>) => {
+        const fp = r['__fp']
+        return typeof fp === 'string' && fpSet.has(fp)
+      })
+    }
     filtered.sort((a, b) => {
       const aTs = typeof a.__fp === 'string' ? firstSeenByFingerprint.get(a.__fp) ?? 0 : 0
       const bTs = typeof b.__fp === 'string' ? firstSeenByFingerprint.get(b.__fp) ?? 0 : 0
       return bTs - aTs
     })
-    let returnedColumns = cached.columnKeys.filter((k) => k !== '__fp')
+    const metaKey = LEAD_SOURCE_CONTACT_META_FIRST_SEEN_KEY
+    let returnedColumns = cached.columnKeys.filter((k) => k !== '__fp' && k !== metaKey)
     if (returnedColumns.length === 0 && cached.rows.length > 0) {
       const keySet = new Set<string>()
       for (const row of cached.rows.slice(0, 200)) {
-        for (const k of Object.keys(row)) if (k && k !== '__fp') keySet.add(k)
+        for (const k of Object.keys(row)) if (k && k !== '__fp' && k !== metaKey) keySet.add(k)
       }
       returnedColumns = Array.from(keySet)
     }
     const searchFiltered = searchQuery
-      ? filtered.filter((row) =>
-          returnedColumns.some((column) =>
+      ? filtered.filter((row) => {
+          const fp = typeof row.__fp === 'string' ? row.__fp : ''
+          const ts = fp ? firstSeenByFingerprint.get(fp) : undefined
+          const meta = ts ? new Date(ts).toISOString().toLowerCase() : ''
+          if (meta.includes(searchQuery)) return true
+          return returnedColumns.some((column) =>
             String(row[column] ?? '')
               .toLowerCase()
               .includes(searchQuery)
           )
-        )
+        })
       : filtered
     const total = searchFiltered.length
     if (process.env.DEBUG_LEAD_SOURCES === '1') {
@@ -999,10 +1030,16 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
     const start = (page - 1) * pageSize
     const slice = searchFiltered.slice(start, start + pageSize).map((r: Record<string, string>) => {
       const { __fp, ...rest } = r
-      return normalizeRowKeepKeys(rest as Record<string, string>, returnedColumns)
+      const fp = typeof __fp === 'string' ? __fp : ''
+      const ts = fp ? firstSeenByFingerprint.get(fp) : undefined
+      const base = normalizeRowKeepKeys(rest as Record<string, string>, returnedColumns)
+      return {
+        ...base,
+        [metaKey]: ts ? new Date(ts).toISOString() : '',
+      }
     })
     res.json({
-      columns: returnedColumns,
+      columns: [metaKey, ...returnedColumns],
       contacts: slice,
       page,
       pageSize,

@@ -11,6 +11,8 @@ export const REVIEW_COLUMN_CONTACT_NUMBER = '__review_contact_number__'
 /** Operator-facing header labels (never raw sheet fragments or ambiguous camelCase in review mode). */
 export const REVIEW_HEADER: Record<string, string> = {
   [REVIEW_COLUMN_BATCH]: 'Batch name',
+  /** Server-added ISO timestamp from LeadSourceRowSeen (newest-first sort uses this). */
+  odcrmfirstseenat: 'First seen (import)',
   firstname: 'First Name',
   lastname: 'Last Name',
   companyname: 'Company',
@@ -21,6 +23,7 @@ export const REVIEW_HEADER: Record<string, string> = {
 
 /** Default review order (logical). Only columns that exist in the row set are shown. */
 const REVIEW_DATA_KEYS = [
+  'odcrmfirstseenat',
   'firstname',
   'lastname',
   'companyname',
@@ -32,7 +35,10 @@ const REVIEW_DATA_KEYS = [
 export type ReviewColumnDef =
   | { normKey: typeof REVIEW_COLUMN_BATCH; header: string }
   | { normKey: typeof REVIEW_COLUMN_CONTACT_NUMBER; header: string }
-  | { normKey: 'firstname' | 'lastname' | 'companyname' | 'email' | 'jobtitle'; header: string }
+  | {
+      normKey: 'odcrmfirstseenat' | 'firstname' | 'lastname' | 'companyname' | 'email' | 'jobtitle'
+      header: string
+    }
 
 export function buildReviewColumnDefs(normalizedColumnSet: Set<string>): ReviewColumnDef[] {
   const has = (k: string) => normalizedColumnSet.has(k)
@@ -58,7 +64,17 @@ export function contactNumberCell(row: Record<string, string>): string {
 
 /** Narrow default for “Choose columns” recommended: sequencing-relevant fields only (not every sheet column). */
 export function getRecommendedContactNormKeys(normalizedColumns: string[]): string[] {
-  const want = ['firstname', 'lastname', 'companyname', 'jobtitle', 'email', 'mobile', 'directphone', 'officephone']
+  const want = [
+    'odcrmfirstseenat',
+    'firstname',
+    'lastname',
+    'companyname',
+    'jobtitle',
+    'email',
+    'mobile',
+    'directphone',
+    'officephone',
+  ]
   const have = new Set(normalizedColumns)
   return want.filter((k) => have.has(k))
 }

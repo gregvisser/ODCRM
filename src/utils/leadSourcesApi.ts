@@ -49,6 +49,7 @@ export interface LeadSourceBatchesResponse {
 }
 
 export interface LeadSourceContactsResponse {
+  /** Sheet + server columns; `odcrmFirstSeenAt` is ISO-first-seen from DB (not from the sheet). */
   columns: string[]
   contacts: Record<string, string>[]
   page: number

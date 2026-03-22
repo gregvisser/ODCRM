@@ -30,6 +30,9 @@ assert.equal(contactNumberCell({}), '')
 const rec = getRecommendedContactNormKeys(['email', 'jobtitle', 'noise'])
 assert.deepEqual(rec, ['jobtitle', 'email'])
 
+const recWithMeta = getRecommendedContactNormKeys(['odcrmfirstseenat', 'email', 'firstname'])
+assert.deepEqual(recWithMeta, ['odcrmfirstseenat', 'firstname', 'email'])
+
 assert.equal(humanizeLeadSourceNormHeader('email', 'Email'), 'Email')
 assert.equal(humanizeLeadSourceNormHeader('unknown', 'Raw header'), 'Raw header')
 
