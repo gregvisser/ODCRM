@@ -16,7 +16,8 @@ type UseCustomersResult = {
   customers: DatabaseCustomer[]
   loading: boolean
   error: string | null
-  refetch: () => Promise<void>
+  /** Foreground refetch shows loading; background keeps UI mounted (scroll + drawer stability). */
+  refetch: (opts?: { background?: boolean }) => Promise<void>
   createCustomer: (data: Partial<DatabaseCustomer>) => Promise<{ id?: string; error?: string }>
   updateCustomer: (id: string, data: Partial<DatabaseCustomer>) => Promise<{ error?: string }>
   deleteCustomer: (id: string) => Promise<{ error?: string }>
@@ -31,32 +32,46 @@ export function useCustomersFromDatabase(): UseCustomersResult {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true)
+  const fetchCustomers = useCallback(async (opts?: { background?: boolean }) => {
+    const background = opts?.background === true
+    // Only the initial / explicit foreground loads should swap the UI for a spinner.
+    // Event-driven refreshes must not set loading=true or AccountsTab/Contacts unmount and scroll resets.
+    if (!background) {
+      setLoading(true)
+    }
     setError(null)
-    
+
     const { data, error: fetchError } = await api.get('/api/customers')
-    
+
     if (fetchError) {
+      if (background) {
+        console.warn('⚠️ Background customer list refresh failed:', fetchError)
+        return
+      }
       console.error('❌ Failed to fetch customers from database:', fetchError)
       setError(fetchError)
       setCustomers([])
       setLoading(false)
       return
     }
-    
+
     try {
-      // Use canonical normalizer - throws on unexpected shape
       const customersArray = normalizeCustomersListResponse(data)
       console.log('✅ Loaded customers from database:', customersArray.length)
       setCustomers(customersArray)
     } catch (err: any) {
+      if (background) {
+        console.warn('⚠️ Background customer list parse failed:', err)
+        return
+      }
       console.error('❌ Failed to normalize customers response:', err)
       setError(err.message || 'Failed to parse customers response')
       setCustomers([])
     }
-    
-    setLoading(false)
+
+    if (!background) {
+      setLoading(false)
+    }
   }, [])
 
   // Load on mount
@@ -67,10 +82,10 @@ export function useCustomersFromDatabase(): UseCustomersResult {
   // Keep customers fresh across the app when anything updates a customer in DB.
   useEffect(() => {
     const off = on('customerUpdated', () => {
-      void fetchCustomers()
+      void fetchCustomers({ background: true })
     })
     const offCreated = on('customerCreated', () => {
-      void fetchCustomers()
+      void fetchCustomers({ background: true })
     })
     return () => {
       off()
@@ -114,7 +129,7 @@ export function useCustomersFromDatabase(): UseCustomersResult {
     }
 
     console.log('✅ Customer created:', result)
-    await fetchCustomers() // Refresh list
+    await fetchCustomers({ background: true })
     return { id: result?.id }
   }, [fetchCustomers])
 
@@ -154,7 +169,7 @@ export function useCustomersFromDatabase(): UseCustomersResult {
     }
 
     console.log('✅ Customer updated:', id)
-    await fetchCustomers() // Refresh list
+    await fetchCustomers({ background: true })
     return {}
   }, [fetchCustomers])
 
@@ -167,7 +182,7 @@ export function useCustomersFromDatabase(): UseCustomersResult {
     }
 
     console.log('✅ Customer deleted:', id)
-    await fetchCustomers() // Refresh list
+    await fetchCustomers({ background: true })
     return {}
   }, [fetchCustomers])
 

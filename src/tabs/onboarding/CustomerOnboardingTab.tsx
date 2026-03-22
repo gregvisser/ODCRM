@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Accordion,
   AccordionButton,
@@ -366,6 +366,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [linkedEmailCount, setLinkedEmailCount] = useState<number | null>(0)
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
   const editVersionRef = useRef(0)
+  /** After background GET, restore window scroll in useLayoutEffect (avoids snap-to-top before paint). */
+  const pendingWindowScrollY = useRef<number | null>(null)
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -387,7 +389,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       return
     }
     const background = opts?.background === true
-    const scrollY = background && typeof window !== 'undefined' ? window.scrollY : null
+    const scrollY =
+      background && typeof window !== 'undefined'
+        ? window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0
+        : null
     onboardingDebug('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId, background ? '(background)' : '')
     if (!background) {
       setIsLoading(true)
@@ -435,16 +440,19 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setSaveStatus('saved')
       setSaveErrorMessage(null)
       setLastSavedAt(typeof (data as any).updatedAt === 'string' ? ((data as any).updatedAt as string) : null)
+      if (background && scrollY !== null) {
+        pendingWindowScrollY.current = scrollY
+      }
     }
     setIsLoading(false)
-    if (background && scrollY !== null) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          window.scrollTo(0, scrollY)
-        })
-      })
-    }
   }, [customerId])
+
+  useLayoutEffect(() => {
+    const y = pendingWindowScrollY.current
+    if (y === null) return
+    pendingWindowScrollY.current = null
+    window.scrollTo({ top: y, left: 0, behavior: 'auto' })
+  }, [customer])
 
   // Protect against accidental refresh/close while dirty
   useEffect(() => {
