@@ -2362,8 +2362,8 @@ type AccountsTabProps = {
   dbCustomers: CustomerApi[]
   /** Data source indicator for debug display */
   dataSource?: 'DB' | 'CACHE'
-  /** Ask the DB hook to refetch customers after saves */
-  refetchCustomers?: () => void
+  /** Ask the DB hook to refetch customers after saves (use background to avoid unmounting the drawer). */
+  refetchCustomers?: (opts?: { background?: boolean }) => Promise<void>
 }
 
 /**
@@ -2652,8 +2652,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       }
 
       // Ask the DB hook to refetch, so list/table stays in sync.
+      // Background refresh avoids setLoading(true) in useCustomersFromDatabase, which would
+      // swap AccountsTabDatabase for the full-page spinner and unmount AccountsTab (closing the drawer).
       try {
-        refetchCustomers?.()
+        await refetchCustomers?.({ background: true })
       } catch {
         // ignore
       }
