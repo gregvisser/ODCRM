@@ -46,13 +46,19 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
-import { emit } from '../../platform/events'
+import { emit, on } from '../../platform/events'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
 import { safeAccountDataMerge } from './utils/safeAccountDataMerge'
 import { CustomerContactsSection } from './components/CustomerContactsSection'
 import { CompleteOnboardingButton } from './components/CompleteOnboardingButton'
-import RemainingProgressAccordion from './components/RemainingProgressAccordion'
+import { ManualConfirmationBlock } from './components/ManualConfirmationBlock'
+import {
+  COMMERCIAL_CONFIRMATION_ROWS,
+  DELIVERY_AND_GO_LIVE_ROWS,
+  FINAL_SIGNOFF_ROWS,
+  OPERATIONS_COORDINATION_ROWS,
+} from './progress/manualConfirmationPlacements'
 import { OnboardingProgressProvider } from './progress/OnboardingProgressContext'
 import { StickyProgressSummary } from './progress/StickyProgressSummary'
 import { OpsDocumentsInlineCard } from './progress/OpsDocumentsInlineCard'
@@ -373,15 +379,19 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     } as Partial<Account>
   }, [customer])
 
-  // Fetch customer data by ID
-  const fetchCustomer = useCallback(async () => {
+  // Fetch customer data by ID. Use `background` after initial load to avoid full-page spinner + scroll jump.
+  const fetchCustomer = useCallback(async (opts?: { background?: boolean }) => {
     if (!customerId) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customerId, skipping fetch')
       setIsLoading(false)
       return
     }
-    onboardingDebug('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId)
-    setIsLoading(true)
+    const background = opts?.background === true
+    const scrollY = background && typeof window !== 'undefined' ? window.scrollY : null
+    onboardingDebug('📥 CustomerOnboardingTab: Fetching customer data for customerId:', customerId, background ? '(background)' : '')
+    if (!background) {
+      setIsLoading(true)
+    }
     setLoadError(null)
     const { data, error } = await api.get<CustomerApi>(`/api/customers/${customerId}`)
     if (error) {
@@ -427,6 +437,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       setLastSavedAt(typeof (data as any).updatedAt === 'string' ? ((data as any).updatedAt as string) : null)
     }
     setIsLoading(false)
+    if (background && scrollY !== null) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, scrollY)
+        })
+      })
+    }
   }, [customerId])
 
   // Protect against accidental refresh/close while dirty
@@ -486,6 +503,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     void fetchTaxonomy()
   }, [fetchCustomer, fetchTaxonomy])
 
+  // Single refresh entry for progress saves, uploads, and other tabs — background fetch avoids scroll-to-top jank.
+  useEffect(() => {
+    return on<{ id?: string }>('customerUpdated', (d) => {
+      if (d?.id !== customerId) return
+      void fetchCustomer({ background: true })
+    })
+  }, [customerId, fetchCustomer])
+
   // After returning from Outlook OAuth, force DB rehydrate and clear the URL flag.
   useEffect(() => {
     try {
@@ -494,10 +519,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       const qpCustomerId = url.searchParams.get('customerId')
       if (qpCustomerId && qpCustomerId !== customerId) return
 
-      void (async () => {
-        await fetchCustomer()
-        emit('customerUpdated', { id: customerId })
-      })()
+      emit('customerUpdated', { id: customerId })
 
       url.searchParams.delete('emailConnected')
       url.searchParams.delete('connectedEmail')
@@ -764,8 +786,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           throw new Error(message)
         }
 
-        // DB rehydration is mandatory: refresh customer to reflect new attachment metadata + wired profile fields
-        await fetchCustomer()
         emit('customerUpdated', { id: customerId })
       } catch (e) {
         toast({
@@ -820,8 +840,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           throw new Error(message)
         }
 
-        // DB rehydration is mandatory
-        await fetchCustomer()
         emit('customerUpdated', { id: customerId })
       } catch (e) {
         toast({
@@ -897,8 +915,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           duration: 6000,
         })
         
-        // DB rehydration is mandatory: refresh customer to reflect metadata + any progress tracker updates
-        await fetchCustomer()
         emit('customerUpdated', { id: customer.id })
       }
       
@@ -1279,7 +1295,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         startDateAgreedSetBy: (accountDetails as any).startDateAgreedSetBy,
       }}
       dbUsers={Array.isArray(dbUsers) ? dbUsers : []}
-      onRefresh={() => fetchCustomer()}
+      onRefresh={() => fetchCustomer({ background: true })}
     >
     <Stack spacing={6}>
       <StickyProgressSummary />
@@ -1422,6 +1438,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 </Stack>
               </Box>
               <InlineFirstPaymentRow />
+              <ManualConfirmationBlock
+                title="Commercial confirmations & handover"
+                description="Confirm services, expectations, validation, and handover in line with the agreement and payment steps above."
+                rows={COMMERCIAL_CONFIRMATION_ROWS}
+              />
             </Stack>
           </Box>
 
@@ -1698,6 +1719,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <InlineSuppressionDncStatus />
             </Box>
           </FormControl>
+
+          <ManualConfirmationBlock
+            id="onb-ops-coordination"
+            title="Operations coordination"
+            description="Internal prep, client comms, and meetings — aligned with CRM, lead data, and suppression above."
+            rows={OPERATIONS_COORDINATION_ROWS}
+          />
         </Stack>
       </Box>
 
@@ -2125,6 +2153,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
           <TargetingReadinessStrip />
 
+          <ManualConfirmationBlock
+            id="onb-delivery-launch"
+            title="Delivery, meetings & go-live"
+            description="Meeting prep, reporting rhythm, templates, and launch confirmations — next to campaign readiness above."
+            rows={DELIVERY_AND_GO_LIVE_ROWS}
+          />
+
           <FormControl>
             <FormLabel>Case Studies or Testimonials</FormLabel>
             <Stack spacing={3}>
@@ -2179,7 +2214,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         </Stack>
       </Box>
 
-      <RemainingProgressAccordion />
+      <ManualConfirmationBlock
+        id="onb-confirmations"
+        title="Final sign-offs"
+        description="Cross-team closure when the onboarding workstream is complete."
+        rows={FINAL_SIGNOFF_ROWS}
+      />
 
       {/* Single bottom save action (unified form) */}
       <Box pt={2} pb={2}>
@@ -2216,7 +2256,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               currentStatus={customer.clientStatus || 'onboarding'}
               isDisabled={isDirty || isSaving}
               onStatusUpdated={() => {
-                void fetchCustomer()
+                void fetchCustomer({ background: true })
               }}
             />
           </HStack>
@@ -2326,7 +2366,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 colorScheme="teal"
                 onClick={() => {
                   void (async () => {
-                    await fetchCustomer()
+                    await fetchCustomer({ background: true })
                     conflictDisclosure.onClose()
                     toast({
                       title: 'Reloaded latest data',

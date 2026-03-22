@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { Text, useToast } from '@chakra-ui/react'
 import { api } from '../../../utils/api'
-import { emit, on } from '../../../platform/events'
+import { emit } from '../../../platform/events'
 import type { DatabaseUser } from '../../../hooks/useUsersFromDatabase'
 export type ProgressMeta = {
   completedAt?: string
@@ -126,8 +126,21 @@ export function OnboardingProgressProvider({
   const resolveUserLabel = useCallback(
     (id: string | null | undefined) => {
       if (!id) return ''
-      const u = dbUsers.find((x) => x.userId === id || x.email === id)
-      if (!u) return id
+      const raw = String(id).trim()
+      if (!raw) return ''
+      const lower = raw.toLowerCase()
+      // Legacy server fallback when Bearer identity was not decoded (see getVerifiedActorIdentity).
+      if (lower === 'unknown') return ''
+      const u = dbUsers.find(
+        (x) =>
+          x.userId === raw ||
+          x.email?.toLowerCase() === lower ||
+          x.email?.toLowerCase() === raw.toLowerCase(),
+      )
+      if (!u) {
+        if (raw.includes('@')) return raw
+        return raw
+      }
       return `${u.firstName} ${u.lastName}`.trim() || u.email
     },
     [dbUsers],
@@ -151,6 +164,9 @@ export function OnboardingProgressProvider({
       const parts: string[] = []
       if (m.completionSource === 'AUTO') parts.push('Auto')
       if (who) parts.push(`By ${who}`)
+      else if (m.completedByUserId && String(m.completedByUserId).trim().toLowerCase() === 'unknown') {
+        parts.push('Recorded before sign-in attribution was enabled')
+      }
       if (when) parts.push(when)
       if (m.value && typeof m.value === 'object') {
         const v = m.value as Record<string, unknown>
@@ -201,18 +217,12 @@ export function OnboardingProgressProvider({
         toast({ title: 'Save failed', description: error || 'Unable to save', status: 'error', duration: 5000 })
         return
       }
-      await onRefresh()
+      // Single refresh path: CustomerOnboardingTab listens for customerUpdated (background fetch, no scroll jump).
       emit('customerUpdated', { id: customerId })
       toast({ title: 'Saved', status: 'success', duration: 2000 })
     },
-    [customerId, onRefresh, toast],
+    [customerId, toast],
   )
-
-  useEffect(() => {
-    return on<{ id?: string }>('customerUpdated', (d) => {
-      if (d?.id === customerId) void onRefresh()
-    })
-  }, [customerId, onRefresh])
 
   const value = useMemo<Ctx>(
     () => ({

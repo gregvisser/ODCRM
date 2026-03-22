@@ -2708,8 +2708,10 @@ router.put('/:id/progress-tracker', async (req, res) => {
 
     const { group, itemKey, checked, valuePayload } = parsed.data
 
-    const actor = getActorIdentity(req)
-    const updatedByUserId = (actor?.userId || actor?.email || 'unknown') as string
+    // Use verified JWT / SWA identity (same as other audit paths). Legacy getActorIdentity() does not
+    // decode Bearer tokens, so App Service requests stored literal "unknown" for completedByUserId.
+    const verified = await getVerifiedActorIdentity(req)
+    const updatedByUserId = (verified.emailNormalized || verified.userId || 'unknown') as string
 
     const result = await prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
