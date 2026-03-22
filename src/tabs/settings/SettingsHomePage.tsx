@@ -2,7 +2,6 @@ import { useMemo } from 'react'
 import { Box, Text } from '@chakra-ui/react'
 import { UnlockIcon, ChatIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
-import { useLocale } from '../../contexts/LocaleContext'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import UserAuthorizationTab from '../../components/UserAuthorizationTab'
 import TroubleshootingTab from './TroubleshootingTab'
@@ -25,20 +24,19 @@ export default function SettingsHomePage({
 }) {
   const activeView = coerceSettingsViewId(view)
   const { getTabOrder, saveTabOrder } = useUserPreferencesContext()
-  const { t } = useLocale()
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
     const defaultNavItems: SubNavItem[] = [
       {
         id: 'user-authorization',
-        label: t('settings.userAuthorization'),
+        label: 'User Authorization',
         icon: UnlockIcon,
         content: <UserAuthorizationTab />,
       },
       {
         id: 'troubleshooting',
-        label: t('settings.troubleshooting'),
+        label: 'Troubleshooting & Feedback',
         icon: ChatIcon,
         content: <TroubleshootingTab />,
       },
@@ -65,7 +63,7 @@ export default function SettingsHomePage({
     orderedItems.push(...Array.from(itemsById.values()))
 
     return orderedItems
-  }, [getTabOrder, t])
+  }, [getTabOrder])
 
   // Save navigation order when it changes (to database, per-user)
   const handleNavReorder = async (reorderedItems: SubNavItem[]) => {
@@ -85,10 +83,10 @@ export default function SettingsHomePage({
         data-testid="settings-admin-framing"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="settings-role-framing">
-          {t('settings.adminIntro')}
+          Settings is an admin/setup area for permissions and system controls.
         </Text>
         <Text mt={1} fontSize="sm" color="gray.700" data-testid="settings-daily-operations-guidance">
-          {t('settings.dailyOpsGuidance')}
+          For daily client work, start in OpensDoors Clients or Marketing Readiness instead of staying in Settings.
         </Text>
       </Box>
       <SubNavigation
@@ -96,7 +94,7 @@ export default function SettingsHomePage({
         activeId={activeView}
         onChange={(id) => onNavigate?.(id as SettingsViewId)}
         onReorder={handleNavReorder}
-        title={t('settings.title')}
+        title="Settings"
         enableDragDrop={true}
       />
     </Box>

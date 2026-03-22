@@ -55,7 +55,6 @@ import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import * as leadSourceSelectionStore from '../../../platform/stores/leadSourceSelection'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
-import { useLocale } from '../../../contexts/LocaleContext'
 import {
   getLeadSources,
   connectLeadSource,
@@ -810,7 +809,6 @@ export default function LeadSourcesTabNew({
 }: {
   onNavigateToSequences?: () => void
 } = {}) {
-  const { t } = useLocale()
   const [customers, setCustomers] = useState<Array<{ id: string; name: string }>>([])
   const { canSelectCustomer, customerId, setCustomerId } = useScopedCustomerSelection()
   const [sources, setSources] = useState<Awaited<ReturnType<typeof getLeadSources>>['sources']>([])
@@ -1124,9 +1122,9 @@ export default function LeadSourcesTabNew({
       <VStack align="stretch" spacing={6}>
         <Flex justify="space-between" align="center" flexWrap="wrap" gap={2}>
           <Box>
-            <Heading size="lg">{t('marketing.leadSourcesTitle')}</Heading>
+            <Heading size="lg">Lead Sources</Heading>
             <Text fontSize="sm" color="gray.600" mt={1}>
-              {t('marketing.leadSourcesIntro')}
+              See which lead sources are ready, review the latest batches for a client, and pass the right batch into Sequences.
             </Text>
             {import.meta.env.DEV && (
               <Text fontSize="xs" color="gray.500" mt={0.5}>
@@ -1140,7 +1138,7 @@ export default function LeadSourcesTabNew({
             maxW="280px"
             value={customerId}
             onChange={(e) => handleCustomerChange(e.target.value)}
-            placeholder={t('common.selectClient')}
+            placeholder="Select client"
             isDisabled={!canSelectCustomer}
           >
             {customers.map((c) => (
@@ -1155,9 +1153,9 @@ export default function LeadSourcesTabNew({
           <Alert status="info" id="lead-sources-no-customer-state" data-testid="lead-sources-no-customer-state">
             <AlertIcon />
             <Box>
-              <AlertTitle>{t('marketing.selectClientLeadSources')}</AlertTitle>
+              <AlertTitle>Select a client to review lead sources</AlertTitle>
               <AlertDescription>
-                {t('marketing.selectClientLeadSourcesDescription')}
+                Choose a client above to see which sources are ready, review batches, and send the right batch into Sequences.
               </AlertDescription>
             </Box>
           </Alert>
@@ -1181,7 +1179,7 @@ export default function LeadSourcesTabNew({
                   <Alert status="info">
                     <AlertIcon />
                     <Box>
-                      <AlertTitle>{t('marketing.noLeadSourcesConnected')}</AlertTitle>
+                      <AlertTitle>No lead sources connected yet</AlertTitle>
                       <AlertDescription>
                         Connect at least one source below, then review its batches to choose which contacts should move into Sequences.
                       </AlertDescription>
@@ -1191,7 +1189,7 @@ export default function LeadSourcesTabNew({
                   <Alert status="warning">
                     <AlertIcon />
                     <Box>
-                      <AlertTitle>{t('marketing.someLeadSourcesNeedAttention')}</AlertTitle>
+                      <AlertTitle>Some lead sources need attention</AlertTitle>
                       <AlertDescription>
                         {sourceSummary.needsAttention} connected source{sourceSummary.needsAttention === 1 ? '' : 's'} reported a refresh issue. Review the source status first, then use the setup section below if you need to refresh or reconnect.
                       </AlertDescription>
@@ -1201,7 +1199,7 @@ export default function LeadSourcesTabNew({
                   <Alert status="success">
                     <AlertIcon />
                     <Box>
-                      <AlertTitle>{t('marketing.leadSourcesReady')}</AlertTitle>
+                      <AlertTitle>Lead sources are ready to review</AlertTitle>
                       <AlertDescription>
                         Start with the source cards below to open the latest batches and choose which batch should move into Sequences.
                       </AlertDescription>
@@ -1212,32 +1210,32 @@ export default function LeadSourcesTabNew({
                   <Card>
                     <CardBody>
                       <Text fontSize="2xl" fontWeight="bold">{sourceSummary.connected}</Text>
-                      <Text fontSize="sm" color="gray.600">{t('marketing.connectedSources')}</Text>
+                      <Text fontSize="sm" color="gray.600">Connected sources</Text>
                     </CardBody>
                   </Card>
                   <Card>
                     <CardBody>
                       <Text fontSize="2xl" fontWeight="bold">{sourceSummary.ready}</Text>
-                      <Text fontSize="sm" color="gray.600">{t('marketing.readyToUse')}</Text>
+                      <Text fontSize="sm" color="gray.600">Ready to use</Text>
                     </CardBody>
                   </Card>
                   <Card>
                     <CardBody>
                       <Text fontSize="2xl" fontWeight="bold">{sourceSummary.needsAttention}</Text>
-                      <Text fontSize="sm" color="gray.600">{t('marketing.needAttention')}</Text>
+                      <Text fontSize="sm" color="gray.600">Need attention</Text>
                     </CardBody>
                   </Card>
                   <Card>
                     <CardBody>
                       <Text fontSize="2xl" fontWeight="bold">{sourceSummary.shared}</Text>
-                      <Text fontSize="sm" color="gray.600">{t('marketing.usingSharedSource')}</Text>
+                      <Text fontSize="sm" color="gray.600">Using shared source</Text>
                     </CardBody>
                   </Card>
                 </SimpleGrid>
                 <Box>
-                  <Heading size="md" mb={1}>{t('marketing.sourceStatus')}</Heading>
+                  <Heading size="md" mb={1}>Source status</Heading>
                   <Text fontSize="sm" color="gray.600">
-                    {t('marketing.sourceStatusDescription')}
+                    Start here to see which lead sources are ready and open the batch you want to review next.
                   </Text>
                 </Box>
                 <SourcesOverview
@@ -1332,7 +1330,7 @@ export default function LeadSourcesTabNew({
                 ) : null}
                 <Card>
                   <CardHeader pb={2}>
-                    <Heading size="md">{t('marketing.sourceSetupTroubleshooting')}</Heading>
+                    <Heading size="md">Source setup &amp; troubleshooting</Heading>
                     <Text fontSize="sm" color="gray.600" mt={1}>
                       Use the source cards above to refresh, open, review, or reconnect a sheet without switching to a second operator flow.
                     </Text>

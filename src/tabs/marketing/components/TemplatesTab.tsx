@@ -58,7 +58,6 @@ import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
-import { useLocale } from '../../../contexts/LocaleContext'
 
 type EmailTemplate = {
   id: string
@@ -193,7 +192,6 @@ const buildEmailPreviewDocument = (bodyHtml: string) => `<!doctype html>
 </html>`
 
 const TemplatesTab: React.FC = () => {
-  const { t } = useLocale()
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const {
@@ -647,7 +645,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     return (
       <RequireActiveClient>
         <Box textAlign="center" py={10}>
-          <Text>{t('state.loading')}</Text>
+          <Text>Loading...</Text>
         </Box>
       </RequireActiveClient>
     )
@@ -659,9 +657,9 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       {/* Header */}
       <Flex justify="space-between" align="center" mb={6}>
         <VStack align="start" spacing={1}>
-          <Heading size="lg">{t('marketing.templatesTitle')}</Heading>
+          <Heading size="lg">Email Templates</Heading>
           <Text color="gray.600">
-            {t('marketing.templatesIntro')}
+            Find reusable outreach copy, preview how it renders, and update the templates this client relies on.
           </Text>
         </VStack>
         <HStack spacing={3}>
@@ -669,7 +667,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             <Select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
-              placeholder={t('common.selectClient')}
+              placeholder="Select client"
               isDisabled={!canSelectCustomer}
             >
               {customers.map((customer) => (
@@ -687,7 +685,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             onClick={handleCreateTemplate}
             isDisabled={!selectedCustomerId}
           >
-            {t('marketing.createTemplate')}
+            Create template
           </Button>
         </HStack>
       </Flex>
@@ -697,11 +695,11 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         <Alert status="error" mb={4}>
           <AlertIcon />
           <Box flex="1">
-            <AlertTitle>{t('marketing.templatesLoadFailed')}</AlertTitle>
+            <AlertTitle>Failed to load templates</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Box>
           <Button size="sm" onClick={loadData} ml={4}>
-            {t('common.retry')}
+            Retry
           </Button>
         </Alert>
       )}
@@ -710,9 +708,9 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         <Alert status="info" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.noTemplatesReady')}</AlertTitle>
+            <AlertTitle>No templates ready yet</AlertTitle>
             <AlertDescription>
-              {t('marketing.noTemplatesReadyDescription')}
+              Create the first reusable template for this client, then preview and edit it from the library below.
             </AlertDescription>
           </Box>
         </Alert>
@@ -720,9 +718,9 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         <Alert status="success" mb={4}>
           <AlertIcon />
           <Box>
-            <AlertTitle>{t('marketing.templateLibraryReady')}</AlertTitle>
+            <AlertTitle>Template library ready</AlertTitle>
             <AlertDescription>
-              {t('marketing.templateLibraryReadyDescription')}
+              Start with the template library below to preview, edit, duplicate, or create reusable outreach copy for this client.
             </AlertDescription>
           </Box>
         </Alert>
@@ -733,25 +731,25 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         <Card>
           <CardBody>
             <Text fontSize="2xl" fontWeight="bold">{templateSummary.total}</Text>
-            <Text fontSize="sm" color="gray.600">{t('marketing.templatesCount')}</Text>
+            <Text fontSize="sm" color="gray.600">Templates</Text>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Text fontSize="2xl" fontWeight="bold">{templateSummary.favorites}</Text>
-            <Text fontSize="sm" color="gray.600">{t('marketing.favorites')}</Text>
+            <Text fontSize="sm" color="gray.600">Favorites</Text>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Text fontSize="2xl" fontWeight="bold">{templateSummary.recentlyUpdated}</Text>
-            <Text fontSize="sm" color="gray.600">{t('marketing.updatedThisMonth')}</Text>
+            <Text fontSize="sm" color="gray.600">Updated this month</Text>
           </CardBody>
         </Card>
         <Card>
           <CardBody>
             <Text fontSize="2xl" fontWeight="bold">{templateSummary.categories}</Text>
-            <Text fontSize="sm" color="gray.600">{t('marketing.categories')}</Text>
+            <Text fontSize="sm" color="gray.600">Categories</Text>
           </CardBody>
         </Card>
       </SimpleGrid>
@@ -763,7 +761,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
             <Icon as={SearchIcon} color="gray.400" />
           </InputLeftElement>
           <Input
-            placeholder={t('marketing.searchTemplates')}
+            placeholder="Search templates..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -774,7 +772,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
           onChange={(e) => setCategoryFilter(e.target.value)}
           maxW="150px"
         >
-          <option value="all">{t('marketing.allCategories')}</option>
+          <option value="all">All Categories</option>
           {categories.map(category => (
             <option key={category} value={category}>{category}</option>
           ))}
@@ -787,13 +785,13 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
       {filteredTemplates.length === 0 && !loading && (
         <Box textAlign="center" py={10}>
           <Text fontSize="lg" color="gray.600" mb={4}>
-            {templates.length === 0 
-              ? t('marketing.noTemplatesYet')
-              : t('marketing.noTemplatesMatch')}
+            {templates.length === 0
+              ? 'No templates yet. Create your first template to get started!'
+              : 'No templates match your search criteria.'}
           </Text>
           {templates.length === 0 && (
             <Button leftIcon={<AddIcon />} colorScheme="blue" onClick={handleCreateTemplate}>
-              {t('marketing.createFirstTemplate')}
+              Create first template
             </Button>
           )}
         </Box>
@@ -801,9 +799,9 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
 
       {filteredTemplates.length > 0 ? (
         <Box mb={4}>
-          <Heading size="sm" mb={1}>{t('marketing.templateLibrary')}</Heading>
+          <Heading size="sm" mb={1}>Template library</Heading>
           <Text fontSize="sm" color="gray.600">
-            {t('marketing.templateLibraryDescription')}
+            Review reusable copy, then open the action menu on any template to preview, edit, duplicate, or delete it.
           </Text>
         </Box>
       ) : null}
@@ -833,23 +831,23 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                   />
                   <MenuList>
                     <MenuItem icon={<ViewIcon />} onClick={() => handlePreviewTemplate(template)}>
-                      {t('marketing.previewRender')}
+                      Preview render
                     </MenuItem>
                     <MenuItem icon={<EditIcon />} onClick={() => handleEditTemplate(template)}>
-                      {t('marketing.editTemplate')}
+                      Edit template
                     </MenuItem>
                     <MenuItem icon={<CopyIcon />} onClick={() => handleDuplicateTemplate(template)}>
-                      {t('marketing.duplicateTemplate')}
+                      Duplicate template
                     </MenuItem>
                     <MenuItem
                       icon={<StarIcon />}
                       onClick={() => handleToggleFavorite(template)}
                     >
-                      {template.isFavorite ? t('marketing.removeFavorite') : t('marketing.addFavorite')}
+                      {template.isFavorite ? 'Remove from Favorites' : 'Add to Favorites'}
                     </MenuItem>
                     <MenuDivider />
                     <MenuItem icon={<DeleteIcon />} color="red.500" onClick={() => handleDeleteTemplate(template.id)}>
-                      {t('marketing.deleteTemplate')}
+                      Delete template
                     </MenuItem>
                   </MenuList>
                 </Menu>
@@ -859,10 +857,10 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
               <VStack spacing={3} align="stretch">
                 <Box>
                   <Text fontSize="sm" fontWeight="semibold" color="gray.700">
-                    {t('marketing.subject')}: {template.subject}
+                    Subject: {template.subject}
                   </Text>
                   {!/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}|unsubscribe/i.test(template.content) && (
-                    <Badge mt={1} colorScheme="blue">{t('marketing.unsubscribeAdded')}</Badge>
+                    <Badge mt={1} colorScheme="blue">Unsubscribe footer added automatically</Badge>
                   )}
                   {template.previewText && (
                     <Text fontSize="sm" color="gray.600" noOfLines={2}>

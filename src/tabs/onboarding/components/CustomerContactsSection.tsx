@@ -16,8 +16,6 @@ import {
   Heading,
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon, EmailIcon, PhoneIcon } from '@chakra-ui/icons'
-import { useLocale } from '../../../contexts/LocaleContext'
-
 interface CustomerContact {
   id: string
   name: string
@@ -34,7 +32,6 @@ interface CustomerContactsSectionProps {
 }
 
 export function CustomerContactsSection({ contacts, onChange }: CustomerContactsSectionProps) {
-  const { t } = useLocale()
   const [isAdding, setIsAdding] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   
@@ -57,8 +54,8 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
   const handleAddContact = async () => {
     if (!newContact.name.trim()) {
       toast({
-        title: t('contacts.nameRequired'),
-        description: t('contacts.nameRequiredDescription'),
+        title: 'Name required',
+        description: 'Contact name is required',
         status: 'warning',
         duration: 2000,
       })
@@ -67,8 +64,8 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
 
     if (!newContact.email.trim() && !newContact.phone.trim()) {
       toast({
-        title: t('contacts.emailOrPhoneRequired'),
-        description: t('contacts.emailOrPhoneRequiredDescription'),
+        title: 'Email or phone required',
+        description: 'Add an email address or phone number before saving this contact.',
         status: 'warning',
         duration: 2500,
       })
@@ -101,7 +98,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
 
   // Delete contact
   const handleDeleteContact = async (contactId: string) => {
-    if (!confirm(t('contacts.deleteContact') + '?')) return
+    if (!confirm('Delete contact?')) return
 
     try {
       onChange((Array.isArray(contacts) ? contacts : []).filter((c) => c.id !== contactId))
@@ -113,10 +110,10 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
   return (
     <Box>
       <Heading size="sm" mb={1}>
-        {t('contacts.title')}
+        Contacts
       </Heading>
       <Text fontSize="sm" color="gray.600" mb={4}>
-        {t('contacts.autoSave')}
+        Additional contacts save automatically.
       </Text>
 
       {/* Existing contacts list */}
@@ -137,7 +134,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
                     <Text fontWeight="medium">{contact.name}</Text>
                     {contact.isPrimary && (
                       <Badge colorScheme="blue" fontSize="xs">
-                        {t('contacts.primary')}
+                        Primary
                       </Badge>
                     )}
                   </HStack>
@@ -162,7 +159,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
                   </HStack>
                 </VStack>
                 <IconButton
-                  aria-label={t('contacts.deleteContact')}
+                  aria-label="Delete contact"
                   icon={<DeleteIcon />}
                   size="sm"
                   colorScheme="red"
@@ -180,27 +177,27 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
         <Box p={4} bg="blue.50" borderRadius="md" border="1px solid" borderColor="blue.200">
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
             <FormControl isRequired>
-              <FormLabel fontSize="sm">{t('settings.userAuth.name')}</FormLabel>
+              <FormLabel fontSize="sm">Name</FormLabel>
               <Input
                 size="sm"
                 bg="white"
                 value={newContact.name}
                 onChange={(e) => setNewContact((prev) => ({ ...prev, name: e.target.value }))}
-                placeholder={t('contacts.fullName')}
+                placeholder="Full name"
               />
             </FormControl>
             <FormControl>
-              <FormLabel fontSize="sm">{t('contacts.jobTitle')}</FormLabel>
+              <FormLabel fontSize="sm">Job Title</FormLabel>
               <Input
                 size="sm"
                 bg="white"
                 value={newContact.title}
                 onChange={(e) => setNewContact((prev) => ({ ...prev, title: e.target.value }))}
-                placeholder={t('contacts.jobTitlePlaceholder')}
+                placeholder="Job title"
               />
             </FormControl>
             <FormControl>
-              <FormLabel fontSize="sm">{t('common.email')}</FormLabel>
+              <FormLabel fontSize="sm">Email</FormLabel>
               <Input
                 size="sm"
                 bg="white"
@@ -211,13 +208,13 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
               />
             </FormControl>
             <FormControl>
-              <FormLabel fontSize="sm">{t('settings.userAuth.phoneNumber')}</FormLabel>
+              <FormLabel fontSize="sm">Phone Number</FormLabel>
               <Input
                 size="sm"
                 bg="white"
                 value={newContact.phone}
                 onChange={(e) => setNewContact((prev) => ({ ...prev, phone: e.target.value }))}
-                placeholder={t('onboarding.phoneNumberPlaceholder')}
+                placeholder="Phone number"
               />
             </FormControl>
           </SimpleGrid>
@@ -229,7 +226,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
               isLoading={isAdding}
               isDisabled={!newContact.name.trim()}
             >
-              {t('contacts.addContact')}
+              Add Contact
             </Button>
             <Button
               size="sm"
@@ -240,7 +237,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
               }}
               isDisabled={isAdding}
             >
-              {t('common.cancel')}
+              Cancel
             </Button>
           </HStack>
         </Box>
@@ -252,7 +249,7 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
           variant="outline"
           onClick={() => setShowAddForm(true)}
         >
-          {t('contacts.addContact')}
+          Add Contact
         </Button>
       )}
     </Box>
