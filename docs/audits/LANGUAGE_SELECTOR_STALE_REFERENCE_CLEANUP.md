@@ -15,7 +15,7 @@ Documentation-only mentions of removed i18n paths remain in historical audit fil
 ## Exact fix
 
 - Removed `enSource` / `arSource` file reads and the two `fail()` checks that asserted English/Arabic nav strings in deleted translation files.
-- Left all other reporting-home / `ReportingDashboard` / nav contract checks unchanged (script still validates the reporting “Dashboard” home wiring until a future change removes that product area).
+- Follow-up: the `self-test-reporting-home-runtime.mjs` script was removed entirely in the Dashboard tab removal PR (no longer applicable).
 
 ## Proof searches (after cleanup)
 

@@ -355,7 +355,7 @@ const ReportsTab: React.FC = () => {
                     size="sm"
                     variant="outline"
                     onClick={goToMarketingReadiness}
-                    data-testid="reports-go-dashboard-triage"
+                    data-testid="reports-go-marketing-readiness"
                   >
                     Open Marketing Readiness
                   </Button>
