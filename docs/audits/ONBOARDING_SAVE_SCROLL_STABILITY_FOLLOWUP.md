@@ -64,7 +64,7 @@ This was **not** fixable by `window.scrollTo` alone because the scrolled surface
 | `npm run build` | exit **0** |
 | `cd server && npm run build` | exit **0** |
 
-**Commit:** `5b783d7` (branch `codex/fix-onboarding-scroll-jump-followup`).
+**Merge (main):** `3f08a9713d3162cab7fe4ee085353478b21ffa21` (PR [#349](https://github.com/gregvisser/ODCRM/pull/349)).
 
 **Manual:** After deploy — tick onboarding progress, save onboarding — confirm no jump to top; on **Clients**, open account drawer, scroll drawer + table, trigger an update that emits `customerUpdated` — confirm drawer and table position stay stable.
 
