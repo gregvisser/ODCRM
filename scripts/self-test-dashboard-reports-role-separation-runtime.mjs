@@ -45,7 +45,7 @@ for (const marker of dashboardMarkers) {
 
 const reportsMarkers = [
   'reports-retrospective-role-separation',
-  'reports-go-dashboard-triage',
+  'reports-go-marketing-readiness',
   'reports-tab-operator-cue',
 ]
 for (const marker of reportsMarkers) {

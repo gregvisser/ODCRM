@@ -2,7 +2,6 @@ export type CrmTopTab = {
   id:
     | 'customers-home'
     | 'marketing-home'
-    | 'reporting-home'
     | 'onboarding-home'
     | 'settings-home'
   label: string
@@ -15,7 +14,6 @@ export type CrmTopTab = {
 }
 
 export const CRM_TOP_TABS: readonly CrmTopTab[] = [
-  { id: 'reporting-home', label: 'Dashboard', ownerAgent: 'Project Manager', path: '/reporting' },
   { id: 'customers-home', label: 'OpensDoors Clients', ownerAgent: 'Customers Agent', path: '/customers' },
   { id: 'marketing-home', label: 'OpensDoors Marketing', ownerAgent: 'Marketing Agent', path: '/marketing' },
   { id: 'onboarding-home', label: 'Onboarding', ownerAgent: 'Onboarding Agent', path: '/onboarding' },

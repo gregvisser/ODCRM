@@ -17,7 +17,6 @@ import { getMe, type MeResponse } from './platform/me'
 import { clearApiAuthToken } from './auth/apiAuthToken'
 import CustomersHomePage, { type CustomersViewId } from './tabs/customers/CustomersHomePage'
 import MarketingHomePage, { type OpenDoorsViewId } from './tabs/marketing/MarketingHomePage'
-import DashboardHomePage, { type DashboardViewId } from './tabs/reporting/ReportingHomePage'
 import OnboardingHomePage, { type OnboardingViewId } from './tabs/onboarding/OnboardingHomePage'
 import SettingsHomePage from './tabs/settings/SettingsHomePage'
 import './App.css'
@@ -68,17 +67,14 @@ function App() {
       contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
       inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
-      reporting: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies DashboardViewId },
-      dashboard: { tab: 'reporting-home' as const, view: 'reporting-dashboard' satisfies DashboardViewId },
+      reporting: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
+      dashboard: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
       'email-accounts': { tab: 'marketing-home' as const, view: 'email-accounts' satisfies OpenDoorsViewId },
       schedules: { tab: 'marketing-home' as const, view: 'schedules' satisfies OpenDoorsViewId },
     } as const
   }, [])
 
-  const getDefaultViewForTab = (tab: CrmTopTabId): string => {
-    if (tab === 'reporting-home') return 'reporting-dashboard'
-    return 'accounts'
-  }
+  const getDefaultViewForTab = (_tab: CrmTopTabId): string => 'accounts'
 
   // Deep-linking: keep current tab/view in the URL (?tab=...&view=...&account=...).
   useEffect(() => {
@@ -101,6 +97,13 @@ function App() {
     const account = params.get('account')
 
     if (account) setFocusAccountName(account)
+
+    // Removed top-level Dashboard tab (reporting-home): send bookmarks to Clients home.
+    if (tab === 'reporting-home') {
+      setActiveTab(resolveClientModeTab('customers-home'))
+      setActiveView('accounts')
+      return
+    }
 
     // Path-based deep link (preferred for production-safe routing)
     const fromPath = CRM_TOP_TABS.find((t) => t.path === sourceUrl.pathname)?.id
@@ -239,8 +242,6 @@ function App() {
             }}
           />
         )
-      case 'reporting-home':
-        return <DashboardHomePage view={activeView} />
       case 'onboarding-home':
         return (
           <OnboardingHomePage

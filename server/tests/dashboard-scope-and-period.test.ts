@@ -14,7 +14,6 @@ const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..', '..')
 
 const reportingRouteSource = readFileSync(path.join(repoRoot, 'server', 'src', 'routes', 'reporting.ts'), 'utf8')
-const dashboardSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportingDashboard.tsx'), 'utf8')
 const reportsTabSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportsTab.tsx'), 'utf8')
 const marketingHomeSource = readFileSync(path.join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingHomePage.tsx'), 'utf8')
 const navSource = readFileSync(path.join(repoRoot, 'src', 'contracts', 'nav.ts'), 'utf8')
@@ -82,21 +81,6 @@ function testTrendsUsesBoundedRanges(): void {
   assert.match(reportingRouteSource, /occurredAt: getDateRangeFilter\(period\), type: \{ in: \['sent', 'replied'\] \}/)
 }
 
-function testAllClientsCalendarModesRemainSupported(): void {
-  assert.match(dashboardSource, /params\.append\('periodType', 'week'\)/)
-  assert.match(dashboardSource, /params\.append\('periodType', 'month'\)/)
-  assert.match(dashboardSource, /params\.append\('scope', 'all'\)/)
-  assert.match(reportingRouteSource, /scope=all cannot be combined with a specific customerId or X-Customer-Id/)
-}
-
-function testDashboardLabelsMatchSelectedPeriod(): void {
-  assert.match(dashboardSource, /const periodBadgeLabel = useMemo/)
-  assert.match(dashboardSource, /Week: \$\{formatPeriodRangeLabel/)
-  assert.match(dashboardSource, /Month: \$\{formatMonthLabel/)
-  assert.ok(!dashboardSource.includes('Window: last {windowDays} days'))
-  assert.match(dashboardSource, /setWeekStart\(normalizeWeekStartValue\(e\.target\.value\)\)/)
-}
-
 function testMarketingReportsRemainsSeparate(): void {
   assert.ok(!reportsTabSource.includes('ReportingDashboard'))
   assert.match(marketingHomeSource, /id: 'reports'/)
@@ -104,18 +88,17 @@ function testMarketingReportsRemainsSeparate(): void {
 }
 
 function testMarketingReportsDoesNotDoubleUnwrapApiPayload(): void {
-  // api.get uses unwrapResponsePayload: server { success, data: T } becomes response.data === T
   assert.ok(!reportsTabSource.includes('outreachRes.data?.data'))
   assert.ok(!reportsTabSource.includes('runHistoryRes.data?.data'))
   assert.match(reportsTabSource, /setOutreachData\(outreachRes\.data/)
 }
 
-function testDashboardRemainsFirstTopLevelTab(): void {
-  const reportingIndex = navSource.indexOf("{ id: 'reporting-home'")
+function testNavHasNoReportingHomeTab(): void {
+  assert.ok(!navSource.includes("'reporting-home'"), 'top-level reporting-home tab must remain removed')
   const customersIndex = navSource.indexOf("{ id: 'customers-home'")
-  assert.ok(reportingIndex >= 0, 'Dashboard tab missing from nav contract')
+  const marketingIndex = navSource.indexOf("{ id: 'marketing-home'")
   assert.ok(customersIndex >= 0, 'Customers tab missing from nav contract')
-  assert.ok(reportingIndex < customersIndex, 'Dashboard tab must remain first in the top-level nav')
+  assert.ok(marketingIndex > customersIndex, 'OpensDoors Clients remains first; Marketing follows')
 }
 
 const tests: Array<{ name: string; fn: () => void }> = [
@@ -125,11 +108,9 @@ const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'summary respects bounded week/month ranges', fn: testSummaryUsesBoundedRanges },
   { name: 'leads-vs-target respects selected calendar period', fn: testLeadsVsTargetUsesSelectedPeriod },
   { name: 'trends respects bounded week/month ranges', fn: testTrendsUsesBoundedRanges },
-  { name: 'All Clients works with calendar period modes', fn: testAllClientsCalendarModesRemainSupported },
-  { name: 'dashboard labels match selected period', fn: testDashboardLabelsMatchSelectedPeriod },
   { name: 'Marketing > Reports remains separate', fn: testMarketingReportsRemainsSeparate },
   { name: 'Marketing > Reports uses single api.get unwrap level', fn: testMarketingReportsDoesNotDoubleUnwrapApiPayload },
-  { name: 'Dashboard remains first top-level tab', fn: testDashboardRemainsFirstTopLevelTab },
+  { name: 'nav contract has no reporting-home tab', fn: testNavHasNoReportingHomeTab },
 ]
 
 for (const test of tests) {
