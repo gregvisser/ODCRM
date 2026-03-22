@@ -7,8 +7,7 @@ import { StatusChip } from './InlineProgressWidgets'
 const OPS_DOC_KEYS = ['ops_prepare_pack', 'ops_populate_ppt', 'ops_receive_file', 'ops_brief_campaigns'] as const
 
 export function OpsDocumentsInlineCard() {
-  const { customerId, ops, onRefresh, busyKey, setBusyKey, listAttachmentNames, renderMetaLine } =
-    useOnboardingProgress()
+  const { customerId, ops, busyKey, setBusyKey, listAttachmentNames, renderMetaLine } = useOnboardingProgress()
 
   const rows = OPS_TEAM_ITEMS.filter((i) => OPS_DOC_KEYS.includes(i.key as any))
 
@@ -56,7 +55,7 @@ export function OpsDocumentsInlineCard() {
                 attachmentType={attType}
                 busyKey={busyKey}
                 setBusyKey={setBusyKey}
-                onDone={() => void onRefresh()}
+                onDone={() => {}}
                 files={files}
               />
             </Box>

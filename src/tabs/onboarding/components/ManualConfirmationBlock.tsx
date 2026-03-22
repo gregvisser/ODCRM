@@ -1,30 +1,28 @@
 /**
- * Manual confirmations & sign-offs not tied to a specific inline field in the main form.
- * Must render inside OnboardingProgressProvider.
+ * Renders a subset of manual onboarding checklist rows (same PUT /progress-tracker contract as inline widgets).
  */
-import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
-  Box,
-  Button,
-  Checkbox,
-  Input,
-  Text,
-  VStack,
-} from '@chakra-ui/react'
-import { AM_ITEMS, OPS_TEAM_ITEMS, SALES_TEAM_ITEMS } from '../progressTrackerItems'
-import { EMBEDDED_INLINE_PROGRESS_KEYS } from '../progress/embeddedKeys'
+import { Box, Checkbox, Input, Text, VStack, Button } from '@chakra-ui/react'
+import { AM_ITEMS, SALES_TEAM_ITEMS, OPS_TEAM_ITEMS } from '../progressTrackerItems'
 import { useOnboardingProgress } from '../progress/OnboardingProgressContext'
 import { PROGRESS_DATE_PAYLOAD } from '../progress/datePayload'
 
-const SALES_REST = SALES_TEAM_ITEMS.filter((i) => !EMBEDDED_INLINE_PROGRESS_KEYS.has(i.key))
-const OPS_REST = OPS_TEAM_ITEMS.filter((i) => !EMBEDDED_INLINE_PROGRESS_KEYS.has(i.key))
-const AM_REST = AM_ITEMS.filter((i) => !EMBEDDED_INLINE_PROGRESS_KEYS.has(i.key))
+type Group = 'sales' | 'ops' | 'am'
 
-export default function RemainingProgressAccordion() {
+function itemByKey(group: Group, key: string) {
+  if (group === 'sales') return SALES_TEAM_ITEMS.find((i) => i.key === key)
+  if (group === 'ops') return OPS_TEAM_ITEMS.find((i) => i.key === key)
+  return AM_ITEMS.find((i) => i.key === key)
+}
+
+export type ManualConfirmationBlockProps = {
+  id?: string
+  title: string
+  description?: string
+  /** Tuples of (group, itemKey) in display order */
+  rows: ReadonlyArray<{ group: Group; key: string }>
+}
+
+export function ManualConfirmationBlock({ id, title, description, rows }: ManualConfirmationBlockProps) {
   const {
     sales,
     ops,
@@ -38,8 +36,9 @@ export default function RemainingProgressAccordion() {
     renderMetaLine,
   } = useOnboardingProgress()
 
-  const renderSalesRow = (item: (typeof SALES_TEAM_ITEMS)[number]) => {
-    const key = item.key
+  const renderSalesRow = (key: string) => {
+    const item = itemByKey('sales', key)
+    if (!item) return null
     const checked = sales[key] === true
     const dateField = PROGRESS_DATE_PAYLOAD[key as string]
     return (
@@ -50,9 +49,7 @@ export default function RemainingProgressAccordion() {
           onChange={(e) => {
             const next = e.target.checked
             const vp =
-              dateField && next
-                ? { [dateField]: dateExtra[key] || undefined }
-                : undefined
+              dateField && next ? { [dateField]: dateExtra[key] || undefined } : undefined
             void saveItem('sales', key, next, vp)
           }}
         >
@@ -75,13 +72,18 @@ export default function RemainingProgressAccordion() {
     )
   }
 
-  const renderOpsRow = (item: (typeof OPS_TEAM_ITEMS)[number]) => {
-    const key = item.key
+  const renderOpsRow = (key: string) => {
+    const item = itemByKey('ops', key)
+    if (!item) return null
     const dateField = PROGRESS_DATE_PAYLOAD[key as string]
     const checked = ops[key] === true
     return (
       <Box key={key} py={2} borderBottom="1px solid" borderColor="gray.100">
-        <Checkbox isChecked={checked} onChange={(e) => void saveItem('ops', key, e.target.checked)} isDisabled={busyKey === `ops.${key}`}>
+        <Checkbox
+          isChecked={checked}
+          onChange={(e) => void saveItem('ops', key, e.target.checked)}
+          isDisabled={busyKey === `ops.${key}`}
+        >
           <Text fontSize="sm" as="span">
             {item.label}
           </Text>
@@ -101,8 +103,9 @@ export default function RemainingProgressAccordion() {
     )
   }
 
-  const renderAmRow = (item: (typeof AM_ITEMS)[number]) => {
-    const key = item.key
+  const renderAmRow = (key: string) => {
+    const item = itemByKey('am', key)
+    if (!item) return null
     if (key === 'am_campaigns_launched') {
       const m = metaFor('am', key)
       const acks = Array.isArray(m.acknowledgements) ? m.acknowledgements : []
@@ -127,7 +130,7 @@ export default function RemainingProgressAccordion() {
             <VStack align="stretch" mt={2} spacing={1}>
               {acks.map((a, i) => (
                 <Text key={i} fontSize="xs" color="gray.700">
-                  {resolveUserLabel(a.completedByUserId)} · {new Date(a.completedAt).toLocaleString()}
+                  {resolveUserLabel(a.completedByUserId) || 'Recorded'} · {new Date(a.completedAt).toLocaleString()}
                 </Text>
               ))}
             </VStack>
@@ -145,9 +148,7 @@ export default function RemainingProgressAccordion() {
           onChange={(e) => {
             const next = e.target.checked
             const vp =
-              dateField && next
-                ? { [dateField]: dateExtra[key] || undefined }
-                : undefined
+              dateField && next ? { [dateField]: dateExtra[key] || undefined } : undefined
             void saveItem('am', key, next, vp)
           }}
           isDisabled={busyKey === `am.${key}`}
@@ -171,66 +172,34 @@ export default function RemainingProgressAccordion() {
     )
   }
 
-  const hasAny =
-    SALES_REST.length > 0 || OPS_REST.length > 0 || AM_REST.length > 0
+  const renderRow = (group: Group, key: string) => {
+    if (group === 'sales') return renderSalesRow(key)
+    if (group === 'ops') return renderOpsRow(key)
+    return renderAmRow(key)
+  }
 
-  if (!hasAny) return null
+  if (rows.length === 0) return null
 
   return (
-    <Box id="onb-confirmations" borderWidth="1px" borderColor="gray.200" borderRadius="xl" p={5} bg="gray.50">
-      <Text fontSize="md" fontWeight="semibold" color="gray.800" mb={1}>
-        Confirmations &amp; sign-offs
+    <Box
+      id={id}
+      borderWidth="1px"
+      borderColor="gray.200"
+      borderRadius="lg"
+      p={4}
+      bg="gray.50"
+    >
+      <Text fontSize="sm" fontWeight="semibold" color="gray.800" mb={description ? 1 : 3}>
+        {title}
       </Text>
-      <Text fontSize="sm" color="gray.600" mb={4}>
-        Steps that need an explicit tick or date — completion also appears inline where the work happens above.
-      </Text>
-      <Accordion allowMultiple defaultIndex={[0, 1, 2]}>
-        {SALES_REST.length > 0 ? (
-          <AccordionItem border="none">
-            <AccordionButton bg="white" borderRadius="md" mb={2}>
-              <Box flex="1" textAlign="left" fontWeight="semibold">
-                Sales
-              </Box>
-              <AccordionIcon />
-            </AccordionButton>
-            <AccordionPanel pb={4} px={0}>
-              <Box bg="white" borderRadius="md" p={3}>
-                {SALES_REST.map((it) => renderSalesRow(it))}
-              </Box>
-            </AccordionPanel>
-          </AccordionItem>
-        ) : null}
-        {OPS_REST.length > 0 ? (
-          <AccordionItem border="none">
-            <AccordionButton bg="white" borderRadius="md" mb={2}>
-              <Box flex="1" textAlign="left" fontWeight="semibold">
-                Operations
-              </Box>
-              <AccordionIcon />
-            </AccordionButton>
-            <AccordionPanel pb={4} px={0}>
-              <Box bg="white" borderRadius="md" p={3}>
-                {OPS_REST.map((it) => renderOpsRow(it))}
-              </Box>
-            </AccordionPanel>
-          </AccordionItem>
-        ) : null}
-        {AM_REST.length > 0 ? (
-          <AccordionItem border="none">
-            <AccordionButton bg="white" borderRadius="md" mb={2}>
-              <Box flex="1" textAlign="left" fontWeight="semibold">
-                Account manager
-              </Box>
-              <AccordionIcon />
-            </AccordionButton>
-            <AccordionPanel pb={4} px={0}>
-              <Box bg="white" borderRadius="md" p={3}>
-                {AM_REST.map((it) => renderAmRow(it))}
-              </Box>
-            </AccordionPanel>
-          </AccordionItem>
-        ) : null}
-      </Accordion>
+      {description ? (
+        <Text fontSize="xs" color="gray.600" mb={3}>
+          {description}
+        </Text>
+      ) : null}
+      <Box bg="white" borderRadius="md" p={3} borderWidth="1px" borderColor="gray.100">
+        {rows.map((r) => renderRow(r.group, r.key))}
+      </Box>
     </Box>
   )
 }

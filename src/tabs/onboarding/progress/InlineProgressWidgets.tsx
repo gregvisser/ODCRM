@@ -184,8 +184,7 @@ export function InlineWeeklyTargetProgress() {
 
 export function InlineFirstPaymentRow() {
   const toast = useToast()
-  const { customerId, sales, onRefresh, busyKey, setBusyKey, listAttachmentNames, renderMetaLine } =
-    useOnboardingProgress()
+  const { customerId, sales, busyKey, setBusyKey, listAttachmentNames, renderMetaLine } = useOnboardingProgress()
   const checked = sales.sales_first_payment === true
   const names = listAttachmentNames((t) => t === ATTACHMENT_TYPES.firstPayment || t === 'payment_confirmation')
   return (
@@ -220,7 +219,6 @@ export function InlineFirstPaymentRow() {
                       fd.append('attachmentType', ATTACHMENT_TYPES.firstPayment)
                       const r = await fetch(`/api/customers/${customerId}/attachments`, { method: 'POST', body: fd })
                       if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.error || r.statusText)
-                      await onRefresh()
                       emit('customerUpdated', { id: customerId })
                       toast({ title: 'Uploaded', status: 'success', duration: 3000 })
                     } catch (err) {

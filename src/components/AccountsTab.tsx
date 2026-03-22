@@ -4761,6 +4761,88 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 )}
 
                 <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.200" boxShadow="sm">
+                  {selectedCustomerDetail && !loadingCustomerDetail ? (
+                    <Box px={4} pt={4} pb={3} borderBottom="1px solid" borderColor="gray.100">
+                      <Text
+                        fontSize="xs"
+                        fontWeight="semibold"
+                        color="gray.500"
+                        textTransform="uppercase"
+                        letterSpacing="wide"
+                        mb={2}
+                      >
+                        Onboarding (read-only summary)
+                      </Text>
+                      <HStack justify="space-between" align="flex-start" flexWrap="wrap" spacing={3}>
+                        <Stack spacing={1} fontSize="sm" maxW="lg">
+                          <Text color="gray.700">
+                            <Text as="span" fontWeight="medium">
+                              Status:
+                            </Text>{' '}
+                            {selectedCustomerDetail.clientStatus === 'onboarding'
+                              ? 'Onboarding'
+                              : selectedCustomerDetail.clientStatus === 'active'
+                                ? 'Active'
+                                : selectedCustomerDetail.clientStatus || '—'}
+                          </Text>
+                          {(() => {
+                            const ad =
+                              selectedCustomerDetail.accountData && typeof selectedCustomerDetail.accountData === 'object'
+                                ? (selectedCustomerDetail.accountData as Record<string, unknown>)
+                                : null
+                            const details =
+                              ad?.accountDetails && typeof ad.accountDetails === 'object'
+                                ? (ad.accountDetails as Record<string, unknown>)
+                                : {}
+                            const start =
+                              typeof details.startDateAgreed === 'string' ? details.startDateAgreed.slice(0, 10) : null
+                            const pt =
+                              ad?.progressTracker && typeof ad.progressTracker === 'object'
+                                ? (ad.progressTracker as Record<string, unknown>)
+                                : null
+                            const ptUpdated = typeof pt?.updatedAt === 'string' ? pt.updatedAt : null
+                            const am = selectedCustomerDetail.assignedAccountManagerUser
+                            const amLabel = am
+                              ? `${String(am.firstName || '').trim()} ${String(am.lastName || '').trim()}`.trim() || am.email
+                              : null
+                            return (
+                              <>
+                                {start ? (
+                                  <Text color="gray.700">
+                                    <Text as="span" fontWeight="medium">
+                                      Start date:
+                                    </Text>{' '}
+                                    {start}
+                                  </Text>
+                                ) : null}
+                                {amLabel ? (
+                                  <Text color="gray.700">
+                                    <Text as="span" fontWeight="medium">
+                                      Account manager:
+                                    </Text>{' '}
+                                    {amLabel}
+                                  </Text>
+                                ) : null}
+                                {ptUpdated ? (
+                                  <Text fontSize="xs" color="gray.500">
+                                    Checklist last updated {new Date(ptUpdated).toLocaleString()}
+                                  </Text>
+                                ) : null}
+                              </>
+                            )
+                          })()}
+                        </Stack>
+                        <Button
+                          size="sm"
+                          colorScheme="teal"
+                          variant="outline"
+                          onClick={() => window.dispatchEvent(new CustomEvent('navigateToOnboarding'))}
+                        >
+                          Open onboarding
+                        </Button>
+                      </HStack>
+                    </Box>
+                  ) : null}
                   <Tabs variant="enclosed" colorScheme="gray" isLazy>
                     <TabList
                       position="sticky"

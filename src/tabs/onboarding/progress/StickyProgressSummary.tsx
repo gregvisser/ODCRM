@@ -60,6 +60,9 @@ export function StickyProgressSummary() {
         <Link href="#onb-team" color="blue.600">
           Team &amp; data
         </Link>
+        <Link href="#onb-ops-coordination" color="blue.600">
+          Ops coordination
+        </Link>
         <Link href="#onb-emails" color="blue.600">
           Emails
         </Link>
@@ -69,8 +72,11 @@ export function StickyProgressSummary() {
         <Link href="#onb-profile" color="blue.600">
           Profile
         </Link>
+        <Link href="#onb-delivery-launch" color="blue.600">
+          Delivery &amp; launch
+        </Link>
         <Link href="#onb-confirmations" color="blue.600">
-          Confirmations
+          Final sign-offs
         </Link>
       </HStack>
     </Box>
