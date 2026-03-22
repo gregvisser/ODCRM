@@ -2,14 +2,14 @@
 
 ## Current IA (As Implemented)
 Top-level tabs from [`src/contracts/nav.ts`](../../src/contracts/nav.ts):
-1. Dashboards
-2. OpenDoors Clients
-3. OpenDoors Marketing
-4. Onboarding
-5. Settings
+1. **Dashboard** (`reporting-home`, path `/reporting`)
+2. **OpensDoors Clients** (`customers-home`, path `/customers`)
+3. **OpensDoors Marketing** (`marketing-home`, path `/marketing`)
+4. **Onboarding** (`onboarding-home`, path `/onboarding`)
+5. **Settings** (`settings-home`, path `/settings`)
 
 ### Current Characterization
-- Daily-use: Dashboards, Marketing
+- Daily-use: Dashboard, Marketing
 - Setup/maintenance: Clients, Onboarding
 - Admin: Settings
 
@@ -28,5 +28,5 @@ Keep top-level tabs unchanged, but adjust framing and guidance:
 
 ## Suggested Future IA Evolution (Optional)
 After usage validation, consider role-sensitive nav emphasis rather than tab removal:
-- Operator-focused default emphasis: Dashboard + Marketing.
+- Operator-focused default emphasis: **Marketing** for execution; **Dashboard** for rollups (exact default tab is a product decision — see `DASHBOARD_OPERATOR_WORKFLOW_PLAN_2026-03-19.md`).
 - Setup/admin emphasis when role/context requires it.
