@@ -105,16 +105,39 @@ export async function getVerifiedActorIdentity(req: Request): Promise<VerifiedAc
       }
     }
     const token = authHeader.slice(7).trim()
-    const verified = await verifyMicrosoftJwtAndExtractIdentity({
-      token,
-      expectedAudience,
-    })
-    return {
-      userId: verified.oid || verified.sub || null,
-      email: verified.emailNormalized,
-      emailNormalized: verified.emailNormalized,
-      source: 'jwt',
-      claimUsed: verified.claimUsed || 'bearer',
+    if (!token) {
+      return {
+        userId: null,
+        email: null,
+        emailNormalized: null,
+        source: 'none',
+        claimUsed: null,
+      }
+    }
+    // jwtVerify throws on expired/invalid signature/wrong aud — must not take down customer routes (500).
+    // Callers that require an actor return 401 when identity is empty; progress-tracker falls back to 'unknown'.
+    try {
+      const verified = await verifyMicrosoftJwtAndExtractIdentity({
+        token,
+        expectedAudience,
+      })
+      return {
+        userId: verified.oid || verified.sub || null,
+        email: verified.emailNormalized,
+        emailNormalized: verified.emailNormalized,
+        source: 'jwt',
+        claimUsed: verified.claimUsed || 'bearer',
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn('[actorIdentity] Bearer JWT verification failed:', msg)
+      return {
+        userId: null,
+        email: null,
+        emailNormalized: null,
+        source: 'none',
+        claimUsed: null,
+      }
     }
   }
 

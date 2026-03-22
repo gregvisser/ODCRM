@@ -211,6 +211,7 @@ export function OnboardingProgressProvider({
       const { data, error } = await api.put<{ success: boolean; progressTracker: unknown }>(
         `/api/customers/${customerId}/progress-tracker`,
         { group, itemKey, checked, valuePayload },
+        { headers: { 'X-Customer-Id': customerId } },
       )
       setBusyKey(null)
       if (error || !data?.success) {
