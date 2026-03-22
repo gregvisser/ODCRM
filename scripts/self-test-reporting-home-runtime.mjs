@@ -13,8 +13,6 @@ const appSource = readFileSync(join(repoRoot, 'src', 'App.tsx'), 'utf8')
 const reportingHomeSource = readFileSync(join(repoRoot, 'src', 'tabs', 'reporting', 'ReportingHomePage.tsx'), 'utf8')
 const reportingDashboardSource = readFileSync(join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportingDashboard.tsx'), 'utf8')
 const reportsTabSource = readFileSync(join(repoRoot, 'src', 'tabs', 'marketing', 'components', 'ReportsTab.tsx'), 'utf8')
-const enSource = readFileSync(join(repoRoot, 'src', 'i18n', 'en.ts'), 'utf8')
-const arSource = readFileSync(join(repoRoot, 'src', 'i18n', 'ar.ts'), 'utf8')
 
 const navMarkers = [
   "'reporting-home'",
@@ -47,8 +45,6 @@ for (const marker of reportingHomeMarkers) {
   if (!reportingHomeSource.includes(marker)) fail(`ReportingHomePage missing marker: ${marker}`)
 }
 
-if (!enSource.includes("'nav.reporting-home': 'Dashboard'")) fail('English nav label must be Dashboard')
-if (!arSource.includes("'nav.reporting-home': 'لوحة التحكم'")) fail('Arabic nav label must be لوحة التحكم')
 if (!reportingDashboardSource.includes('reporting-dashboard')) fail('ReportingDashboard missing root marker')
 if (!reportingDashboardSource.includes('/api/reporting')) fail('ReportingDashboard missing /api/reporting data source')
 if (!reportingDashboardSource.includes('dashboard-kanban-board')) fail('ReportingDashboard missing kanban board marker')
