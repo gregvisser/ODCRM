@@ -4,7 +4,8 @@
 
 - **Branch:** `codex/integrate-progress-tracker-into-onboarding`
 - **Start SHA (origin/main):** `ff8d545da0f3d562bb9ff4d29d54c3da8ce7feb4`
-- **Integration commit SHA:** `d520fd1` (amend docs if this doc is updated in a follow-up commit)
+- **Integration commit SHA:** `d520fd1` (feature); docs touch-up: `30fce9f`
+- **PR:** https://github.com/gregvisser/ODCRM/pull/346
 
 ## Current-state audit (before implementation)
 
