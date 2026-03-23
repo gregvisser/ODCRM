@@ -26,13 +26,14 @@ CREATE TABLE "lead_source_imported_contacts" (
     CONSTRAINT "lead_source_imported_contacts_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "lead_source_imported_contacts_customerId_sourceType_spreadsheetId_fingerprint_key"
+-- Short names: PostgreSQL truncates identifiers to 63 chars; default Prisma-style names collided.
+CREATE UNIQUE INDEX "ls_imp_ct_uniq"
 ON "lead_source_imported_contacts"("customerId", "sourceType", "spreadsheetId", "fingerprint");
 
-CREATE INDEX "lead_source_imported_contacts_customerId_sourceType_spreadsheetId_idx"
+CREATE INDEX "ls_imp_ct_scope"
 ON "lead_source_imported_contacts"("customerId", "sourceType", "spreadsheetId");
 
-CREATE INDEX "lead_source_imported_contacts_customerId_sourceType_idx"
+CREATE INDEX "ls_imp_ct_src"
 ON "lead_source_imported_contacts"("customerId", "sourceType");
 
 ALTER TABLE "lead_source_imported_contacts"

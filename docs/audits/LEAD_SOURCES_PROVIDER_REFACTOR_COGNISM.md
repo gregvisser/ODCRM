@@ -28,3 +28,11 @@
 ## Operator-visible behaviour
 
 - Connect **Cognism API token** + optional search defaults; **Import from Cognism** replaces “refresh from sheet”; no “open sheet” actions in Lead Sources.
+
+## Production recovery (deploy P3018)
+
+If `20260323130000_lead_source_imported_contacts` failed with **42P07** (duplicate index relation after truncation to 63 characters), the migration SQL was updated to use short index names (`ls_imp_ct_uniq`, etc.). Recover with:
+
+1. `DROP TABLE IF EXISTS lead_source_imported_contacts CASCADE;` on the production DB if needed.
+2. `cd server && npx prisma migrate resolve --rolled-back "20260323130000_lead_source_imported_contacts"` (so deploy can re-apply the fixed migration).
+3. Redeploy backend or run `npx prisma migrate deploy` against production.
