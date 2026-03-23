@@ -31,7 +31,8 @@ export interface LeadSourcePollResponse {
 export interface LeadSourceBatch {
   batchKey: string
   date?: string
-  client: string
+  /** From batchKey; null when missing or placeholder — not a sheet column. */
+  client?: string | null
   jobTitle: string
   count: number
   firstSeenMin?: string

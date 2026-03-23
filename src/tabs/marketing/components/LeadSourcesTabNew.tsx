@@ -301,7 +301,7 @@ function BatchRow({
           </Text>
         </VStack>
       </Td>
-      <Td>{batch.client ?? '(none)'}</Td>
+      <Td>{batch.client ?? '—'}</Td>
       <Td>{batch.jobTitle ?? '(none)'}</Td>
       <Td isNumeric>{batch.count ?? 0}</Td>
       <Td>{batch.lastSeenAt ? new Date(batch.lastSeenAt).toLocaleString() : '—'}</Td>
@@ -431,18 +431,21 @@ function BatchesBlock({
           <Text fontSize="sm" color="gray.600" mb={2}>
             Showing {filteredBatches.length} of {safeBatches.length} batch{safeBatches.length === 1 ? '' : 'es'}, newest batch first.
           </Text>
-          <TableContainer
-            id="lead-sources-batches-table"
-            data-testid="lead-sources-batches-table"
-            maxH="55vh"
-            overflowY="auto"
+          <Box
             overflowX="auto"
             borderWidth="1px"
             borderRadius="md"
             bg="white"
             _dark={{ bg: 'gray.800' }}
           >
-            <Table size="sm" minW="720px">
+            <TableContainer
+              id="lead-sources-batches-table"
+              data-testid="lead-sources-batches-table"
+              maxH="55vh"
+              overflowY="auto"
+              overflowX="visible"
+            >
+            <Table size="sm" minW="980px">
               <Thead>
                 <Tr>
                   <Th
@@ -551,7 +554,8 @@ function BatchesBlock({
               )}
             </Tbody>
           </Table>
-          </TableContainer>
+            </TableContainer>
+          </Box>
         </>
       )}
     </Box>

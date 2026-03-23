@@ -117,6 +117,13 @@ function buildBatchDisplayLabel(sourceType: LeadSourceType, batchKey: string, op
   return normalizedName ? `${normalizedName} · ${fallbackLabel}` : fallbackLabel
 }
 
+/** Batches list JSON: omit misleading placeholder when batchKey has no real client segment. */
+function normalizeBatchClientForResponse(parsedClient: string | undefined): string | null {
+  const c = (parsedClient ?? '').trim()
+  if (!c || c.toLowerCase() === '(none)') return null
+  return c
+}
+
 function buildMaterializedLeadBatchListName(
   sourceType: LeadSourceType,
   batchKey: string,
@@ -802,7 +809,7 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
           batchName,
           fallbackLabel,
           displayLabel: buildBatchDisplayLabel(sourceType, g.batchKey, batchName),
-          client: parsed.client && parsed.client.trim() !== '' ? parsed.client : '(none)',
+          client: normalizeBatchClientForResponse(parsed.client),
           jobTitle: parsed.jobTitle && parsed.jobTitle.trim() !== '' ? parsed.jobTitle : '(none)',
           count: g._count._all,
           lastSeenAt: g._max.firstSeenAt?.toISOString() ?? '',
