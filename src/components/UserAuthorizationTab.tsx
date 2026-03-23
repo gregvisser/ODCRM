@@ -1098,7 +1098,7 @@ function UserAuthorizationTab() {
 
             <AlertDialogFooter>
               <Button ref={cancelRef} onClick={onDeleteClose}>
-                {Cancel}
+                Cancel
               </Button>
               <Button colorScheme="gray" onClick={confirmDelete} ml={3}>
                 Delete
