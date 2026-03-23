@@ -7,10 +7,16 @@ const API_BASE = import.meta.env.VITE_API_URL || ''
 
 export type LeadSourceType = 'COGNISM' | 'APOLLO' | 'SOCIAL' | 'BLACKBOOK'
 
+export type LeadSourceProviderMode = 'SHEET' | 'COGNISM_API'
+
 export interface LeadSourceConfig {
   sourceType: LeadSourceType
   displayName: string
   connected: boolean
+  /** Backend provider mode (Cognism can use native API instead of Google Sheets). */
+  providerMode?: LeadSourceProviderMode
+  /** Last 4 characters of stored Cognism API token (never the full secret). */
+  cognismTokenLast4?: string | null
   /** True when this customer is using a sheet connected for "all accounts" (not their own). */
   usingGlobalConfig?: boolean
   lastFetchAt: string | null
@@ -86,6 +92,33 @@ export async function connectLeadSource(
     method: 'POST',
     headers: headers(customerId),
     body: JSON.stringify({ sheetUrl, displayName, applyToAllAccounts: !!applyToAllAccounts }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+/** POST /api/lead-sources/cognism/connect — native Cognism API (token never returned after save). */
+export async function connectCognismLeadSource(
+  customerId: string,
+  params: {
+    apiToken: string
+    displayName: string
+    applyToAllAccounts?: boolean
+    searchDefaults?: Record<string, unknown>
+  }
+): Promise<{ success: boolean; cognismTokenLast4?: string; providerMode?: LeadSourceProviderMode }> {
+  const res = await fetch(`${API_BASE}/api/lead-sources/cognism/connect`, {
+    method: 'POST',
+    headers: headers(customerId),
+    body: JSON.stringify({
+      apiToken: params.apiToken,
+      displayName: params.displayName,
+      applyToAllAccounts: !!params.applyToAllAccounts,
+      ...(params.searchDefaults !== undefined ? { searchDefaults: params.searchDefaults } : {}),
+    }),
   })
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))

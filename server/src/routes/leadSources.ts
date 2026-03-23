@@ -5,18 +5,42 @@
 
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
-import { LeadSourceType, LeadSourceAppliesTo } from '@prisma/client'
+import { LeadSourceType, LeadSourceAppliesTo, LeadSourceProviderMode, Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
 import { csvToMappedRows, detectDelimiter } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
+import { encryptLeadSourceSecret, decryptLeadSourceSecret, isLeadSourceSecretEncryptionConfigured } from '../utils/leadSourceTokenCrypto.js'
+import {
+  cognismValidateApiKey,
+  cognismSearchContacts,
+  cognismRedeemContacts,
+  type CognismSearchResultPreview,
+} from '../services/cognismClient.js'
+import { cognismNormalizedToFlatRow, normalizeCognismRedeemedContact } from '../services/cognismNormalizer.js'
 
 const router = Router()
 
+/** Stable spreadsheetId for Cognism API-backed configs (not a Google Sheet). */
+const COGNISM_API_SPREADSHEET_SENTINEL = 'COGNISM_API'
+
 const CACHE_TTL_MS = 45 * 1000 // 30–60s in-memory cache for CSV-derived contacts
 const FETCH_TIMEOUT_MS = 15 * 1000
+
+const COGNISM_POLL_INDEX_SIZE = Math.min(
+  100,
+  Math.max(1, parseInt(process.env.COGNISM_POLL_INDEX_SIZE || '50', 10) || 50)
+)
+const COGNISM_POLL_MAX_PAGES = Math.min(
+  20,
+  Math.max(1, parseInt(process.env.COGNISM_POLL_MAX_PAGES || '5', 10) || 5)
+)
+const COGNISM_REDEEM_CHUNK = Math.min(
+  50,
+  Math.max(1, parseInt(process.env.COGNISM_REDEEM_CHUNK || '25', 10) || 25)
+)
 
 const SOURCE_TYPES: LeadSourceType[] = [
   'COGNISM',
@@ -27,6 +51,23 @@ const SOURCE_TYPES: LeadSourceType[] = [
 
 function isValidSourceType(value: string): value is LeadSourceType {
   return SOURCE_TYPES.includes(value as LeadSourceType)
+}
+
+type LeadSourceSheetConfigRow = {
+  id: string
+  customerId: string
+  sourceType: LeadSourceType
+  spreadsheetId: string
+  gid: string | null
+  displayName: string
+  isLocked: boolean
+  lastFetchAt: Date | null
+  lastError: string | null
+  appliesTo: LeadSourceAppliesTo
+  providerMode: LeadSourceProviderMode
+  cognismApiTokenEncrypted: string | null
+  cognismApiTokenLast4: string | null
+  cognismSearchDefaults: unknown | null
 }
 
 const PUBLISHED_LINK_REJECT_MESSAGE =
@@ -74,7 +115,9 @@ type ResolvedLeadSourceConfig = NonNullable<Awaited<ReturnType<typeof resolveLea
 
 // Shared ALL_ACCOUNTS configs store row-seen state once on the owning config customer.
 // Any client inheriting that config reads and writes through the same scope.
-function getLeadSourceDataScope(config: ResolvedLeadSourceConfig): {
+function getLeadSourceDataScope(
+  config: Pick<LeadSourceSheetConfigRow, 'customerId' | 'sourceType' | 'spreadsheetId' | 'gid'>
+): {
   configCustomerId: string
   sourceType: LeadSourceType
   spreadsheetId: string
@@ -248,15 +291,54 @@ const LEAD_SOURCE_CONTACT_META_FIRST_SEEN_KEY = 'odcrmFirstSeenAt'
 async function resolveLeadSourceConfig(
   customerId: string,
   sourceType: LeadSourceType
-): Promise<{ id: string; customerId: string; sourceType: LeadSourceType; spreadsheetId: string; gid: string | null; displayName: string; isLocked: boolean; lastFetchAt: Date | null; lastError: string | null } | null> {
+): Promise<LeadSourceSheetConfigRow | null> {
   const exact = await prisma.leadSourceSheetConfig.findUnique({
     where: { customerId_sourceType: { customerId, sourceType } },
   })
-  if (exact?.spreadsheetId) return exact
+  if (exact?.spreadsheetId) return exact as LeadSourceSheetConfigRow
   const fallback = await prisma.leadSourceSheetConfig.findFirst({
     where: { sourceType, appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS },
   })
-  return fallback?.spreadsheetId ? fallback : null
+  return fallback?.spreadsheetId ? (fallback as LeadSourceSheetConfigRow) : null
+}
+
+function isCognismApiMode(config: LeadSourceSheetConfigRow): boolean {
+  return config.sourceType === 'COGNISM' && config.providerMode === LeadSourceProviderMode.COGNISM_API
+}
+
+function buildCognismSearchBody(defaults: unknown): Record<string, unknown> {
+  if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
+    return { ...(defaults as Record<string, unknown>) }
+  }
+  return {}
+}
+
+function mergeCognismContactCache(
+  dataScope: LeadSourceDataScope,
+  columnKeys: string[],
+  newFlatRows: Array<Record<string, string>>
+): { columnKeys: string[]; rows: Array<Record<string, string>> } {
+  const hit = getCachedContacts(dataScope)
+  const keySet = new Set<string>(columnKeys)
+  const byFp = new Map<string, Record<string, string>>()
+  if (hit) {
+    for (const r of hit.rows) {
+      const fp = r['__fp']
+      if (typeof fp === 'string') byFp.set(fp, r)
+    }
+    for (const k of hit.columnKeys) keySet.add(k)
+  }
+  for (const r of newFlatRows) {
+    const fp = r['__fp']
+    if (typeof fp === 'string') byFp.set(fp, r)
+    for (const k of Object.keys(r)) {
+      if (k && k !== '__fp') keySet.add(k)
+    }
+  }
+  const merged = [...byFp.values()]
+  const mergedColumns = [...keySet].filter((k) => k !== '__fp')
+  setCachedContacts(dataScope, mergedColumns, merged)
+  return { columnKeys: mergedColumns, rows: merged }
 }
 
 /**
@@ -310,6 +392,96 @@ async function loadLeadSourceContactsCsvIntoCache(
   return { columnKeys, rows: flat }
 }
 
+/**
+ * Contacts cache: Google Sheets CSV or merged Cognism API rows (same downstream shape).
+ */
+async function loadLeadSourceContactsIntoCache(
+  config: ResolvedLeadSourceConfig,
+  dataScope: LeadSourceDataScope,
+  options?: { forceRefresh?: boolean }
+): Promise<{ columnKeys: string[]; rows: Array<Record<string, string>> }> {
+  if (isCognismApiMode(config)) {
+    if (options?.forceRefresh) {
+      deleteCachedContacts(dataScope)
+    }
+    const hit = getCachedContacts(dataScope)
+    if (hit) return { columnKeys: hit.columnKeys, rows: hit.rows }
+    return { columnKeys: [], rows: [] }
+  }
+  return loadLeadSourceContactsCsvIntoCache(config, dataScope, options)
+}
+
+async function runCognismApiPoll(
+  config: ResolvedLeadSourceConfig,
+  dataScope: LeadSourceDataScope,
+  now: Date
+): Promise<{ totalRows: number; newRowsDetected: number }> {
+  if (!config.cognismApiTokenEncrypted) {
+    throw Object.assign(new Error('Cognism API token is not configured. Connect a token first.'), { status: 400 })
+  }
+  const apiKey = decryptLeadSourceSecret(config.cognismApiTokenEncrypted)
+  const searchBody = buildCognismSearchBody(config.cognismSearchDefaults)
+  let lastKey: string | undefined
+  const previews: CognismSearchResultPreview[] = []
+  for (let page = 0; page < COGNISM_POLL_MAX_PAGES; page++) {
+    const pageRes = await cognismSearchContacts(apiKey, searchBody, {
+      lastReturnedKey: lastKey,
+      indexSize: COGNISM_POLL_INDEX_SIZE,
+    })
+    const chunk = pageRes.results ?? []
+    previews.push(...chunk)
+    if (!pageRes.lastReturnedKey || chunk.length === 0) break
+    lastKey = pageRes.lastReturnedKey
+  }
+  const redeemIds = previews.map((p) => p.redeemId).filter((id): id is string => typeof id === 'string' && id.length > 0)
+  const redeemedRaw: unknown[] = []
+  for (let i = 0; i < redeemIds.length; i += COGNISM_REDEEM_CHUNK) {
+    const slice = redeemIds.slice(i, i + COGNISM_REDEEM_CHUNK)
+    const r = await cognismRedeemContacts(apiKey, slice)
+    redeemedRaw.push(...(r.results ?? []))
+  }
+  const toCreate: Array<{
+    customerId: string
+    sourceType: LeadSourceType
+    spreadsheetId: string
+    fingerprint: string
+    batchKey: string
+  }> = []
+  const seen = new Set<string>()
+  const newFlatRows: Array<Record<string, string>> = []
+  for (const raw of redeemedRaw) {
+    if (!raw || typeof raw !== 'object') continue
+    const row = normalizeCognismRedeemedContact(raw as Record<string, unknown>)
+    const flat = cognismNormalizedToFlatRow(row)
+    const canonical = { ...row.canonical }
+    const fingerprint = computeFingerprint(canonical)
+    if (seen.has(fingerprint)) continue
+    seen.add(fingerprint)
+    const client = canonical.client ?? ''
+    const jobTitle = canonical.jobTitle ?? ''
+    const batchKey = buildBatchKey(now, client, jobTitle)
+    flat['__fp'] = fingerprint
+    newFlatRows.push(flat)
+    toCreate.push({
+      customerId: dataScope.configCustomerId,
+      sourceType: 'COGNISM',
+      spreadsheetId: dataScope.spreadsheetId,
+      fingerprint,
+      batchKey,
+    })
+  }
+  const result = await prisma.leadSourceRowSeen.createMany({
+    data: toCreate,
+    skipDuplicates: true,
+  })
+  const newRowsDetected = result.count
+  const columnKeys = Object.keys(newFlatRows[0] ?? {}).filter((k) => k !== '__fp')
+  if (newFlatRows.length > 0) {
+    mergeCognismContactCache(dataScope, columnKeys, newFlatRows)
+  }
+  return { totalRows: redeemedRaw.length, newRowsDetected }
+}
+
 /** Resolve configs for all source types (for list endpoint). */
 async function resolveAllLeadSourceConfigs(customerId: string): Promise<Array<{ sourceType: LeadSourceType; config: Awaited<ReturnType<typeof resolveLeadSourceConfig>> }>> {
   const results = await Promise.all(
@@ -331,10 +503,17 @@ router.get('/', async (req: Request, res: Response) => {
       const r = resolved.find((x) => x.sourceType === sourceType)
       const c = r?.config
       const usingGlobalConfig = !!(c && c.customerId !== customerId)
+      const cognismApi =
+        c && c.sourceType === 'COGNISM' && c.providerMode === LeadSourceProviderMode.COGNISM_API
+      const connected = cognismApi
+        ? !!c?.cognismApiTokenEncrypted
+        : !!c?.spreadsheetId
       return {
         sourceType,
         displayName: c?.displayName ?? sourceType,
-        connected: !!c?.spreadsheetId,
+        connected,
+        providerMode: c?.providerMode ?? (sourceType === 'COGNISM' ? LeadSourceProviderMode.SHEET : LeadSourceProviderMode.SHEET),
+        cognismTokenLast4: cognismApi ? c?.cognismApiTokenLast4 ?? null : null,
         usingGlobalConfig,
         lastFetchAt: c?.lastFetchAt?.toISOString() ?? null,
         lastError: c?.lastError ?? null,
@@ -417,7 +596,13 @@ async function materializeLeadSourceBatchList(
   batchKey: string
 ): Promise<{ listId: string; name: string }> {
   const config = await resolveLeadSourceConfig(customerId, sourceType)
-  if (!config?.spreadsheetId) throw Object.assign(new Error('Source not connected'), { status: 404 })
+  if (!config) throw Object.assign(new Error('Source not connected'), { status: 404 })
+  if (isCognismApiMode(config) && !config.cognismApiTokenEncrypted) {
+    throw Object.assign(new Error('Source not connected'), { status: 404 })
+  }
+  if (!isCognismApiMode(config) && !config.spreadsheetId) {
+    throw Object.assign(new Error('Source not connected'), { status: 404 })
+  }
   const dataScope = getLeadSourceDataScope(config)
 
   const metadataRow = await prisma.leadSourceBatchMetadata.findUnique({
@@ -463,16 +648,13 @@ async function materializeLeadSourceBatchList(
 
   let cached = getCachedContacts(dataScope)
   if (!cached) {
-    const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
-    const csvText = await fetchCsvFromUrl(csvUrl)
-    const { columnKeys, rows } = csvToMappedRows(csvText)
-    const flat = rows.map((r) => {
-      const canonical = { ...r.canonical }
-      const fingerprint = computeFingerprint(canonical)
-      return { ...canonical, ...r.extraFields, __fp: fingerprint }
-    })
-    setCachedContacts(dataScope, columnKeys, flat)
-    cached = { columnKeys, rows: flat }
+    cached = await loadLeadSourceContactsIntoCache(config, dataScope)
+  }
+  if (cached.rows.length === 0 && isCognismApiMode(config)) {
+    throw Object.assign(
+      new Error('No Cognism contacts in memory. Run Poll on this source again, then materialize.'),
+      { status: 400 }
+    )
   }
   const filtered = cached.rows.filter((r: Record<string, string>) => {
     const fp = r['__fp']
@@ -595,6 +777,90 @@ router.post('/batches/:batchKey/materialize-list', requireMarketingMutationAuth,
   }
 })
 
+// POST /api/lead-sources/cognism/connect — native Cognism API (token stored server-side only)
+const cognismConnectSchema = z.object({
+  apiToken: z.string().min(8),
+  displayName: z.string().trim().min(1),
+  applyToAllAccounts: z.boolean().optional().default(false),
+  /** Cognism POST /api/search/contact/search JSON body (see Cognism API docs). */
+  searchDefaults: z.record(z.unknown()).optional(),
+})
+router.post('/cognism/connect', requireMarketingMutationAuth, async (req: Request, res: Response) => {
+  try {
+    if (!isLeadSourceSecretEncryptionConfigured()) {
+      return res.status(503).json({
+        error:
+          'Server is not configured to store API tokens securely (LEAD_SOURCE_SECRETS_KEY). Ask an administrator to set a 32-byte base64 key.',
+      })
+    }
+    const parsed = cognismConnectSchema.parse(req.body)
+    const customerId = requireCustomerId(req, res)
+    if (!customerId) return
+    await ensureCustomerExists(customerId)
+    await cognismValidateApiKey(parsed.apiToken.trim())
+    const enc = encryptLeadSourceSecret(parsed.apiToken.trim())
+    const last4 = parsed.apiToken.trim().slice(-4)
+    const appliesTo = parsed.applyToAllAccounts ? LeadSourceAppliesTo.ALL_ACCOUNTS : LeadSourceAppliesTo.CUSTOMER_ONLY
+    const searchDefaults = parsed.searchDefaults
+    const createData: Prisma.LeadSourceSheetConfigUncheckedCreateInput = {
+      customerId,
+      sourceType: 'COGNISM',
+      spreadsheetId: COGNISM_API_SPREADSHEET_SENTINEL,
+      gid: null,
+      displayName: parsed.displayName,
+      isLocked: true,
+      appliesTo,
+      providerMode: LeadSourceProviderMode.COGNISM_API,
+      cognismApiTokenEncrypted: enc,
+      cognismApiTokenLast4: last4,
+      lastError: null,
+    }
+    if (searchDefaults !== undefined) {
+      createData.cognismSearchDefaults = searchDefaults as Prisma.InputJsonValue
+    }
+    const updateData: Prisma.LeadSourceSheetConfigUncheckedUpdateInput = {
+      displayName: parsed.displayName,
+      appliesTo,
+      spreadsheetId: COGNISM_API_SPREADSHEET_SENTINEL,
+      gid: null,
+      providerMode: LeadSourceProviderMode.COGNISM_API,
+      cognismApiTokenEncrypted: enc,
+      cognismApiTokenLast4: last4,
+      lastError: null,
+    }
+    if (searchDefaults !== undefined) {
+      updateData.cognismSearchDefaults = searchDefaults as Prisma.InputJsonValue
+    }
+    const config = await prisma.leadSourceSheetConfig.upsert({
+      where: { customerId_sourceType: { customerId, sourceType: 'COGNISM' } },
+      create: createData,
+      update: updateData,
+    })
+    deleteCachedContacts(
+      getLeadSourceDataScope({
+        customerId: config.customerId,
+        sourceType: 'COGNISM',
+        spreadsheetId: COGNISM_API_SPREADSHEET_SENTINEL,
+        gid: null,
+      })
+    )
+    res.json({
+      success: true,
+      sourceType: config.sourceType,
+      displayName: config.displayName,
+      isLocked: config.isLocked,
+      providerMode: config.providerMode,
+      cognismTokenLast4: last4,
+    })
+  } catch (e) {
+    if (e instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Invalid input', details: e.errors })
+    }
+    const err = e as Error & { status?: number }
+    res.status(err.status ?? 500).json({ error: err.message ?? 'Cognism connect failed' })
+  }
+})
+
 // POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
 const connectSchema = z.object({
   sheetUrl: z.string().url(),
@@ -652,8 +918,22 @@ router.post('/:sourceType/connect', requireMarketingMutationAuth, async (req: Re
         displayName,
         isLocked: true,
         appliesTo,
+        providerMode: LeadSourceProviderMode.SHEET,
+        cognismApiTokenEncrypted: null,
+        cognismApiTokenLast4: null,
+        cognismSearchDefaults: Prisma.JsonNull,
       },
-      update: { spreadsheetId, gid, displayName, lastError: null, appliesTo },
+      update: {
+        spreadsheetId,
+        gid,
+        displayName,
+        lastError: null,
+        appliesTo,
+        providerMode: LeadSourceProviderMode.SHEET,
+        cognismApiTokenEncrypted: null,
+        cognismApiTokenLast4: null,
+        cognismSearchDefaults: Prisma.JsonNull,
+      },
     })
     res.json({
       success: true,
@@ -682,15 +962,36 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
     }
     const sourceType = sourceTypeRaw
     const config = await resolveLeadSourceConfig(customerId, sourceType)
-    if (!config?.spreadsheetId) {
+    if (!config) {
+      return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
+    }
+    if (isCognismApiMode(config)) {
+      if (!config.cognismApiTokenEncrypted) {
+        return res.status(404).json({ error: 'Cognism API not connected. Connect an API token first.' })
+      }
+    } else if (!config.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
     }
     configForError = config
     const dataScope = getLeadSourceDataScope(config)
+    const now = new Date()
+
+    if (isCognismApiMode(config)) {
+      const { totalRows, newRowsDetected } = await runCognismApiPoll(config, dataScope, now)
+      await prisma.leadSourceSheetConfig.update({
+        where: { id: config.id },
+        data: { lastFetchAt: now, lastError: null },
+      })
+      return res.json({
+        totalRows,
+        newRowsDetected,
+        lastFetchAt: now.toISOString(),
+      })
+    }
+
     const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
     const csvText = await fetchCsvFromUrl(csvUrl)
     const { columnKeys, rows } = csvToMappedRows(csvText)
-    const now = new Date()
     const toCreate: Array<{ customerId: string; sourceType: LeadSourceType; spreadsheetId: string; fingerprint: string; batchKey: string }> = []
     const seen = new Set<string>()
     for (const row of rows) {
@@ -912,6 +1213,11 @@ router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
     if (!config?.spreadsheetId) {
       return res.status(404).json({ error: 'Source not connected' })
     }
+    if (isCognismApiMode(config)) {
+      return res.status(400).json({
+        error: 'This Cognism source uses the API. There is no Google Sheet to open.',
+      })
+    }
     const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
     const redirectUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
     res.redirect(302, redirectUrl)
@@ -983,14 +1289,14 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       fingerprintsInBatch.map((row) => [row.fingerprint, row.firstSeenAt.getTime()] as const)
     )
     const rowSeenCount = fingerprintsInBatch.length
-    let cached = await loadLeadSourceContactsCsvIntoCache(config, dataScope)
+    let cached = await loadLeadSourceContactsIntoCache(config, dataScope)
     let filtered = cached.rows.filter((r: Record<string, string>) => {
       const fp = r['__fp']
       return typeof fp === 'string' && fpSet.has(fp)
     })
     // Stale in-memory CSV vs current sheet: fingerprints from DB don't match cached export (e.g. sheet edited).
-    if (filtered.length === 0 && fpSet.size > 0) {
-      cached = await loadLeadSourceContactsCsvIntoCache(config, dataScope, { forceRefresh: true })
+    if (filtered.length === 0 && fpSet.size > 0 && !isCognismApiMode(config)) {
+      cached = await loadLeadSourceContactsIntoCache(config, dataScope, { forceRefresh: true })
       filtered = cached.rows.filter((r: Record<string, string>) => {
         const fp = r['__fp']
         return typeof fp === 'string' && fpSet.has(fp)

@@ -58,6 +58,7 @@ import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import {
   getLeadSources,
   connectLeadSource,
+  connectCognismLeadSource,
   pollLeadSource,
   getLeadSourceBatches,
   getLeadSourceContacts,
@@ -128,12 +129,16 @@ function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>
       description: `The latest source refresh needs review: ${src.lastError}`,
     }
   }
+  const tokenHint =
+    src.sourceType === 'COGNISM' && src.providerMode === 'COGNISM_API' && src.cognismTokenLast4
+      ? ` Token …${src.cognismTokenLast4}.`
+      : ''
   return {
     colorScheme: 'green',
     label: 'Ready',
     description: src.lastFetchAt
-      ? `Last refreshed ${new Date(src.lastFetchAt).toLocaleString()}.`
-      : 'Connected and ready to review batches.',
+      ? `Last refreshed ${new Date(src.lastFetchAt).toLocaleString()}.${tokenHint}`
+      : `Connected and ready to review batches.${tokenHint}`,
   }
 }
 
@@ -200,10 +205,13 @@ function SourcesOverview({
                     isLoading={pollingSourceType === sourceType}
                     onClick={() => onPoll(sourceType)}
                   >
-                    Refresh from sheet
+                    {sourceType === 'COGNISM' && src?.providerMode === 'COGNISM_API'
+                      ? 'Poll Cognism'
+                      : 'Refresh from sheet'}
                   </Button>
                 ) : null}
-                {src?.connected ? (
+                {src?.connected &&
+                !(sourceType === 'COGNISM' && src?.providerMode === 'COGNISM_API') ? (
                   <Link
                     id="lead-sources-open-sheet-link"
                     data-testid="lead-sources-open-sheet-link"
@@ -224,7 +232,13 @@ function SourcesOverview({
                   variant="ghost"
                   onClick={() => onOpenConnect(sourceType)}
                 >
-                  {src?.connected ? 'Replace source' : 'Connect source'}
+                  {src?.connected
+                    ? sourceType === 'COGNISM' && src?.providerMode === 'COGNISM_API'
+                      ? 'Replace token / defaults'
+                      : 'Replace source'
+                    : sourceType === 'COGNISM'
+                      ? 'Connect Cognism'
+                      : 'Connect source'}
                 </Button>
               </VStack>
             </CardBody>
@@ -333,6 +347,8 @@ function BatchesBlock({
   activeBatchKey,
   batchDate,
   openSheetUrl,
+  showOpenSheetLink = true,
+  refreshSourceLabel = 'Refresh from sheet',
   refreshingSource,
   onBatchDateChange,
   onBack,
@@ -350,6 +366,8 @@ function BatchesBlock({
   activeBatchKey?: string | null
   batchDate: string
   openSheetUrl: string
+  showOpenSheetLink?: boolean
+  refreshSourceLabel?: string
   refreshingSource: boolean
   onBatchDateChange: (date: string) => void
   onBack: () => void
@@ -410,13 +428,15 @@ function BatchesBlock({
             />
           </FormControl>
           <Button size="sm" variant="outline" leftIcon={<RepeatIcon />} onClick={onRefreshSource} isLoading={refreshingSource}>
-            Refresh from sheet
+            {refreshSourceLabel}
           </Button>
-          <Link href={openSheetUrl} isExternal _hover={{ textDecoration: 'none' }}>
-            <Button size="sm" variant="ghost" leftIcon={<ExternalLinkIcon />}>
-              Open linked sheet
-            </Button>
-          </Link>
+          {showOpenSheetLink ? (
+            <Link href={openSheetUrl} isExternal _hover={{ textDecoration: 'none' }}>
+              <Button size="sm" variant="ghost" leftIcon={<ExternalLinkIcon />}>
+                Open linked sheet
+              </Button>
+            </Link>
+          ) : null}
           <Button size="sm" onClick={onBack}>
             Back
           </Button>
@@ -913,6 +933,11 @@ export default function LeadSourcesTabNew({
   const [connectSubmitting, setConnectSubmitting] = useState(false)
   const [connectUrlError, setConnectUrlError] = useState<string | null>(null)
   const [connectApplyToAllAccounts, setConnectApplyToAllAccounts] = useState(false)
+  const [connectCognismLegacySheet, setConnectCognismLegacySheet] = useState(false)
+  const [connectCognismToken, setConnectCognismToken] = useState('')
+  const [cognismCompanies, setCognismCompanies] = useState('')
+  const [cognismJobTitles, setCognismJobTitles] = useState('')
+  const [cognismRegions, setCognismRegions] = useState('')
   const [pollingSourceType, setPollingSourceType] = useState<LeadSourceType | null>(null)
   const [savingBatchKey, setSavingBatchKey] = useState<string | null>(null)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
@@ -1109,11 +1134,58 @@ export default function LeadSourcesTabNew({
     setConnectUrl('')
     setConnectUrlError(null)
     setConnectApplyToAllAccounts(false)
+    setConnectCognismLegacySheet(false)
+    setConnectCognismToken('')
+    setCognismCompanies('')
+    setCognismJobTitles('')
+    setCognismRegions('')
     onConnectOpen()
   }
 
   const submitConnect = async () => {
-    if (!connectSource || !connectUrl.trim() || !connectName.trim()) return
+    if (!connectSource || !connectName.trim()) return
+    if (connectSource === 'COGNISM' && !connectCognismLegacySheet) {
+      if (!connectCognismToken.trim()) return
+      const companies = cognismCompanies
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const jobs = cognismJobTitles
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const regions = cognismRegions
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const searchDefaults: Record<string, unknown> = {}
+      if (companies.length > 0) searchDefaults.account = { names: companies }
+      if (jobs.length > 0) searchDefaults.jobTitles = jobs
+      if (regions.length > 0) searchDefaults.regions = regions
+      setConnectSubmitting(true)
+      try {
+        await connectCognismLeadSource(customerId, {
+          apiToken: connectCognismToken.trim(),
+          displayName: connectName.trim(),
+          applyToAllAccounts: connectApplyToAllAccounts,
+          searchDefaults,
+        })
+        toast({ title: 'Cognism API connected', status: 'success', duration: 3000 })
+        onConnectClose()
+        loadSources()
+      } catch (e) {
+        toast({
+          title: 'Cognism connect failed',
+          description: e instanceof Error ? e.message : 'Error',
+          status: 'error',
+          duration: 7000,
+        })
+      } finally {
+        setConnectSubmitting(false)
+      }
+      return
+    }
+    if (!connectUrl.trim()) return
     if (isPublishedOrCsvUrl(connectUrl)) {
       setConnectUrlError('Use normal Google Sheets URL …/spreadsheets/d/<ID>/edit#gid=… (not published/CSV links).')
       return
@@ -1176,6 +1248,11 @@ export default function LeadSourcesTabNew({
   )
 
   const buildVersion = import.meta.env.VITE_GIT_SHA ?? 'unknown'
+  const viewBatchSourceConfig = useMemo(
+    () => (viewBatchesSource ? sources.find((s) => s.sourceType === viewBatchesSource) : undefined),
+    [sources, viewBatchesSource]
+  )
+  const cognismApiMode = viewBatchesSource === 'COGNISM' && viewBatchSourceConfig?.providerMode === 'COGNISM_API'
   const sourceSummary = useMemo(() => {
     const connected = sources.filter((source) => source.connected).length
     const needsAttention = sources.filter((source) => source.connected && !!source.lastError).length
@@ -1337,6 +1414,8 @@ export default function LeadSourcesTabNew({
                     activeBatchKey={contactsBatchKey?.batchKey ?? null}
                     batchDate={batchDate}
                     openSheetUrl={buildOpenSheetUrl(API_BASE, viewBatchesSource, customerId)}
+                    showOpenSheetLink={!cognismApiMode}
+                    refreshSourceLabel={cognismApiMode ? 'Poll Cognism' : 'Refresh from sheet'}
                     refreshingSource={pollingSourceType === viewBatchesSource}
                     onBatchDateChange={(next) => setBatchDate(next)}
                     onRefreshSource={() => handlePoll(viewBatchesSource)}
@@ -1416,7 +1495,7 @@ export default function LeadSourcesTabNew({
                     <Alert id="lead-sources-sheet-truth-banner" data-testid="lead-sources-sheet-truth-banner" status="info" mb={4}>
                       <AlertIcon />
                       <AlertDescription fontSize="sm">
-                        The linked Google Sheet remains the source of truth for this tab. Shared source inheritance still applies exactly as before; the main source cards now carry the day-to-day operator actions.
+                        The linked source remains the source of truth for this tab: Google Sheets for Apollo/Social/Blackbook (and legacy Cognism), or the Cognism API when connected in API mode. Shared source inheritance still applies as before.
                       </AlertDescription>
                     </Alert>
                     <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
@@ -1450,25 +1529,87 @@ export default function LeadSourcesTabNew({
       <Modal isOpen={isConnectOpen} onClose={onConnectClose}>
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Connect sheet — {connectSource && SOURCE_LABELS[connectSource]}</ModalHeader>
+          <ModalHeader>
+            {connectSource === 'COGNISM' && !connectCognismLegacySheet
+              ? 'Connect Cognism API'
+              : `Connect sheet — ${connectSource && SOURCE_LABELS[connectSource]}`}
+          </ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            <FormControl isRequired mb={3} isInvalid={!!connectUrlError}>
-              <FormLabel>Sheet URL</FormLabel>
-              <Input
-                value={connectUrl}
-                onChange={(e) => {
-                  const next = e.target.value
-                  setConnectUrl(next)
-                  if (connectUrlError && !isPublishedOrCsvUrl(next)) setConnectUrlError(null)
-                }}
-                placeholder="https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0"
-              />
-              <Text fontSize="sm" color="gray.600" mt={1}>
-                Use normal Google Sheets URL …/spreadsheets/d/&lt;ID&gt;/edit#gid=… (sheet must be viewable by anyone with the link).
-              </Text>
-              <FormErrorMessage>{connectUrlError}</FormErrorMessage>
-            </FormControl>
+            {connectSource === 'COGNISM' ? (
+              <FormControl mb={3}>
+                <Checkbox
+                  isChecked={connectCognismLegacySheet}
+                  onChange={(e) => {
+                    setConnectCognismLegacySheet(e.target.checked)
+                    setConnectUrlError(null)
+                  }}
+                >
+                  Use Google Sheet (legacy) instead of Cognism API
+                </Checkbox>
+              </FormControl>
+            ) : null}
+            {connectSource === 'COGNISM' && !connectCognismLegacySheet ? (
+              <>
+                <FormControl isRequired mb={3}>
+                  <FormLabel>Cognism API token</FormLabel>
+                  <Input
+                    type="password"
+                    autoComplete="off"
+                    value={connectCognismToken}
+                    onChange={(e) => setConnectCognismToken(e.target.value)}
+                    placeholder="Paste API key (Bearer token)"
+                  />
+                  <Text fontSize="sm" color="gray.600" mt={1}>
+                    The token is stored encrypted on the server and is never shown again after save.
+                  </Text>
+                </FormControl>
+                <FormControl mb={3}>
+                  <FormLabel>Company names (optional)</FormLabel>
+                  <Input
+                    value={cognismCompanies}
+                    onChange={(e) => setCognismCompanies(e.target.value)}
+                    placeholder="Comma-separated, e.g. Acme Ltd, Contoso"
+                  />
+                  <Text fontSize="sm" color="gray.600" mt={1}>
+                    Mapped to Cognism search account.names. Add at least one filter if your search returns too many results.
+                  </Text>
+                </FormControl>
+                <FormControl mb={3}>
+                  <FormLabel>Job titles (optional)</FormLabel>
+                  <Input
+                    value={cognismJobTitles}
+                    onChange={(e) => setCognismJobTitles(e.target.value)}
+                    placeholder="Comma-separated, e.g. Chief Revenue Officer"
+                  />
+                </FormControl>
+                <FormControl mb={3}>
+                  <FormLabel>Regions (optional)</FormLabel>
+                  <Input
+                    value={cognismRegions}
+                    onChange={(e) => setCognismRegions(e.target.value)}
+                    placeholder="Comma-separated, e.g. EMEA, North America"
+                  />
+                </FormControl>
+              </>
+            ) : (
+              <FormControl isRequired mb={3} isInvalid={!!connectUrlError}>
+                <FormLabel>Sheet URL</FormLabel>
+                <Input
+                  value={connectUrl}
+                  onChange={(e) => {
+                    const next = e.target.value
+                    setConnectUrl(next)
+                    if (connectUrlError && !isPublishedOrCsvUrl(next)) setConnectUrlError(null)
+                  }}
+                  placeholder="https://docs.google.com/spreadsheets/d/<ID>/edit#gid=0"
+                />
+                <Text fontSize="sm" color="gray.600" mt={1}>
+                  Use normal Google Sheets URL …/spreadsheets/d/&lt;ID&gt;/edit#gid=… (sheet must be viewable by anyone with the link).
+                </Text>
+                <FormErrorMessage>{connectUrlError}</FormErrorMessage>
+              </FormControl>
+            )}
             <FormControl isRequired>
               <FormLabel>Display name</FormLabel>
               <Input
@@ -1494,7 +1635,11 @@ export default function LeadSourcesTabNew({
               colorScheme="blue"
               onClick={submitConnect}
               isLoading={connectSubmitting}
-              isDisabled={!connectUrl.trim() || !connectName.trim()}
+              isDisabled={
+                connectSource === 'COGNISM' && !connectCognismLegacySheet
+                  ? !connectCognismToken.trim() || !connectName.trim()
+                  : !connectUrl.trim() || !connectName.trim()
+              }
             >
               Connect
             </Button>
