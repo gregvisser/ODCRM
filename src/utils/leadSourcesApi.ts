@@ -1,5 +1,5 @@
 /**
- * Lead Sources API client — 4 sheets (Cognism, Apollo, Social, Blackbook).
+ * Lead Sources API client — provider-backed imports (Cognism API first).
  * All requests use x-customer-id from api or explicit header.
  */
 
@@ -17,7 +17,7 @@ export interface LeadSourceConfig {
   providerMode?: LeadSourceProviderMode
   /** Last 4 characters of stored Cognism API token (never the full secret). */
   cognismTokenLast4?: string | null
-  /** True when this customer is using a sheet connected for "all accounts" (not their own). */
+  /** True when this customer is using a connection scoped to all accounts (not their own). */
   usingGlobalConfig?: boolean
   lastFetchAt: string | null
   lastError: string | null
@@ -59,7 +59,7 @@ export interface LeadSourceBatchesResponse {
 }
 
 export interface LeadSourceContactsResponse {
-  /** Sheet + server columns; `odcrmFirstSeenAt` is ISO-first-seen from DB (not from the sheet). */
+  /** Imported columns; `odcrmFirstSeenAt` is ISO-first-seen from DB batch tracking. */
   columns: string[]
   contacts: Record<string, string>[]
   page: number
@@ -78,25 +78,6 @@ function headers(customerId: string): Record<string, string> {
 export async function getLeadSources(customerId: string): Promise<LeadSourcesListResponse> {
   const res = await fetch(`${API_BASE}/api/lead-sources`, { headers: headers(customerId) })
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`)
-  return res.json()
-}
-
-export async function connectLeadSource(
-  customerId: string,
-  sourceType: LeadSourceType,
-  sheetUrl: string,
-  displayName: string,
-  applyToAllAccounts?: boolean
-): Promise<{ success: boolean }> {
-  const res = await fetch(`${API_BASE}/api/lead-sources/${sourceType}/connect`, {
-    method: 'POST',
-    headers: headers(customerId),
-    body: JSON.stringify({ sheetUrl, displayName, applyToAllAccounts: !!applyToAllAccounts }),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `HTTP ${res.status}`)
-  }
   return res.json()
 }
 
@@ -185,12 +166,6 @@ export async function getLeadSourceContacts(
     ...data,
     configScope,
   }
-}
-
-/** Build URL for "Open Sheet" — backend redirect (never exposes spreadsheetId to client). */
-export function buildOpenSheetUrl(apiBase: string, sourceType: LeadSourceType, customerId: string): string {
-  const base = apiBase.replace(/\/$/, '')
-  return `${base}/api/lead-sources/${sourceType}/open-sheet?customerId=${encodeURIComponent(customerId)}`
 }
 
 /** GET /api/lead-sources/batches — all batches across sources (for Sequences Leads Snapshot). */

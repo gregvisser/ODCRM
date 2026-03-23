@@ -1,13 +1,12 @@
 /**
- * Lead Sources API — 4 sheets (Cognism, Apollo, Social, Blackbook) as immutable source of truth.
- * Metadata only in DB; contacts are NOT persisted. All scoped by x-customer-id.
+ * Lead Sources API — provider-backed imports (Cognism API first). Persisted rows in DB; tenant via x-customer-id.
+ * Google Sheets CSV flow removed; legacy SHEET configs in DB are ignored.
  */
 
 import { Router, Request, Response } from 'express'
 import { z } from 'zod'
 import { LeadSourceType, LeadSourceAppliesTo, LeadSourceProviderMode, Prisma } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
-import { csvToMappedRows, detectDelimiter } from '../services/leadSourcesCanonicalMapping.js'
 import { computeFingerprint } from '../services/leadSourcesFingerprint.js'
 import { buildBatchKey, parseBatchKey } from '../services/leadSourcesBatch.js'
 import { requireCustomerId } from '../utils/tenantId.js'
@@ -23,11 +22,8 @@ import { cognismNormalizedToFlatRow, normalizeCognismRedeemedContact } from '../
 
 const router = Router()
 
-/** Stable spreadsheetId for Cognism API-backed configs (not a Google Sheet). */
+/** Stable spreadsheetId for Cognism API-backed configs (legacy column name; not a Google Sheet). */
 const COGNISM_API_SPREADSHEET_SENTINEL = 'COGNISM_API'
-
-const CACHE_TTL_MS = 45 * 1000 // 30–60s in-memory cache for CSV-derived contacts
-const FETCH_TIMEOUT_MS = 15 * 1000
 
 const COGNISM_POLL_INDEX_SIZE = Math.min(
   100,
@@ -68,47 +64,6 @@ type LeadSourceSheetConfigRow = {
   cognismApiTokenEncrypted: string | null
   cognismApiTokenLast4: string | null
   cognismSearchDefaults: unknown | null
-}
-
-const PUBLISHED_LINK_REJECT_MESSAGE =
-  'Please paste the normal Google Sheets URL (…/spreadsheets/d/<ID>/edit). Do not use published CSV (/pub?output=csv) links.'
-
-/** True if URL is a published CSV link (/d/e/..., /pub, or output=csv). */
-function isPublishedCsvUrl(url: string): boolean {
-  const u = url.toLowerCase()
-  return u.includes('/spreadsheets/d/e/') || u.includes('/pub') || u.includes('output=csv')
-}
-
-/** Build CSV export URL. spreadsheetId is always a sheet ID (not a full URL). */
-function getCsvExportUrl(spreadsheetId: string, gid?: string | null): string {
-  const g = gid && /^\d+$/.test(gid) ? gid : '0'
-  return `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${g}`
-}
-
-const HTML_ERROR_MSG =
-  'Sheet URL returned HTML. This usually means the sheet is not published / not accessible, or the URL format is unsupported. If you are using a published link, it must contain output=csv.'
-
-/** Fetches CSV from external URL only (Google Sheets export). No self-fetch; frontend calls POST /poll explicitly. */
-async function fetchCsvFromUrl(url: string): Promise<string> {
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await fetch(url, {
-      headers: { Accept: 'text/csv, text/plain, */*', 'User-Agent': 'ODCRM-LeadSources/1.0' },
-      signal: controller.signal,
-    })
-    clearTimeout(timeout)
-    const text = await res.text()
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-    const contentType = (res.headers.get('content-type') || '').toLowerCase()
-    if (contentType.includes('text/html') || text.trim().toLowerCase().includes('<html')) {
-      throw new Error(HTML_ERROR_MSG)
-    }
-    return text
-  } catch (e) {
-    clearTimeout(timeout)
-    throw e instanceof Error ? e : new Error(String(e))
-  }
 }
 
 type ResolvedLeadSourceConfig = NonNullable<Awaited<ReturnType<typeof resolveLeadSourceConfig>>>
@@ -238,56 +193,10 @@ async function loadBatchMetadataMap(
   return byKey
 }
 
-function getContactsCacheKey(scope: {
-  configCustomerId: string
-  sourceType: LeadSourceType
-  spreadsheetId: string
-  gid: string | null
-}): string {
-  return `${scope.configCustomerId}|${scope.sourceType}|${scope.spreadsheetId}|${scope.gid ?? ''}`
-}
-
-// In-memory cache for GET contacts: key = config owner + source + sheet identity, value = { data, at }
-const contactsCache = new Map<string, { columnKeys: string[]; rows: Array<Record<string, string>>; at: number }>()
-
-function getCachedContacts(scope: {
-  configCustomerId: string
-  sourceType: LeadSourceType
-  spreadsheetId: string
-  gid: string | null
-}): { columnKeys: string[]; rows: Array<Record<string, string>> } | null {
-  const key = getContactsCacheKey(scope)
-  const entry = contactsCache.get(key)
-  if (!entry || Date.now() - entry.at > CACHE_TTL_MS) return null
-  return { columnKeys: entry.columnKeys, rows: entry.rows }
-}
-
-function setCachedContacts(
-  scope: {
-    configCustomerId: string
-    sourceType: LeadSourceType
-    spreadsheetId: string
-    gid: string | null
-  },
-  columnKeys: string[],
-  rows: Array<Record<string, string>>
-): void {
-  contactsCache.set(getContactsCacheKey(scope), { columnKeys, rows, at: Date.now() })
-}
-
-function deleteCachedContacts(scope: {
-  configCustomerId: string
-  sourceType: LeadSourceType
-  spreadsheetId: string
-  gid: string | null
-}): void {
-  contactsCache.delete(getContactsCacheKey(scope))
-}
-
-/** Canonical field on each contact row: ISO time from LeadSourceRowSeen.firstSeenAt (not from the sheet). */
+/** Canonical field on each contact row: ISO time from LeadSourceRowSeen.firstSeenAt (not from provider payload). */
 const LEAD_SOURCE_CONTACT_META_FIRST_SEEN_KEY = 'odcrmFirstSeenAt'
 
-/** Resolve sheet config: exact customer first, then any config with appliesTo ALL_ACCOUNTS for this sourceType. */
+/** Resolve active provider config: exact customer first, then ALL_ACCOUNTS. Ignores deprecated SHEET mode. */
 async function resolveLeadSourceConfig(
   customerId: string,
   sourceType: LeadSourceType
@@ -295,11 +204,22 @@ async function resolveLeadSourceConfig(
   const exact = await prisma.leadSourceSheetConfig.findUnique({
     where: { customerId_sourceType: { customerId, sourceType } },
   })
-  if (exact?.spreadsheetId) return exact as LeadSourceSheetConfigRow
+  if (isUsableLeadSourceConfig(exact)) return exact as LeadSourceSheetConfigRow
   const fallback = await prisma.leadSourceSheetConfig.findFirst({
     where: { sourceType, appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS },
   })
-  return fallback?.spreadsheetId ? (fallback as LeadSourceSheetConfigRow) : null
+  return isUsableLeadSourceConfig(fallback) ? (fallback as LeadSourceSheetConfigRow) : null
+}
+
+function isUsableLeadSourceConfig(
+  row: Awaited<ReturnType<typeof prisma.leadSourceSheetConfig.findUnique>> | null
+): boolean {
+  if (!row?.spreadsheetId) return false
+  if (row.providerMode === LeadSourceProviderMode.SHEET) return false
+  if (row.sourceType === 'COGNISM' && row.providerMode === LeadSourceProviderMode.COGNISM_API) {
+    return !!row.cognismApiTokenEncrypted
+  }
+  return false
 }
 
 function isCognismApiMode(config: LeadSourceSheetConfigRow): boolean {
@@ -313,102 +233,20 @@ function buildCognismSearchBody(defaults: unknown): Record<string, unknown> {
   return {}
 }
 
-function mergeCognismContactCache(
-  dataScope: LeadSourceDataScope,
-  columnKeys: string[],
-  newFlatRows: Array<Record<string, string>>
-): { columnKeys: string[]; rows: Array<Record<string, string>> } {
-  const hit = getCachedContacts(dataScope)
-  const keySet = new Set<string>(columnKeys)
-  const byFp = new Map<string, Record<string, string>>()
-  if (hit) {
-    for (const r of hit.rows) {
-      const fp = r['__fp']
-      if (typeof fp === 'string') byFp.set(fp, r)
-    }
-    for (const k of hit.columnKeys) keySet.add(k)
+function domainFromWebsite(website: string): string | null {
+  const t = website.trim()
+  if (!t) return null
+  try {
+    const u = t.includes('://') ? new URL(t) : new URL(`https://${t}`)
+    return u.hostname.replace(/^www\./, '') || null
+  } catch {
+    return null
   }
-  for (const r of newFlatRows) {
-    const fp = r['__fp']
-    if (typeof fp === 'string') byFp.set(fp, r)
-    for (const k of Object.keys(r)) {
-      if (k && k !== '__fp') keySet.add(k)
-    }
-  }
-  const merged = [...byFp.values()]
-  const mergedColumns = [...keySet].filter((k) => k !== '__fp')
-  setCachedContacts(dataScope, mergedColumns, merged)
-  return { columnKeys: mergedColumns, rows: merged }
 }
 
-/**
- * Load the current sheet export, map to canonical rows + fingerprints, and optionally refresh the in-memory cache.
- */
-async function loadLeadSourceContactsCsvIntoCache(
-  config: ResolvedLeadSourceConfig,
-  dataScope: LeadSourceDataScope,
-  options?: { forceRefresh?: boolean }
-): Promise<{ columnKeys: string[]; rows: Array<Record<string, string>> }> {
-  if (options?.forceRefresh) {
-    deleteCachedContacts(dataScope)
-  }
-  const hit = getCachedContacts(dataScope)
-  if (hit && !options?.forceRefresh) {
-    return { columnKeys: hit.columnKeys, rows: hit.rows }
-  }
-  const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
-  const csvText = await fetchCsvFromUrl(csvUrl)
-  const firstLine = csvText.split(/\r?\n/)[0] ?? ''
-  if (process.env.DEBUG_LEAD_SOURCES === '1') {
-    const commaCount = (firstLine.match(/,/g) || []).length
-    const tabCount = (firstLine.match(/\t/g) || []).length
-    const semicolonCount = (firstLine.match(/;/g) || []).length
-    const inferred = detectDelimiter(firstLine)
-    console.debug('[lead-sources contacts] raw CSV', {
-      csvUrl,
-      firstLineTrunc500: firstLine.slice(0, 500),
-      commaCount,
-      tabCount,
-      semicolonCount,
-      inferredDelimiter: inferred === '\t' ? 'TAB' : inferred === ';' ? 'SEMICOLON' : 'COMMA',
-    })
-  }
-  const { columnKeys, rows } = csvToMappedRows(csvText)
-  if (process.env.DEBUG_LEAD_SOURCES === '1') {
-    const firstRowKeys = rows[0] ? Object.keys({ ...rows[0].canonical, ...rows[0].extraFields }) : []
-    console.debug('[lead-sources contacts] parser output', {
-      parsedHeadersLength: columnKeys.length,
-      first30Headers: columnKeys.slice(0, 30),
-      firstRowKeysCount: firstRowKeys.length,
-      firstRowKeysList: firstRowKeys.slice(0, 30),
-    })
-  }
-  const flat = rows.map((r) => {
-    const canonical = { ...r.canonical }
-    const fingerprint = computeFingerprint(canonical)
-    return { ...canonical, ...r.extraFields, __fp: fingerprint }
-  })
-  setCachedContacts(dataScope, columnKeys, flat)
-  return { columnKeys, rows: flat }
-}
-
-/**
- * Contacts cache: Google Sheets CSV or merged Cognism API rows (same downstream shape).
- */
-async function loadLeadSourceContactsIntoCache(
-  config: ResolvedLeadSourceConfig,
-  dataScope: LeadSourceDataScope,
-  options?: { forceRefresh?: boolean }
-): Promise<{ columnKeys: string[]; rows: Array<Record<string, string>> }> {
-  if (isCognismApiMode(config)) {
-    if (options?.forceRefresh) {
-      deleteCachedContacts(dataScope)
-    }
-    const hit = getCachedContacts(dataScope)
-    if (hit) return { columnKeys: hit.columnKeys, rows: hit.rows }
-    return { columnKeys: [], rows: [] }
-  }
-  return loadLeadSourceContactsCsvIntoCache(config, dataScope, options)
+function stripFpFromFlat(flat: Record<string, string>): Prisma.InputJsonValue {
+  const { __fp, ...rest } = flat
+  return rest as Prisma.InputJsonValue
 }
 
 async function runCognismApiPoll(
@@ -448,7 +286,6 @@ async function runCognismApiPoll(
     batchKey: string
   }> = []
   const seen = new Set<string>()
-  const newFlatRows: Array<Record<string, string>> = []
   for (const raw of redeemedRaw) {
     if (!raw || typeof raw !== 'object') continue
     const row = normalizeCognismRedeemedContact(raw as Record<string, unknown>)
@@ -461,7 +298,59 @@ async function runCognismApiPoll(
     const jobTitle = canonical.jobTitle ?? ''
     const batchKey = buildBatchKey(now, client, jobTitle)
     flat['__fp'] = fingerprint
-    newFlatRows.push(flat)
+    const fn = canonical.firstName?.trim() ?? ''
+    const ln = canonical.lastName?.trim() ?? ''
+    const fullName = [fn, ln].filter(Boolean).join(' ').trim() || null
+    const phone =
+      canonical.mobile || canonical.directPhone || canonical.officePhone
+        ? (canonical.mobile || canonical.directPhone || canonical.officePhone).trim()
+        : null
+    const extId = (flat.cognismContactId || flat.cognismRedeemId || '').trim() || null
+    await prisma.leadSourceImportedContact.upsert({
+      where: {
+        customerId_sourceType_spreadsheetId_fingerprint: {
+          customerId: dataScope.configCustomerId,
+          sourceType: 'COGNISM',
+          spreadsheetId: dataScope.spreadsheetId,
+          fingerprint,
+        },
+      },
+      create: {
+        customerId: dataScope.configCustomerId,
+        sourceType: 'COGNISM',
+        spreadsheetId: dataScope.spreadsheetId,
+        fingerprint,
+        firstName: fn || null,
+        lastName: ln || null,
+        fullName,
+        email: canonical.email?.trim() || null,
+        phone,
+        companyName: canonical.companyName?.trim() || null,
+        website: canonical.website?.trim() || null,
+        domain: domainFromWebsite(canonical.website),
+        jobTitle: canonical.jobTitle?.trim() || null,
+        region: null,
+        country: canonical.country?.trim() || null,
+        externalId: extId,
+        flatFields: stripFpFromFlat(flat),
+        rawPayload: raw as unknown as Prisma.InputJsonValue,
+      },
+      update: {
+        firstName: fn || null,
+        lastName: ln || null,
+        fullName,
+        email: canonical.email?.trim() || null,
+        phone,
+        companyName: canonical.companyName?.trim() || null,
+        website: canonical.website?.trim() || null,
+        domain: domainFromWebsite(canonical.website),
+        jobTitle: canonical.jobTitle?.trim() || null,
+        country: canonical.country?.trim() || null,
+        externalId: extId,
+        flatFields: stripFpFromFlat(flat),
+        rawPayload: raw as unknown as Prisma.InputJsonValue,
+      },
+    })
     toCreate.push({
       customerId: dataScope.configCustomerId,
       sourceType: 'COGNISM',
@@ -475,10 +364,6 @@ async function runCognismApiPoll(
     skipDuplicates: true,
   })
   const newRowsDetected = result.count
-  const columnKeys = Object.keys(newFlatRows[0] ?? {}).filter((k) => k !== '__fp')
-  if (newFlatRows.length > 0) {
-    mergeCognismContactCache(dataScope, columnKeys, newFlatRows)
-  }
   return { totalRows: redeemedRaw.length, newRowsDetected }
 }
 
@@ -505,9 +390,7 @@ router.get('/', async (req: Request, res: Response) => {
       const usingGlobalConfig = !!(c && c.customerId !== customerId)
       const cognismApi =
         c && c.sourceType === 'COGNISM' && c.providerMode === LeadSourceProviderMode.COGNISM_API
-      const connected = cognismApi
-        ? !!c?.cognismApiTokenEncrypted
-        : !!c?.spreadsheetId
+      const connected = cognismApi ? !!c?.cognismApiTokenEncrypted : false
       return {
         sourceType,
         displayName: c?.displayName ?? sourceType,
@@ -646,20 +529,24 @@ async function materializeLeadSourceBatchList(
   const fpSet = new Set(fingerprintsInBatch.map((r) => r.fingerprint))
   if (fpSet.size === 0) throw Object.assign(new Error('Batch has no contacts'), { status: 400 })
 
-  let cached = getCachedContacts(dataScope)
-  if (!cached) {
-    cached = await loadLeadSourceContactsIntoCache(config, dataScope)
-  }
-  if (cached.rows.length === 0 && isCognismApiMode(config)) {
+  const imported = await prisma.leadSourceImportedContact.findMany({
+    where: {
+      customerId: dataScope.configCustomerId,
+      sourceType,
+      spreadsheetId: dataScope.spreadsheetId,
+      fingerprint: { in: [...fpSet] },
+    },
+  })
+  const filtered = imported.map((row) => {
+    const flat = (row.flatFields as Record<string, string>) || {}
+    return { ...flat, __fp: row.fingerprint } as Record<string, string>
+  })
+  if (filtered.length === 0) {
     throw Object.assign(
-      new Error('No Cognism contacts in memory. Run Poll on this source again, then materialize.'),
+      new Error('No imported contact rows in database for this batch. Run import from Cognism again.'),
       { status: 400 }
     )
   }
-  const filtered = cached.rows.filter((r: Record<string, string>) => {
-    const fp = r['__fp']
-    return typeof fp === 'string' && fpSet.has(fp)
-  }) as Array<Record<string, string>>
 
   list = await prisma.contactList.create({
     data: {
@@ -836,14 +723,6 @@ router.post('/cognism/connect', requireMarketingMutationAuth, async (req: Reques
       create: createData,
       update: updateData,
     })
-    deleteCachedContacts(
-      getLeadSourceDataScope({
-        customerId: config.customerId,
-        sourceType: 'COGNISM',
-        spreadsheetId: COGNISM_API_SPREADSHEET_SENTINEL,
-        gid: null,
-      })
-    )
     res.json({
       success: true,
       sourceType: config.sourceType,
@@ -861,96 +740,7 @@ router.post('/cognism/connect', requireMarketingMutationAuth, async (req: Reques
   }
 })
 
-// POST /api/lead-sources/:sourceType/connect — set spreadsheetId + displayName
-const connectSchema = z.object({
-  sheetUrl: z.string().url(),
-  displayName: z.string().trim().min(1),
-  applyToAllAccounts: z.boolean().optional().default(false),
-})
-router.post('/:sourceType/connect', requireMarketingMutationAuth, async (req: Request, res: Response) => {
-  try {
-    const { sheetUrl, displayName, applyToAllAccounts } = connectSchema.parse(req.body)
-
-    if (isPublishedCsvUrl(sheetUrl)) {
-      return res.status(400).json({ error: PUBLISHED_LINK_REJECT_MESSAGE })
-    }
-
-    const customerId = requireCustomerId(req, res)
-    if (!customerId) return
-    const { sourceType: sourceTypeRaw } = req.params
-    if (!isValidSourceType(sourceTypeRaw)) {
-      return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
-    }
-    const sourceType = sourceTypeRaw
-
-    const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)
-    if (!idMatch) return res.status(400).json({ error: 'Invalid Google Sheets URL' })
-    const spreadsheetId = idMatch[1]
-    let gid: string | null = null
-    try {
-      const parsed = new URL(sheetUrl)
-      const fromQuery = parsed.searchParams.get('gid')
-      const fromHash = parsed.hash ? /gid=(\d+)/.exec(parsed.hash)?.[1] : null
-      const gidVal = fromQuery || fromHash
-      if (gidVal && /^\d+$/.test(gidVal)) gid = gidVal
-    } catch {
-      const gidMatch = sheetUrl.match(/gid=(\d+)/)
-      gid = gidMatch ? gidMatch[1] : null
-    }
-
-    const csvUrl = getCsvExportUrl(spreadsheetId, gid)
-    const csvText = await fetchCsvFromUrl(csvUrl)
-    const { columnKeys } = csvToMappedRows(csvText)
-    if (columnKeys.length < 2) {
-      return res.status(400).json({
-        error:
-          'Sheet export appears to have only 1 column. Check the header row has multiple columns, no merged cells in row 1, and the correct sheet tab (gid).',
-      })
-    }
-    const appliesTo = applyToAllAccounts ? LeadSourceAppliesTo.ALL_ACCOUNTS : LeadSourceAppliesTo.CUSTOMER_ONLY
-    const config = await prisma.leadSourceSheetConfig.upsert({
-      where: { customerId_sourceType: { customerId, sourceType } },
-      create: {
-        customerId,
-        sourceType,
-        spreadsheetId,
-        gid,
-        displayName,
-        isLocked: true,
-        appliesTo,
-        providerMode: LeadSourceProviderMode.SHEET,
-        cognismApiTokenEncrypted: null,
-        cognismApiTokenLast4: null,
-        cognismSearchDefaults: Prisma.JsonNull,
-      },
-      update: {
-        spreadsheetId,
-        gid,
-        displayName,
-        lastError: null,
-        appliesTo,
-        providerMode: LeadSourceProviderMode.SHEET,
-        cognismApiTokenEncrypted: null,
-        cognismApiTokenLast4: null,
-        cognismSearchDefaults: Prisma.JsonNull,
-      },
-    })
-    res.json({
-      success: true,
-      sourceType: config.sourceType,
-      displayName: config.displayName,
-      isLocked: config.isLocked,
-    })
-  } catch (e) {
-    if (e instanceof z.ZodError) {
-      return res.status(400).json({ error: 'Invalid input', details: e.errors })
-    }
-    const err = e as Error & { status?: number }
-    res.status(err.status ?? 500).json({ error: err.message ?? 'Invalid Google Sheets URL or sheet not accessible' })
-  }
-})
-
-// POST /api/lead-sources/:sourceType/poll — fetch sheet, normalize, upsert LeadSourceRowSeen
+// POST /api/lead-sources/:sourceType/poll — Cognism API import only (Google Sheets removed)
 router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Request, res: Response) => {
   let configForError: ResolvedLeadSourceConfig | null = null
   try {
@@ -963,70 +753,27 @@ router.post('/:sourceType/poll', requireMarketingMutationAuth, async (req: Reque
     const sourceType = sourceTypeRaw
     const config = await resolveLeadSourceConfig(customerId, sourceType)
     if (!config) {
-      return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
+      return res.status(404).json({
+        error:
+          sourceType === 'COGNISM'
+            ? 'Cognism is not connected. Add an API token in Connect Cognism.'
+            : 'This provider is not available yet. Only Cognism API import is supported.',
+      })
     }
-    if (isCognismApiMode(config)) {
-      if (!config.cognismApiTokenEncrypted) {
-        return res.status(404).json({ error: 'Cognism API not connected. Connect an API token first.' })
-      }
-    } else if (!config.spreadsheetId) {
-      return res.status(404).json({ error: 'Source not connected. Connect a sheet first.' })
+    if (!isCognismApiMode(config) || !config.cognismApiTokenEncrypted) {
+      return res.status(404).json({ error: 'Cognism API not connected. Connect an API token first.' })
     }
     configForError = config
     const dataScope = getLeadSourceDataScope(config)
     const now = new Date()
 
-    if (isCognismApiMode(config)) {
-      const { totalRows, newRowsDetected } = await runCognismApiPoll(config, dataScope, now)
-      await prisma.leadSourceSheetConfig.update({
-        where: { id: config.id },
-        data: { lastFetchAt: now, lastError: null },
-      })
-      return res.json({
-        totalRows,
-        newRowsDetected,
-        lastFetchAt: now.toISOString(),
-      })
-    }
-
-    const csvUrl = getCsvExportUrl(config.spreadsheetId, config.gid)
-    const csvText = await fetchCsvFromUrl(csvUrl)
-    const { columnKeys, rows } = csvToMappedRows(csvText)
-    const toCreate: Array<{ customerId: string; sourceType: LeadSourceType; spreadsheetId: string; fingerprint: string; batchKey: string }> = []
-    const seen = new Set<string>()
-    for (const row of rows) {
-      const canonical = { ...row.canonical }
-      const fingerprint = computeFingerprint(canonical)
-      if (seen.has(fingerprint)) continue
-      seen.add(fingerprint)
-      const client = canonical.client ?? row.extraFields?.client ?? ''
-      const jobTitle = canonical.jobTitle ?? row.extraFields?.jobTitle ?? ''
-      const batchKey = buildBatchKey(now, client, jobTitle)
-      toCreate.push({
-        customerId: dataScope.configCustomerId,
-        sourceType,
-        spreadsheetId: config.spreadsheetId,
-        fingerprint,
-        batchKey,
-      })
-    }
-    const result = await prisma.leadSourceRowSeen.createMany({
-      data: toCreate,
-      skipDuplicates: true,
-    })
-    const newRowsDetected = result.count
+    const { totalRows, newRowsDetected } = await runCognismApiPoll(config, dataScope, now)
     await prisma.leadSourceSheetConfig.update({
       where: { id: config.id },
       data: { lastFetchAt: now, lastError: null },
     })
-    deleteCachedContacts(dataScope)
-    const flatRows = rows.map((r) => {
-      const canonical = { ...r.canonical }
-      return { ...canonical, ...r.extraFields, __fp: computeFingerprint(canonical) }
-    })
-    setCachedContacts(dataScope, columnKeys, flatRows)
-    res.json({
-      totalRows: rows.length,
+    return res.json({
+      totalRows,
       newRowsDetected,
       lastFetchAt: now.toISOString(),
     })
@@ -1199,34 +946,6 @@ router.patch(
   }
 )
 
-// GET /api/lead-sources/:sourceType/open-sheet — redirect to sheet (spreadsheetId is always an ID)
-router.get('/:sourceType/open-sheet', async (req: Request, res: Response) => {
-  try {
-    const customerId = requireCustomerId(req, res)
-    if (!customerId) return
-    const { sourceType: sourceTypeRaw } = req.params
-    if (!isValidSourceType(sourceTypeRaw)) {
-      return res.status(400).json({ error: `Invalid sourceType. Must be one of: ${SOURCE_TYPES.join(', ')}` })
-    }
-    const sourceType = sourceTypeRaw
-    const config = await resolveLeadSourceConfig(customerId, sourceType)
-    if (!config?.spreadsheetId) {
-      return res.status(404).json({ error: 'Source not connected' })
-    }
-    if (isCognismApiMode(config)) {
-      return res.status(400).json({
-        error: 'This Cognism source uses the API. There is no Google Sheet to open.',
-      })
-    }
-    const g = config.gid && /^\d+$/.test(config.gid) ? config.gid : '0'
-    const redirectUrl = `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit#gid=${g}`
-    res.redirect(302, redirectUrl)
-  } catch (e) {
-    const err = e as Error & { status?: number }
-    res.status(err.status ?? 500).json({ error: err.message ?? 'Failed' })
-  }
-})
-
 /** Ensure every row has every column key (empty string if missing). Stops downstream from collapsing to 1 column. */
 function normalizeRowKeepKeys(
   row: Record<string, string>,
@@ -1289,33 +1008,34 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       fingerprintsInBatch.map((row) => [row.fingerprint, row.firstSeenAt.getTime()] as const)
     )
     const rowSeenCount = fingerprintsInBatch.length
-    let cached = await loadLeadSourceContactsIntoCache(config, dataScope)
-    let filtered = cached.rows.filter((r: Record<string, string>) => {
-      const fp = r['__fp']
-      return typeof fp === 'string' && fpSet.has(fp)
+    const importedRows =
+      fpSet.size === 0
+        ? []
+        : await prisma.leadSourceImportedContact.findMany({
+            where: {
+              customerId: dataScope.configCustomerId,
+              sourceType,
+              spreadsheetId: dataScope.spreadsheetId,
+              fingerprint: { in: [...fpSet] },
+            },
+          })
+    let filtered = importedRows.map((row) => {
+      const flat = (row.flatFields as Record<string, string>) || {}
+      return { ...flat, __fp: row.fingerprint } as Record<string, string>
     })
-    // Stale in-memory CSV vs current sheet: fingerprints from DB don't match cached export (e.g. sheet edited).
-    if (filtered.length === 0 && fpSet.size > 0 && !isCognismApiMode(config)) {
-      cached = await loadLeadSourceContactsIntoCache(config, dataScope, { forceRefresh: true })
-      filtered = cached.rows.filter((r: Record<string, string>) => {
-        const fp = r['__fp']
-        return typeof fp === 'string' && fpSet.has(fp)
-      })
-    }
     filtered.sort((a, b) => {
       const aTs = typeof a.__fp === 'string' ? firstSeenByFingerprint.get(a.__fp) ?? 0 : 0
       const bTs = typeof b.__fp === 'string' ? firstSeenByFingerprint.get(b.__fp) ?? 0 : 0
       return bTs - aTs
     })
     const metaKey = LEAD_SOURCE_CONTACT_META_FIRST_SEEN_KEY
-    let returnedColumns = cached.columnKeys.filter((k) => k !== '__fp' && k !== metaKey)
-    if (returnedColumns.length === 0 && cached.rows.length > 0) {
-      const keySet = new Set<string>()
-      for (const row of cached.rows.slice(0, 200)) {
-        for (const k of Object.keys(row)) if (k && k !== '__fp' && k !== metaKey) keySet.add(k)
+    const keySet = new Set<string>()
+    for (const row of filtered.slice(0, 300)) {
+      for (const k of Object.keys(row)) {
+        if (k && k !== '__fp' && k !== metaKey) keySet.add(k)
       }
-      returnedColumns = Array.from(keySet)
     }
+    let returnedColumns = Array.from(keySet)
     const searchFiltered = searchQuery
       ? filtered.filter((row) => {
           const fp = typeof row.__fp === 'string' ? row.__fp : ''
@@ -1331,13 +1051,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
       : filtered
     const total = searchFiltered.length
     if (process.env.DEBUG_LEAD_SOURCES === '1') {
-      const firstRow = cached.rows[0] as Record<string, string> | undefined
-      const firstRowKeys = firstRow ? Object.keys(firstRow).filter((k) => k !== '__fp') : []
       console.debug('[lead-sources contacts]', {
-        cachedColumnsLength: cached.columnKeys.length,
-        cachedColumnsFirst10: cached.columnKeys.filter((k) => k !== '__fp').slice(0, 10),
-        firstRowKeysLength: firstRowKeys.length,
-        firstRowKeysFirst10: firstRowKeys.slice(0, 10),
         returnedColumnsLength: returnedColumns.length,
         returnedColumnsFirst10: returnedColumns.slice(0, 10),
         customerId,
@@ -1345,7 +1059,7 @@ router.get('/:sourceType/contacts', async (req: Request, res: Response) => {
         batchKey,
         searchQuery,
         rowSeenCount,
-        cachedRowCount: cached.rows.length,
+        importedRowCount: importedRows.length,
         filteredRowCount: searchFiltered.length,
       })
     }

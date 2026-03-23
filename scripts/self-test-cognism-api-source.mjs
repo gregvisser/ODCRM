@@ -26,11 +26,17 @@ try {
   const schema = read('server/prisma/schema.prisma')
   if (!schema.includes('LeadSourceProviderMode')) fail('schema', 'missing LeadSourceProviderMode')
   else ok('schema has LeadSourceProviderMode')
+  if (!schema.includes('LeadSourceImportedContact')) fail('schema', 'missing LeadSourceImportedContact')
+  else ok('schema has LeadSourceImportedContact')
 
   const route = read('server/src/routes/leadSources.ts')
   if (!route.includes('/cognism/connect')) {
     fail('routes', 'missing cognism connect path')
   } else ok('routes include /cognism/connect')
+  if (route.includes('/:sourceType/open-sheet')) fail('routes', 'open-sheet route should be removed')
+  else ok('routes omit open-sheet')
+  if (route.includes('router.post(\'/:sourceType/connect\'')) fail('routes', 'sheet connect route should be removed')
+  else ok('routes omit sheet connect')
 
   const ui = read('src/tabs/marketing/components/LeadSourcesTabNew.tsx')
   if (!ui.includes('connectCognismLeadSource')) fail('ui', 'LeadSourcesTabNew missing connectCognismLeadSource')
