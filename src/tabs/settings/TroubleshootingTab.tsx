@@ -4,7 +4,7 @@
  * Admin (greg@bidlow.co.uk) can manage all reports; others see only their own.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Box,
   Text,
@@ -90,6 +90,11 @@ interface MeUser {
 const ALLOWED_PROOF_TYPES = ['image/png', 'image/jpeg', 'image/webp']
 const MAX_PROOF_SIZE_MB = 5
 
+/** Client-side page size for report history (full list still loaded in one request). */
+const REPORT_HISTORY_PAGE_SIZE = 25
+
+const FILTER_ALL = 'all'
+
 export default function TroubleshootingTab() {
   const toast = useToast()
   const { isOpen: isDetailOpen, onOpen: onDetailOpen, onClose: onDetailClose } = useDisclosure()
@@ -121,6 +126,13 @@ export default function TroubleshootingTab() {
   const [submitting, setSubmitting] = useState(false)
   /** Admin-only: when false, list only own reports (?mine=1) so personal history is not buried under other users' newer items. */
   const [showAllUsersReports, setShowAllUsersReports] = useState(false)
+
+  const [reportSearchQuery, setReportSearchQuery] = useState('')
+  const [filterStatus, setFilterStatus] = useState<string>(FILTER_ALL)
+  const [filterType, setFilterType] = useState<string>(FILTER_ALL)
+  const [filterPriority, setFilterPriority] = useState<string>(FILTER_ALL)
+  /** How many rows to show from the filtered list (load more increases this). */
+  const [visibleReportRows, setVisibleReportRows] = useState(REPORT_HISTORY_PAGE_SIZE)
 
   const isAdmin = me?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
 
@@ -157,6 +169,36 @@ export default function TroubleshootingTab() {
   useEffect(() => {
     if (me) loadReports()
   }, [me, loadReports])
+
+  const filteredReports = useMemo(() => {
+    const q = reportSearchQuery.trim().toLowerCase()
+    return reports.filter((r) => {
+      if (filterStatus !== FILTER_ALL && r.status !== filterStatus) return false
+      if (filterType !== FILTER_ALL && r.type !== filterType) return false
+      if (filterPriority !== FILTER_ALL && r.priority !== filterPriority) return false
+      if (!q) return true
+      const title = r.title.toLowerCase()
+      const app = (r.appArea ?? '').toLowerCase()
+      const by = r.createdByEmail.toLowerCase()
+      return title.includes(q) || app.includes(q) || by.includes(q)
+    })
+  }, [reports, reportSearchQuery, filterStatus, filterType, filterPriority])
+
+  const displayedReports = useMemo(
+    () => filteredReports.slice(0, visibleReportRows),
+    [filteredReports, visibleReportRows]
+  )
+
+  useEffect(() => {
+    setVisibleReportRows(REPORT_HISTORY_PAGE_SIZE)
+  }, [reportSearchQuery, filterStatus, filterType, filterPriority, reports, showAllUsersReports])
+
+  const clearReportFilters = () => {
+    setReportSearchQuery('')
+    setFilterStatus(FILTER_ALL)
+    setFilterType(FILTER_ALL)
+    setFilterPriority(FILTER_ALL)
+  }
 
   const handleProofSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -483,13 +525,6 @@ export default function TroubleshootingTab() {
           </FormLabel>
         </HStack>
       )}
-      {!reportsLoading && (
-        <Text fontSize="xs" color="gray.600" mb={2}>
-          {reports.length === 1 ? '1 report' : `${reports.length} reports`}
-          {' · '}
-          {'Newest first'}
-        </Text>
-      )}
       {reportsLoading ? (
         <HStack>
           <Spinner size="sm" />
@@ -501,58 +536,155 @@ export default function TroubleshootingTab() {
           {'No reports yet. Submit one above.'}
         </Alert>
       ) : (
-        <Box overflowX="auto" maxH="60vh" overflowY="auto">
-          <Table size="sm" variant="simple">
-            <Thead>
-              <Tr>
-                <Th>Created</Th>
-                <Th>Type</Th>
-                <Th>Priority</Th>
-                <Th>Status</Th>
-                <Th>Title</Th>
-                <Th>App area</Th>
-                <Th>Submitted by</Th>
-                {isAdmin && <Th>Client</Th>}
-                <Th>Updated</Th>
-                <Th>Proof</Th>
-                <Th />
-              </Tr>
-            </Thead>
-            <Tbody>
-              {reports.map((r) => (
-                <Tr key={r.id}>
-                  <Td fontSize="xs">{new Date(r.createdAt).toLocaleDateString()}</Td>
-                  <Td>{r.type}</Td>
-                  <Td>
-                    <Badge size="sm" colorScheme={priorityColor(r.priority)}>
-                      {r.priority}
-                    </Badge>
-                  </Td>
-                  <Td>
-                    <Badge colorScheme={statusColor(r.status)}>{r.status}</Badge>
-                  </Td>
-                  <Td maxW="180px" isTruncated>
-                    {r.title}
-                  </Td>
-                  <Td fontSize="xs">{r.appArea ?? '—'}</Td>
-                  <Td fontSize="xs">{r.createdByEmail}</Td>
-                  {isAdmin && <Td fontSize="xs">{r.customerId ?? '—'}</Td>}
-                  <Td fontSize="xs">{new Date(r.updatedAt).toLocaleDateString()}</Td>
-                  <Td>{r.hasProof ? 'Yes' : '—'}</Td>
-                  <Td>
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() => openDetail(r)}
-                    >
-                      {isAdmin ? 'View / Edit' : 'View'}
-                    </Button>
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </Box>
+        <>
+          <VStack align="stretch" spacing={3} mb={3}>
+            <FormControl maxW="400px">
+              <FormLabel fontSize="sm" mb={1}>
+                {'Search'}
+              </FormLabel>
+              <Input
+                size="sm"
+                placeholder={'Title, app area, or submitted-by email'}
+                value={reportSearchQuery}
+                onChange={(e) => setReportSearchQuery(e.target.value)}
+              />
+            </FormControl>
+            <HStack spacing={4} flexWrap="wrap" align="flex-end">
+              <FormControl maxW="160px">
+                <FormLabel fontSize="sm" mb={1}>
+                  Status
+                </FormLabel>
+                <Select
+                  size="sm"
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                >
+                  <option value={FILTER_ALL}>{'All statuses'}</option>
+                  {STATUSES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl maxW="200px">
+                <FormLabel fontSize="sm" mb={1}>
+                  Type
+                </FormLabel>
+                <Select size="sm" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+                  <option value={FILTER_ALL}>{'All types'}</option>
+                  {REPORT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl maxW="160px">
+                <FormLabel fontSize="sm" mb={1}>
+                  Priority
+                </FormLabel>
+                <Select
+                  size="sm"
+                  value={filterPriority}
+                  onChange={(e) => setFilterPriority(e.target.value)}
+                >
+                  <option value={FILTER_ALL}>{'All priorities'}</option>
+                  {PRIORITIES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </Select>
+              </FormControl>
+              <Button size="sm" variant="ghost" onClick={clearReportFilters}>
+                {'Clear filters'}
+              </Button>
+            </HStack>
+            <Text fontSize="xs" color="gray.600">
+              {`${reports.length} loaded from server · ${filteredReports.length} match filters · showing ${displayedReports.length} of ${filteredReports.length} matching · newest first`}
+            </Text>
+          </VStack>
+
+          {filteredReports.length === 0 ? (
+            <Alert status="warning" borderRadius="md">
+              <AlertIcon />
+              <Box>
+                <Text fontSize="sm">{'No reports match your search or filters.'}</Text>
+                <Button size="xs" mt={2} variant="outline" onClick={clearReportFilters}>
+                  {'Clear filters'}
+                </Button>
+              </Box>
+            </Alert>
+          ) : (
+            <>
+              <Box overflowX="auto" maxH="60vh" overflowY="auto">
+                <Table size="sm" variant="simple">
+                  <Thead>
+                    <Tr>
+                      <Th>Created</Th>
+                      <Th>Type</Th>
+                      <Th>Priority</Th>
+                      <Th>Status</Th>
+                      <Th>Title</Th>
+                      <Th>App area</Th>
+                      <Th>Submitted by</Th>
+                      {isAdmin && <Th>Client</Th>}
+                      <Th>Updated</Th>
+                      <Th>Proof</Th>
+                      <Th />
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {displayedReports.map((r) => (
+                      <Tr key={r.id}>
+                        <Td fontSize="xs">{new Date(r.createdAt).toLocaleDateString()}</Td>
+                        <Td>{r.type}</Td>
+                        <Td>
+                          <Badge size="sm" colorScheme={priorityColor(r.priority)}>
+                            {r.priority}
+                          </Badge>
+                        </Td>
+                        <Td>
+                          <Badge colorScheme={statusColor(r.status)}>{r.status}</Badge>
+                        </Td>
+                        <Td maxW="180px" isTruncated>
+                          {r.title}
+                        </Td>
+                        <Td fontSize="xs">{r.appArea ?? '—'}</Td>
+                        <Td fontSize="xs">{r.createdByEmail}</Td>
+                        {isAdmin && <Td fontSize="xs">{r.customerId ?? '—'}</Td>}
+                        <Td fontSize="xs">{new Date(r.updatedAt).toLocaleDateString()}</Td>
+                        <Td>{r.hasProof ? 'Yes' : '—'}</Td>
+                        <Td>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => openDetail(r)}
+                          >
+                            {isAdmin ? 'View / Edit' : 'View'}
+                          </Button>
+                        </Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </Box>
+              {visibleReportRows < filteredReports.length && (
+                <Button
+                  size="sm"
+                  mt={3}
+                  variant="outline"
+                  onClick={() =>
+                    setVisibleReportRows((n) => n + REPORT_HISTORY_PAGE_SIZE)
+                  }
+                >
+                  {`Load more (${Math.min(REPORT_HISTORY_PAGE_SIZE, filteredReports.length - visibleReportRows)} next)`}
+                </Button>
+              )}
+            </>
+          )}
+        </>
       )}
 
       {/* Admin detail modal */}

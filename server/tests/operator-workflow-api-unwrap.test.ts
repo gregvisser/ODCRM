@@ -39,6 +39,11 @@ function testTroubleshootingTabUsesSingleUnwrap(): void {
   assert.ok(!src.includes('data?.data'), 'TroubleshootingTab must not double-unwrap list payload')
   assert.match(src, /\/api\/settings\/troubleshooting/)
   assert.match(src, /Array\.isArray\(data\)/)
+  assert.match(src, /\?mine=1/)
+  assert.match(src, /showAllUsersReports/)
+  assert.match(src, /filteredReports/)
+  assert.match(src, /REPORT_HISTORY_PAGE_SIZE/)
+  assert.match(src, /Load more/)
 }
 
 const tests: Array<{ name: string; fn: () => void }> = [
