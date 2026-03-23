@@ -301,8 +301,8 @@ function BatchRow({
           </Text>
         </VStack>
       </Td>
-      <Td>{batch.client ?? '—'}</Td>
-      <Td>{batch.jobTitle ?? '(none)'}</Td>
+      <Td whiteSpace="nowrap">{batch.dateBucket ?? '—'}</Td>
+      <Td>{batch.jobTitle ?? '—'}</Td>
       <Td isNumeric>{batch.count ?? 0}</Td>
       <Td>{batch.lastSeenAt ? new Date(batch.lastSeenAt).toLocaleString() : '—'}</Td>
       <Td>
@@ -366,12 +366,13 @@ function BatchesBlock({
     if (!query) return safeBatches
     return safeBatches.filter((batch) =>
       [
-        batch.client,
+        batch.dateBucket,
         batch.jobTitle,
         batch.batchKey,
         batch.batchName ?? '',
         batch.displayLabel ?? '',
         batch.fallbackLabel ?? '',
+        batch.client,
       ].some((value) => String(value ?? '').toLowerCase().includes(query))
     )
   }, [safeBatches, searchTerm])
@@ -381,7 +382,9 @@ function BatchesBlock({
         <Box>
           <Heading size="md">Lead batches — {sourceLabel}</Heading>
           <Text fontSize="sm" color="gray.600" mt={1}>
-            Refresh here, review the newest matching batches, then open contacts or pass the right batch into Sequences.
+            Each row is a batch (grouped contacts), not a single lead. Use Review contacts for full row-level fields
+            (company, email, etc.). The Date column is the poll-day bucket from the batch key; Job title comes from the
+            batch grouping when the sheet mapped it.
           </Text>
         </Box>
         <HStack align="end" spacing={3} wrap="wrap">
@@ -393,7 +396,7 @@ function BatchesBlock({
               size="sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filter client, job title, or batch key"
+              placeholder="Filter by name, date, job title, or batch key"
             />
           </FormControl>
           <FormControl width="auto">
@@ -445,7 +448,7 @@ function BatchesBlock({
               overflowY="auto"
               overflowX="visible"
             >
-            <Table size="sm" minW="980px">
+            <Table size="sm" minW="1120px">
               <Thead>
                 <Tr>
                   <Th
@@ -466,7 +469,7 @@ function BatchesBlock({
                     _dark={{ bg: 'gray.800' }}
                     boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
                   >
-                    Client
+                    Date
                   </Th>
                   <Th
                     position="sticky"
@@ -476,7 +479,7 @@ function BatchesBlock({
                     _dark={{ bg: 'gray.800' }}
                     boxShadow="inset 0 -1px 0 rgba(0, 0, 0, 0.08)"
                   >
-                    Job Title
+                    Job title
                   </Th>
                   <Th
                     isNumeric

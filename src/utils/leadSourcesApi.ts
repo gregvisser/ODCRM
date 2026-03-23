@@ -31,9 +31,12 @@ export interface LeadSourcePollResponse {
 export interface LeadSourceBatch {
   batchKey: string
   date?: string
-  /** From batchKey; null when missing or placeholder — not a sheet column. */
+  /** YYYY-MM-DD bucket from batchKey (Europe/London poll day). */
+  dateBucket?: string | null
+  /** From batchKey client= segment; usually null when sheet did not map client at poll time. */
   client?: string | null
-  jobTitle: string
+  /** From batchKey job= segment; null when empty / placeholder. */
+  jobTitle?: string | null
   count: number
   firstSeenMin?: string
   firstSeenMax?: string
