@@ -37,6 +37,7 @@ import {
   useDisclosure,
   Alert,
   AlertIcon,
+  Switch,
 } from '@chakra-ui/react'
 import { api } from '../../utils/api'
 import { getCurrentCustomerId } from '../../platform/stores/settings'
@@ -118,6 +119,8 @@ export default function TroubleshootingTab() {
   } | null>(null)
   const [uploadingProof, setUploadingProof] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  /** Admin-only: when false, list only own reports (?mine=1) so personal history is not buried under other users' newer items. */
+  const [showAllUsersReports, setShowAllUsersReports] = useState(false)
 
   const isAdmin = me?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()
 
@@ -134,7 +137,10 @@ export default function TroubleshootingTab() {
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true)
-    const { data, error } = await api.get<TroubleshootingReportDto[]>('/api/settings/troubleshooting')
+    const qs = isAdmin && !showAllUsersReports ? '?mine=1' : ''
+    const { data, error } = await api.get<TroubleshootingReportDto[]>(
+      `/api/settings/troubleshooting${qs}`
+    )
     setReportsLoading(false)
     if (error) {
       toast({ title: 'Error', description: error, status: 'error' })
@@ -142,7 +148,7 @@ export default function TroubleshootingTab() {
       return
     }
     setReports(Array.isArray(data) ? data : [])
-  }, [toast])
+  }, [toast, isAdmin, showAllUsersReports])
 
   useEffect(() => {
     loadMe()
@@ -461,10 +467,29 @@ export default function TroubleshootingTab() {
       <Divider my={4} />
 
       {/* Reports table */}
-      <Text fontWeight="semibold" mb={2}>
-        {'Your reports'}
-        {isAdmin && ' (all)'}
+      <Text fontWeight="semibold" mb={1}>
+        {isAdmin && showAllUsersReports ? "All users' reports" : 'Your reports'}
       </Text>
+      {isAdmin && (
+        <HStack spacing={3} mb={2} align="center">
+          <Switch
+            id="troubleshooting-show-all-users"
+            isChecked={showAllUsersReports}
+            onChange={(e) => setShowAllUsersReports(e.target.checked)}
+            size="sm"
+          />
+          <FormLabel htmlFor="troubleshooting-show-all-users" mb={0} fontSize="sm" cursor="pointer">
+            {'Show reports from all users'}
+          </FormLabel>
+        </HStack>
+      )}
+      {!reportsLoading && (
+        <Text fontSize="xs" color="gray.600" mb={2}>
+          {reports.length === 1 ? '1 report' : `${reports.length} reports`}
+          {' · '}
+          {'Newest first'}
+        </Text>
+      )}
       {reportsLoading ? (
         <HStack>
           <Spinner size="sm" />
@@ -476,7 +501,7 @@ export default function TroubleshootingTab() {
           {'No reports yet. Submit one above.'}
         </Alert>
       ) : (
-        <Box overflowX="auto">
+        <Box overflowX="auto" maxH="60vh" overflowY="auto">
           <Table size="sm" variant="simple">
             <Thead>
               <Tr>
