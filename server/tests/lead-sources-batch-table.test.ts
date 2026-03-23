@@ -19,6 +19,9 @@ function testBatchRouteExposesDateBucketAndNormalizedJob(): void {
   assert.match(src, /dateBucket:/, 'batches payload must include dateBucket')
   assert.match(src, /normalizeBatchKeySegmentForResponse/, 'job segment must use same normalization as client')
   assert.match(src, /batchKeySegmentForLabel/, 'fallback labels must omit (none) segments')
+  assert.match(src, /leadSourceImportedContact/, 'contacts/materialize must use persisted imported rows')
+  assert.ok(!src.includes('/:sourceType/open-sheet'), 'Google Sheets open-sheet route must be removed')
+  assert.ok(!src.includes('/:sourceType/connect'), 'sheet connect route must be removed')
 }
 
 function testLeadSourcesTabBatchTableHasDateNotClientColumn(): void {
@@ -28,6 +31,8 @@ function testLeadSourcesTabBatchTableHasDateNotClientColumn(): void {
   const slice = src.slice(idx, idx + 4500)
   assert.match(slice, />\s*Date\s*</, 'batches table must include Date column header')
   assert.ok(!slice.includes('>Client</Th>'), 'batches table must not use a Client column header')
+  assert.ok(!src.includes('Open linked sheet'), 'sheet open action copy must be removed from Lead Sources')
+  assert.ok(!src.includes('lead-sources-open-sheet-link'), 'open-sheet test id must be removed')
 }
 
 function testApiTypeAllowsJobTitleNull(): void {

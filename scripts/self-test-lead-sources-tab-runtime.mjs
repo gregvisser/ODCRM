@@ -59,12 +59,12 @@ const homeSource = readFileSync(homePath, 'utf8')
 const markers = [
   'lead-sources-tab-panel',
   'lead-sources-customer-select',
-  'lead-sources-sheet-truth-banner',
+  'lead-sources-provider-truth-banner',
   'lead-sources-overview-grid',
   'lead-sources-source-card',
   'lead-sources-view-batches-btn',
   'lead-sources-connect-btn',
-  'lead-sources-open-sheet-link',
+  'connectCognismLeadSource',
   'lead-sources-batches-panel',
   'lead-sources-batches-table',
   'lead-sources-batches-filter-input',
@@ -75,7 +75,6 @@ const markers = [
   'getLeadSources',
   'getLeadSourceBatches',
   'getLeadSourceContacts',
-  'buildOpenSheetUrl',
 ]
 for (const marker of markers) {
   if (!tabSource.includes(marker)) fail(`LeadSourcesTabNew missing marker: ${marker}`)

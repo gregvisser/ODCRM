@@ -8,7 +8,14 @@ import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma.js'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
-import { OutboundSendQueueStatus, OutboundSendAttemptDecision, LeadSourceType, LeadSourceAppliesTo, EnrollmentStatus } from '@prisma/client'
+import {
+  OutboundSendQueueStatus,
+  OutboundSendAttemptDecision,
+  LeadSourceType,
+  LeadSourceAppliesTo,
+  LeadSourceProviderMode,
+  EnrollmentStatus,
+} from '@prisma/client'
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
@@ -367,11 +374,25 @@ async function getLeadSourceHealthSnapshot(customerId: string) {
   const [exactConfigs, globalConfigs] = await Promise.all([
     prisma.leadSourceSheetConfig.findMany({
       where: { customerId, sourceType: { in: LEAD_SOURCE_TYPES } },
-      select: { sourceType: true, spreadsheetId: true, lastError: true, lastFetchAt: true },
+      select: {
+        sourceType: true,
+        spreadsheetId: true,
+        lastError: true,
+        lastFetchAt: true,
+        providerMode: true,
+        cognismApiTokenEncrypted: true,
+      },
     }),
     prisma.leadSourceSheetConfig.findMany({
       where: { appliesTo: LeadSourceAppliesTo.ALL_ACCOUNTS, sourceType: { in: LEAD_SOURCE_TYPES } },
-      select: { sourceType: true, spreadsheetId: true, lastError: true, lastFetchAt: true },
+      select: {
+        sourceType: true,
+        spreadsheetId: true,
+        lastError: true,
+        lastFetchAt: true,
+        providerMode: true,
+        cognismApiTokenEncrypted: true,
+      },
       orderBy: [{ updatedAt: 'desc' }],
     }),
   ])
@@ -379,9 +400,14 @@ async function getLeadSourceHealthSnapshot(customerId: string) {
   const globalByType = new Map(globalConfigs.map((row) => [row.sourceType, row]))
   const rows = LEAD_SOURCE_TYPES.map((sourceType) => {
     const row = exactByType.get(sourceType) ?? globalByType.get(sourceType) ?? null
+    const configured =
+      !!row?.spreadsheetId &&
+      row.sourceType === 'COGNISM' &&
+      row.providerMode === LeadSourceProviderMode.COGNISM_API &&
+      !!row.cognismApiTokenEncrypted
     return {
       sourceType,
-      configured: Boolean(row?.spreadsheetId),
+      configured,
       hasError: Boolean(row?.lastError),
       lastError: row?.lastError ?? null,
       lastFetchAt: row?.lastFetchAt?.toISOString() ?? null,
@@ -1505,7 +1531,7 @@ router.get('/sequence-preflight', async (req: Request, res: Response) => {
     if ((readiness.summary.enrollmentCount ?? 0) < 1) blockers.push('Sequence has no enrollments yet.')
     if ((readiness.summary.eligibleCount ?? 0) < 1) blockers.push('No eligible recipients are sendable now.')
 
-    if (leadSourceHealth.configuredCount < 1) warnings.push('No lead source sheet is connected for this tenant.')
+    if (leadSourceHealth.configuredCount < 1) warnings.push('No lead source is connected for this tenant (Cognism API required).')
     if (leadSourceHealth.erroredCount > 0) warnings.push(`${leadSourceHealth.erroredCount} lead source(s) currently report sync/config errors.`)
     if (suppressionHealth.configuredCount < 1) warnings.push('No suppression sheet source is configured.')
     if (suppressionHealth.erroredCount > 0) warnings.push('Suppression sheet health reports import/config errors.')
@@ -2523,7 +2549,7 @@ router.get('/exception-center', async (req: Request, res: Response) => {
         priority: hasErrors ? 3 : 5,
         count: hasErrors ? leadSourceHealth.erroredCount : leadSourceHealth.total - leadSourceHealth.configuredCount,
         status: 'open',
-        summary: hasErrors ? 'One or more lead-source sheets are failing.' : 'Lead sources are not configured.',
+        summary: hasErrors ? 'One or more lead sources report sync/config errors.' : 'Lead sources are not configured (connect Cognism API).',
         nextStep: { label: 'Review Data Health', target: 'marketing-data-health' },
         samples: leadSourceHealth.rows
           .filter((row) => row.hasError || !row.configured)
