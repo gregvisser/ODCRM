@@ -34,10 +34,18 @@ function testSequencesTabAuditsAndOperatorActionsUseSingleUnwrap(): void {
   assert.match(src, /const items = res\.data\?\.items/)
 }
 
+function testTroubleshootingTabUsesSingleUnwrap(): void {
+  const src = read('src/tabs/settings/TroubleshootingTab.tsx')
+  assert.ok(!src.includes('data?.data'), 'TroubleshootingTab must not double-unwrap list payload')
+  assert.match(src, /\/api\/settings\/troubleshooting/)
+  assert.match(src, /Array\.isArray\(data\)/)
+}
+
 const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'ReadinessTab send-worker results use single unwrap', fn: testReadinessTabSendWorkerUsesSingleUnwrap },
   { name: 'SchedulesTab detail uses single unwrap', fn: testSchedulesTabDetailUsesSingleUnwrap },
   { name: 'SequencesTab audits and operator actions use single unwrap', fn: testSequencesTabAuditsAndOperatorActionsUseSingleUnwrap },
+  { name: 'TroubleshootingTab list uses single unwrap', fn: testTroubleshootingTabUsesSingleUnwrap },
 ]
 
 for (const test of tests) {
