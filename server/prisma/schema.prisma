@@ -1130,8 +1130,8 @@ model LeadSourceImportedContact {
 
   customer      Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
-  @@unique([customerId, sourceType, spreadsheetId, fingerprint])
-  @@index([customerId, sourceType, spreadsheetId])
-  @@index([customerId, sourceType])
+  @@unique([customerId, sourceType, spreadsheetId, fingerprint], map: "ls_imp_ct_uniq")
+  @@index([customerId, sourceType, spreadsheetId], map: "ls_imp_ct_scope")
+  @@index([customerId, sourceType], map: "ls_imp_ct_src")
   @@map("lead_source_imported_contacts")
 }
