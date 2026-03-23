@@ -13,7 +13,7 @@ try {
   `
   console.log('_prisma_migrations:', JSON.stringify(rows, null, 2))
   const t = await p.$queryRaw`
-    SELECT to_regclass('public.lead_source_imported_contacts') AS reg
+    SELECT to_regclass('public.lead_source_imported_contacts')::text AS reg
   `
   console.log('lead_source_imported_contacts to_regclass:', JSON.stringify(t))
 } finally {
