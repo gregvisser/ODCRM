@@ -1089,6 +1089,7 @@ export default function LeadSourcesTabNew({
     setContactsConfigScope(null)
     setContactsError(null)
     setContactsSearchQuery('')
+    setLastImportBySource({})
   }
 
   const handlePoll = async (sourceType: LeadSourceType) => {
@@ -1106,7 +1107,7 @@ export default function LeadSourcesTabNew({
       if (result.totalRows === 0) {
         toast({
           title: 'Import returned no contacts',
-          description: 'Cognism returned zero contacts for the current search defaults. Adjust filters or try again.',
+          description: `${SOURCE_LABELS[sourceType]} returned zero contacts. Adjust filters or the linked source and try again.`,
           status: 'info',
           duration: 6000,
         })

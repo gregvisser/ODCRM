@@ -29,7 +29,20 @@ function testConnectionTruthfulnessAndTokenHint(): void {
 function testEmptyImportHandling(): void {
   const src = read('src/tabs/marketing/components/LeadSourcesTabNew.tsx')
   assert.match(src, /Import returned no contacts/, 'Import flow should show clear empty-result state')
-  assert.match(src, /Cognism returned zero contacts/, 'Empty import message should be operator-friendly')
+  assert.match(
+    src,
+    /description: `\$\{SOURCE_LABELS\[sourceType\]\} returned zero contacts/,
+    'Empty import message should name the polled source, not hardcode Cognism'
+  )
+}
+
+function testCustomerChangeClearsLastImport(): void {
+  const src = read('src/tabs/marketing/components/LeadSourcesTabNew.tsx')
+  assert.match(
+    src,
+    /const handleCustomerChange[\s\S]*?setLastImportBySource\(\{\}\)/,
+    'Switching customer should clear per-source last-import metadata'
+  )
 }
 
 function testContactsReviewAndMaterializeGuardrails(): void {
@@ -49,6 +62,7 @@ function testContactsReviewAndMaterializeGuardrails(): void {
 const tests: Array<{ name: string; fn: () => void }> = [
   { name: 'Connection status is truthful and token hint remains masked', fn: testConnectionTruthfulnessAndTokenHint },
   { name: 'Import flow handles empty Cognism results clearly', fn: testEmptyImportHandling },
+  { name: 'Customer switch clears last-import metadata', fn: testCustomerChangeClearsLastImport },
   { name: 'Contacts review and materialize guardrails are explicit', fn: testContactsReviewAndMaterializeGuardrails },
 ]
 
