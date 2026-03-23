@@ -1028,16 +1028,25 @@ enum LeadSourceAppliesTo {
   ALL_ACCOUNTS    // use for any customer that has no own config (connect once, apply everywhere)
 }
 
+enum LeadSourceProviderMode {
+  SHEET        // Google Sheets CSV export (default / legacy)
+  COGNISM_API  // Native Cognism HTTP API (COGNISM sourceType only)
+}
+
 // Sheet configuration per customer per source (metadata only)
 model LeadSourceSheetConfig {
   id             String               @id @default(cuid())
   customerId     String
   sourceType     LeadSourceType
-  spreadsheetId  String               // Google spreadsheet ID (no full URL stored for UI)
+  spreadsheetId  String               // Google spreadsheet ID, or sentinel COGNISM_API for Cognism API mode
   gid            String?              // Sheet tab GID for CSV export
   displayName    String               // User-facing name; never show spreadsheetId in UI
   isLocked       Boolean              @default(true)
   appliesTo      LeadSourceAppliesTo  @default(CUSTOMER_ONLY)
+  providerMode   LeadSourceProviderMode @default(SHEET)
+  cognismApiTokenEncrypted String?   @db.Text
+  cognismApiTokenLast4     String?
+  cognismSearchDefaults    Json?
   lastFetchAt    DateTime?
   lastError      String?
   createdAt      DateTime             @default(now())

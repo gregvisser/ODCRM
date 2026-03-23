@@ -116,6 +116,7 @@
     "test:reporting-dashboard-runtime": "node scripts/self-test-reporting-dashboard-runtime.mjs",
     "test:reporting-enum-compat-runtime": "node scripts/self-test-reporting-enum-compat-runtime.mjs",
     "test:lead-sources-tab-runtime": "node scripts/self-test-lead-sources-tab-runtime.mjs",
+    "test:cognism-api-source": "node scripts/self-test-cognism-api-source.mjs",
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",
     "test:email-accounts-tab-runtime": "node scripts/self-test-email-accounts-tab-runtime.mjs",
     "test:templates-tab-runtime": "node scripts/self-test-templates-tab-runtime.mjs",
