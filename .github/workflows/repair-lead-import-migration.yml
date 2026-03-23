@@ -1,0 +1,53 @@
+# One-off / recovery: clear P3009 for 20260323130000_lead_source_imported_contacts on the DB
+# wired to backend deploy (secrets.DATABASE_URL → odcrm-postgres-yesterday per deploy logs).
+name: Repair lead import migration (P3009)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Log DB host (sanitized)
+        run: |
+          DB_HOST=$(echo "$DATABASE_URL" | grep -oP '(?<=@)[^:/]+' || echo "PARSE_FAILED")
+          echo "DB_HOST=$DB_HOST"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Inspect migration row and table (before)
+        run: cd server && node scripts/inspect-lead-import-migration-state.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Run repair SQL
+        run: cd server && npx prisma db execute --file scripts/repair-failed-lead-import-migration.sql --schema prisma/schema.prisma
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Prisma migrate deploy
+        run: cd server && npx prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Inspect migration row and table (after)
+        run: cd server && node scripts/inspect-lead-import-migration-state.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Prisma migrate status (after)
+        run: cd server && npx prisma migrate status
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
