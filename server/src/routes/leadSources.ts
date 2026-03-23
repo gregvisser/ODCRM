@@ -106,9 +106,18 @@ function getBatchMetadataKey(
   return `${scope.configCustomerId}|${scope.sourceType}|${scope.spreadsheetId}|${batchKey}`
 }
 
+/** Omit placeholder segments so labels do not show misleading "(none)" as real data. */
+function batchKeySegmentForLabel(value: string | undefined): string | null {
+  const t = (value ?? '').trim()
+  if (!t || t.toLowerCase() === '(none)') return null
+  return t
+}
+
 function buildFallbackBatchLabel(sourceType: LeadSourceType, batchKey: string): string {
   const parsed = parseBatchKey(batchKey)
-  return `${sourceType} — ${parsed.date}${parsed.client ? ` · ${parsed.client}` : ''}${parsed.jobTitle ? ` · ${parsed.jobTitle}` : ''}`.trim()
+  const clientSeg = batchKeySegmentForLabel(parsed.client)
+  const jobSeg = batchKeySegmentForLabel(parsed.jobTitle)
+  return `${sourceType} — ${parsed.date}${clientSeg ? ` · ${clientSeg}` : ''}${jobSeg ? ` · ${jobSeg}` : ''}`.trim()
 }
 
 function buildBatchDisplayLabel(sourceType: LeadSourceType, batchKey: string, operatorName?: string | null): string {
@@ -117,11 +126,9 @@ function buildBatchDisplayLabel(sourceType: LeadSourceType, batchKey: string, op
   return normalizedName ? `${normalizedName} · ${fallbackLabel}` : fallbackLabel
 }
 
-/** Batches list JSON: omit misleading placeholder when batchKey has no real client segment. */
-function normalizeBatchClientForResponse(parsedClient: string | undefined): string | null {
-  const c = (parsedClient ?? '').trim()
-  if (!c || c.toLowerCase() === '(none)') return null
-  return c
+/** Batches list JSON: omit misleading placeholder when batchKey segment is empty or "(none)". */
+function normalizeBatchKeySegmentForResponse(segment: string | undefined): string | null {
+  return batchKeySegmentForLabel(segment)
 }
 
 function buildMaterializedLeadBatchListName(
@@ -809,8 +816,10 @@ router.get('/:sourceType/batches', async (req: Request, res: Response) => {
           batchName,
           fallbackLabel,
           displayLabel: buildBatchDisplayLabel(sourceType, g.batchKey, batchName),
-          client: normalizeBatchClientForResponse(parsed.client),
-          jobTitle: parsed.jobTitle && parsed.jobTitle.trim() !== '' ? parsed.jobTitle : '(none)',
+          /** Europe/London date bucket from batchKey; always present for valid keys. */
+          dateBucket: parsed.date || null,
+          client: normalizeBatchKeySegmentForResponse(parsed.client),
+          jobTitle: normalizeBatchKeySegmentForResponse(parsed.jobTitle),
           count: g._count._all,
           lastSeenAt: g._max.firstSeenAt?.toISOString() ?? '',
         }
