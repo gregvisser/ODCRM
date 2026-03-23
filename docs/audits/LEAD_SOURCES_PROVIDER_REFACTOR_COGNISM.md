@@ -29,10 +29,13 @@
 
 - Connect **Cognism API token** + optional search defaults; **Import from Cognism** replaces “refresh from sheet”; no “open sheet” actions in Lead Sources.
 
-## Production recovery (deploy P3018)
+## Production recovery (deploy P3018 / P3009)
 
-If `20260323130000_lead_source_imported_contacts` failed with **42P07** (duplicate index relation after truncation to 63 characters), the migration SQL was updated to use short index names (`ls_imp_ct_uniq`, etc.). Recover with:
+If `20260323130000_lead_source_imported_contacts` failed with **42P07** (duplicate index names after PostgreSQL 63-char truncation), the migration file was fixed to use short index names (`ls_imp_ct_uniq`, etc.).
 
-1. `DROP TABLE IF EXISTS lead_source_imported_contacts CASCADE;` on the production DB if needed.
-2. `cd server && npx prisma migrate resolve --rolled-back "20260323130000_lead_source_imported_contacts"` (so deploy can re-apply the fixed migration).
-3. Redeploy backend or run `npx prisma migrate deploy` against production.
+If `prisma migrate deploy` then reports **P3009** (failed migrations in the database), clear the failed migration row and any partial table, then redeploy:
+
+1. In Azure PostgreSQL query tool (or any client with production `DATABASE_URL`), run `server/scripts/repair-failed-lead-import-migration.sql`.
+2. Redeploy the backend so `prisma migrate deploy` applies `20260323130000_lead_source_imported_contacts` again from the fixed SQL.
+
+Alternatively, from a shell that has production `DATABASE_URL`: `cd server && npx prisma migrate resolve --rolled-back "20260323130000_lead_source_imported_contacts"` after dropping the partial table if needed, then `npx prisma migrate deploy`.
