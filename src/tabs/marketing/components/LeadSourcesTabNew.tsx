@@ -105,7 +105,7 @@ function isoYesterday(): string {
 }
 
 function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>['sources'][number] | undefined): {
-  colorScheme: 'green' | 'orange' | 'gray'
+  colorScheme: 'green' | 'orange' | 'gray' | 'red'
   label: string
   description: string
 } {
@@ -116,11 +116,18 @@ function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>
       description: 'Connect a lead source before this source can provide new batches.',
     }
   }
-  if (src.lastError) {
+  if (src.sourceType === 'COGNISM' && src.providerMode !== 'COGNISM_API') {
     return {
       colorScheme: 'orange',
       label: 'Needs attention',
-      description: `The latest source refresh needs review: ${src.lastError}`,
+      description: 'This Cognism source is not using native API mode. Reconnect Cognism to restore live imports.',
+    }
+  }
+  if (src.lastError) {
+    return {
+      colorScheme: 'red',
+      label: 'Error',
+      description: `Latest import/config error: ${src.lastError}`,
     }
   }
   const tokenHint =
@@ -138,12 +145,14 @@ function getSourceOperatorStatus(src: Awaited<ReturnType<typeof getLeadSources>>
 
 function SourcesOverview({
   sources,
+  lastImportBySource,
   onViewBatches,
   onOpenConnect,
   onPoll,
   pollingSourceType,
 }: {
   sources: Awaited<ReturnType<typeof getLeadSources>>['sources']
+  lastImportBySource: Partial<Record<LeadSourceType, { atIso: string; totalRows: number; newRowsDetected: number }>>
   onViewBatches: (sourceType: LeadSourceType) => void
   onOpenConnect: (sourceType: LeadSourceType) => void
   onPoll: (sourceType: LeadSourceType) => void
@@ -155,6 +164,7 @@ function SourcesOverview({
         const src = sources.find((s) => s.sourceType === sourceType)
         const connected = !!src?.connected
         const operatorStatus = getSourceOperatorStatus(src)
+        const lastImport = lastImportBySource[sourceType]
         return (
           <Card key={sourceType} id="lead-sources-source-card" data-testid="lead-sources-source-card">
             <CardHeader>
@@ -174,6 +184,12 @@ function SourcesOverview({
               <Text fontSize="sm" color="gray.700" mb={3}>
                 {operatorStatus.description}
               </Text>
+              {lastImport ? (
+                <Text fontSize="xs" color="gray.600" mb={3}>
+                  Last import: {new Date(lastImport.atIso).toLocaleString()} - {lastImport.totalRows} row
+                  {lastImport.totalRows === 1 ? '' : 's'} returned, {lastImport.newRowsDetected} new in this batch scan.
+                </Text>
+              ) : null}
               <VStack align="stretch" spacing={2}>
                 <Button
                   id="lead-sources-view-batches-btn"
@@ -698,7 +714,10 @@ function ContactsBlock({
       </CardHeader>
       <CardBody pt={0} overflow="visible">
         {contactsLoading && contacts.length === 0 ? (
-          <Spinner size="sm" />
+          <HStack>
+            <Spinner size="sm" />
+            <Text fontSize="sm" color="gray.600">Loading imported contacts...</Text>
+          </HStack>
         ) : (
           <>
             <Flex justify="space-between" align={{ base: 'start', md: 'center' }} gap={3} wrap="wrap" mb={4}>
@@ -829,7 +848,11 @@ function ContactsBlock({
                         }
                         color="gray.500"
                       >
-                        {contactsTotal > 0 ? 'No rows on this page (pagination)' : 'No contacts'}
+                        {contactsSearchQuery.trim()
+                          ? 'No imported contacts match this search. Clear the search to view all rows in this batch.'
+                          : contactsTotal > 0
+                            ? 'No rows on this page (pagination).'
+                            : 'No imported contacts are available for this batch yet. Run Import from Cognism and try again.'}
                       </Td>
                     </Tr>
                   ) : !wideColumnMode ? (
@@ -909,6 +932,9 @@ export default function LeadSourcesTabNew({
   const [cognismJobTitles, setCognismJobTitles] = useState('')
   const [cognismRegions, setCognismRegions] = useState('')
   const [pollingSourceType, setPollingSourceType] = useState<LeadSourceType | null>(null)
+  const [lastImportBySource, setLastImportBySource] = useState<
+    Partial<Record<LeadSourceType, { atIso: string; totalRows: number; newRowsDetected: number }>>
+  >({})
   const [savingBatchKey, setSavingBatchKey] = useState<string | null>(null)
   const { isOpen: isConnectOpen, onOpen: onConnectOpen, onClose: onConnectClose } = useDisclosure()
   const toast = useToast()
@@ -1069,7 +1095,29 @@ export default function LeadSourcesTabNew({
     setPollingSourceType(sourceType)
     try {
       const result = await pollLeadSource(customerId, sourceType)
-      toast({ title: 'Poll complete', description: `${result.totalRows} rows, ${result.newRowsDetected} new`, status: 'success', duration: 3000 })
+      setLastImportBySource((prev) => ({
+        ...prev,
+        [sourceType]: {
+          atIso: result.lastFetchAt,
+          totalRows: result.totalRows,
+          newRowsDetected: result.newRowsDetected,
+        },
+      }))
+      if (result.totalRows === 0) {
+        toast({
+          title: 'Import returned no contacts',
+          description: 'Cognism returned zero contacts for the current search defaults. Adjust filters or try again.',
+          status: 'info',
+          duration: 6000,
+        })
+      } else {
+        toast({
+          title: 'Import complete',
+          description: `${result.totalRows} row${result.totalRows === 1 ? '' : 's'} returned, ${result.newRowsDetected} new.`,
+          status: 'success',
+          duration: 4000,
+        })
+      }
       loadSources()
       if (viewBatchesSource === sourceType) {
         const data = await getLeadSourceBatches(customerId, sourceType, normalizeBatchDate(batchDate))
@@ -1141,6 +1189,15 @@ export default function LeadSourcesTabNew({
   }
 
   const handleUseInSequence = (batch: LeadSourceBatch) => {
+    if ((batch.count ?? 0) <= 0) {
+      toast({
+        title: 'No contacts to materialize',
+        description: 'This batch currently has no imported contacts. Run Import from Cognism and review the batch again.',
+        status: 'warning',
+        duration: 5000,
+      })
+      return
+    }
     const source = viewBatchesSource ?? (batch.sourceType ?? contactsBatchKey?.sourceType as LeadSourceType)
     const key = batch.batchKey
     leadSourceSelectionStore.setLeadSourceBatchSelection({
@@ -1327,6 +1384,7 @@ export default function LeadSourcesTabNew({
                 </Box>
                 <SourcesOverview
                   sources={sources}
+                  lastImportBySource={lastImportBySource}
                   onPoll={handlePoll}
                   pollingSourceType={pollingSourceType}
                   onViewBatches={(sourceType) => {
