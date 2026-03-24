@@ -117,6 +117,7 @@
     "test:reporting-enum-compat-runtime": "node scripts/self-test-reporting-enum-compat-runtime.mjs",
     "test:lead-sources-tab-runtime": "node scripts/self-test-lead-sources-tab-runtime.mjs",
     "test:cognism-api-source": "node scripts/self-test-cognism-api-source.mjs",
+    "test:cognism-client-validation": "cd server && npx tsx tests/cognism-client-validation.test.ts && npx tsx tests/cognism-connect-secret-order.test.ts",
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",
     "test:email-accounts-tab-runtime": "node scripts/self-test-email-accounts-tab-runtime.mjs",
     "test:templates-tab-runtime": "node scripts/self-test-templates-tab-runtime.mjs",

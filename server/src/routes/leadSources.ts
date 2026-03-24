@@ -684,7 +684,8 @@ router.post('/cognism/connect', requireMarketingMutationAuth, async (req: Reques
     const customerId = requireCustomerId(req, res)
     if (!customerId) return
     await ensureCustomerExists(customerId)
-    await cognismValidateApiKey(parsed.apiToken.trim())
+    const searchBody = buildCognismSearchBody(parsed.searchDefaults)
+    await cognismValidateApiKey(parsed.apiToken.trim(), searchBody)
     const enc = encryptLeadSourceSecret(parsed.apiToken.trim())
     const last4 = parsed.apiToken.trim().slice(-4)
     const appliesTo = parsed.applyToAllAccounts ? LeadSourceAppliesTo.ALL_ACCOUNTS : LeadSourceAppliesTo.CUSTOMER_ONLY
