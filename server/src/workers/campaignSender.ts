@@ -12,7 +12,7 @@
 
 import { PrismaClient } from '@prisma/client'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
-import { sendEmail as sendEmailViaOutlook } from '../services/outlookEmailService.js'
+import { sendEmail as sendEmailForOutbound } from '../services/outlookEmailService.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 // Instance ID for logging - unique per process
@@ -395,8 +395,8 @@ export async function processSequenceBasedCampaigns(
           : undefined
         const enforced = enforceUnsubscribeFooter(bodyHtml, bodyText, buildCampaignUnsubscribeUrl(prospect.id))
 
-        // Send email via Outlook
-        const result = await sendEmailViaOutlook(prisma, {
+        // Unified outbound send (Outlook/Graph or SMTP per EmailIdentity.provider)
+        const result = await sendEmailForOutbound(prisma, {
           senderIdentityId: identity.id,
           toEmail: contact.email,
           subject,

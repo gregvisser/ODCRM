@@ -121,6 +121,7 @@
     "test:cognism-client-validation": "cd server && npx tsx tests/cognism-client-validation.test.ts && npx tsx tests/cognism-connect-secret-order.test.ts",
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",
     "test:email-accounts-tab-runtime": "node scripts/self-test-email-accounts-tab-runtime.mjs",
+    "test:smtp-send-path-contract": "node scripts/self-test-smtp-send-path-contract.mjs",
     "test:templates-tab-runtime": "node scripts/self-test-templates-tab-runtime.mjs",
     "test:sequences-tab-runtime": "node scripts/self-test-sequences-tab-runtime.mjs",
     "test:schedules-tab-runtime": "node scripts/self-test-schedules-tab-runtime.mjs",

@@ -2,7 +2,7 @@
  * Stage 2B: Send-queue worker with optional live sending.
  * - Locks QUEUED OutboundSendQueueItems with a lease (no double-processing).
  * - Enforces kill-switch (ENABLE_LIVE_SENDING default false).
- * - When ENABLE_LIVE_SENDING is enabled, sends via Outlook (Graph).
+ * - When ENABLE_LIVE_SENDING is enabled, sends via `sendEmail` (Microsoft Graph or SMTP per identity).
  * - Writes append-only EnrollmentAuditEvent entries for every decision/send.
  */
 import cron from 'node-cron'

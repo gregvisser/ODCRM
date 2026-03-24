@@ -642,7 +642,7 @@ async function sendCampaignEmail(
       }
       // Record sent event
       await prisma.emailEvent.create({ data: { ...eventBase, type: 'sent' } })
-      // Record delivered event — Graph API accepted the message (accepted-by-MTA = delivered)
+      // Record delivered event — transport accepted the message (Graph or SMTP; accepted-by-MTA = delivered)
       await prisma.emailEvent.create({ data: { ...eventBase, type: 'delivered' } })
 
       // Update prospect - finalize with proper status

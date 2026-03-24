@@ -27,6 +27,12 @@
 - Campaign / scheduler workers call `sendEmail` from `outlookEmailService` (e.g. `server/src/workers/emailScheduler.ts`, `server/src/workers/campaignSender.ts`, `server/src/workers/sendQueueWorker.ts`).
 - Test send: `POST /api/outlook/identities/:id/test-send` supports both Outlook and SMTP.
 
+## Hardening (operator UX + contract)
+
+- **Validation:** Client `src/utils/smtpIdentityValidation.ts` and server `validateSmtpIdentityUpsertPayload` in `server/src/services/smtpMailer.ts` reject invalid host/port and common TLS/port mismatches (587 vs 465).
+- **Errors:** `mapSmtpErrorForOperator` in `smtpMailer.ts` turns nodemailer errors into short guidance (auth vs TLS vs network).
+- **Contract self-test:** `npm run test:smtp-send-path-contract` — static check that `outlookEmailService` contains the SMTP branch and workers send through `sendEmail` without an Outlook-only `provider` gate in those files.
+
 ## Residual risk
 
 - SMTP credentials are **stored secrets**; operators must rotate credentials if leaked and follow least-privilege (app passwords, not primary passwords where possible).

@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
+import { validateSmtpIdentityUpsertPayload } from '../services/smtpMailer.js'
 
 const router = express.Router()
 
@@ -612,18 +613,31 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
       return res.status(400).json({ error: 'SMTP host, username, and password are required' })
     }
 
+    const emailStr = String(emailAddress).trim()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr)) {
+      return res.status(400).json({ error: 'Invalid email address format', code: 'INVALID_EMAIL' })
+    }
+
+    const smtpValidationError = validateSmtpIdentityUpsertPayload({ smtpHost, smtpPort, smtpSecure })
+    if (smtpValidationError) {
+      return res.status(400).json({ error: smtpValidationError, code: 'SMTP_VALIDATION' })
+    }
+
+    const portNum = Number(smtpPort)
+    const hostTrim = String(smtpHost).trim()
+
     const identity = await prisma.emailIdentity.upsert({
       where: {
         customerId_emailAddress: {
           customerId: resolvedCustomerId,
-          emailAddress
+          emailAddress: emailStr
         }
       },
       update: {
         displayName,
         provider: 'smtp',
-        smtpHost,
-        smtpPort,
+        smtpHost: hostTrim,
+        smtpPort: portNum,
         smtpUsername,
         smtpPassword,
         smtpSecure: smtpSecure ?? false,
@@ -633,11 +647,11 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
       create: {
         id: randomUUID(),
         customerId: resolvedCustomerId,
-        emailAddress,
+        emailAddress: emailStr,
         displayName,
         provider: 'smtp',
-        smtpHost,
-        smtpPort,
+        smtpHost: hostTrim,
+        smtpPort: portNum,
         smtpUsername,
         smtpPassword,
         smtpSecure: smtpSecure ?? false,

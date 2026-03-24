@@ -1,9 +1,11 @@
 import {
   Alert,
   AlertIcon,
+  AlertDescription,
   Button,
   FormControl,
   FormLabel,
+  FormHelperText,
   HStack,
   Input,
   Modal,
@@ -21,9 +23,10 @@ import {
   VStack,
   Code,
 } from '@chakra-ui/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../utils/api'
 import { emit } from '../platform/events'
+import { validateSmtpIdentityForm } from '../utils/smtpIdentityValidation'
 
 export type SmtpEmailIdentityModalProps = {
   customerId: string
@@ -52,6 +55,14 @@ export default function SmtpEmailIdentityModal({
   const [smtpPassword, setSmtpPassword] = useState('')
   const [smtpSecure, setSmtpSecure] = useState(false)
   const [dailySendLimit, setDailySendLimit] = useState(150)
+  const [inlineError, setInlineError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setSmtpHost(defaultSmtpHost)
+    setSmtpPort(defaultSmtpPort)
+    setInlineError(null)
+  }, [isOpen, defaultSmtpHost, defaultSmtpPort])
 
   const resetForOpen = () => {
     setEmailAddress('')
@@ -62,26 +73,38 @@ export default function SmtpEmailIdentityModal({
     setSmtpPassword('')
     setSmtpSecure(false)
     setDailySendLimit(150)
+    setInlineError(null)
   }
 
   const handleSave = async () => {
-    if (!customerId || !emailAddress || !smtpHost || !smtpUsername || !smtpPassword) {
-      toast({
-        title: 'Validation Error',
-        description: 'Email, SMTP host, username, and password are required',
-        status: 'error',
-      })
+    if (!customerId) {
+      toast({ title: 'Select a client', description: 'Choose a client before adding a mailbox.', status: 'error' })
       return
     }
 
-    const payload = {
-      customerId,
+    const formErr = validateSmtpIdentityForm({
       emailAddress,
-      displayName,
-      provider: 'smtp',
       smtpHost,
       smtpPort,
       smtpUsername,
+      smtpPassword,
+      smtpSecure,
+    })
+    if (formErr) {
+      setInlineError(formErr)
+      toast({ title: 'Fix the form', description: formErr, status: 'error', duration: 8000, isClosable: true })
+      return
+    }
+    setInlineError(null)
+
+    const payload = {
+      customerId,
+      emailAddress: emailAddress.trim(),
+      displayName: displayName.trim() || undefined,
+      provider: 'smtp',
+      smtpHost: smtpHost.trim(),
+      smtpPort,
+      smtpUsername: smtpUsername.trim(),
       smtpPassword,
       smtpSecure,
       dailySendLimit,
@@ -93,7 +116,7 @@ export default function SmtpEmailIdentityModal({
       if (error) throw new Error(error)
       toast({
         title: 'Mailbox added',
-        description: 'SMTP account created for outbound sending',
+        description: 'This SMTP identity can be used for outbound campaigns and sequences for this client.',
         status: 'success',
       })
       onClose()
@@ -101,21 +124,19 @@ export default function SmtpEmailIdentityModal({
       if (customerId) emit('customerUpdated', { id: customerId })
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to create SMTP account'
+      setInlineError(message)
       toast({
-        title: 'Error',
+        title: 'Could not save mailbox',
         description: message,
         status: 'error',
+        duration: 10000,
+        isClosable: true,
       })
     }
   }
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      size="2xl"
-      onCloseComplete={resetForOpen}
-    >
+    <Modal isOpen={isOpen} onClose={onClose} size="2xl" onCloseComplete={resetForOpen}>
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>Add SMTP / Gmail / custom mailbox</ModalHeader>
@@ -124,45 +145,69 @@ export default function SmtpEmailIdentityModal({
           <VStack spacing={4} align="stretch">
             <Alert status="info" fontSize="sm">
               <AlertIcon />
-              <Text fontSize="xs">
-                Use this for outbound outreach from non-Microsoft mailboxes (Google Workspace, Gmail with app
-                password, or any provider that offers SMTP). This is not Google sign-in to ODCRM — it stores SMTP
-                credentials for sending only.
-              </Text>
+              <AlertDescription fontSize="xs">
+                For <strong>outbound outreach only</strong> — not Google sign-in to ODCRM. We store SMTP credentials
+                so sends can use Gmail, Google Workspace, or any host that provides SMTP.
+              </AlertDescription>
             </Alert>
             <Alert status="info" fontSize="sm">
               <AlertIcon />
-              <Text fontSize="xs">
-                Typical hosts: <Code fontSize="xs">smtp.gmail.com:587</Code> (TLS/STARTTLS — keep SSL/TLS off),{' '}
-                <Code fontSize="xs">smtp.office365.com:587</Code>, or your provider&apos;s SMTP endpoint.
-              </Text>
+              <AlertDescription fontSize="xs">
+                <strong>Gmail / Google Workspace:</strong> host <Code fontSize="xs">smtp.gmail.com</Code>, port{' '}
+                <Code fontSize="xs">587</Code>, keep implicit SSL <strong>off</strong>. With 2FA, create an{' '}
+                <strong>app password</strong> and use it here (not your normal password).
+              </AlertDescription>
+            </Alert>
+            <Alert status="info" fontSize="sm">
+              <AlertIcon />
+              <AlertDescription fontSize="xs">
+                <strong>Custom SMTP:</strong> use the host and port from your provider (often 587 + STARTTLS, or 465 +
+                implicit SSL). “From” address should match what your provider allows for that login.
+              </AlertDescription>
             </Alert>
 
+            {inlineError ? (
+              <Alert status="error" fontSize="sm">
+                <AlertIcon />
+                <AlertDescription fontSize="sm">{inlineError}</AlertDescription>
+              </Alert>
+            ) : null}
+
             <FormControl isRequired>
-              <FormLabel fontSize="sm">Email Address</FormLabel>
+              <FormLabel fontSize="sm">From email (outbound address)</FormLabel>
               <Input
                 value={emailAddress}
-                onChange={(e) => setEmailAddress(e.target.value)}
+                onChange={(e) => {
+                  setEmailAddress(e.target.value)
+                  setInlineError(null)
+                }}
                 placeholder="you@company.com"
                 type="email"
               />
+              <FormHelperText>Shown as the sender on outreach emails.</FormHelperText>
             </FormControl>
 
             <FormControl>
-              <FormLabel fontSize="sm">Display Name</FormLabel>
+              <FormLabel fontSize="sm">Display name (optional)</FormLabel>
               <Input
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(e) => {
+                  setDisplayName(e.target.value)
+                  setInlineError(null)
+                }}
                 placeholder="Your Name"
               />
             </FormControl>
 
-            <HStack>
+            <HStack align="flex-start">
               <FormControl isRequired>
-                <FormLabel fontSize="sm">SMTP Host</FormLabel>
+                <FormLabel fontSize="sm">SMTP host</FormLabel>
                 <Input
                   value={smtpHost}
-                  onChange={(e) => setSmtpHost(e.target.value)}
+                  onChange={(e) => {
+                    setSmtpHost(e.target.value)
+                    setInlineError(null)
+                  }}
                   placeholder="smtp.gmail.com"
                 />
               </FormControl>
@@ -171,46 +216,62 @@ export default function SmtpEmailIdentityModal({
                 <FormLabel fontSize="sm">Port</FormLabel>
                 <NumberInput
                   value={smtpPort}
-                  onChange={(_, num) => setSmtpPort(num || 587)}
+                  onChange={(_, num) => {
+                    setSmtpPort(num || 587)
+                    setInlineError(null)
+                  }}
                   min={1}
                   max={65535}
                 >
                   <NumberInputField />
                 </NumberInput>
+                <FormHelperText>Usually 587 (STARTTLS) or 465 (implicit SSL).</FormHelperText>
               </FormControl>
             </HStack>
 
             <FormControl display="flex" alignItems="center">
               <FormLabel fontSize="sm" mb={0}>
-                Use implicit SSL (port 465)
+                Use implicit SSL (typical port 465)
               </FormLabel>
-              <Switch isChecked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} />
+              <Switch
+                isChecked={smtpSecure}
+                onChange={(e) => {
+                  setSmtpSecure(e.target.checked)
+                  setInlineError(null)
+                }}
+              />
               <Text fontSize="xs" color="gray.500" ml={3}>
-                For port 587 with STARTTLS (most Gmail / M365), keep this off
+                Off for port 587 (STARTTLS). On for most 465 setups.
               </Text>
             </FormControl>
 
             <FormControl isRequired>
-              <FormLabel fontSize="sm">SMTP Username</FormLabel>
+              <FormLabel fontSize="sm">SMTP username</FormLabel>
               <Input
                 value={smtpUsername}
-                onChange={(e) => setSmtpUsername(e.target.value)}
-                placeholder="you@company.com"
+                onChange={(e) => {
+                  setSmtpUsername(e.target.value)
+                  setInlineError(null)
+                }}
+                placeholder="Usually your full email address"
               />
             </FormControl>
 
             <FormControl isRequired>
-              <FormLabel fontSize="sm">SMTP Password</FormLabel>
+              <FormLabel fontSize="sm">SMTP password</FormLabel>
               <Input
                 type="password"
                 value={smtpPassword}
-                onChange={(e) => setSmtpPassword(e.target.value)}
-                placeholder="App password or SMTP password"
+                onChange={(e) => {
+                  setSmtpPassword(e.target.value)
+                  setInlineError(null)
+                }}
+                placeholder="App password (Gmail 2FA) or provider SMTP password"
               />
             </FormControl>
 
             <FormControl>
-              <FormLabel fontSize="sm">Daily Send Limit</FormLabel>
+              <FormLabel fontSize="sm">Daily send limit</FormLabel>
               <NumberInput
                 value={dailySendLimit}
                 onChange={(_, num) => setDailySendLimit(num || 150)}
@@ -219,9 +280,7 @@ export default function SmtpEmailIdentityModal({
               >
                 <NumberInputField />
               </NumberInput>
-              <Text fontSize="xs" color="gray.500" mt={1}>
-                Recommended: 150–200 emails per day per account
-              </Text>
+              <FormHelperText>Recommended 150–200 per day per mailbox for deliverability.</FormHelperText>
             </FormControl>
           </VStack>
         </ModalBody>

@@ -821,7 +821,7 @@ router.post('/:id/enroll', requireMarketingMutationAuth, async (req, res) => {
 //   1. POST /api/sequences/:id/enroll  → creates SequenceEnrollment rows (sequences.ts:530)
 //   2. POST /api/campaigns/:id/start   → sets EmailCampaign status = 'running'
 //   3. emailScheduler.ts (cron * * * *) → processScheduledEmails() picks up running campaigns,
-//      calls sendEmail() in outlookEmailService.ts (Microsoft Graph API).
+//      calls sendEmail() in outlookEmailService.ts (Microsoft Graph or SMTP per identity).
 //   No email is sent from this dry-run endpoint.
 router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
   try {
