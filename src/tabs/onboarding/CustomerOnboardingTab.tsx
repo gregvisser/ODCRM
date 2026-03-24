@@ -5,6 +5,10 @@ import {
   AccordionIcon,
   AccordionItem,
   AccordionPanel,
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Badge,
   Box,
   Button,
@@ -46,6 +50,12 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, AttachmentIcon, CloseIcon } from '@chakra-ui/icons'
 import { api } from '../../utils/api'
+import {
+  buildAgreementHistoryView,
+  computeAgreementRenewalReminder,
+  mergeAccountDetailsFromCurrentTerm,
+  syncAgreementTermDatesIntoAccountData,
+} from '../../utils/agreementHistory'
 import { emit, on } from '../../platform/events'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
@@ -119,6 +129,8 @@ type AccountDetails = {
   assignedAccountManagerName?: string
   /** Start date agreed with client (YYYY-MM-DD or ISO string; stored in DB under accountData.accountDetails) */
   startDateAgreed?: string
+  /** Agreement term end / renewal date (YYYY-MM-DD; stored under accountData.accountDetails) */
+  agreementEndDate?: string
   /** Server-stamped when start date is first saved (additive, for checklist attribution). */
   startDateAgreedSetAt?: string
   startDateAgreedSetBy?: string | null
@@ -180,6 +192,7 @@ const EMPTY_ACCOUNT_DETAILS: AccountDetails = {
   assignedAccountManagerId: '',
   assignedAccountManagerName: '',
   startDateAgreed: '',
+  agreementEndDate: '',
   startDateAgreedSetAt: '',
   startDateAgreedSetBy: '',
   clientCreatedOnCrmAt: '',
@@ -221,6 +234,7 @@ const normalizeAccountDetails = (raw?: Partial<AccountDetails> | null): AccountD
       ? safe.emailAccounts
       : [...EMPTY_ACCOUNT_DETAILS.emailAccounts],
     daysPerWeek: typeof safe.daysPerWeek === 'number' ? safe.daysPerWeek : 1,
+    agreementEndDate: typeof (safe as any).agreementEndDate === 'string' ? (safe as any).agreementEndDate : '',
     startDateAgreedSetAt:
       typeof (safe as any).startDateAgreedSetAt === 'string' ? (safe as any).startDateAgreedSetAt : '',
     startDateAgreedSetBy:
@@ -399,6 +413,9 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [uploadingCaseStudies, setUploadingCaseStudies] = useState(false)
   const [uploadingAgreement, setUploadingAgreement] = useState(false)
   const [agreementData, setAgreementData] = useState<{ fileName?: string; uploadedAt?: string } | null>(null)
+  /** Optional YYYY-MM-DD pair sent only with the next main agreement upload (supersedes term when both set). */
+  const [agreementUploadTermStart, setAgreementUploadTermStart] = useState('')
+  const [agreementUploadTermEnd, setAgreementUploadTermEnd] = useState('')
   const [assignedUsers, setAssignedUsers] = useState<AssignedUser[]>([])
   const [monthlyRevenueFromCustomer, setMonthlyRevenueFromCustomer] = useState<string>('')
   const [leadsGoogleSheetUrl, setLeadsGoogleSheetUrl] = useState<string>('')
@@ -447,6 +464,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     setUploadingCaseStudies(false)
     setUploadingAgreement(false)
     setAgreementData(null)
+    setAgreementUploadTermStart('')
+    setAgreementUploadTermEnd('')
     setMonthlyRevenueFromCustomer('')
     setLeadsGoogleSheetUrl('')
     setLeadsGoogleSheetLabel('')
@@ -476,6 +495,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       const type = String(att?.type || '')
       return type === 'sales_client_agreement_supporting' || type.startsWith('sales_client_agreement_supporting:')
     })
+  }, [customer])
+
+  const agreementRenewal = useMemo(() => {
+    if (!customer) return null
+    return computeAgreementRenewalReminder(
+      (customer.accountData as Record<string, unknown>) || {},
+      customer as any,
+    )
+  }, [customer])
+
+  const agreementHistoryRows = useMemo(() => {
+    if (!customer) return []
+    return buildAgreementHistoryView(
+      (customer.accountData as Record<string, unknown>) || {},
+      customer as any,
+    ).slice()
   }, [customer])
 
   // Fetch customer data by ID. Use `background` after initial load to avoid full-page spinner + scroll jump.
@@ -679,10 +714,22 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const rawDetails = rawAccountData as Partial<AccountDetails> & {
       accountDetails?: Partial<AccountDetails>
     }
-    const mergedDetails = normalizeAccountDetails({
-      ...rawDetails,
-      ...rawDetails.accountDetails,
-    })
+    const custBlob = customer as any
+    const mergedDetails = mergeAccountDetailsFromCurrentTerm(
+      normalizeAccountDetails({
+        ...rawDetails,
+        ...rawDetails.accountDetails,
+      }),
+      rawAccountData as Record<string, unknown>,
+      {
+        agreementBlobName: custBlob.agreementBlobName,
+        agreementContainerName: custBlob.agreementContainerName,
+        agreementFileName: custBlob.agreementFileName,
+        agreementFileMimeType: custBlob.agreementFileMimeType,
+        agreementUploadedAt: custBlob.agreementUploadedAt,
+        agreementUploadedByEmail: custBlob.agreementUploadedByEmail,
+      },
+    )
     // Keep primary contact stable across save→refetch cycles:
     // - If backend payload/rehydrate is missing primaryContact, do NOT blank the UI.
     // - Preserve a stable primaryContact.id so DB upserts don't create "new" contacts every save.
@@ -998,14 +1045,19 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       if (!dataUrl) return
 
       setUploadingAgreement(true)
-      
+
+      const uploadBody: Record<string, string> = { fileName: file.name, dataUrl }
+      const optStart = agreementUploadTermStart.trim().slice(0, 10)
+      const optEnd = agreementUploadTermEnd.trim().slice(0, 10)
+      if (optStart && optEnd) {
+        uploadBody.startDate = optStart
+        uploadBody.endDate = optEnd
+      }
+
       const { data, error } = await api.post<{
         success: boolean
         agreement: { fileName: string; blobName: string; uploadedAt: string }
-      }>(
-        `/api/customers/${customer.id}/agreement`,
-        { fileName: file.name, dataUrl },
-      )
+      }>(`/api/customers/${customer.id}/agreement`, uploadBody)
 
       if (error || !data?.success) {
         toast({
@@ -1025,10 +1077,12 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           status: 'success',
           duration: 6000,
         })
-        
+        setAgreementUploadTermStart('')
+        setAgreementUploadTermEnd('')
+
         emit('customerUpdated', { id: customer.id })
       }
-      
+
       setUploadingAgreement(false)
     }
     reader.readAsDataURL(file)
@@ -1245,7 +1299,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       days: accountDetails.daysPerWeek,
     })
 
-    const outgoingAccountData = stripUndefinedDeep(nextAccountData)
+    const custRow = customer as any
+    const nextAccountDataSynced = syncAgreementTermDatesIntoAccountData(nextAccountData, nextAccountDetails, {
+      agreementBlobName: custRow.agreementBlobName,
+      agreementContainerName: custRow.agreementContainerName,
+      agreementFileName: custRow.agreementFileName,
+      agreementFileMimeType: custRow.agreementFileMimeType,
+      agreementUploadedAt: custRow.agreementUploadedAt,
+      agreementUploadedByEmail: custRow.agreementUploadedByEmail,
+    })
+
+    const outgoingAccountData = stripUndefinedDeep(nextAccountDataSynced)
     const revenueNumber = monthlyRevenueFromCustomer.trim() ? parseFloat(monthlyRevenueFromCustomer) : undefined
 
     const parseIntOrNull = (raw: string): number | null | undefined => {
@@ -1460,6 +1524,20 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     >
     <Stack spacing={6}>
       <StickyProgressSummary />
+      {agreementRenewal ? (
+        <Alert status={agreementRenewal.daysLeft < 0 ? 'error' : 'warning'} borderRadius="md">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Agreement renewal</AlertTitle>
+            <AlertDescription fontSize="sm">
+              Current agreement term ends on {agreementRenewal.endDate}.
+              {agreementRenewal.daysLeft < 0
+                ? ` ${Math.abs(agreementRenewal.daysLeft)} day(s) overdue — upload a renewal agreement (with term dates) or update the active term.`
+                : ` ${agreementRenewal.daysLeft} day(s) until renewal.`}
+            </AlertDescription>
+          </Box>
+        </Alert>
+      ) : null}
       {/* Account Details Section */}
       <Box border="1px solid" borderColor="gray.200" borderRadius="xl" p={6} bg="white">
         <Stack spacing={6}>
@@ -1528,6 +1606,24 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               Commercial &amp; contract
             </Text>
             <Stack spacing={4}>
+              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                <FormControl maxW="md">
+                  <FormLabel>Agreement term start</FormLabel>
+                  <Input
+                    type="date"
+                    value={accountDetails.startDateAgreed?.slice(0, 10) || ''}
+                    onChange={(e) => updateAccountDetails({ startDateAgreed: e.target.value })}
+                  />
+                </FormControl>
+                <FormControl maxW="md">
+                  <FormLabel>Agreement term end (renewal)</FormLabel>
+                  <Input
+                    type="date"
+                    value={accountDetails.agreementEndDate?.slice(0, 10) || ''}
+                    onChange={(e) => updateAccountDetails({ agreementEndDate: e.target.value })}
+                  />
+                </FormControl>
+              </SimpleGrid>
               <FormControl maxW="md">
                 <FormLabel>{"Monthly Revenue from Customer (£)"}</FormLabel>
                 <Input
@@ -1568,7 +1664,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                       isLoading={uploadingAgreement}
                       isDisabled={uploadingAgreement}
                     >
-                      {agreementData ? 'Replace Agreement' : 'Upload Agreement'}
+                      {agreementData ? 'Upload new agreement file' : 'Upload Agreement'}
                     </Button>
                     {agreementData ? (
                       <HStack spacing={2}>
@@ -1596,6 +1692,78 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                       </Text>
                     )}
                   </HStack>
+                  <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                    <FormControl maxW="md">
+                      <FormLabel fontSize="xs" color="gray.600">
+                        Optional — term start for this upload only (both dates required to supersede prior term)
+                      </FormLabel>
+                      <Input
+                        type="date"
+                        size="sm"
+                        value={agreementUploadTermStart}
+                        onChange={(e) => setAgreementUploadTermStart(e.target.value)}
+                      />
+                    </FormControl>
+                    <FormControl maxW="md">
+                      <FormLabel fontSize="xs" color="gray.600">
+                        Optional — term end for this upload only
+                      </FormLabel>
+                      <Input
+                        type="date"
+                        size="sm"
+                        value={agreementUploadTermEnd}
+                        onChange={(e) => setAgreementUploadTermEnd(e.target.value)}
+                      />
+                    </FormControl>
+                  </SimpleGrid>
+                  {agreementHistoryRows.length > 0 ? (
+                    <Box overflowX="auto">
+                      <Text fontSize="xs" fontWeight="semibold" color="gray.600" mb={1}>
+                        Agreement file history (newest first)
+                      </Text>
+                      <Table size="sm" variant="simple">
+                        <Thead>
+                          <Tr>
+                            <Th>File</Th>
+                            <Th>Uploaded</Th>
+                            <Th>Term</Th>
+                            <Th>Status</Th>
+                            <Th> </Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          {agreementHistoryRows
+                            .slice()
+                            .sort((a, b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)))
+                            .map((row) => (
+                              <Tr key={row.id}>
+                                <Td>{row.fileName}</Td>
+                                <Td fontSize="xs">
+                                  {row.uploadedAt ? new Date(row.uploadedAt).toLocaleString() : '—'}
+                                </Td>
+                                <Td fontSize="xs">
+                                  {row.startDate || row.endDate
+                                    ? `${row.startDate || '—'} → ${row.endDate || '—'}`
+                                    : '—'}
+                                </Td>
+                                <Td fontSize="xs" textTransform="capitalize">
+                                  {row.termKind.replace(/_/g, ' ')}
+                                </Td>
+                                <Td>
+                                  <Link
+                                    href={`${apiBaseUrl}/api/customers/${customer.id}/agreement/download?blobName=${encodeURIComponent(row.blobName)}`}
+                                    isExternal
+                                    fontSize="sm"
+                                  >
+                                    Open
+                                  </Link>
+                                </Td>
+                              </Tr>
+                            ))}
+                        </Tbody>
+                      </Table>
+                    </Box>
+                  ) : null}
                   <Input
                     type="file"
                     accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xls,.xlsx,.csv,.txt"
