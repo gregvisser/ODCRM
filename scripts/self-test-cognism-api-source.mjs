@@ -52,7 +52,16 @@ try {
 
   if (!route.includes('cognismValidateApiKey')) fail('routes', 'missing token validation on connect')
   else if (!route.includes('runCognismApiPoll')) fail('routes', 'missing Cognism poll runner')
+  else if (!route.includes('buildCognismSearchBody')) fail('routes', 'missing buildCognismSearchBody for Cognism')
   else ok('leadSources Cognism poll + validate')
+
+  const cognismClientSrc = read('server/src/services/cognismClient.ts')
+  if (cognismClientSrc.includes('contactEntitlementSubscription')) {
+    fail('cognismClient', 'validation must use documented Search API, not entitlement HTML route')
+  } else ok('cognismClient avoids entitlement validation URL')
+  if (!cognismClientSrc.includes('cognismValidateApiKey')) fail('cognismClient', 'missing cognismValidateApiKey')
+  else if (!cognismClientSrc.includes('/api/search/contact/search')) fail('cognismClient', 'missing contact search path')
+  else ok('cognismClient documents Search API path')
 } catch (e) {
   console.error(e)
   failed = true

@@ -1,10 +1,14 @@
 /**
  * Cognism HTTP API client (server-side only).
- * Contract: Postman collection "Cognism API" (developers.cognism.com), base https://app.cognism.com
+ * Contract: documented Search / Redeem flow — POST https://app.cognism.com/api/search/contact/search and .../redeem
+ * (see Cognism API docs / Postman). Do not use web-app HTML routes for API validation.
  */
 
 const DEFAULT_BASE_URL = 'https://app.cognism.com'
 const DEFAULT_TIMEOUT_MS = 25_000
+
+/** Small page size for connect-time validation only (limits payload; same API as import). */
+export const COGNISM_VALIDATE_SEARCH_INDEX_SIZE = 1
 
 export interface CognismSearchResponse {
   lastReturnedKey?: string
@@ -28,7 +32,35 @@ export interface CognismRedeemResponse {
   results?: unknown[]
 }
 
+/** True when the body looks like an HTML document (SPA shell / login page), not API JSON. */
+export function cognismResponseLooksLikeHtml(bodyText: string): boolean {
+  const s = bodyText.trimStart().slice(0, 800)
+  if (!s) return false
+  const lower = s.toLowerCase()
+  return (
+    lower.startsWith('<!doctype html') ||
+    lower.startsWith('<html') ||
+    (lower.includes('<html') && lower.includes('</'))
+  )
+}
+
+function parseCognismJsonPayload<T>(bodyText: string, operation: string): T {
+  if (cognismResponseLooksLikeHtml(bodyText)) {
+    throw new Error(
+      `Cognism returned HTML instead of API JSON (${operation}). Confirm requests use the documented Search API (POST /api/search/contact/search) and base URL https://app.cognism.com (or set COGNISM_API_BASE_URL correctly).`
+    )
+  }
+  try {
+    return JSON.parse(bodyText) as T
+  } catch {
+    throw new Error(`Cognism returned non-JSON for ${operation}.`)
+  }
+}
+
 function parseCognismErrorMessage(status: number, bodyText: string): string {
+  if (cognismResponseLooksLikeHtml(bodyText)) {
+    return `Cognism returned a web page (HTTP ${status}) instead of API JSON — the request did not receive a Search API response. Use the documented contact Search endpoint (POST /api/search/contact/search) with base https://app.cognism.com.`
+  }
   if (status === 401 || status === 403) {
     return 'Cognism rejected the API key (unauthorized). Check the token is valid and not expired.'
   }
@@ -43,7 +75,7 @@ function parseCognismErrorMessage(status: number, bodyText: string): string {
     const msg = j.message || j.error || j.title
     if (typeof msg === 'string' && msg.trim()) return `Cognism: ${msg.trim()}`
   } catch {
-    // ignore
+    // fall through
   }
   const t = bodyText.trim().slice(0, 400)
   return t ? `Cognism error (HTTP ${status}): ${t}` : `Cognism request failed (HTTP ${status})`
@@ -76,16 +108,19 @@ async function cognismFetch(
   }
 }
 
-/** GET /api/search/entitlement/contactEntitlementSubscription — validate API key. */
-export async function cognismValidateApiKey(apiKey: string): Promise<void> {
-  const res = await cognismFetch(apiKey, '/api/search/entitlement/contactEntitlementSubscription', {
-    method: 'GET',
-    timeoutMs: 15_000,
+/**
+ * Validates the API key with the same documented Search API used for imports:
+ * POST /api/search/contact/search?lastReturnedKey=&indexSize=
+ * Does not call redeem or persist anything.
+ */
+export async function cognismValidateApiKey(
+  apiKey: string,
+  searchBody: Record<string, unknown> = {}
+): Promise<void> {
+  await cognismSearchContacts(apiKey, searchBody, {
+    lastReturnedKey: '',
+    indexSize: COGNISM_VALIDATE_SEARCH_INDEX_SIZE,
   })
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(parseCognismErrorMessage(res.status, text))
-  }
 }
 
 /**
@@ -109,11 +144,7 @@ export async function cognismSearchContacts(
   if (!res.ok) {
     throw new Error(parseCognismErrorMessage(res.status, text))
   }
-  try {
-    return JSON.parse(text) as CognismSearchResponse
-  } catch {
-    throw new Error('Cognism search returned invalid JSON')
-  }
+  return parseCognismJsonPayload<CognismSearchResponse>(text, 'contact search')
 }
 
 /**
@@ -138,9 +169,5 @@ export async function cognismRedeemContacts(
   if (!res.ok) {
     throw new Error(parseCognismErrorMessage(res.status, text))
   }
-  try {
-    return JSON.parse(text) as CognismRedeemResponse
-  } catch {
-    throw new Error('Cognism redeem returned invalid JSON')
-  }
+  return parseCognismJsonPayload<CognismRedeemResponse>(text, 'contact redeem')
 }
