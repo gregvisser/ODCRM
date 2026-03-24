@@ -435,9 +435,13 @@ const EmailAccountsTab: React.FC = () => {
     if (apiError) {
       toast({
         title: 'Test send failed',
-        description: apiError,
+        description: (
+          <Text as="span" whiteSpace="pre-line" fontSize="sm" display="block">
+            {apiError}
+          </Text>
+        ),
         status: 'error',
-        duration: 5000,
+        duration: 8000,
       })
       return
     }

@@ -205,7 +205,12 @@ export default function EmailAccountsEnhancedTab({
         toast.closeAll()
         toast({
           title: 'Test send failed',
-          description: `${errorMsg}${requestId ? ` (Request ID: ${requestId})` : ''}`,
+          description: (
+            <Text as="span" whiteSpace="pre-line" fontSize="sm" display="block">
+              {errorMsg}
+              {requestId ? `\n(Request ID: ${requestId})` : ''}
+            </Text>
+          ),
           status: 'error',
           duration: 8000,
           isClosable: true,
