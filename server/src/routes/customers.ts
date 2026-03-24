@@ -15,6 +15,12 @@ import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
 import { applyAutoTicksToAccountData, applyManualTickToAccountData } from '../services/progressAutoTick.js'
+import {
+  mergeAgreementHistoryOnMainUpload,
+  preservePriorAgreementBlobIfReplaced,
+  syncAgreementTermDatesIntoAccountData,
+  resolveAgreementBlobForDownload,
+} from '../services/agreementHistory.js'
 
 const router = Router()
 
@@ -1104,6 +1110,10 @@ router.put('/:id/onboarding', async (req, res) => {
           // Needed for auto-tick evaluation without extra round trips
           agreementBlobName: true,
           agreementContainerName: true,
+          agreementFileName: true,
+          agreementFileMimeType: true,
+          agreementUploadedAt: true,
+          agreementUploadedByEmail: true,
           agreementFileUrl: true, // legacy
           leadsReportingUrl: true,
           weeklyLeadTarget: true,
@@ -1150,6 +1160,24 @@ router.put('/:id/onboarding', async (req, res) => {
             },
           }
         }
+      } catch {
+        // ignore
+      }
+
+      // Agreement term dates (accountData.agreementHistory current_term) stay aligned with accountDetails.
+      try {
+        const det =
+          mergedAccountDataBase?.accountDetails && typeof mergedAccountDataBase.accountDetails === 'object'
+            ? (mergedAccountDataBase.accountDetails as any)
+            : {}
+        mergedAccountDataBase = syncAgreementTermDatesIntoAccountData(mergedAccountDataBase, det, {
+          agreementBlobName: existing.agreementBlobName,
+          agreementContainerName: existing.agreementContainerName,
+          agreementFileName: existing.agreementFileName,
+          agreementFileMimeType: existing.agreementFileMimeType,
+          agreementUploadedAt: existing.agreementUploadedAt?.toISOString?.() ?? null,
+          agreementUploadedByEmail: existing.agreementUploadedByEmail,
+        })
       } catch {
         // ignore
       }
@@ -2857,7 +2885,12 @@ router.post('/:id/agreement', async (req, res) => {
   try {
     const { id } = req.params
     if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
-    const { fileName, dataUrl } = req.body
+    const { fileName, dataUrl, startDate: rawStartDate, endDate: rawEndDate } = req.body as {
+      fileName?: string
+      dataUrl?: string
+      startDate?: string
+      endDate?: string
+    }
 
     // Validate customer exists
     const customer = await prisma.customer.findUnique({
@@ -2868,6 +2901,19 @@ router.post('/:id/agreement', async (req, res) => {
     if (!customer) {
       return res.status(404).json({ error: 'Customer not found' })
     }
+
+    const priorAgreement = await prisma.customer.findUnique({
+      where: { id },
+      select: {
+        accountData: true,
+        agreementBlobName: true,
+        agreementContainerName: true,
+        agreementFileName: true,
+        agreementFileMimeType: true,
+        agreementUploadedAt: true,
+        agreementUploadedByEmail: true,
+      },
+    })
 
     // Validate input
     if (!fileName || !dataUrl) {
@@ -3002,9 +3048,11 @@ router.post('/:id/agreement', async (req, res) => {
       })
     }
 
-    // Merge onboarding progress auto-ticks (agreement present) into accountData JSON.
+    // Merge agreement history + onboarding progress auto-ticks into accountData JSON.
     try {
       const actorForProgress = (actorIdentity?.userId || actorIdentity?.email || null) as string | null
+      const optStart = typeof rawStartDate === 'string' ? rawStartDate.trim() : ''
+      const optEnd = typeof rawEndDate === 'string' ? rawEndDate.trim() : ''
       await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT "id" FROM "customers" WHERE "id" = ${id} FOR UPDATE`
         const row = await tx.customer.findUnique({
@@ -3019,9 +3067,43 @@ router.post('/:id/agreement', async (req, res) => {
           },
         })
         if (!row) return
-        const ad = row.accountData && typeof row.accountData === 'object' ? (row.accountData as any) : {}
+        let ad0 = row.accountData && typeof row.accountData === 'object' ? { ...(row.accountData as any) } : {}
+        if (
+          priorAgreement?.agreementBlobName &&
+          updatedCustomer.agreementBlobName &&
+          priorAgreement.agreementBlobName !== updatedCustomer.agreementBlobName
+        ) {
+          ad0 = preservePriorAgreementBlobIfReplaced(ad0, priorAgreement, String(updatedCustomer.agreementBlobName))
+        }
+        let withHistory = mergeAgreementHistoryOnMainUpload({
+          accountData: ad0,
+          newEntry: {
+            blobName: String(updatedCustomer.agreementBlobName),
+            containerName,
+            fileName,
+            mimeType,
+            uploadedAt: now,
+            uploadedByEmail: actorEmail,
+            startDate: optStart || null,
+            endDate: optEnd || null,
+          },
+        })
+        if (optStart && optEnd) {
+          const det =
+            withHistory.accountDetails && typeof withHistory.accountDetails === 'object'
+              ? ({ ...(withHistory.accountDetails as any) } as Record<string, unknown>)
+              : {}
+          withHistory = {
+            ...withHistory,
+            accountDetails: {
+              ...det,
+              startDateAgreed: optStart,
+              agreementEndDate: optEnd,
+            },
+          }
+        }
         const nowIso = new Date().toISOString()
-        const ticked = await applyProgressAutoTicksInTransaction(tx, id, ad, {
+        const ticked = await applyProgressAutoTicksInTransaction(tx, id, withHistory, {
           hasAgreement: true,
           leadsReportingUrl: row.leadsReportingUrl,
           weeklyLeadTarget: row.weeklyLeadTarget,
@@ -3076,6 +3158,8 @@ router.post('/:id/agreement', async (req, res) => {
 router.get('/:id/agreement-download', async (req, res) => {
   try {
     const { id } = req.params
+    const requestedBlob =
+      typeof (req.query as any)?.blobName === 'string' ? String((req.query as any).blobName).trim() : ''
 
     // Validate customer exists and has agreement
     const customer = await prisma.customer.findUnique({
@@ -3083,6 +3167,7 @@ router.get('/:id/agreement-download', async (req, res) => {
       select: {
         id: true,
         name: true,
+        accountData: true,
         agreementBlobName: true,
         agreementContainerName: true,
         agreementFileName: true,
@@ -3095,24 +3180,36 @@ router.get('/:id/agreement-download', async (req, res) => {
       return res.status(404).json({ error: 'Customer not found' })
     }
 
-    // Check for blob-based agreement (new format)
-    if (customer.agreementBlobName && customer.agreementContainerName) {
-      // Generate SAS URL for blob access
+    const resolved = resolveAgreementBlobForDownload({
+      customer,
+      accountData: customer.accountData,
+      requestedBlobName: requestedBlob || null,
+    })
+
+    // Check for blob-based agreement (new format) or historical blob in agreementHistory
+    if (resolved) {
       const { generateAgreementSasUrl } = await import('../utils/blobSas.js')
-      
+
       const sasResult = await generateAgreementSasUrl({
-        containerName: customer.agreementContainerName,
-        blobName: customer.agreementBlobName,
+        containerName: resolved.containerName,
+        blobName: resolved.blobName,
         ttlMinutes: 15
       })
 
-      console.log(`[agreement-download] Generated SAS for customer ${id}: ${customer.agreementFileName}`)
+      console.log(`[agreement-download] Generated SAS for customer ${id}: ${resolved.fileName}`)
 
       return res.status(200).json({
         url: sasResult.url,
-        fileName: customer.agreementFileName || 'agreement.pdf',
-        mimeType: customer.agreementFileMimeType || 'application/pdf',
+        fileName: resolved.fileName || 'agreement.pdf',
+        mimeType: resolved.mimeType || 'application/pdf',
         expiresAt: sasResult.expiresAt.toISOString()
+      })
+    }
+
+    if (requestedBlob) {
+      return res.status(404).json({
+        error: 'no_agreement',
+        message: 'Agreement blob not found for this customer',
       })
     }
 
@@ -3181,11 +3278,15 @@ router.get('/:id/agreement/download', async (req, res) => {
     const { id } = req.params
     if (!enforceTenantHeaderForCustomerRoute(req, res, id)) return
 
+    const requestedBlob =
+      typeof (req.query as any)?.blobName === 'string' ? String((req.query as any).blobName).trim() : ''
+
     const customer = await prisma.customer.findUnique({
       where: { id },
       select: {
         id: true,
         name: true,
+        accountData: true,
         agreementBlobName: true,
         agreementContainerName: true,
         agreementFileName: true,
@@ -3201,6 +3302,28 @@ router.get('/:id/agreement/download', async (req, res) => {
     }
 
     const { generateAgreementSasUrl } = await import('../utils/blobSas.js')
+
+    const resolved = resolveAgreementBlobForDownload({
+      customer,
+      accountData: customer.accountData,
+      requestedBlobName: requestedBlob || null,
+    })
+
+    if (resolved) {
+      const sas = await generateAgreementSasUrl({
+        containerName: resolved.containerName,
+        blobName: resolved.blobName,
+        ttlMinutes: 5,
+      })
+      res.setHeader('Cache-Control', 'no-store')
+      return res.redirect(sas.url)
+    }
+
+    if (requestedBlob) {
+      res.status(404)
+      res.setHeader('Content-Type', 'text/html; charset=utf-8')
+      return res.send('<h3>Agreement file not found</h3>')
+    }
 
     // New blob-based agreement (expected)
     if (customer.agreementBlobName && customer.agreementContainerName) {
