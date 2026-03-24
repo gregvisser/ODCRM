@@ -309,6 +309,49 @@ const dedupeAreas = (areas: any[]): TargetGeographicalArea[] => {
   return out
 }
 
+const ALLOWED_ONBOARDING_ATTACHMENT_EXTENSIONS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'xls',
+  'xlsx',
+  'csv',
+  'txt',
+])
+
+const ALLOWED_ONBOARDING_ATTACHMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+])
+
+const getFileExtension = (fileName: string): string => {
+  const idx = fileName.lastIndexOf('.')
+  if (idx < 0) return ''
+  return fileName.slice(idx + 1).toLowerCase()
+}
+
+const isAllowedOnboardingAttachment = (file: File): boolean => {
+  const ext = getFileExtension(file.name)
+  const mimeType = String(file.type || '').toLowerCase().trim()
+  return ALLOWED_ONBOARDING_ATTACHMENT_EXTENSIONS.has(ext) || ALLOWED_ONBOARDING_ATTACHMENT_MIME_TYPES.has(mimeType)
+}
+
 const buildAccreditation = (): Accreditation => ({
   id: `acc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
   name: '',
@@ -379,6 +422,17 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       weeklyTarget: accountData?.weeklyTarget as number | undefined,
       _databaseId: customer.id,
     } as Partial<Account>
+  }, [customer])
+  const supportingAgreementFiles = useMemo(() => {
+    const accountData = customer?.accountData
+    const attachments =
+      accountData && typeof accountData === 'object' && Array.isArray((accountData as any).attachments)
+        ? ((accountData as any).attachments as Array<any>)
+        : []
+    return attachments.filter((att) => {
+      const type = String(att?.type || '')
+      return type === 'sales_client_agreement_supporting' || type.startsWith('sales_client_agreement_supporting:')
+    })
   }, [customer])
 
   // Fetch customer data by ID. Use `background` after initial load to avoid full-page spinner + scroll jump.
@@ -878,11 +932,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     if (!proceed) return
 
     // Validate file type
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    if (!allowedTypes.includes(file.type)) {
+    if (!isAllowedOnboardingAttachment(file)) {
       toast({
         title: 'Invalid file type',
-        description: 'Only PDF, DOC, and DOCX files are allowed',
+        description: 'Allowed: PDF, DOC, DOCX, PPT, PPTX, PNG, JPG/JPEG, WEBP, XLS/XLSX, CSV, TXT.',
         status: 'error',
         duration: 4000,
       })
@@ -940,6 +993,51 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       window.dispatchEvent(new CustomEvent('navigateToMarketing', { detail: { view: 'compliance' } }))
     })()
   }, [confirmProceedIfDirty])
+
+  const handleSupportingAgreementUpload = async (file: File | null) => {
+    if (!file || !customer) return
+    if (!isAllowedOnboardingAttachment(file)) {
+      toast({
+        title: 'Invalid file type',
+        description: 'Allowed: PDF, DOC, DOCX, PPT, PPTX, PNG, JPG/JPEG, WEBP, XLS/XLSX, CSV, TXT.',
+        status: 'error',
+        duration: 4000,
+      })
+      return
+    }
+    const proceed = await confirmProceedIfDirty(
+      'You have unsaved onboarding changes. Uploading supporting agreement files will refresh this customer from the database.',
+    )
+    if (!proceed) return
+    setUploadingAgreement(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file, file.name)
+      formData.append('attachmentType', 'sales_client_agreement_supporting')
+      const response = await fetch(`/api/customers/${customer.id}/attachments`, { method: 'POST', body: formData })
+      if (!response.ok) {
+        let message = `Upload failed (${response.status})`
+        try {
+          const errorData = await response.json()
+          message = errorData?.message || errorData?.error || message
+        } catch {
+          // ignore
+        }
+        throw new Error(message)
+      }
+      emit('customerUpdated', { id: customer.id })
+      toast({ title: 'Supporting agreement file uploaded', status: 'success', duration: 3500 })
+    } catch (e) {
+      toast({
+        title: 'Upload failed',
+        description: e instanceof Error ? e.message : 'Unable to upload supporting agreement file',
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setUploadingAgreement(false)
+    }
+  }
 
   const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
     items.find((item) => item.id === id)?.label || id
@@ -1399,7 +1497,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                 <Stack spacing={2}>
                   <Input
                     type="file"
-                    accept=".pdf,.doc,.docx"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xls,.xlsx,.csv,.txt"
                     display="none"
                     id="agreement-upload"
                     onChange={(e) => void handleAgreementFileChange(e.target.files?.[0] || null)}
@@ -1440,6 +1538,36 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     ) : (
                       <Text fontSize="sm" color="gray.500">
                         No agreement uploaded
+                      </Text>
+                    )}
+                  </HStack>
+                  <Input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xls,.xlsx,.csv,.txt"
+                    display="none"
+                    id="agreement-supporting-upload"
+                    onChange={(e) => void handleSupportingAgreementUpload(e.target.files?.[0] || null)}
+                  />
+                  <HStack spacing={3} flexWrap="wrap">
+                    <Button
+                      as="label"
+                      htmlFor="agreement-supporting-upload"
+                      leftIcon={<AttachmentIcon />}
+                      variant="ghost"
+                      size="sm"
+                      colorScheme="teal"
+                      isLoading={uploadingAgreement}
+                      isDisabled={uploadingAgreement}
+                    >
+                      Add supporting agreement file
+                    </Button>
+                    {supportingAgreementFiles.length > 0 ? (
+                      <Text fontSize="sm" color="gray.600">
+                        {supportingAgreementFiles.length} supporting file(s) uploaded
+                      </Text>
+                    ) : (
+                      <Text fontSize="sm" color="gray.500">
+                        No supporting agreement files uploaded
                       </Text>
                     )}
                   </HStack>
@@ -1833,7 +1961,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                     <Stack spacing={2}>
                       <Input
                         type="file"
-                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
                         display="none"
                         id={`accreditation-upload-${accreditation.id}`}
                         onChange={(e) =>
@@ -2180,7 +2308,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
               <Stack spacing={2}>
                 <Input
                   type="file"
-                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                  accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
                   display="none"
                   id="case-studies-upload"
                   onChange={(e) => void handleCaseStudiesFileChange(e.target.files?.[0] || null)}

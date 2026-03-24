@@ -23,6 +23,8 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = [
   'application/pdf',
   'application/msword',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   // Images (common onboarding evidence uploads)
   'image/png',
   'image/jpeg',
@@ -34,6 +36,33 @@ const ALLOWED_ATTACHMENT_MIME_TYPES = [
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 ]
+
+const ALLOWED_ATTACHMENT_EXTENSIONS = new Set([
+  'pdf',
+  'doc',
+  'docx',
+  'ppt',
+  'pptx',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'txt',
+  'csv',
+  'xls',
+  'xlsx',
+])
+
+const getFileExtension = (fileName: string): string => {
+  const idx = String(fileName || '').lastIndexOf('.')
+  if (idx < 0) return ''
+  return fileName.slice(idx + 1).toLowerCase()
+}
+
+const isAllowedAttachmentFile = (fileName: string, mimeType: string): boolean => {
+  const ext = getFileExtension(fileName)
+  return ALLOWED_ATTACHMENT_EXTENSIONS.has(ext) || ALLOWED_ATTACHMENT_MIME_TYPES.includes(mimeType)
+}
 
 const MAX_ATTACHMENT_FILE_SIZE_MB = 10
 const MAX_ATTACHMENT_FILE_SIZE_BYTES = MAX_ATTACHMENT_FILE_SIZE_MB * 1024 * 1024
@@ -2852,15 +2881,9 @@ router.post('/:id/agreement', async (req, res) => {
     }
 
     const mimeType = mimeMatch[1]
-    const allowedMimeTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    ]
-
-    if (!allowedMimeTypes.includes(mimeType)) {
+    if (!isAllowedAttachmentFile(fileName, mimeType)) {
       return res.status(400).json({ 
-        error: 'Invalid file type. Only PDF, DOC, and DOCX files are allowed.',
+        error: 'Invalid file type. Allowed: PDF/DOC/DOCX/PPT/PPTX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
         receivedMimeType: mimeType 
       })
     }
@@ -3267,9 +3290,9 @@ router.post('/:id/attachments', (req, res) => {
       }
 
       const mimeType = String(file.mimetype || '').trim()
-      if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(mimeType)) {
+      if (!isAllowedAttachmentFile(file.originalname, mimeType)) {
         return res.status(400).json({
-          error: 'Invalid file type. Allowed: PDF/DOC/DOCX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
+          error: 'Invalid file type. Allowed: PDF/DOC/DOCX/PPT/PPTX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
           receivedMimeType: mimeType,
         })
       }
@@ -3695,7 +3718,7 @@ router.post('/:id/suppression-import', (req, res) => {
       const suppressionMimeType = String((file as any).mimetype || '').trim() || 'application/octet-stream'
       if (!ALLOWED_ATTACHMENT_MIME_TYPES.includes(suppressionMimeType)) {
         return res.status(400).json({
-          error: 'Invalid file type. Allowed: PDF/DOC/DOCX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
+          error: 'Invalid file type. Allowed: PDF/DOC/DOCX/PPT/PPTX, PNG/JPEG/WEBP, CSV/TXT, XLS/XLSX.',
           receivedMimeType: suppressionMimeType,
         })
       }

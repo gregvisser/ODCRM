@@ -53,7 +53,7 @@ export function AttachmentInline({
         <Input
           type="file"
           display="none"
-          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
+          accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv,.txt"
           onChange={(e) => {
             const f = e.target.files?.[0]
             if (f) upload(f)
