@@ -2,6 +2,7 @@ import { Client } from '@microsoft/microsoft-graph-client'
 import { PrismaClient } from '@prisma/client'
 import type { EmailIdentity, EmailMessageMetadata } from '@prisma/client'
 import { prisma } from '../lib/prisma.js'
+import { sendOutboundSmtpMail } from './smtpMailer.js'
 
 export interface SendEmailParams {
   senderIdentityId: string
@@ -155,11 +156,57 @@ export async function sendEmail(
       }
     }
 
-    // Delegated OAuth only
+    // SMTP identities (Gmail / Google Workspace / custom mail servers)
+    if (identity.provider === 'smtp') {
+      const mergedHeaders: Record<string, string> = { ...(params.customHeaders || {}) }
+      if (params.campaignProspectId) {
+        mergedHeaders['X-CRM-CampaignProspect-Id'] = params.campaignProspectId
+      }
+      const smtpResult = await sendOutboundSmtpMail({
+        identity,
+        to: params.toEmail,
+        subject: params.subject,
+        htmlBody: params.htmlBody,
+        textBody: params.textBody,
+        customHeaders: Object.keys(mergedHeaders).length ? mergedHeaders : undefined,
+      })
+
+      if (!smtpResult.success) {
+        return {
+          success: false,
+          error: smtpResult.error || 'SMTP send failed',
+        }
+      }
+
+      const messageId = smtpResult.messageId
+
+      if (messageId && params.campaignProspectId) {
+        await prisma.emailMessageMetadata.create({
+          data: {
+            campaignProspectId: params.campaignProspectId,
+            senderIdentityId: identity.id,
+            providerMessageId: messageId,
+            threadId: null,
+            direction: 'outbound',
+            fromAddress: identity.emailAddress,
+            toAddress: params.toEmail,
+            subject: params.subject,
+          } as any,
+        })
+      }
+
+      return {
+        success: true,
+        messageId,
+        threadId: undefined,
+      }
+    }
+
+    // Delegated OAuth (Microsoft Graph)
     if (identity.provider !== 'outlook') {
       return {
         success: false,
-        error: `Unsupported email identity provider for Outlook sending: ${identity.provider}`,
+        error: `Unsupported email identity provider for sending: ${identity.provider}`,
       }
     }
 

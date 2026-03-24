@@ -820,8 +820,37 @@ router.post('/identities/:id/test-send', requireMarketingMutationAuth, async (re
       return res.status(404).json({ error: 'Identity not found' })
     }
 
+    if (identity.provider === 'smtp') {
+      const { sendOutboundSmtpMail } = await import('../services/smtpMailer.js')
+      const smtpResult = await sendOutboundSmtpMail({
+        identity,
+        to: toEmail,
+        subject: subject || 'Test Email from OpenDoors CRM',
+        htmlBody:
+          body ||
+          `<p>This is a test email sent from ${identity.emailAddress} via OpenDoors CRM at ${new Date().toISOString()}</p>`,
+        textBody: body || undefined,
+      })
+      if (!smtpResult.success) {
+        return res.status(502).json({
+          error: smtpResult.error || 'SMTP test send failed',
+          code: 'SMTP_SEND_FAILED',
+        })
+      }
+      res.setHeader('x-odcrm-customer-id', customerId)
+      return res.json({
+        data: {
+          success: true,
+          message: `Test email sent from ${identity.emailAddress} to ${toEmail}`,
+          from: identity.emailAddress,
+          to: toEmail,
+          requestId: smtpResult.messageId || 'smtp',
+        },
+      })
+    }
+
     if (identity.provider !== 'outlook') {
-      return res.status(400).json({ error: 'Test send only supported for Outlook identities' })
+      return res.status(400).json({ error: 'Test send is only supported for Outlook or SMTP identities' })
     }
 
     if (!identity.accessToken) {
