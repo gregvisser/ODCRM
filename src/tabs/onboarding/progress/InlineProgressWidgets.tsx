@@ -32,24 +32,6 @@ export function StatusChip({
   )
 }
 
-export function InlineStartDateStatus() {
-  const { sales, accountDetails, renderMetaLine, resolveUserLabel } = useOnboardingProgress()
-  const checked = sales.sales_start_date === true
-  return (
-    <VStack align="stretch" spacing={0} minW={{ base: '100%', md: '200px' }}>
-      <StatusChip done={checked} label="Start date" auto={!!accountDetails.startDateAgreed?.toString().trim()} />
-      {accountDetails.startDateAgreedSetBy ? (
-        <Text fontSize="xs" color="gray.500">
-          Recorded{' '}
-          {accountDetails.startDateAgreedSetAt ? new Date(accountDetails.startDateAgreedSetAt).toLocaleString() : ''}
-          {resolveUserLabel(accountDetails.startDateAgreedSetBy) ? ` · ${resolveUserLabel(accountDetails.startDateAgreedSetBy)}` : ''}
-        </Text>
-      ) : null}
-      {renderMetaLine('sales', 'sales_start_date')}
-    </VStack>
-  )
-}
-
 export function InlineAssignAmStatus() {
   const { sales, renderMetaLine } = useOnboardingProgress()
   const checked = sales.sales_assign_am === true

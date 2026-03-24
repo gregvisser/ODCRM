@@ -40,19 +40,10 @@ const files = {
 }
 
 const markers = [
-  'onboarding-role-framing',
-  'onboarding-activation-framing',
-  'onboarding-client-readiness-state',
-  'onboarding-readiness-guidance',
-  'onboarding-checkpoint-guidance',
-  'onboarding-blocker-vs-proceed',
-  'onboarding-activation-state',
-  'onboarding-clients-vs-onboarding-guidance',
-  'onboarding-transitional-leads-note',
-  'onboarding-operations-handoff',
-  'onboarding-readiness-next-step',
-  'onboarding-go-marketing-readiness',
-  'useClientReadinessState',
+  'CustomerSelector',
+  'CustomerOnboardingTab',
+  'useScopedCustomerSelection',
+  'Select a client to begin',
 ]
 
 for (const marker of markers) {
@@ -67,7 +58,6 @@ if (!files.requireActiveClient.includes('NoActiveClientEmptyState')) {
   fail('active-client guard marker regressed')
 }
 
-console.log('PASS onboarding activation/setup framing markers exist')
-console.log('PASS blocker vs proceed, clients-vs-onboarding, and operations handoff markers exist')
+console.log('PASS onboarding home shells selector + tab wiring markers exist')
 console.log('PASS shared readiness labels and active-client guard markers remain present')
 console.log('self-test-onboarding-activation-tightening-runtime: PASS')

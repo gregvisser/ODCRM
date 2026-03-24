@@ -71,7 +71,6 @@ import {
   InlineEmailsLinkedStatus,
   InlineFirstPaymentRow,
   InlineLeadTrackerStatus,
-  InlineStartDateStatus,
   InlineSuppressionDncStatus,
   InlineWeeklyTargetProgress,
 } from './progress/InlineProgressWidgets'
@@ -1628,23 +1627,6 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
                   </Select>
                 </Box>
                 <InlineAssignAmStatus />
-              </Flex>
-            </FormControl>
-            <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
-              <Flex direction={{ base: 'column', lg: 'row' }} gap={4} align={{ lg: 'flex-end' }} flexWrap="wrap">
-                <Box flex="1" minW={0}>
-                  <FormLabel>{"Start Date Agreed"}</FormLabel>
-                  <Input
-                    type="date"
-                    value={String(accountDetails.startDateAgreed || '').slice(0, 10)}
-                    onChange={(e) => {
-                      const next = e.target.value
-                      updateAccountDetails({ startDateAgreed: next })
-                    }}
-                    placeholder="YYYY-MM-DD"
-                  />
-                </Box>
-                <InlineStartDateStatus />
               </Flex>
             </FormControl>
             <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>

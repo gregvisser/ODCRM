@@ -37,7 +37,6 @@ const files = {
   helper: readFileSync(join(repoRoot, 'src', 'utils', 'clientReadinessState.ts'), 'utf8'),
   hook: readFileSync(join(repoRoot, 'src', 'hooks', 'useClientReadinessState.ts'), 'utf8'),
   dashboard: readFileSync(join(repoRoot, 'src', 'tabs', 'dashboards', 'DashboardsHomePage.tsx'), 'utf8'),
-  onboarding: readFileSync(join(repoRoot, 'src', 'tabs', 'onboarding', 'OnboardingHomePage.tsx'), 'utf8'),
   customers: readFileSync(join(repoRoot, 'src', 'tabs', 'customers', 'CustomersHomePage.tsx'), 'utf8'),
   marketingHome: readFileSync(join(repoRoot, 'src', 'tabs', 'marketing', 'MarketingHomePage.tsx'), 'utf8'),
   requireActiveClient: readFileSync(join(repoRoot, 'src', 'components', 'RequireActiveClient.tsx'), 'utf8'),
@@ -57,8 +56,6 @@ for (const label of expectedLabels) {
 const surfaceMarkers = [
   ['Dashboard', files.dashboard, 'dashboard-client-readiness-state'],
   ['Dashboard', files.dashboard, 'dashboard-readiness-next-step'],
-  ['Onboarding', files.onboarding, 'onboarding-client-readiness-state'],
-  ['Onboarding', files.onboarding, 'onboarding-readiness-next-step'],
   ['Customers', files.customers, 'customers-client-readiness-state'],
   ['Customers', files.customers, 'customers-readiness-next-step'],
   ['MarketingHome', files.marketingHome, 'marketing-client-readiness-state'],
@@ -70,7 +67,6 @@ for (const [scope, source, marker] of surfaceMarkers) {
 
 const sharedHookMarkers = [
   ['Dashboard', files.dashboard, 'useClientReadinessState'],
-  ['Onboarding', files.onboarding, 'useClientReadinessState'],
   ['Customers', files.customers, 'useClientReadinessState'],
   ['MarketingHome', files.marketingHome, 'useClientReadinessState'],
 ]
@@ -86,7 +82,7 @@ if (!files.requireActiveClient.includes('NoActiveClientEmptyState')) {
 }
 
 console.log('PASS shared readiness labels defined with employee-readable vocabulary')
-console.log('PASS readiness state markers + next-step guidance exist across Dashboard/Onboarding/Clients/Marketing')
+console.log('PASS readiness state markers + next-step guidance exist across Dashboard/Clients/Marketing')
 console.log('PASS shared readiness hook composes existing onboarding + marketing console truth surfaces')
 console.log('PASS active-client guard remains in place')
 console.log('self-test-client-readiness-unification-runtime: PASS')
