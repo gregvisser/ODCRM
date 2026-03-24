@@ -24,6 +24,7 @@
     "search:concatenated-imports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/search-concatenated-imports.ps1",
     "prod:check": "node scripts/prod-check.cjs",
     "test:no-tenant-fallback": "node scripts/self-test-no-tenant-fallback.mjs",
+    "test:taxonomy-label": "node scripts/self-test-taxonomy-label.mjs",
     "test:tenant-guard": "node scripts/self-test-no-tenant-api-without-client.mjs",
     "test:require-active-client": "node scripts/self-test-require-active-client-wrapper.mjs",
     "test:client-mode-ui": "node scripts/self-test-client-mode-hides-clients-ui.mjs",

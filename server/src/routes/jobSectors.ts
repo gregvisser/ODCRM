@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
+import { normalizeTaxonomyLabel } from '../utils/taxonomyLabel.js'
 
 const router = Router()
 
@@ -23,7 +24,10 @@ router.get('/', async (_req, res) => {
 router.post('/', async (req, res) => {
   try {
     const validated = createSchema.parse(req.body)
-    const normalizedLabel = validated.label.trim()
+    const normalizedLabel = normalizeTaxonomyLabel(validated.label)
+    if (!normalizedLabel) {
+      return res.status(400).json({ error: 'Invalid input', details: [{ message: 'label is empty after normalization' }] })
+    }
 
     const existing = await prisma.jobSector.findFirst({
       where: { label: { equals: normalizedLabel, mode: 'insensitive' } },

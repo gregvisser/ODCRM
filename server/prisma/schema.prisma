@@ -864,6 +864,28 @@ model JobRole {
   @@map("job_roles")
 }
 
+/// Company / industry sector (customer-facing), distinct from target ICP job_sectors
+model IndustrySector {
+  id        String   @id @default(cuid())
+  label     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([label])
+  @@map("industry_sectors")
+}
+
+/// Primary contact "Role at Company" — singular selection in UI; global reusable list
+model ContactRoleTitle {
+  id        String   @id @default(cuid())
+  label     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([label])
+  @@map("contact_role_titles")
+}
+
 // User authorization model (migrated from localStorage)
 model User {
   id              String   @id @default(cuid())
