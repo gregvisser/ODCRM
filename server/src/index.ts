@@ -24,6 +24,8 @@ import companyDataRoutes from './routes/companyData.js'
 import adminRoutes from './routes/admin.js'
 import jobSectorsRoutes from './routes/jobSectors.js'
 import jobRolesRoutes from './routes/jobRoles.js'
+import industrySectorsRoutes from './routes/industrySectors.js'
+import contactRoleTitlesRoutes from './routes/contactRoleTitles.js'
 import placesRoutes from './routes/places.js'
 import uploadsRoutes from './routes/uploads.js'
 import suppressionRoutes from './routes/suppression.js'
@@ -453,6 +455,8 @@ app.get('/api/routes', (req, res): void => {
     '/api/admin',
     '/api/job-sectors',
     '/api/job-roles',
+    '/api/industry-sectors',
+    '/api/contact-role-titles',
     '/api/places',
     '/api/uploads',
     '/api/suppression',
@@ -501,6 +505,8 @@ app.use('/api/company-data', companyDataRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/job-sectors', jobSectorsRoutes)
 app.use('/api/job-roles', jobRolesRoutes)
+app.use('/api/industry-sectors', industrySectorsRoutes)
+app.use('/api/contact-role-titles', contactRoleTitlesRoutes)
 app.use('/api/places', placesRoutes)
 app.use('/api/uploads', uploadsRoutes)
 app.use('/api/suppression', suppressionRoutes)

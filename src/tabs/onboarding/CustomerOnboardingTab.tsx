@@ -56,6 +56,9 @@ import {
   mergeAccountDetailsFromCurrentTerm,
   syncAgreementTermDatesIntoAccountData,
 } from '../../utils/agreementHistory'
+import { normalizeTaxonomyLabel } from '../../utils/taxonomyLabel'
+import { CreatableTaxonomyMultiSelect } from '../../components/taxonomy/CreatableTaxonomyMultiSelect'
+import { CreatableTaxonomySingleSelect } from '../../components/taxonomy/CreatableTaxonomySingleSelect'
 import { emit, on } from '../../platform/events'
 import EmailAccountsEnhancedTab from '../../components/EmailAccountsEnhancedTab'
 import { onboardingDebug, onboardingError, onboardingWarn } from './utils/debug'
@@ -400,8 +403,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [loadError, setLoadError] = useState<string | null>(null)
   const [jobSectors, setJobSectors] = useState<JobTaxonomyItem[]>([])
   const [jobRoles, setJobRoles] = useState<JobTaxonomyItem[]>([])
-  const [jobSectorInput, setJobSectorInput] = useState('')
-  const [jobRoleInput, setJobRoleInput] = useState('')
+  const [industrySectors, setIndustrySectors] = useState<JobTaxonomyItem[]>([])
+  const [contactRoleTitles, setContactRoleTitles] = useState<JobTaxonomyItem[]>([])
+  /** Company/industry sectors (Customer.sector is joined scalar for legacy readers). */
+  const [customerIndustrySectorIds, setCustomerIndustrySectorIds] = useState<string[]>([])
   const [geoQuery, setGeoQuery] = useState('')
   const [geoOptions, setGeoOptions] = useState<TargetGeographicalArea[]>([])
   const [geoLoading, setGeoLoading] = useState(false)
@@ -428,6 +433,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const activeCustomerIdRef = useRef(customerId)
   const fetchRequestSeqRef = useRef(0)
   const hydratedCustomerIdRef = useRef<string | null>(null)
+  const industryLegacyMigratedRef = useRef<string | null>(null)
   /** After background GET, restore window scroll in useLayoutEffect (avoids snap-to-top before paint). */
   const pendingWindowScrollY = useRef<number | null>(null)
 
@@ -458,8 +464,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     setHeadOfficeQuery('')
     setHeadOfficeOptions([])
     setHeadOfficeLoading(false)
-    setJobSectorInput('')
-    setJobRoleInput('')
+    setCustomerIndustrySectorIds([])
+    industryLegacyMigratedRef.current = null
     setUploadingAccreditations({})
     setUploadingCaseStudies(false)
     setUploadingAgreement(false)
@@ -616,9 +622,11 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   )
 
   const fetchTaxonomy = useCallback(async () => {
-    const [sectorsResponse, rolesResponse] = await Promise.all([
+    const [sectorsResponse, rolesResponse, industryResponse, contactRoleResponse] = await Promise.all([
       api.get<JobTaxonomyItem[]>('/api/job-sectors'),
       api.get<JobTaxonomyItem[]>('/api/job-roles'),
+      api.get<JobTaxonomyItem[]>('/api/industry-sectors'),
+      api.get<JobTaxonomyItem[]>('/api/contact-role-titles'),
     ])
     if (sectorsResponse.error) {
       toast({
@@ -640,12 +648,51 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     } else if (rolesResponse.data) {
       setJobRoles(rolesResponse.data)
     }
+    if (industryResponse.error) {
+      toast({
+        title: 'Could not load industry sectors',
+        description: industryResponse.error,
+        status: 'error',
+        duration: 4000,
+      })
+    } else if (industryResponse.data) {
+      setIndustrySectors(industryResponse.data)
+    }
+    if (contactRoleResponse.error) {
+      toast({
+        title: 'Could not load contact roles',
+        description: contactRoleResponse.error,
+        status: 'error',
+        duration: 4000,
+      })
+    } else if (contactRoleResponse.data) {
+      setContactRoleTitles(contactRoleResponse.data)
+    }
   }, [toast])
 
   useEffect(() => {
     void fetchCustomer()
     void fetchTaxonomy()
   }, [fetchCustomer, fetchTaxonomy])
+
+  /** Link legacy free-text primary role to a canonical contact-role title when lists load. */
+  useEffect(() => {
+    if (!customer?.id || contactRoleTitles.length === 0) return
+    setAccountDetails((prev) => {
+      const pc = prev.primaryContact
+      const label = normalizeTaxonomyLabel(String(pc.roleLabel || ''))
+      const rid = String(pc.roleId || '').trim()
+      if (!label || rid) return prev
+      const hit = contactRoleTitles.find(
+        (t) => normalizeTaxonomyLabel(t.label).toLowerCase() === label.toLowerCase(),
+      )
+      if (!hit) return prev
+      return {
+        ...prev,
+        primaryContact: { ...pc, roleId: hit.id, roleLabel: hit.label },
+      }
+    })
+  }, [customer?.id, contactRoleTitles])
 
   // Single refresh entry for progress saves, uploads, and other tabs — background fetch avoids scroll-to-top jank.
   useEffect(() => {
@@ -710,6 +757,13 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     const legacySingle = nextProfile?.targetGeographicalArea ? [nextProfile.targetGeographicalArea] : []
     setTargetGeographicalAreas(dedupeAreas([...(fromArray as any), ...(legacySingle as any)]))
     setGeoQuery('')
+
+    const cids = (rawAccountData as { customerIndustrySectorIds?: unknown }).customerIndustrySectorIds
+    if (Array.isArray(cids) && cids.some((x) => typeof x === 'string')) {
+      setCustomerIndustrySectorIds(cids.filter((x): x is string => typeof x === 'string'))
+    } else if (!String(customer.sector || '').trim()) {
+      setCustomerIndustrySectorIds([])
+    }
 
     const rawDetails = rawAccountData as Partial<AccountDetails> & {
       accountDetails?: Partial<AccountDetails>
@@ -796,6 +850,63 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     setSaveErrorMessage(null)
     setSaveStatus((prev) => (prev === 'saving' ? prev : 'dirty'))
   }, [])
+
+  /**
+   * One-time migration: legacy Customer.sector string → customerIndustrySectorIds + POST idempotent options.
+   */
+  useEffect(() => {
+    if (!customer) return
+    const ad = customer.accountData && typeof customer.accountData === 'object' ? customer.accountData : {}
+    const existing = (ad as { customerIndustrySectorIds?: unknown }).customerIndustrySectorIds
+    if (Array.isArray(existing) && existing.length > 0) {
+      industryLegacyMigratedRef.current = customer.id
+      return
+    }
+    if (industryLegacyMigratedRef.current === customer.id) return
+    const rawS = String(customer.sector || '').trim()
+    if (!rawS) {
+      industryLegacyMigratedRef.current = customer.id
+      return
+    }
+    if (industrySectors.length === 0) return
+
+    let cancelled = false
+    void (async () => {
+      const parts = rawS
+        .split(/[,;|·]/)
+        .map((p) => normalizeTaxonomyLabel(p))
+        .filter(Boolean)
+      const ids: string[] = []
+      let nextList = industrySectors
+      for (const p of parts) {
+        const hit = nextList.find((s) => s.label.toLowerCase() === p.toLowerCase())
+        if (hit) {
+          ids.push(hit.id)
+          continue
+        }
+        const { data, error } = await api.post<JobTaxonomyItem>('/api/industry-sectors', { label: p })
+        if (cancelled) return
+        if (error || !data?.id) continue
+        ids.push(data.id)
+        nextList = [...nextList.filter((x) => x.id !== data.id), data].sort((a, b) => a.label.localeCompare(b.label))
+        setIndustrySectors(nextList)
+      }
+      if (cancelled) return
+      if (ids.length > 0) {
+        setCustomerIndustrySectorIds(ids)
+        const joined = ids
+          .map((id) => nextList.find((s) => s.id === id)?.label)
+          .filter(Boolean)
+          .join(' · ')
+        setCustomer((prev) => (prev ? { ...prev, sector: joined || prev.sector } : prev))
+        markDirty()
+      }
+      industryLegacyMigratedRef.current = customer.id
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [customer, industrySectors, markDirty])
 
   // Geographic area search
   useEffect(() => {
@@ -1143,11 +1254,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
   }
 
-  const resolveLabel = (items: JobTaxonomyItem[], id: string) =>
-    items.find((item) => item.id === id)?.label || id
-
   const createJobSector = async (label: string): Promise<JobTaxonomyItem | null> => {
-    const trimmed = label.trim()
+    const trimmed = normalizeTaxonomyLabel(label)
     if (!trimmed) return null
     const existing = jobSectors.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
     if (existing) return existing
@@ -1166,7 +1274,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   const createJobRole = async (label: string): Promise<JobTaxonomyItem | null> => {
-    const trimmed = label.trim()
+    const trimmed = normalizeTaxonomyLabel(label)
     if (!trimmed) return null
     const existing = jobRoles.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
     if (existing) return existing
@@ -1184,39 +1292,63 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     return data
   }
 
-  const addJobSector = async (label: string) => {
-    const item = await createJobSector(label)
-    if (!item) return
-    updateProfile({
-      targetJobSectorIds: clientProfile.targetJobSectorIds.includes(item.id)
-        ? clientProfile.targetJobSectorIds
-        : [...clientProfile.targetJobSectorIds, item.id],
-    })
-    setJobSectorInput('')
+  const createIndustrySectorOption = async (label: string): Promise<JobTaxonomyItem | null> => {
+    const trimmed = normalizeTaxonomyLabel(label)
+    if (!trimmed) return null
+    const existing = industrySectors.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return existing
+    const { data, error } = await api.post<JobTaxonomyItem>('/api/industry-sectors', { label: trimmed })
+    if (error || !data) {
+      toast({
+        title: 'Could not add industry sector',
+        description: error || 'Unknown error',
+        status: 'error',
+        duration: 4000,
+      })
+      return null
+    }
+    setIndustrySectors((prev) => [...prev, data].sort((a, b) => a.label.localeCompare(b.label)))
+    return data
   }
 
-  const addJobRole = async (label: string) => {
-    const item = await createJobRole(label)
-    if (!item) return
-    updateProfile({
-      targetJobRoleIds: clientProfile.targetJobRoleIds.includes(item.id)
-        ? clientProfile.targetJobRoleIds
-        : [...clientProfile.targetJobRoleIds, item.id],
-    })
-    setJobRoleInput('')
+  const createContactRoleTitleOption = async (label: string): Promise<JobTaxonomyItem | null> => {
+    const trimmed = normalizeTaxonomyLabel(label)
+    if (!trimmed) return null
+    const existing = contactRoleTitles.find((item) => item.label.toLowerCase() === trimmed.toLowerCase())
+    if (existing) return existing
+    const { data, error } = await api.post<JobTaxonomyItem>('/api/contact-role-titles', { label: trimmed })
+    if (error || !data) {
+      toast({
+        title: 'Could not add contact role',
+        description: error || 'Unknown error',
+        status: 'error',
+        duration: 4000,
+      })
+      return null
+    }
+    setContactRoleTitles((prev) => [...prev, data].sort((a, b) => a.label.localeCompare(b.label)))
+    return data
   }
 
-  const removeJobSector = (id: string) => {
-    updateProfile({
-      targetJobSectorIds: clientProfile.targetJobSectorIds.filter((itemId) => itemId !== id),
-    })
-  }
+  const applyCustomerIndustrySectorIds = useCallback(
+    (ids: string[]) => {
+      setCustomerIndustrySectorIds(ids)
+      markDirty()
+      if (ids.length === 0) {
+        setCustomer((prev) => (prev ? { ...prev, sector: null } : prev))
+      }
+    },
+    [markDirty],
+  )
 
-  const removeJobRole = (id: string) => {
-    updateProfile({
-      targetJobRoleIds: clientProfile.targetJobRoleIds.filter((itemId) => itemId !== id),
-    })
-  }
+  useEffect(() => {
+    if (!customer?.id || customerIndustrySectorIds.length === 0) return
+    const joined = customerIndustrySectorIds
+      .map((id) => industrySectors.find((s) => s.id === id)?.label)
+      .filter(Boolean)
+      .join(' · ')
+    setCustomer((prev) => (prev ? { ...prev, sector: joined || null } : prev))
+  }, [customer?.id, customerIndustrySectorIds, industrySectors])
 
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual'): Promise<boolean> => {
     const saveCustomerId = customerId
@@ -1279,6 +1411,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
     const nextAccountData = safeAccountDataMerge(currentAccountData, {
       clientProfile: { ...(clientProfile as any), targetGeographicalArea: null },
+      customerIndustrySectorIds,
       accountDetails: nextAccountDetails,
       targetGeographicalAreas: normalizedTargetAreas,
       contactPersons: `${accountDetails.primaryContact.firstName} ${accountDetails.primaryContact.lastName}`.trim(),
@@ -1458,6 +1591,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     conflictDisclosure,
     customer,
     customerId,
+    customerIndustrySectorIds,
     customerUpdatedAt,
     leadsGoogleSheetLabel,
     leadsGoogleSheetUrl,
@@ -1579,10 +1713,20 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             </FormControl>
             <FormControl>
               <FormLabel>{"Role at Company"}</FormLabel>
-              <Input
-                value={accountDetails.primaryContact.roleLabel || ''}
-                onChange={(e) => updatePrimaryContact({ roleId: '', roleLabel: e.target.value })}
-                placeholder={"e.g. Marketing Manager"}
+              <CreatableTaxonomySingleSelect
+                fieldLabel="Role at Company"
+                items={contactRoleTitles}
+                valueId={String(accountDetails.primaryContact.roleId || '').trim()}
+                valueLabel={String(accountDetails.primaryContact.roleLabel || '').trim()}
+                onChange={(next) => {
+                  if (!next) {
+                    updatePrimaryContact({ roleId: '', roleLabel: '' })
+                    return
+                  }
+                  updatePrimaryContact({ roleId: next.id, roleLabel: next.label })
+                }}
+                createItem={createContactRoleTitleOption}
+                placeholder="Search or add a role (e.g. Marketing Manager)"
               />
             </FormControl>
             <FormControl>
@@ -1821,10 +1965,15 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             </FormControl>
             <FormControl>
               <FormLabel>{"Sector"}</FormLabel>
-              <Input
-                value={customer.sector || ''}
-                onChange={(e) => updateCustomerFields({ sector: e.target.value })}
-                placeholder={"e.g. Facilities Management"}
+              <CreatableTaxonomyMultiSelect
+                fieldLabel="Sector"
+                items={industrySectors}
+                selectedIds={customerIndustrySectorIds}
+                onChangeSelectedIds={applyCustomerIndustrySectorIds}
+                createItem={createIndustrySectorOption}
+                placeholder="Search or add company sectors (e.g. Facilities Management)"
+                addButtonAriaLabel="Add industry sector"
+                tagColorScheme="cyan"
               />
             </FormControl>
             <FormControl gridColumn={{ base: '1', md: '1 / -1' }}>
@@ -2308,78 +2457,30 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
           <SimpleGrid columns={{ base: 1, md: 2 }} spacing={6}>
             <FormControl>
               <FormLabel>Target Job Sector</FormLabel>
-              <Stack spacing={2}>
-                <HStack>
-                  <Input
-                    list="job-sector-options"
-                    value={jobSectorInput}
-                    onChange={(e) => setJobSectorInput(e.target.value)}
-                    placeholder="Add or select a sector"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        void addJobSector(jobSectorInput)
-                      }
-                    }}
-                  />
-                  <IconButton
-                    aria-label="Add job sector"
-                    icon={<AddIcon />}
-                    onClick={() => void addJobSector(jobSectorInput)}
-                  />
-                </HStack>
-                <datalist id="job-sector-options">
-                  {jobSectors.map((sector) => (
-                    <option key={sector.id} value={sector.label} />
-                  ))}
-                </datalist>
-                <HStack spacing={2} flexWrap="wrap">
-                  {clientProfile.targetJobSectorIds.map((id) => (
-                    <Tag key={id} size="sm" colorScheme="teal" borderRadius="full">
-                      <TagLabel>{resolveLabel(jobSectors, id)}</TagLabel>
-                      <TagCloseButton onClick={() => removeJobSector(id)} />
-                    </Tag>
-                  ))}
-                </HStack>
-              </Stack>
+              <CreatableTaxonomyMultiSelect
+                fieldLabel="Target Job Sector"
+                items={jobSectors}
+                selectedIds={clientProfile.targetJobSectorIds}
+                onChangeSelectedIds={(ids) => updateProfile({ targetJobSectorIds: ids })}
+                createItem={createJobSector}
+                placeholder="Search or add target job sectors"
+                addButtonAriaLabel="Add job sector"
+                tagColorScheme="teal"
+              />
             </FormControl>
 
             <FormControl>
               <FormLabel>Target Job Roles</FormLabel>
-              <Stack spacing={2}>
-                <HStack>
-                  <Input
-                    list="job-role-options"
-                    value={jobRoleInput}
-                    onChange={(e) => setJobRoleInput(e.target.value)}
-                    placeholder="Add or select a role"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        void addJobRole(jobRoleInput)
-                      }
-                    }}
-                  />
-                  <IconButton
-                    aria-label="Add job role"
-                    icon={<AddIcon />}
-                    onClick={() => void addJobRole(jobRoleInput)}
-                  />
-                </HStack>
-                <datalist id="job-role-options">
-                  {jobRoles.map((role) => (
-                    <option key={role.id} value={role.label} />
-                  ))}
-                </datalist>
-                <HStack spacing={2} flexWrap="wrap">
-                  {clientProfile.targetJobRoleIds.map((id) => (
-                    <Tag key={id} size="sm" colorScheme="purple" borderRadius="full">
-                      <TagLabel>{resolveLabel(jobRoles, id)}</TagLabel>
-                      <TagCloseButton onClick={() => removeJobRole(id)} />
-                    </Tag>
-                  ))}
-                </HStack>
-              </Stack>
+              <CreatableTaxonomyMultiSelect
+                fieldLabel="Target Job Roles"
+                items={jobRoles}
+                selectedIds={clientProfile.targetJobRoleIds}
+                onChangeSelectedIds={(ids) => updateProfile({ targetJobRoleIds: ids })}
+                createItem={createJobRole}
+                placeholder="Search or add target job roles"
+                addButtonAriaLabel="Add job role"
+                tagColorScheme="purple"
+              />
             </FormControl>
           </SimpleGrid>
 

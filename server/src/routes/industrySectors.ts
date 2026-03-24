@@ -11,13 +11,13 @@ const createSchema = z.object({
 
 router.get('/', async (_req, res) => {
   try {
-    const roles = await prisma.jobRole.findMany({
+    const sectors = await prisma.industrySector.findMany({
       orderBy: { label: 'asc' },
     })
-    return res.json(roles)
+    return res.json(sectors)
   } catch (error) {
-    console.error('Error fetching job roles:', error)
-    return res.status(500).json({ error: 'Failed to fetch job roles' })
+    console.error('Error fetching industry sectors:', error)
+    return res.status(500).json({ error: 'Failed to fetch industry sectors' })
   }
 })
 
@@ -29,7 +29,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Invalid input', details: [{ message: 'label is empty after normalization' }] })
     }
 
-    const existing = await prisma.jobRole.findFirst({
+    const existing = await prisma.industrySector.findFirst({
       where: { label: { equals: normalizedLabel, mode: 'insensitive' } },
     })
 
@@ -37,20 +37,20 @@ router.post('/', async (req, res) => {
       return res.json(existing)
     }
 
-    const role = await prisma.jobRole.create({
+    const sector = await prisma.industrySector.create({
       data: {
-        id: `role_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        id: `industry_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         label: normalizedLabel,
       },
     })
 
-    return res.status(201).json(role)
+    return res.status(201).json(sector)
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: 'Invalid input', details: error.errors })
     }
-    console.error('Error creating job role:', error)
-    return res.status(500).json({ error: 'Failed to create job role' })
+    console.error('Error creating industry sector:', error)
+    return res.status(500).json({ error: 'Failed to create industry sector' })
   }
 })
 
