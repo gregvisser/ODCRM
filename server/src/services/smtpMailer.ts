@@ -26,10 +26,32 @@ function normalizeSmtpMessageId(raw: string | undefined): string {
 }
 
 /**
- * Map low-level nodemailer/network errors to operator-readable guidance (Gmail, custom SMTP, TLS mismatches).
+ * Pull a short SMTP-style line (e.g. "535 5.7.8 ...") for UI — no URLs or long opaque tokens.
+ * Full raw message must only appear in server logs, not in API/toast text.
  */
-export function mapSmtpErrorForOperator(raw: string): string {
+export function extractSanitizedSmtpProviderLine(raw: string): string | null {
+  const noUrl = raw.replace(/https?:\/\/[^\s>]+/gi, '').replace(/\s+/g, ' ').trim()
+  const noOpaque = noUrl.replace(/[a-fA-F0-9:_-]{40,}/g, '').trim()
+  const m = noOpaque.match(/\b([45]\d\d(?:\.\d+\.\d+)?)\s+(.{1,200})/)
+  if (m) {
+    const rest = m[2].trim()
+    const line = `${m[1]} ${rest}`.trim()
+    return line.length > 220 ? `${line.slice(0, 217)}...` : line
+  }
+  return null
+}
+
+/**
+ * Operator-facing SMTP error for API/UI (toasts, test-send). Does not include full provider dumps.
+ * Logs should use the raw nodemailer message separately.
+ */
+export function formatSmtpErrorForOperatorUi(raw: string): string {
   const m = raw.toLowerCase()
+  const providerLine = extractSanitizedSmtpProviderLine(raw)
+
+  const withOptionalProvider = (body: string) =>
+    providerLine ? `${body}\n\nProvider response: ${providerLine}` : body
+
   if (
     m.includes('invalid login') ||
     m.includes('authentication failed') ||
@@ -37,23 +59,27 @@ export function mapSmtpErrorForOperator(raw: string): string {
     m.includes('eauth') ||
     m.includes('badcredentials')
   ) {
-    return (
-      'SMTP login was rejected. For Gmail / Google Workspace with 2FA, create an app password and use your full ' +
-      `email as the username. Provider message: ${raw}`
+    return withOptionalProvider(
+      'SMTP login was rejected. For Gmail / Google Workspace with 2FA, create an app password and use your full email address as the username.'
     )
   }
   if (m.includes('certificate') || m.includes('self signed') || m.includes('unable to verify the first certificate')) {
-    return (
-      'TLS/certificate problem talking to the SMTP server. Check host/port and that “implicit SSL” matches your ' +
-      `provider (465 vs 587). Details: ${raw}`
+    return withOptionalProvider(
+      'TLS or certificate problem contacting the SMTP server. Check host/port and that “implicit SSL” matches your provider (465 vs 587).'
     )
   }
   if (m.includes('timeout') || m.includes('econnrefused') || m.includes('enotfound') || m.includes('getaddrinfo')) {
-    return (
-      'Could not reach the SMTP host. Check the hostname, port, firewall, and DNS. ' + `Details: ${raw}`
+    return withOptionalProvider(
+      'Could not reach the SMTP host. Check the hostname, port, firewall, and DNS.'
     )
   }
-  return raw
+  const fallback = 'SMTP send failed. Check your SMTP settings and try again.'
+  return withOptionalProvider(fallback)
+}
+
+/** @deprecated Use formatSmtpErrorForOperatorUi — kept name for call sites expecting “mapped” UI text. */
+export function mapSmtpErrorForOperator(raw: string): string {
+  return formatSmtpErrorForOperatorUi(raw)
 }
 
 /**
@@ -96,8 +122,8 @@ export async function sendEmailViaSMTP(args: {
     return { ok: true, messageId }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown SMTP error'
-    console.error('[SMTP] Send failed:', message)
-    return { ok: false, error: mapSmtpErrorForOperator(message) }
+    console.error('[SMTP] Send failed (raw):', message)
+    return { ok: false, error: formatSmtpErrorForOperatorUi(message) }
   }
 }
 
@@ -192,6 +218,7 @@ export async function testSmtpConnection(account: SmtpAccount): Promise<SendEmai
     return { ok: true, messageId: 'smtp:verified' }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown SMTP error'
-    return { ok: false, error: mapSmtpErrorForOperator(message) }
+    console.error('[SMTP] verify failed (raw):', message)
+    return { ok: false, error: formatSmtpErrorForOperatorUi(message) }
   }
 }
