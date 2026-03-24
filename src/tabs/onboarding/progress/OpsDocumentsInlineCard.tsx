@@ -1,4 +1,4 @@
-import { Box, HStack, Text, VStack } from '@chakra-ui/react'
+import { Box, Checkbox, HStack, Text, VStack } from '@chakra-ui/react'
 import { ATTACHMENT_TYPES, OPS_TEAM_ITEMS } from '../progressTrackerItems'
 import { useOnboardingProgress } from './OnboardingProgressContext'
 import { AttachmentInline } from './AttachmentInline'
@@ -7,7 +7,8 @@ import { StatusChip } from './InlineProgressWidgets'
 const OPS_DOC_KEYS = ['ops_prepare_pack', 'ops_populate_ppt', 'ops_receive_file', 'ops_brief_campaigns'] as const
 
 export function OpsDocumentsInlineCard() {
-  const { customerId, ops, busyKey, setBusyKey, listAttachmentNames, renderMetaLine } = useOnboardingProgress()
+  const { customerId, ops, busyKey, setBusyKey, listAttachmentNames, renderMetaLine, saveItem } =
+    useOnboardingProgress()
 
   const rows = OPS_TEAM_ITEMS.filter((i) => OPS_DOC_KEYS.includes(i.key as any))
 
@@ -50,14 +51,29 @@ export function OpsDocumentsInlineCard() {
                 <StatusChip done={checked} label="Ready" auto={checked} />
               </HStack>
               {renderMetaLine('ops', key)}
-              <AttachmentInline
-                customerId={customerId}
-                attachmentType={attType}
-                busyKey={busyKey}
-                setBusyKey={setBusyKey}
-                onDone={() => {}}
-                files={files}
-              />
+              {key === 'ops_brief_campaigns' ? (
+                <VStack align="stretch" spacing={2} mt={1}>
+                  <Checkbox
+                    isChecked={checked}
+                    isDisabled={busyKey === 'ops.ops_brief_campaigns'}
+                    onChange={(e) => void saveItem('ops', 'ops_brief_campaigns', e.target.checked)}
+                  >
+                    <Text fontSize="sm">Mark brief provided to Campaigns Creator</Text>
+                  </Checkbox>
+                  <Text fontSize="xs" color="gray.500">
+                    This step is now tracked as a boolean confirmation instead of a file upload.
+                  </Text>
+                </VStack>
+              ) : (
+                <AttachmentInline
+                  customerId={customerId}
+                  attachmentType={attType}
+                  busyKey={busyKey}
+                  setBusyKey={setBusyKey}
+                  onDone={() => {}}
+                  files={files}
+                />
+              )}
             </Box>
           )
         })}
