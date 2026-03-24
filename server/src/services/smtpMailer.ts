@@ -26,6 +26,37 @@ function normalizeSmtpMessageId(raw: string | undefined): string {
 }
 
 /**
+ * Map low-level nodemailer/network errors to operator-readable guidance (Gmail, custom SMTP, TLS mismatches).
+ */
+export function mapSmtpErrorForOperator(raw: string): string {
+  const m = raw.toLowerCase()
+  if (
+    m.includes('invalid login') ||
+    m.includes('authentication failed') ||
+    m.includes('535') ||
+    m.includes('eauth') ||
+    m.includes('badcredentials')
+  ) {
+    return (
+      'SMTP login was rejected. For Gmail / Google Workspace with 2FA, create an app password and use your full ' +
+      `email as the username. Provider message: ${raw}`
+    )
+  }
+  if (m.includes('certificate') || m.includes('self signed') || m.includes('unable to verify the first certificate')) {
+    return (
+      'TLS/certificate problem talking to the SMTP server. Check host/port and that “implicit SSL” matches your ' +
+      `provider (465 vs 587). Details: ${raw}`
+    )
+  }
+  if (m.includes('timeout') || m.includes('econnrefused') || m.includes('enotfound') || m.includes('getaddrinfo')) {
+    return (
+      'Could not reach the SMTP host. Check the hostname, port, firewall, and DNS. ' + `Details: ${raw}`
+    )
+  }
+  return raw
+}
+
+/**
  * Send email via SMTP (Gmail, Google Workspace, custom mail servers, etc.)
  */
 export async function sendEmailViaSMTP(args: {
@@ -66,7 +97,7 @@ export async function sendEmailViaSMTP(args: {
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown SMTP error'
     console.error('[SMTP] Send failed:', message)
-    return { ok: false, error: message }
+    return { ok: false, error: mapSmtpErrorForOperator(message) }
   }
 }
 
@@ -122,6 +153,30 @@ export async function sendOutboundSmtpMail(args: {
 /**
  * Verify SMTP credentials (login + connection) without sending mail.
  */
+/** Server-side checks for POST /api/outlook/identities (SMTP). Returns error message or null. */
+export function validateSmtpIdentityUpsertPayload(p: {
+  smtpHost: unknown
+  smtpPort: unknown
+  smtpSecure: unknown
+}): string | null {
+  const portNum = Number(p.smtpPort)
+  if (!Number.isFinite(portNum) || portNum < 1 || portNum > 65535) {
+    return 'SMTP port must be a number between 1 and 65535.'
+  }
+  const host = String(p.smtpHost ?? '').trim()
+  if (!host || host.length > 253 || /\s/.test(host)) {
+    return 'SMTP host is invalid.'
+  }
+  const secure = Boolean(p.smtpSecure)
+  if (secure && portNum === 587) {
+    return 'Port 587 normally uses STARTTLS — turn off implicit SSL, or use port 465 with implicit SSL on.'
+  }
+  if (!secure && portNum === 465) {
+    return 'Port 465 usually requires implicit SSL — enable it, or use port 587 with STARTTLS.'
+  }
+  return null
+}
+
 export async function testSmtpConnection(account: SmtpAccount): Promise<SendEmailResult> {
   try {
     const transporter = nodemailer.createTransport({
@@ -137,6 +192,6 @@ export async function testSmtpConnection(account: SmtpAccount): Promise<SendEmai
     return { ok: true, messageId: 'smtp:verified' }
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Unknown SMTP error'
-    return { ok: false, error: message }
+    return { ok: false, error: mapSmtpErrorForOperator(message) }
   }
 }
