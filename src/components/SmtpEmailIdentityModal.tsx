@@ -17,36 +17,43 @@ import {
   ModalOverlay,
   NumberInput,
   NumberInputField,
+  Radio,
+  RadioGroup,
   Switch,
   Text,
   useToast,
   VStack,
-  Code,
 } from '@chakra-ui/react'
 import { useEffect, useState } from 'react'
 import { api } from '../utils/api'
 import { emit } from '../platform/events'
 import { validateSmtpIdentityForm } from '../utils/smtpIdentityValidation'
 
+export type MailboxKind = 'google-hosted' | 'other-smtp'
+
 export type SmtpEmailIdentityModalProps = {
   customerId: string
   isOpen: boolean
   onClose: () => void
   onCreated?: () => void
-  /** Default host/port for "Add" — e.g. Gmail-friendly vs blank */
+  /** Defaults when “Google-hosted mailbox” is selected */
   defaultSmtpHost?: string
   defaultSmtpPort?: number
 }
+
+const GOOGLE_SMTP_HOST = 'smtp.gmail.com'
+const GOOGLE_SMTP_PORT = 587
 
 export default function SmtpEmailIdentityModal({
   customerId,
   isOpen,
   onClose,
   onCreated,
-  defaultSmtpHost = 'smtp.gmail.com',
-  defaultSmtpPort = 587,
+  defaultSmtpHost = GOOGLE_SMTP_HOST,
+  defaultSmtpPort = GOOGLE_SMTP_PORT,
 }: SmtpEmailIdentityModalProps) {
   const toast = useToast()
+  const [mailboxKind, setMailboxKind] = useState<MailboxKind>('google-hosted')
   const [emailAddress, setEmailAddress] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [smtpHost, setSmtpHost] = useState(defaultSmtpHost)
@@ -57,14 +64,31 @@ export default function SmtpEmailIdentityModal({
   const [dailySendLimit, setDailySendLimit] = useState(150)
   const [inlineError, setInlineError] = useState<string | null>(null)
 
+  const applyMailboxKind = (kind: MailboxKind) => {
+    setMailboxKind(kind)
+    setInlineError(null)
+    if (kind === 'google-hosted') {
+      setSmtpHost(defaultSmtpHost)
+      setSmtpPort(defaultSmtpPort)
+      setSmtpSecure(false)
+    } else {
+      setSmtpHost('')
+      setSmtpPort(587)
+      setSmtpSecure(false)
+    }
+  }
+
   useEffect(() => {
     if (!isOpen) return
+    setMailboxKind('google-hosted')
     setSmtpHost(defaultSmtpHost)
     setSmtpPort(defaultSmtpPort)
+    setSmtpSecure(false)
     setInlineError(null)
   }, [isOpen, defaultSmtpHost, defaultSmtpPort])
 
   const resetForOpen = () => {
+    setMailboxKind('google-hosted')
     setEmailAddress('')
     setDisplayName('')
     setSmtpHost(defaultSmtpHost)
@@ -116,7 +140,7 @@ export default function SmtpEmailIdentityModal({
       if (error) throw new Error(error)
       toast({
         title: 'Mailbox added',
-        description: 'This SMTP identity can be used for outbound campaigns and sequences for this client.',
+        description: 'This identity can be used for outbound campaigns and sequences for this client.',
         status: 'success',
       })
       onClose()
@@ -139,32 +163,41 @@ export default function SmtpEmailIdentityModal({
     <Modal isOpen={isOpen} onClose={onClose} size="2xl" onCloseComplete={resetForOpen}>
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>Add SMTP / Gmail / custom mailbox</ModalHeader>
+        <ModalHeader>Add outbound mailbox</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
           <VStack spacing={4} align="stretch">
-            <Alert status="info" fontSize="sm">
+            <Alert status="info" fontSize="sm" borderRadius="md">
               <AlertIcon />
-              <AlertDescription fontSize="xs">
-                For <strong>outbound outreach only</strong> — not Google sign-in to ODCRM. We store SMTP credentials
-                so sends can use Gmail, Google Workspace, or any host that provides SMTP.
+              <AlertDescription fontSize="sm">
+                <strong>Outbound email only</strong> — not sign-in to ODCRM. SMTP details are stored so this client can
+                send campaigns from your mailbox.
               </AlertDescription>
             </Alert>
-            <Alert status="info" fontSize="sm">
-              <AlertIcon />
-              <AlertDescription fontSize="xs">
-                <strong>Gmail / Google Workspace:</strong> host <Code fontSize="xs">smtp.gmail.com</Code>, port{' '}
-                <Code fontSize="xs">587</Code>, keep implicit SSL <strong>off</strong>. With 2FA, create an{' '}
-                <strong>app password</strong> and use it here (not your normal password).
-              </AlertDescription>
-            </Alert>
-            <Alert status="info" fontSize="sm">
-              <AlertIcon />
-              <AlertDescription fontSize="xs">
-                <strong>Custom SMTP:</strong> use the host and port from your provider (often 587 + STARTTLS, or 465 +
-                implicit SSL). “From” address should match what your provider allows for that login.
-              </AlertDescription>
-            </Alert>
+
+            <FormControl>
+              <FormLabel fontSize="sm">Mailbox type</FormLabel>
+              <RadioGroup value={mailboxKind} onChange={(v) => applyMailboxKind(v as MailboxKind)}>
+                <VStack align="stretch" spacing={2}>
+                  <Radio value="google-hosted">Google-hosted mailbox (Gmail or Google Workspace)</Radio>
+                  <Radio value="other-smtp">Other SMTP mailbox</Radio>
+                </VStack>
+              </RadioGroup>
+              {mailboxKind === 'google-hosted' ? (
+                <FormHelperText>
+                  Includes <strong>@gmail.com</strong> addresses and <strong>custom domains</strong> hosted on Google
+                  Workspace. SMTP is preset to {GOOGLE_SMTP_HOST}, port {GOOGLE_SMTP_PORT}, implicit SSL off (STARTTLS).
+                  Use your <strong>full email address</strong> as the username. If your Google account requires it, use
+                  an <strong>app password</strong> instead of your normal password.
+                </FormHelperText>
+              ) : (
+                <FormHelperText>
+                  Use the SMTP host, port, and security settings from your email provider. Common setups: port{' '}
+                  <strong>587</strong> with implicit SSL off (STARTTLS), or port <strong>465</strong> with implicit SSL
+                  on. The “From” address should match what your provider allows for that login.
+                </FormHelperText>
+              )}
+            </FormControl>
 
             {inlineError ? (
               <Alert status="error" fontSize="sm">
@@ -181,10 +214,10 @@ export default function SmtpEmailIdentityModal({
                   setEmailAddress(e.target.value)
                   setInlineError(null)
                 }}
-                placeholder="you@company.com"
+                placeholder={mailboxKind === 'google-hosted' ? 'you@gmail.com or you@yourdomain.com' : 'you@company.com'}
                 type="email"
               />
-              <FormHelperText>Shown as the sender on outreach emails.</FormHelperText>
+              <FormHelperText>Recipients see this as the sender.</FormHelperText>
             </FormControl>
 
             <FormControl>
@@ -208,7 +241,7 @@ export default function SmtpEmailIdentityModal({
                     setSmtpHost(e.target.value)
                     setInlineError(null)
                   }}
-                  placeholder="smtp.gmail.com"
+                  placeholder={mailboxKind === 'google-hosted' ? GOOGLE_SMTP_HOST : 'e.g. smtp.yourprovider.com'}
                 />
               </FormControl>
 
@@ -231,7 +264,7 @@ export default function SmtpEmailIdentityModal({
 
             <FormControl display="flex" alignItems="center">
               <FormLabel fontSize="sm" mb={0}>
-                Use implicit SSL (typical port 465)
+                Implicit SSL (typical port 465)
               </FormLabel>
               <Switch
                 isChecked={smtpSecure}
@@ -255,6 +288,9 @@ export default function SmtpEmailIdentityModal({
                 }}
                 placeholder="Usually your full email address"
               />
+              {mailboxKind === 'google-hosted' ? (
+                <FormHelperText>Use the same full address as “From email” (Workspace custom domains included).</FormHelperText>
+              ) : null}
             </FormControl>
 
             <FormControl isRequired>
@@ -266,7 +302,11 @@ export default function SmtpEmailIdentityModal({
                   setSmtpPassword(e.target.value)
                   setInlineError(null)
                 }}
-                placeholder="App password (Gmail 2FA) or provider SMTP password"
+                placeholder={
+                  mailboxKind === 'google-hosted'
+                    ? 'Google app password (when your account requires it)'
+                    : 'Password or app-specific password from your provider'
+                }
               />
             </FormControl>
 
@@ -289,7 +329,7 @@ export default function SmtpEmailIdentityModal({
             Cancel
           </Button>
           <Button colorScheme="teal" onClick={handleSave}>
-            Create
+            Add mailbox
           </Button>
         </ModalFooter>
       </ModalContent>

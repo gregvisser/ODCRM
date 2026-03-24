@@ -578,8 +578,8 @@ const EmailAccountsTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
-            Outlook (OAuth) or SMTP mailboxes (Gmail, Google Workspace, custom SMTP) for outbound sending — review
-            health and limits per client.
+            Outlook (OAuth) or outbound SMTP mailboxes (Google-hosted or other providers) — review health and limits per
+            client.
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
@@ -612,7 +612,7 @@ const EmailAccountsTab: React.FC = () => {
             onClick={onSmtpOpen}
             isDisabled={!selectedCustomerId || identities.filter((i) => i.isActive).length >= 5}
           >
-            Add SMTP / Gmail / custom
+            Add outbound mailbox
           </Button>
           <Button
             id="email-accounts-tab-connect-outlook-btn"
@@ -746,12 +746,11 @@ const EmailAccountsTab: React.FC = () => {
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
             <Text fontSize="lg" fontWeight="semibold" mb={2}>No mailboxes connected</Text>
             <Text color="gray.600" mb={4}>
-              Connect Outlook (OAuth) or add SMTP credentials for Gmail, Google Workspace, or custom mail servers for
-              outbound sending.
+              Connect Outlook (OAuth) or add an outbound mailbox via SMTP (Google-hosted or your provider&apos;s server).
             </Text>
             <HStack justify="center" spacing={3}>
               <Button colorScheme="teal" variant="outline" onClick={onSmtpOpen} isDisabled={!selectedCustomerId}>
-                Add SMTP / Gmail / custom
+                Add outbound mailbox
               </Button>
               <Button colorScheme="blue" onClick={handleConnectOutlook}>
                 Connect Outlook mailbox

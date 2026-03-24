@@ -110,7 +110,7 @@ export function formatSmtpErrorForOperatorUi(raw: string): string {
     m.includes('badcredentials')
   ) {
     return withOptionalProvider(
-      'SMTP login was rejected. For Gmail / Google Workspace with 2FA, create an app password and use your full email address as the username.'
+      'SMTP login was rejected. For a Google-hosted mailbox (Gmail or Google Workspace) with 2FA, create an app password and use your full email address as the username.'
     )
   }
   if (m.includes('certificate') || m.includes('self signed') || m.includes('unable to verify the first certificate')) {
