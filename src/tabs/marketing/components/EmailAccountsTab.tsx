@@ -66,6 +66,7 @@ import { api } from '../../../utils/api'
 import { normalizeCustomersListResponse } from '../../../utils/normalizeApiResponse'
 import { useScopedCustomerSelection } from '../../../hooks/useCustomerScope'
 import RequireActiveClient from '../../../components/RequireActiveClient'
+import SmtpEmailIdentityModal from '../../../components/SmtpEmailIdentityModal'
 
 // Backend EmailIdentity shape from /api/outlook/identities
 type EmailIdentity = {
@@ -186,6 +187,7 @@ const EmailAccountsTab: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const { isOpen: isSmtpOpen, onOpen: onSmtpOpen, onClose: onSmtpClose } = useDisclosure()
   const [editingIdentity, setEditingIdentity] = useState<EmailIdentity | null>(null)
   const toast = useToast()
   const selectedCustomerIdRef = useRef(selectedCustomerId)
@@ -572,7 +574,8 @@ const EmailAccountsTab: React.FC = () => {
         <VStack align="start" spacing={1}>
           <Text fontSize="2xl" fontWeight="bold">Email Accounts</Text>
           <Text color="gray.600">
-            Review connected mailboxes, see which ones are usable, and manage what needs attention next.
+            Outlook (OAuth) or SMTP mailboxes (Gmail, Google Workspace, custom SMTP) for outbound sending — review
+            health and limits per client.
           </Text>
           <HStack spacing={4} mt={2}>
             <FormControl w="300px">
@@ -596,6 +599,17 @@ const EmailAccountsTab: React.FC = () => {
           </HStack>
         </VStack>
         <HStack>
+          <Button
+            id="email-accounts-tab-add-smtp-btn"
+            data-testid="email-accounts-tab-add-smtp-btn"
+            leftIcon={<AddIcon />}
+            colorScheme="teal"
+            variant="outline"
+            onClick={onSmtpOpen}
+            isDisabled={!selectedCustomerId || identities.filter((i) => i.isActive).length >= 5}
+          >
+            Add SMTP / Gmail / custom
+          </Button>
           <Button
             id="email-accounts-tab-connect-outlook-btn"
             data-testid="email-accounts-tab-connect-outlook-btn"
@@ -728,11 +742,17 @@ const EmailAccountsTab: React.FC = () => {
             <Icon as={EmailIcon} boxSize={12} color="gray.400" mb={4} />
             <Text fontSize="lg" fontWeight="semibold" mb={2}>No mailboxes connected</Text>
             <Text color="gray.600" mb={4}>
-              Connect an Outlook mailbox to start sending and reviewing mailbox health for this client.
+              Connect Outlook (OAuth) or add SMTP credentials for Gmail, Google Workspace, or custom mail servers for
+              outbound sending.
             </Text>
-            <Button colorScheme="blue" onClick={handleConnectOutlook}>
-              Connect Outlook mailbox
-            </Button>
+            <HStack justify="center" spacing={3}>
+              <Button colorScheme="teal" variant="outline" onClick={onSmtpOpen} isDisabled={!selectedCustomerId}>
+                Add SMTP / Gmail / custom
+              </Button>
+              <Button colorScheme="blue" onClick={handleConnectOutlook}>
+                Connect Outlook mailbox
+              </Button>
+            </HStack>
           </CardBody>
         </Card>
       )}
@@ -1046,6 +1066,13 @@ const EmailAccountsTab: React.FC = () => {
           </ModalBody>
         </ModalContent>
       </Modal>
+
+      <SmtpEmailIdentityModal
+        customerId={selectedCustomerId || ''}
+        isOpen={isSmtpOpen}
+        onClose={onSmtpClose}
+        onCreated={() => void loadIdentities()}
+      />
     </Box>
     </RequireActiveClient>
   )
