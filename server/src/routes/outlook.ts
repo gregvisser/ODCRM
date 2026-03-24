@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
-import { validateSmtpIdentityUpsertPayload } from '../services/smtpMailer.js'
+import { testSmtpConnection, validateSmtpIdentityUpsertPayload } from '../services/smtpMailer.js'
 
 const router = express.Router()
 
@@ -625,6 +625,23 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
 
     const portNum = Number(smtpPort)
     const hostTrim = String(smtpHost).trim()
+
+    const verifyResult = await testSmtpConnection({
+      smtpHost: hostTrim,
+      smtpPort: portNum,
+      smtpSecure: smtpSecure ?? false,
+      smtpUsername: String(smtpUsername).trim(),
+      smtpPassword: String(smtpPassword),
+      emailAddress: emailStr,
+      displayName: displayName != null && String(displayName).trim() ? String(displayName).trim() : undefined,
+    })
+    if (verifyResult.ok !== true) {
+      const detail = verifyResult.error || 'SMTP verification failed.'
+      return res.status(400).json({
+        error: `SMTP verification failed — mailbox was not saved.\n\n${detail}`,
+        code: 'SMTP_VERIFY_FAILED',
+      })
+    }
 
     const identity = await prisma.emailIdentity.upsert({
       where: {
