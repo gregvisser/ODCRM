@@ -274,8 +274,8 @@ export default function EmailAccountsEnhancedTab({
                 </Badge>
               </HStack>
               <Text fontSize="sm" color="gray.600">
-                Connect Microsoft Outlook (OAuth) or add SMTP credentials for Gmail, Google Workspace, custom mail
-                hosts, or other providers that offer SMTP — for outbound sending from this client.
+                Connect Microsoft Outlook (OAuth), or add an outbound mailbox via SMTP (Google-hosted or any provider)
+                — for sending from this client.
               </Text>
             </Box>
             <HStack flexShrink={0}>
@@ -291,10 +291,10 @@ export default function EmailAccountsEnhancedTab({
                     ? 'Select a client first.'
                     : identities.length >= 5
                       ? 'Limit reached (5). Disconnect one to add another.'
-                      : 'Add SMTP / Gmail / custom mailbox'
+                      : 'Add outbound mailbox (SMTP)'
                 }
               >
-                Add SMTP / Gmail / custom
+                Add outbound mailbox
               </Button>
               <Button
                 leftIcon={<AddIcon />}
@@ -350,7 +350,7 @@ export default function EmailAccountsEnhancedTab({
                       )}
                       <HStack justify="center" spacing={3}>
                         <Button size="sm" colorScheme="teal" variant="outline" onClick={onSmtpOpen} isDisabled={!isValidCustomer}>
-                          Add SMTP / Gmail / custom
+                          Add outbound mailbox
                         </Button>
                         <Button size="sm" colorScheme="blue" onClick={handleConnectOutlook} isDisabled={!isValidCustomer}>
                           Connect Outlook mailbox
