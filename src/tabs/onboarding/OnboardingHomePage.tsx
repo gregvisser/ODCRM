@@ -50,7 +50,7 @@ export default function OnboardingHomePage({ onNavigate }: OnboardingHomePagePro
             </Box>
           </Alert>
         ) : (
-          <CustomerOnboardingTab customerId={selectedCustomerId} />
+          <CustomerOnboardingTab key={selectedCustomerId} customerId={selectedCustomerId} />
         )}
       </Box>
     </Flex>

@@ -408,8 +408,52 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   const [linkedEmailCount, setLinkedEmailCount] = useState<number | null>(0)
   const [additionalContacts, setAdditionalContacts] = useState<any[]>([])
   const editVersionRef = useRef(0)
+  const activeCustomerIdRef = useRef(customerId)
+  const fetchRequestSeqRef = useRef(0)
+  const hydratedCustomerIdRef = useRef<string | null>(null)
   /** After background GET, restore window scroll in useLayoutEffect (avoids snap-to-top before paint). */
   const pendingWindowScrollY = useRef<number | null>(null)
+
+  useEffect(() => {
+    activeCustomerIdRef.current = customerId
+  }, [customerId])
+
+  useEffect(() => {
+    // Hard reset transient/local state on customer switch to avoid cross-customer leakage.
+    hydratedCustomerIdRef.current = null
+    setCustomer(null)
+    setCustomerUpdatedAt(null)
+    setIsLoading(true)
+    setLoadError(null)
+    setIsSaving(false)
+    setIsDirty(false)
+    setSaveStatus('idle')
+    setSaveErrorMessage(null)
+    setLastSavedAt(null)
+    setConflictCurrentUpdatedAt(null)
+    setClientProfile(EMPTY_PROFILE)
+    setAccountDetails(EMPTY_ACCOUNT_DETAILS)
+    setAdditionalContacts([])
+    setTargetGeographicalAreas([])
+    setGeoQuery('')
+    setGeoOptions([])
+    setGeoLoading(false)
+    setHeadOfficeQuery('')
+    setHeadOfficeOptions([])
+    setHeadOfficeLoading(false)
+    setJobSectorInput('')
+    setJobRoleInput('')
+    setUploadingAccreditations({})
+    setUploadingCaseStudies(false)
+    setUploadingAgreement(false)
+    setAgreementData(null)
+    setMonthlyRevenueFromCustomer('')
+    setLeadsGoogleSheetUrl('')
+    setLeadsGoogleSheetLabel('')
+    setWeeklyLeadTarget('')
+    setMonthlyLeadTarget('')
+    setLinkedEmailCount(0)
+  }, [customerId])
 
   // Build account snapshot directly from database customer
   const accountSnapshot = useMemo(() => {
@@ -436,6 +480,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
   // Fetch customer data by ID. Use `background` after initial load to avoid full-page spinner + scroll jump.
   const fetchCustomer = useCallback(async (opts?: { background?: boolean }) => {
+    const requestSeq = ++fetchRequestSeqRef.current
+    const requestedCustomerId = customerId
     if (!customerId) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customerId, skipping fetch')
       setIsLoading(false)
@@ -452,6 +498,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     }
     setLoadError(null)
     const { data, error } = await api.get<CustomerApi>(`/api/customers/${customerId}`)
+    if (requestSeq !== fetchRequestSeqRef.current) return
+    if (activeCustomerIdRef.current !== requestedCustomerId) return
     if (error) {
       setLoadError(error)
       setIsLoading(false)
@@ -638,12 +686,14 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     // Keep primary contact stable across save→refetch cycles:
     // - If backend payload/rehydrate is missing primaryContact, do NOT blank the UI.
     // - Preserve a stable primaryContact.id so DB upserts don't create "new" contacts every save.
+    const previousHydratedCustomerId = hydratedCustomerIdRef.current
+    const isSameCustomerHydrate = previousHydratedCustomerId === customer.id
     setAccountDetails((prev) => {
       const next = { ...mergedDetails }
       const prevPc = prev?.primaryContact
       const nextPc = next?.primaryContact
 
-      if (!isPrimaryContactEmpty(prevPc) && isPrimaryContactEmpty(nextPc)) {
+      if (isSameCustomerHydrate && !isPrimaryContactEmpty(prevPc) && isPrimaryContactEmpty(nextPc)) {
         next.primaryContact = prevPc
         return next
       }
@@ -651,7 +701,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
       // If we got a non-empty contact but lost its id, keep the previous id.
       const prevId = typeof (prevPc as any)?.id === 'string' ? String((prevPc as any).id).trim() : ''
       const nextId = typeof (nextPc as any)?.id === 'string' ? String((nextPc as any).id).trim() : ''
-      if (prevId && !nextId && !isPrimaryContactEmpty(nextPc)) {
+      if (isSameCustomerHydrate && prevId && !nextId && !isPrimaryContactEmpty(nextPc)) {
         next.primaryContact = { ...(nextPc as any), id: prevId }
       }
 
@@ -662,6 +712,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
 
       return next
     })
+    hydratedCustomerIdRef.current = customer.id
     setHeadOfficeQuery(mergedDetails.headOfficeAddress || '')
     
     // Initialize monthly revenue from customer field
@@ -1114,6 +1165,7 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
   }
 
   const handleSave = useCallback(async (mode: 'manual' | 'auto' = 'manual'): Promise<boolean> => {
+    const saveCustomerId = customerId
     if (!customer) {
       onboardingWarn('⚠️ CustomerOnboardingTab: No customer, skipping save')
       return false
@@ -1278,6 +1330,10 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
         },
       },
     )
+    if (activeCustomerIdRef.current !== saveCustomerId) {
+      // Customer switched while save was in-flight; drop stale completion handlers.
+      return false
+    }
 
     if (error) {
       if (errorDetails?.status === 409) {
