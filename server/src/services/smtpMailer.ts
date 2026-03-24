@@ -26,17 +26,67 @@ function normalizeSmtpMessageId(raw: string | undefined): string {
 }
 
 /**
- * Pull a short SMTP-style line (e.g. "535 5.7.8 ...") for UI — no URLs or long opaque tokens.
- * Full raw message must only appear in server logs, not in API/toast text.
+ * Pull a short human-readable SMTP-style line for UI (e.g. "535 5.7.8 Username and Password not accepted.").
+ * Strips opaque provider IDs, session tokens, and suffixes like "- gsmtp". Full raw stays in logs only.
  */
 export function extractSanitizedSmtpProviderLine(raw: string): string | null {
-  const noUrl = raw.replace(/https?:\/\/[^\s>]+/gi, '').replace(/\s+/g, ' ').trim()
-  const noOpaque = noUrl.replace(/[a-fA-F0-9:_-]{40,}/g, '').trim()
-  const m = noOpaque.match(/\b([45]\d\d(?:\.\d+\.\d+)?)\s+(.{1,200})/)
-  if (m) {
-    const rest = m[2].trim()
-    const line = `${m[1]} ${rest}`.trim()
-    return line.length > 220 ? `${line.slice(0, 217)}...` : line
+  const oneLine = raw.replace(/https?:\/\/[^\s>]+/gi, '').replace(/\s+/g, ' ').trim()
+  const low = oneLine.toLowerCase()
+
+  // Prefer canonical phrases when the raw text clearly contains them (ignore token noise elsewhere).
+  if (low.includes('username and password not accepted')) {
+    return '535 5.7.8 Username and Password not accepted.'
+  }
+  if (low.includes('invalid mail or password') || low.includes('invalid user name or password')) {
+    return '535 5.7.8 Invalid username or password.'
+  }
+  if (low.includes('invalid credentials') || low.includes('credentials invalid')) {
+    return '535 5.7.8 Invalid credentials.'
+  }
+  if (
+    low.includes('authentication failed') ||
+    low.includes('authentication unsuccessful') ||
+    low.includes('login failed')
+  ) {
+    return '535 5.7.8 Authentication failed.'
+  }
+
+  // Strip provider routing suffixes and opaque blobs (Gmail gsmtp IDs, long hex, hyphenated session IDs).
+  let s = oneLine
+    .replace(/\s*-\s*gsmtp\s*$/i, '')
+    .replace(/\s*-\s*outlook\.com\s*$/i, '')
+    .replace(/\s*-\s*res\.smtp\.[^\s]+$/i, '')
+    .trim()
+  s = s.replace(/\b[a-f0-9]{8,}(?:-[a-f0-9.]+)*(?:\.[a-f0-9]{2,})?\b/gi, ' ')
+  s = s.replace(/\b[a-z0-9]{6,}-[a-z0-9-]{6,}(?:\.[a-z0-9]{2,})?\b/gi, ' ')
+  s = s.replace(/\b[a-f0-9:_-]{24,}\b/gi, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+
+  const m = s.match(/\b([45]\d\d(?:\s+\d+\.\d+\.\d+|-\d+\.\d+\.\d+)?)\b/)
+  if (!m) return null
+
+  const normalizedCode = m[1].replace(/-/g, ' ')
+  const afterCode = s.slice((m.index ?? 0) + m[0].length).trim().replace(/^[-–—]\s*/, '')
+  const afterClean = afterCode
+    .replace(/\b[a-f0-9]{6,}\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  const words = afterClean
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && /[a-zA-Z]{2,}/.test(w) && !/^[a-f0-9]+$/i.test(w))
+
+  if (words.length >= 2) {
+    const tail = words.slice(0, 14).join(' ')
+    return `${normalizedCode} ${tail}`.slice(0, 220)
+  }
+
+  // Mostly token noise after stripping — generic short line for typical auth failures
+  if (/^5\d\d/.test(m[1])) {
+    return '535 5.7.8 Authentication failed.'
+  }
+  if (/^4\d\d/.test(m[1])) {
+    return '535 5.7.8 Authentication failed.'
   }
   return null
 }
