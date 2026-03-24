@@ -51,8 +51,8 @@ const markers = [
   ['Customers', customers, 'customers-module-continuity-guidance'],
   ['Marketing', marketing, 'marketing-home-operator-guidance'],
   ['Marketing', marketing, 'marketing-module-continuity-guidance'],
-  ['Onboarding', onboarding, 'onboarding-marketing-bridge'],
-  ['Onboarding', onboarding, 'onboarding-module-continuity-guidance'],
+  ['Onboarding', onboarding, 'CustomerSelector'],
+  ['Onboarding', onboarding, 'CustomerOnboardingTab'],
   ['Settings', settings, 'settings-admin-framing'],
   ['Settings', settings, 'settings-daily-operations-guidance'],
 ]

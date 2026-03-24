@@ -49,9 +49,8 @@ const requiredMarkers = [
   ['Dashboard', files.dashboard, 'dashboard-go-onboarding-setup'],
   ['Dashboard', files.dashboard, 'dashboard-go-clients-maintenance'],
   ['Dashboard', files.dashboard, 'dashboard-role-framing'],
-  ['Onboarding', files.onboarding, 'onboarding-marketing-bridge'],
-  ['Onboarding', files.onboarding, 'onboarding-go-marketing-readiness'],
-  ['Onboarding', files.onboarding, 'onboarding-role-framing'],
+  ['Onboarding', files.onboarding, 'CustomerSelector'],
+  ['Onboarding', files.onboarding, 'CustomerOnboardingTab'],
   ['Customers', files.customers, 'customers-marketing-bridge'],
   ['Customers', files.customers, 'customers-go-marketing-readiness'],
   ['Customers', files.customers, 'customers-role-framing'],
@@ -73,6 +72,6 @@ for (const [scope, source, marker] of guardMarkers) {
 
 console.log('PASS top-level backend truth surfaces reachable for dashboard/setup/marketing handoff flow')
 console.log('PASS dashboard next-step routing markers present')
-console.log('PASS onboarding and clients include explicit marketing readiness bridge markers')
+console.log('PASS onboarding home wires client selector + onboarding tab shell markers')
 console.log('PASS no active-client guard markers remain present')
 console.log('self-test-top-level-flow-spine-runtime: PASS')
