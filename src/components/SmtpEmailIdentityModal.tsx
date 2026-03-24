@@ -63,6 +63,7 @@ export default function SmtpEmailIdentityModal({
   const [smtpSecure, setSmtpSecure] = useState(false)
   const [dailySendLimit, setDailySendLimit] = useState(150)
   const [inlineError, setInlineError] = useState<string | null>(null)
+  const [isVerifying, setIsVerifying] = useState(false)
 
   const applyMailboxKind = (kind: MailboxKind) => {
     setMailboxKind(kind)
@@ -85,6 +86,7 @@ export default function SmtpEmailIdentityModal({
     setSmtpPort(defaultSmtpPort)
     setSmtpSecure(false)
     setInlineError(null)
+    setIsVerifying(false)
   }, [isOpen, defaultSmtpHost, defaultSmtpPort])
 
   const resetForOpen = () => {
@@ -98,6 +100,7 @@ export default function SmtpEmailIdentityModal({
     setSmtpSecure(false)
     setDailySendLimit(150)
     setInlineError(null)
+    setIsVerifying(false)
   }
 
   const handleSave = async () => {
@@ -135,12 +138,13 @@ export default function SmtpEmailIdentityModal({
       isActive: true,
     }
 
+    setIsVerifying(true)
     try {
       const { error } = await api.post('/api/outlook/identities', payload)
       if (error) throw new Error(error)
       toast({
         title: 'Mailbox added',
-        description: 'This identity can be used for outbound campaigns and sequences for this client.',
+        description: 'SMTP settings were verified; this identity can be used for outbound campaigns and sequences.',
         status: 'success',
       })
       onClose()
@@ -149,29 +153,39 @@ export default function SmtpEmailIdentityModal({
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Failed to create SMTP account'
       setInlineError(message)
+      const verifyFailed = message.includes('SMTP verification failed')
       toast({
-        title: 'Could not save mailbox',
+        title: verifyFailed ? 'SMTP verification failed' : 'Could not save mailbox',
         description: message,
         status: 'error',
         duration: 10000,
         isClosable: true,
       })
+    } finally {
+      setIsVerifying(false)
     }
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl" onCloseComplete={resetForOpen}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="2xl"
+      onCloseComplete={resetForOpen}
+      closeOnOverlayClick={!isVerifying}
+      closeOnEsc={!isVerifying}
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>Add outbound mailbox</ModalHeader>
-        <ModalCloseButton />
+        <ModalCloseButton isDisabled={isVerifying} />
         <ModalBody>
           <VStack spacing={4} align="stretch">
             <Alert status="info" fontSize="sm" borderRadius="md">
               <AlertIcon />
               <AlertDescription fontSize="sm">
-                <strong>Outbound email only</strong> — not sign-in to ODCRM. SMTP details are stored so this client can
-                send campaigns from your mailbox.
+                <strong>Outbound email only</strong> — not sign-in to ODCRM. When you add a mailbox, we verify SMTP
+                login and connection before saving; invalid credentials are not stored.
               </AlertDescription>
             </Alert>
 
@@ -202,7 +216,9 @@ export default function SmtpEmailIdentityModal({
             {inlineError ? (
               <Alert status="error" fontSize="sm">
                 <AlertIcon />
-                <AlertDescription fontSize="sm">{inlineError}</AlertDescription>
+                <AlertDescription fontSize="sm" whiteSpace="pre-line">
+                  {inlineError}
+                </AlertDescription>
               </Alert>
             ) : null}
 
@@ -325,10 +341,15 @@ export default function SmtpEmailIdentityModal({
           </VStack>
         </ModalBody>
         <ModalFooter>
-          <Button variant="ghost" mr={3} onClick={onClose}>
+          <Button variant="ghost" mr={3} onClick={onClose} isDisabled={isVerifying}>
             Cancel
           </Button>
-          <Button colorScheme="teal" onClick={handleSave}>
+          <Button
+            colorScheme="teal"
+            onClick={handleSave}
+            isLoading={isVerifying}
+            loadingText="Verifying SMTP…"
+          >
             Add mailbox
           </Button>
         </ModalFooter>

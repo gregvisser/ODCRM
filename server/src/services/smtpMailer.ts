@@ -227,9 +227,8 @@ export async function sendOutboundSmtpMail(args: {
 }
 
 /**
- * Verify SMTP credentials (login + connection) without sending mail.
+ * Server-side checks for POST /api/outlook/identities (SMTP). Returns error message or null.
  */
-/** Server-side checks for POST /api/outlook/identities (SMTP). Returns error message or null. */
 export function validateSmtpIdentityUpsertPayload(p: {
   smtpHost: unknown
   smtpPort: unknown
@@ -253,6 +252,7 @@ export function validateSmtpIdentityUpsertPayload(p: {
   return null
 }
 
+/** Verify SMTP credentials (connection + auth) via nodemailer.verify(); does not send mail. */
 export async function testSmtpConnection(account: SmtpAccount): Promise<SendEmailResult> {
   try {
     const transporter = nodemailer.createTransport({
