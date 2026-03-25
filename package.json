@@ -122,6 +122,7 @@
     "test:suppression-list-tab-runtime": "node scripts/self-test-suppression-list-tab-runtime.mjs",
     "test:email-accounts-tab-runtime": "node scripts/self-test-email-accounts-tab-runtime.mjs",
     "test:smtp-send-path-contract": "node scripts/self-test-smtp-send-path-contract.mjs",
+    "test:identity-capacity-snapshot-contract": "node scripts/self-test-identity-capacity-snapshot-contract.mjs",
     "test:templates-tab-runtime": "node scripts/self-test-templates-tab-runtime.mjs",
     "test:sequences-tab-runtime": "node scripts/self-test-sequences-tab-runtime.mjs",
     "test:schedules-tab-runtime": "node scripts/self-test-schedules-tab-runtime.mjs",

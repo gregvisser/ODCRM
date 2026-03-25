@@ -4,7 +4,7 @@
  * Ported from OpensDoorsV2 email-accounts/ui.tsx
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Box,
   Button,
@@ -53,6 +53,71 @@ interface EmailIdentity {
   smtpSecure?: boolean
 }
 
+/** Matches GET /api/send-worker/identity-capacity inner `data` payload (unwrapped by api client). */
+type IdentityCapacityRow = {
+  identityId: string
+  email: string
+  label: string | null
+  provider: string
+  isActive: boolean
+  state: 'usable' | 'unavailable' | 'risky'
+  reasons: string[]
+  recent: {
+    windowHours: number
+    sent: number
+    sendFailed: number
+    wouldSend: number
+    skipped: number
+  }
+  lastRecordedOutboundAt?: string | null
+  recentCampaignBounces?: number
+  queuePressure?: { queuedNow?: number }
+}
+
+type IdentityCapacityData = {
+  sinceHours: number
+  summary: {
+    total: number
+    usable: number
+    unavailable: number
+    risky: number
+    preferredIdentityId: string | null
+    preferredIdentityState: 'usable' | 'unavailable' | 'risky' | null
+    recommendedIdentityId: string | null
+  }
+  rows: IdentityCapacityRow[]
+  lastUpdatedAt: string
+}
+
+function formatMailboxState(state: IdentityCapacityRow['state']): string {
+  if (state === 'usable') return 'Ready'
+  if (state === 'risky') return 'Needs attention'
+  if (state === 'unavailable') return 'Unavailable'
+  return 'Unknown'
+}
+
+function mailboxStateColor(state: IdentityCapacityRow['state']): string {
+  if (state === 'usable') return 'green'
+  if (state === 'risky') return 'orange'
+  if (state === 'unavailable') return 'red'
+  return 'gray'
+}
+
+function describeMailboxReason(reason: string): string {
+  switch (reason) {
+    case 'identity_inactive':
+      return 'Mailbox is turned off.'
+    case 'recent_failure_rate_high':
+      return 'Recent sending failures are above the safe range.'
+    case 'recent_send_failures_detected':
+      return 'Recent sending failures need review.'
+    case 'daily_limit_reached_in_window':
+      return 'Mailbox has already reached its daily send limit.'
+    default:
+      return reason.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase()) + '.'
+  }
+}
+
 type EmailAccountsEnhancedTabProps = {
   customerId?: string
   /**
@@ -67,6 +132,7 @@ export default function EmailAccountsEnhancedTab({
   onBeforeConnectOutlook,
 }: EmailAccountsEnhancedTabProps) {
   const [identities, setIdentities] = useState<EmailIdentity[]>([])
+  const [identityCapacity, setIdentityCapacity] = useState<IdentityCapacityData | null>(null)
   const [loading, setLoading] = useState(true)
   const [customerId, setCustomerId] = useState<string>(customerIdProp || (getCurrentCustomerId() ?? ''))
 
@@ -74,15 +140,33 @@ export default function EmailAccountsEnhancedTab({
   const toast = useToast()
 
   const fetchIdentities = useCallback(async () => {
+    if (!customerId) return
     setLoading(true)
-    const { data, error } = await api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${customerId}`)
-    if (error) {
-      toast({ title: 'Error', description: error, status: 'error' })
-    } else if (data) {
-      setIdentities(data)
+    const [idRes, capRes] = await Promise.all([
+      api.get<EmailIdentity[]>(`/api/outlook/identities?customerId=${encodeURIComponent(customerId)}`, {
+        headers: { 'X-Customer-Id': customerId },
+      }),
+      api.get<IdentityCapacityData>(`/api/send-worker/identity-capacity?sinceHours=168`, {
+        headers: { 'X-Customer-Id': customerId },
+      }),
+    ])
+    if (idRes.error) {
+      toast({ title: 'Error', description: idRes.error, status: 'error' })
+    } else if (idRes.data) {
+      setIdentities(idRes.data)
+    }
+    if (!capRes.error && capRes.data) {
+      setIdentityCapacity(capRes.data)
+    } else {
+      setIdentityCapacity(null)
     }
     setLoading(false)
   }, [customerId, toast])
+
+  const capacityById = useMemo(
+    () => new Map((identityCapacity?.rows ?? []).map((row) => [row.identityId, row])),
+    [identityCapacity?.rows],
+  )
 
   useEffect(() => {
     if (customerId) {
@@ -319,7 +403,16 @@ export default function EmailAccountsEnhancedTab({
             <AlertIcon />
             <AlertDescription fontSize="sm">
               <strong>Deliverability:</strong> Configure SPF, DKIM, and DMARC on your domain. Keep daily send limits
-              reasonable (150–200 per account). Gmail SMTP often requires an app password when 2FA is enabled.
+              reasonable (150–200 per account). Google-hosted SMTP often needs an app password when 2FA is enabled.
+            </AlertDescription>
+          </Alert>
+
+          <Alert status="info" mb={4} fontSize="sm">
+            <AlertIcon />
+            <AlertDescription fontSize="xs">
+              <strong>Send health</strong> uses sequence queue audits (sent/failed in the window) plus campaign{' '}
+              <strong>EmailEvent</strong> timestamps. Sequence-only mailboxes may show “—” for last campaign send until a
+              campaign send is recorded.
             </AlertDescription>
           </Alert>
 
@@ -330,6 +423,10 @@ export default function EmailAccountsEnhancedTab({
                   <Th>Email Address</Th>
                   <Th>Display Name</Th>
                   <Th>Type</Th>
+                  <Th>Send health</Th>
+                  <Th>7d queue activity</Th>
+                  <Th>Last campaign send</Th>
+                  <Th isNumeric>7d bounces</Th>
                   <Th>Daily Limit</Th>
                   <Th>Status</Th>
                   <Th>Actions</Th>
@@ -338,7 +435,7 @@ export default function EmailAccountsEnhancedTab({
               <Tbody>
                 {identities.length === 0 ? (
                   <Tr>
-                    <Td colSpan={6} textAlign="center" py={8}>
+                    <Td colSpan={10} textAlign="center" py={8}>
                       <Text color="gray.500" mb={3}>
                         No mailbox connected yet
                       </Text>
@@ -364,6 +461,9 @@ export default function EmailAccountsEnhancedTab({
                     .map((identity) => {
                       const needsReconnect =
                         identity.provider === 'outlook' && identity.delegatedReady === false
+                      const cap = capacityById.get(identity.id)
+                      const state =
+                        cap?.state ?? (identity.isActive ? ('usable' as const) : ('unavailable' as const))
                       return (
                         <Tr key={identity.id}>
                           <Td fontWeight="medium">{identity.emailAddress}</Td>
@@ -379,6 +479,39 @@ export default function EmailAccountsEnhancedTab({
                                 </Badge>
                               ) : null}
                             </HStack>
+                          </Td>
+                          <Td>
+                            <HStack align="start" spacing={2}>
+                              {needsReconnect ? (
+                                <Badge colorScheme="orange">OAuth refresh</Badge>
+                              ) : (
+                                <Badge colorScheme={mailboxStateColor(state)}>{formatMailboxState(state)}</Badge>
+                              )}
+                              <Text fontSize="xs" color="gray.600" maxW="200px">
+                                {cap?.reasons?.length
+                                  ? cap.reasons.map(describeMailboxReason).join(' ')
+                                  : 'No capacity warnings.'}
+                              </Text>
+                            </HStack>
+                          </Td>
+                          <Td fontSize="xs">
+                            {cap ? (
+                              <>
+                                {cap.recent.sent} sent · {cap.recent.sendFailed} failed
+                                <br />
+                                {cap.queuePressure?.queuedNow ?? 0} queued
+                              </>
+                            ) : (
+                              '—'
+                            )}
+                          </Td>
+                          <Td fontSize="xs">
+                            {cap?.lastRecordedOutboundAt
+                              ? new Date(cap.lastRecordedOutboundAt).toLocaleString()
+                              : '—'}
+                          </Td>
+                          <Td isNumeric fontSize="sm">
+                            {cap?.recentCampaignBounces ?? 0}
                           </Td>
                           <Td fontSize="sm">{identity.dailySendLimit}/day</Td>
                           <Td>

@@ -109,6 +109,10 @@ type IdentityCapacityRow = {
     wouldSend: number
     skipped: number
   }
+  /** ISO timestamp from EmailEvent sent/delivered (campaign + legacy scheduler; not sequence queue). */
+  lastRecordedOutboundAt?: string | null
+  /** EmailEvent bounced rows in the same window as `recent` (campaign send failures). */
+  recentCampaignBounces?: number
   queuePressure?: {
     queuedNow?: number
   }
@@ -946,6 +950,8 @@ const EmailAccountsTab: React.FC = () => {
                       <Th isNumeric>Recent sends</Th>
                       <Th isNumeric>Recent failures</Th>
                       <Th>Queued now</Th>
+                      <Th>Last recorded send</Th>
+                      <Th isNumeric>Campaign bounces</Th>
                       <Th>Technical detail</Th>
                     </Tr>
                   </Thead>
@@ -961,6 +967,12 @@ const EmailAccountsTab: React.FC = () => {
                         <Td isNumeric>{row.recent?.sent ?? 0}</Td>
                         <Td isNumeric>{row.recent?.sendFailed ?? 0}</Td>
                         <Td fontSize="xs">{row.queuePressure?.queuedNow ?? 0} queued</Td>
+                        <Td fontSize="xs">
+                          {row.lastRecordedOutboundAt
+                            ? new Date(row.lastRecordedOutboundAt).toLocaleString()
+                            : '—'}
+                        </Td>
+                        <Td isNumeric>{row.recentCampaignBounces ?? 0}</Td>
                         <Td fontSize="xs">{row.reasons?.length ? row.reasons.map(describeMailboxReason).join(' ') : 'No current guardrail issues.'}</Td>
                       </Tr>
                     ))}
@@ -969,6 +981,9 @@ const EmailAccountsTab: React.FC = () => {
               </Box>
               <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
                 Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'}
+                {' · '}
+                Recent sends/failures are from sequence queue audits. Last recorded send / campaign bounces come from
+                campaign EmailEvent rows (not sequence queue sends).
               </Text>
             </CardBody>
           </Card>
