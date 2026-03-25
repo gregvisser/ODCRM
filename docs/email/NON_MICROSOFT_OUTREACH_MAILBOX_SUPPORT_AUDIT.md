@@ -8,7 +8,7 @@
 | Question | Answer |
 |----------|--------|
 | Can ODCRM send outreach via SMTP for Gmail / Google Workspace? | **Yes**, when an `EmailIdentity` has `provider: 'smtp'` and valid SMTP fields, outbound sends use **nodemailer** (`server/src/services/smtpMailer.ts`) from the same `sendEmail` path as Microsoft Graph (`server/src/services/outlookEmailService.ts`). Operators must supply Gmail-compatible SMTP settings (typically `smtp.gmail.com:587`, STARTTLS, and often an **app password** if 2FA is on). |
-| Can ODCRM send via generic custom SMTP? | **Yes** — any provider that offers authenticated SMTP is supported the same way; the UI labels this as “SMTP / Gmail / custom”. |
+| Can ODCRM send via generic custom SMTP? | **Yes** — any provider that offers authenticated SMTP is supported the same way; the UI labels this as **“Add outbound mailbox”** (SMTP). |
 | Was UI misleading? | Previously the Marketing and onboarding Email Accounts surfaces emphasized **Connect Outlook** and did **not** expose an “Add SMTP” button (the SMTP modal existed but was unreachable). Copy now states that non-Microsoft mailboxes use SMTP credentials for outbound sending only. |
 | Is IMAP required for outbound outreach? | **No** — outbound campaigns and sequences only need a working send transport (Microsoft Graph for Outlook, **SMTP** for other providers). |
 | Is native Google OAuth / Gmail API integrated for mail? | **No** — `googleapis` in the repo is used for **Google Sheets** and similar, not for Gmail OAuth. There is no Gmail API send or inbox sync pipeline. |
@@ -31,6 +31,7 @@
 
 - **Validation:** Client `src/utils/smtpIdentityValidation.ts` and server `validateSmtpIdentityUpsertPayload` in `server/src/services/smtpMailer.ts` reject invalid host/port and common TLS/port mismatches (587 vs 465).
 - **Errors:** `mapSmtpErrorForOperator` in `smtpMailer.ts` turns nodemailer errors into short guidance (auth vs TLS vs network).
+- **Verify-before-save:** `POST /api/outlook/identities` runs `testSmtpConnection()` (nodemailer `verify()`) before persisting the identity; on failure it returns `SMTP_VERIFY_FAILED` and **does not** save unusable credentials.
 - **Contract self-test:** `npm run test:smtp-send-path-contract` — static check that `outlookEmailService` contains the SMTP branch and workers send through `sendEmail` without an Outlook-only `provider` gate in those files.
 
 ## Residual risk
