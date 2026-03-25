@@ -12,7 +12,8 @@
 
 - **API:** `GET /api/send-worker/identity-capacity?sinceHours=…` (tenant-scoped).
 - **Queue / sequence path:** “Recent sends / failures” and “queued now” come from **sequence send queue audits** tied to each mailbox via sequence `senderIdentityId`.
-- **Campaign path:** “Last recorded send” and “campaign bounces” use **`EmailEvent`** (sent/delivered and bounced). If you only send **sequences**, last campaign send may stay empty until a **campaign** send is recorded.
+- **Campaign path:** “Last recorded **campaign** send” and “campaign bounces (window)” use **`EmailEvent`** (sent/delivered and bounced). If you only send **sequences**, those columns may stay empty/zero until a **campaign** event is recorded.
+- **Sequence path:** “Queue sends / failures (audited)” use **`OutboundSendAttemptAudit`** in the API window (marketing tab: 72h; Enhanced Email Accounts: 7d).
 
 ## Safe end-to-end smoke (recommended order)
 

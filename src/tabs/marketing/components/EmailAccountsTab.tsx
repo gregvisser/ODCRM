@@ -109,7 +109,7 @@ type IdentityCapacityRow = {
     wouldSend: number
     skipped: number
   }
-  /** ISO timestamp from EmailEvent sent/delivered (campaign + legacy scheduler; not sequence queue). */
+  /** Max EmailEvent occurredAt for sent/delivered (campaign path; not sequence queue audits). */
   lastRecordedOutboundAt?: string | null
   /** EmailEvent bounced rows in the same window as `recent` (campaign send failures). */
   recentCampaignBounces?: number
@@ -947,11 +947,11 @@ const EmailAccountsTab: React.FC = () => {
                     <Tr>
                       <Th>Mailbox</Th>
                       <Th>Status</Th>
-                      <Th isNumeric>Recent sends</Th>
-                      <Th isNumeric>Recent failures</Th>
+                      <Th isNumeric>Queue sends (audited)</Th>
+                      <Th isNumeric>Queue failures (audited)</Th>
                       <Th>Queued now</Th>
-                      <Th>Last recorded send</Th>
-                      <Th isNumeric>Campaign bounces</Th>
+                      <Th>Last recorded campaign send</Th>
+                      <Th isNumeric>Campaign bounces (window)</Th>
                       <Th>Technical detail</Th>
                     </Tr>
                   </Thead>
@@ -982,8 +982,9 @@ const EmailAccountsTab: React.FC = () => {
               <Text id="email-accounts-last-updated" data-testid="email-accounts-last-updated" fontSize="xs" color="gray.500" mt={2}>
                 Last updated: {identityCapacity?.lastUpdatedAt ? new Date(identityCapacity.lastUpdatedAt).toLocaleString() : '—'}
                 {' · '}
-                Recent sends/failures are from sequence queue audits. Last recorded send / campaign bounces come from
-                campaign EmailEvent rows (not sequence queue sends).
+                Queue sends/failures are from sequence <strong>OutboundSendAttemptAudit</strong> rows in the window above.
+                Last recorded campaign send and campaign bounces come from <strong>EmailEvent</strong> (not sequence queue
+                sends).
               </Text>
             </CardBody>
           </Card>
