@@ -17,6 +17,10 @@ const FILES = [
     mustInclude: ["identity.provider === 'smtp'", 'sendOutboundSmtpMail'],
   },
   {
+    file: path.join(root, 'server', 'src', 'routes', 'outlook.ts'),
+    mustInclude: ['testSmtpConnection({', "code: 'SMTP_VERIFY_FAILED'"],
+  },
+  {
     file: path.join(root, 'server', 'src', 'workers', 'sendQueueWorker.ts'),
     mustInclude: ["from '../services/outlookEmailService.js'", 'sendEmail('],
     mustNotInclude: ['provider === \'outlook\''],
