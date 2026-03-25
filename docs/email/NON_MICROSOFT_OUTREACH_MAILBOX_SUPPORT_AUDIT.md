@@ -26,7 +26,7 @@
 - Outbound send: `sendEmail` in `server/src/services/outlookEmailService.ts` (SMTP branch + Graph branch).
 - Campaign / scheduler workers call `sendEmail` from `outlookEmailService` (e.g. `server/src/workers/emailScheduler.ts`, `server/src/workers/campaignSender.ts`, `server/src/workers/sendQueueWorker.ts`).
 - Test send: `POST /api/outlook/identities/:id/test-send` supports both Outlook and SMTP.
-- **Mailbox / send health (read-only):** `GET /api/send-worker/identity-capacity` aggregates per-identity signals from **sequence queue audits** (`OutboundSendAttemptAudit` → queue → enrollment → sequence → sender) plus **campaign** `EmailEvent` aggregates (`lastRecordedOutboundAt` from sent/delivered; `recentCampaignBounces` from bounced rows in the window). Sequence-only sends do not always produce `EmailEvent` rows — “last campaign send” may be empty until a campaign send exists.
+- **Mailbox / send health (read-only):** `GET /api/send-worker/identity-capacity` aggregates per-identity signals from **sequence queue audits** (`OutboundSendAttemptAudit` → queue → enrollment → sequence → sender) plus **campaign** `EmailEvent` aggregates (`lastRecordedOutboundAt` from sent/delivered; `recentCampaignBounces` from bounced rows in the window). Sequence-only sends do not produce those `EmailEvent` rows — **“Last recorded campaign send”** / **campaign bounces** may be empty or zero until a campaign-tied event exists. UI labels distinguish queue-audit counts from EmailEvent fields.
 
 ## Hardening (operator UX + contract)
 

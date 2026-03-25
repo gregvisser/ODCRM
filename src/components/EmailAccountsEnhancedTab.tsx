@@ -69,7 +69,9 @@ type IdentityCapacityRow = {
     wouldSend: number
     skipped: number
   }
+  /** Max EmailEvent occurredAt for sent/delivered (campaign path; not sequence queue). */
   lastRecordedOutboundAt?: string | null
+  /** EmailEvent bounced count in window (campaign failures). */
   recentCampaignBounces?: number
   queuePressure?: { queuedNow?: number }
 }
@@ -410,8 +412,10 @@ export default function EmailAccountsEnhancedTab({
           <Alert status="info" mb={4} fontSize="sm">
             <AlertIcon />
             <AlertDescription fontSize="xs">
-              <strong>Send health</strong> uses sequence queue audits (sent/failed in the window) plus campaign{' '}
-              <strong>EmailEvent</strong> timestamps. Sequence-only mailboxes may show “—” for last campaign send until a
+              <strong>Mailbox readiness</strong> (Ready / Needs attention / Unavailable) uses identity state plus{' '}
+              <strong>sequence queue send audits</strong> and limits. <strong>Queue sends/fails</strong> count only
+              audited sequence sends. <strong>Last recorded campaign send</strong> and <strong>campaign bounces</strong>{' '}
+              come from <strong>EmailEvent</strong> (campaign path); sequence-only mailboxes may show “—” for those until a
               campaign send is recorded.
             </AlertDescription>
           </Alert>
@@ -423,10 +427,10 @@ export default function EmailAccountsEnhancedTab({
                   <Th>Email Address</Th>
                   <Th>Display Name</Th>
                   <Th>Type</Th>
-                  <Th>Send health</Th>
-                  <Th>7d queue activity</Th>
-                  <Th>Last campaign send</Th>
-                  <Th isNumeric>7d bounces</Th>
+                  <Th>Mailbox readiness</Th>
+                  <Th>Queue sends / fails (7d)</Th>
+                  <Th>Last recorded campaign send</Th>
+                  <Th isNumeric>Campaign bounces (7d)</Th>
                   <Th>Daily Limit</Th>
                   <Th>Status</Th>
                   <Th>Actions</Th>
