@@ -497,6 +497,46 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
     getLiveGatesSnapshot(customerId, sinceHours),
   ])
 
+  const identityIds = identities.map((i) => i.id)
+  const [lastOutboundGroup, campaignBounceWindowGroup] = await Promise.all([
+    identityIds.length
+      ? prisma.emailEvent.groupBy({
+          by: ['senderIdentityId'],
+          where: {
+            customerId,
+            senderIdentityId: { in: identityIds },
+            type: { in: ['sent', 'delivered'] },
+          },
+          _max: { occurredAt: true },
+        })
+      : Promise.resolve([]),
+    identityIds.length
+      ? prisma.emailEvent.groupBy({
+          by: ['senderIdentityId'],
+          where: {
+            customerId,
+            senderIdentityId: { in: identityIds },
+            type: 'bounced',
+            occurredAt: { gte: sinceDate },
+          },
+          _count: { _all: true },
+        })
+      : Promise.resolve([]),
+  ])
+
+  const lastRecordedOutboundAtByIdentity = new Map<string, string>()
+  for (const row of lastOutboundGroup) {
+    if (row.senderIdentityId && row._max.occurredAt) {
+      lastRecordedOutboundAtByIdentity.set(row.senderIdentityId, row._max.occurredAt.toISOString())
+    }
+  }
+  const recentCampaignBouncesByIdentity = new Map<string, number>()
+  for (const row of campaignBounceWindowGroup) {
+    if (row.senderIdentityId) {
+      recentCampaignBouncesByIdentity.set(row.senderIdentityId, row._count._all)
+    }
+  }
+
   const queueItemIds = Array.from(new Set(recentAudits.map((audit) => audit.queueItemId)))
   const queueRowsForAudit = queueItemIds.length
     ? await prisma.outboundSendQueueItem.findMany({
@@ -592,6 +632,10 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
         wouldSend: stats.wouldSend,
         skipped: stats.skipped,
       },
+      /** Latest EmailEvent sent/delivered for this identity (campaign + legacy scheduler path; not sequence queue). */
+      lastRecordedOutboundAt: lastRecordedOutboundAtByIdentity.get(identity.id) ?? null,
+      /** Bounced EmailEvent rows in the window (campaign send failures recorded as bounced). */
+      recentCampaignBounces: recentCampaignBouncesByIdentity.get(identity.id) ?? 0,
       queuePressure: {
         queuedNow,
       },

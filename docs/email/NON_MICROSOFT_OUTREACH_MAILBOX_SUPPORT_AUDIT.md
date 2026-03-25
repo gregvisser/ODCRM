@@ -26,6 +26,7 @@
 - Outbound send: `sendEmail` in `server/src/services/outlookEmailService.ts` (SMTP branch + Graph branch).
 - Campaign / scheduler workers call `sendEmail` from `outlookEmailService` (e.g. `server/src/workers/emailScheduler.ts`, `server/src/workers/campaignSender.ts`, `server/src/workers/sendQueueWorker.ts`).
 - Test send: `POST /api/outlook/identities/:id/test-send` supports both Outlook and SMTP.
+- **Mailbox / send health (read-only):** `GET /api/send-worker/identity-capacity` aggregates per-identity signals from **sequence queue audits** (`OutboundSendAttemptAudit` → queue → enrollment → sequence → sender) plus **campaign** `EmailEvent` aggregates (`lastRecordedOutboundAt` from sent/delivered; `recentCampaignBounces` from bounced rows in the window). Sequence-only sends do not always produce `EmailEvent` rows — “last campaign send” may be empty until a campaign send exists.
 
 ## Hardening (operator UX + contract)
 
@@ -33,6 +34,7 @@
 - **Errors:** `mapSmtpErrorForOperator` in `smtpMailer.ts` turns nodemailer errors into short guidance (auth vs TLS vs network).
 - **Verify-before-save:** `POST /api/outlook/identities` runs `testSmtpConnection()` (nodemailer `verify()`) before persisting the identity; on failure it returns `SMTP_VERIFY_FAILED` and **does not** save unusable credentials.
 - **Contract self-test:** `npm run test:smtp-send-path-contract` — static check that `outlookEmailService` contains the SMTP branch and workers send through `sendEmail` without an Outlook-only `provider` gate in those files.
+- **Identity-capacity snapshot:** `npm run test:identity-capacity-snapshot-contract` — static check that `getIdentityCapacitySnapshot` includes EmailEvent-backed health fields.
 
 ## Residual risk
 

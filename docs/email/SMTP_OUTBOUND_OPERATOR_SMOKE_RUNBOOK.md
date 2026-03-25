@@ -8,6 +8,12 @@
 - **Not supported**: Inbox/reply sync, Graph-style threading, or OAuth-based mailboxes for Google-hosted accounts (Gmail API).
 - **Outlook-only**: Outlook connect and inbox/reply features use Microsoft Graph.
 
+## Mailbox / send health (Email Accounts)
+
+- **API:** `GET /api/send-worker/identity-capacity?sinceHours=…` (tenant-scoped).
+- **Queue / sequence path:** “Recent sends / failures” and “queued now” come from **sequence send queue audits** tied to each mailbox via sequence `senderIdentityId`.
+- **Campaign path:** “Last recorded send” and “campaign bounces” use **`EmailEvent`** (sent/delivered and bounced). If you only send **sequences**, last campaign send may stay empty until a **campaign** send is recorded.
+
 ## Safe end-to-end smoke (recommended order)
 
 ### 1) Add mailbox (verify-before-save)
