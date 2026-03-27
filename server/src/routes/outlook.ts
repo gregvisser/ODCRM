@@ -24,6 +24,33 @@ const FRONTDOOR_URL = process.env.FRONTDOOR_URL || 'https://odcrm.bidlow.co.uk'
 const BACKEND_BASE_URL = process.env.BACKEND_BASE_URL || 'https://odcrm-api-hkbsfbdzdvezedg8.westeurope-01.azurewebsites.net'
 const OAUTH_CALLBACK_MODE = process.env.OAUTH_CALLBACK_MODE || 'frontdoor'
 
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function escapeHtmlText(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+/** Default HTML + plain text for operator test sends (avoids overly sparse plain-only messages). */
+function buildTestOutboundBodies(params: { identityEmail: string; body?: string }) {
+  const iso = new Date().toISOString()
+  const safeEmail = escapeHtmlText(params.identityEmail)
+  const defaultHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body>
+<p>This is a test email sent from OpenDoors CRM.</p>
+<p><strong>Mailbox:</strong> ${safeEmail}<br/><strong>Time (UTC):</strong> ${iso}</p>
+<p>This message is for connectivity testing. Inbox placement still depends on SPF, DKIM, DMARC, and sender reputation for your domain.</p>
+</body></html>`
+  const html = params.body && params.body.trim().length > 0 ? params.body : defaultHtml
+  const plain = htmlToPlainText(html)
+  return { html, plain }
+}
+
 function sanitizeReturnTo(value: unknown): string | null {
   if (typeof value !== 'string') return null
   const v = value.trim()
@@ -853,14 +880,13 @@ router.post('/identities/:id/test-send', requireMarketingMutationAuth, async (re
 
     if (identity.provider === 'smtp') {
       const { sendOutboundSmtpMail } = await import('../services/smtpMailer.js')
+      const { html, plain } = buildTestOutboundBodies({ identityEmail: identity.emailAddress, body })
       const smtpResult = await sendOutboundSmtpMail({
         identity,
         to: toEmail,
-        subject: subject || 'Test Email from OpenDoors CRM',
-        htmlBody:
-          body ||
-          `<p>This is a test email sent from ${identity.emailAddress} via OpenDoors CRM at ${new Date().toISOString()}</p>`,
-        textBody: body || undefined,
+        subject: subject || 'Test email from OpenDoors CRM',
+        htmlBody: html,
+        textBody: plain,
       })
       if (!smtpResult.success) {
         return res.status(502).json({
@@ -949,13 +975,14 @@ router.post('/identities/:id/test-send', requireMarketingMutationAuth, async (re
       console.log('✅ Token refreshed successfully for:', identity.emailAddress)
     }
 
-    // Build email message
+    const { html } = buildTestOutboundBodies({ identityEmail: identity.emailAddress, body })
+    // Microsoft Graph sends as the authenticated mailbox; do not set `from` (not supported the same way as SMTP).
     const emailMessage = {
       message: {
-        subject: subject || 'Test Email from OpenDoors CRM',
+        subject: subject || 'Test email from OpenDoors CRM',
         body: {
-          contentType: 'Text',
-          content: body || `This is a test email sent from ${identity.emailAddress} via OpenDoors CRM at ${new Date().toISOString()}`
+          contentType: 'HTML',
+          content: html,
         },
         toRecipients: [
           {
@@ -964,11 +991,6 @@ router.post('/identities/:id/test-send', requireMarketingMutationAuth, async (re
             }
           }
         ],
-        from: {
-          emailAddress: {
-            address: identity.emailAddress
-          }
-        }
       },
       saveToSentItems: true
     }

@@ -207,7 +207,7 @@ export default function CustomersOverviewTab() {
                   <Td>
                     <Text fontWeight="semibold" color="text.primary">{row.account.name}</Text>
                     <Text fontSize="xs" color="text.muted">
-                      DEFCON {row.account.defcon}
+                      Health {row.account.defcon}
                     </Text>
                   </Td>
                   <Td isNumeric>
@@ -240,7 +240,7 @@ export default function CustomersOverviewTab() {
           <HStack justify="space-between" align="center" mb={6}>
             <Box>
               <Text fontSize="sm" color="text.muted" textTransform="uppercase" letterSpacing="0.2em">
-                DEFCON Watchlist
+                Health watchlist
               </Text>
               <Heading size="md" mt={1}>
                 Accounts requiring attention
@@ -276,7 +276,7 @@ export default function CustomersOverviewTab() {
                       {row.account.name}
                     </Text>
                     <Badge variant="subtle" colorScheme="gray">
-                      DEFCON {row.account.defcon}
+                      Health {row.account.defcon}
                     </Badge>
                   </HStack>
                   <Text fontSize="sm" color="text.muted">

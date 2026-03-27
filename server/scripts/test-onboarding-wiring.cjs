@@ -171,7 +171,7 @@ async function run() {
       isPrimary: false,
     })
     assert(addRes.status === 201, `Expected 201 from add contact, got ${addRes.status}: ${addRes.text}`)
-    const additionalContactId = addRes.json?.id
+    const additionalContactId = addRes.json?.data?.id || addRes.json?.id
     assert(additionalContactId, 'Add contact response missing id')
     console.log('✅ Added additional CustomerContact:', additionalContactId)
 

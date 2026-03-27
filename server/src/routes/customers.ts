@@ -14,6 +14,10 @@ import { safeCustomerAuditEvent, safeCustomerAuditEventBulk } from '../utils/aud
 import { deepMergePreserve, stripUndefinedDeep } from '../lib/merge.js'
 import { getVerifiedActorIdentity } from '../utils/actorIdentity.js'
 import { computeCustomerAccountPatch, formatCustomerAccountAuditNote, patchCustomerAccountSchema } from '../utils/customerAccountPatch.js'
+import {
+  overlayPrimaryContactOntoAccountData,
+  buildPrimaryContactDisplayName,
+} from '../utils/customerAccountDataHydrate.js'
 import { applyAutoTicksToAccountData, applyManualTickToAccountData } from '../services/progressAutoTick.js'
 import {
   mergeAgreementHistoryOnMainUpload,
@@ -716,6 +720,14 @@ router.get('/:id', async (req, res) => {
       })),
     }
 
+    // Single source of truth: overlay primary CustomerContact row onto accountData.primaryContact + convenience fields.
+    if (serialized.accountData && Array.isArray(serialized.customerContacts) && serialized.customerContacts.length > 0) {
+      serialized.accountData = overlayPrimaryContactOntoAccountData(
+        serialized.accountData,
+        serialized.customerContacts,
+      ) as any
+    }
+
     // Test serialization
     JSON.stringify(serialized)
 
@@ -1213,11 +1225,11 @@ router.put('/:id/onboarding', async (req, res) => {
       // Persist primary contact from onboarding snapshot into customer_contacts (same canonical store the UI reads).
       const primary = mergedAccountData?.accountDetails?.primaryContact
       const primaryId = typeof primary?.id === 'string' ? primary.id : null
-      const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
-      const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
-      const fullName = `${firstName} ${lastName}`.trim()
+      if (primaryId) {
+        const fullName = buildPrimaryContactDisplayName(primary as any)
+        const phoneVal = typeof primary?.phone === 'string' ? primary.phone.trim() || null : null
+        const titleVal = typeof primary?.roleLabel === 'string' ? primary.roleLabel.trim() || null : null
 
-      if (primaryId && fullName) {
         await tx.customerContact.updateMany({
           where: { customerId: id, isPrimary: true, id: { not: primaryId } },
           data: { isPrimary: false },
@@ -1230,16 +1242,16 @@ router.put('/:id/onboarding', async (req, res) => {
             customerId: id,
             name: fullName,
             email: normalizeEmail(primary?.email),
-            phone: typeof primary?.phone === 'string' ? primary.phone : null,
-            title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+            phone: phoneVal,
+            title: titleVal,
             isPrimary: true,
           },
           update: {
             customerId: id,
             name: fullName,
             email: normalizeEmail(primary?.email),
-            phone: typeof primary?.phone === 'string' ? primary.phone : null,
-            title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+            phone: phoneVal,
+            title: titleVal,
             isPrimary: true,
           },
         })
@@ -1734,11 +1746,11 @@ router.put('/:id', async (req, res) => {
         const accountData = validated.accountData as any
         const primary = accountData?.accountDetails?.primaryContact
         const primaryId = typeof primary?.id === 'string' ? primary.id : null
-        const firstName = typeof primary?.firstName === 'string' ? primary.firstName : ''
-        const lastName = typeof primary?.lastName === 'string' ? primary.lastName : ''
-        const fullName = `${firstName} ${lastName}`.trim()
+        if (primaryId) {
+          const fullName = buildPrimaryContactDisplayName(primary as any)
+          const phoneVal = typeof primary?.phone === 'string' ? primary.phone.trim() || null : null
+          const titleVal = typeof primary?.roleLabel === 'string' ? primary.roleLabel.trim() || null : null
 
-        if (primaryId && fullName) {
           // Ensure only one primary per customer
           await tx.customerContact.updateMany({
             where: { customerId: id, isPrimary: true, id: { not: primaryId } },
@@ -1751,17 +1763,17 @@ router.put('/:id', async (req, res) => {
               id: primaryId,
               customerId: id,
               name: fullName,
-              email: typeof primary?.email === 'string' ? primary.email : null,
-              phone: typeof primary?.phone === 'string' ? primary.phone : null,
-              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              email: typeof primary?.email === 'string' ? primary.email.trim() || null : null,
+              phone: phoneVal,
+              title: titleVal,
               isPrimary: true,
             },
             update: {
               customerId: id,
               name: fullName,
-              email: typeof primary?.email === 'string' ? primary.email : null,
-              phone: typeof primary?.phone === 'string' ? primary.phone : null,
-              title: typeof primary?.roleLabel === 'string' ? primary.roleLabel : null,
+              email: typeof primary?.email === 'string' ? primary.email.trim() || null : null,
+              phone: phoneVal,
+              title: titleVal,
               isPrimary: true,
             },
           })
@@ -2253,8 +2265,17 @@ router.post('/:id/contacts', async (req, res) => {
     })
 
     return res.status(201).json({
-      id: contact.id,
-      name: contact.name,
+      data: {
+        id: contact.id,
+        customerId: contact.customerId,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        title: contact.title,
+        isPrimary: contact.isPrimary,
+        notes: contact.notes,
+        updatedAt: contact.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     // Local typed conflict (see above)
@@ -2314,8 +2335,17 @@ router.put('/:customerId/contacts/:contactId', async (req, res) => {
     })
 
     return res.json({
-      id: contact.id,
-      name: contact.name,
+      data: {
+        id: contact.id,
+        customerId: contact.customerId,
+        name: contact.name,
+        email: contact.email,
+        phone: contact.phone,
+        title: contact.title,
+        isPrimary: contact.isPrimary,
+        notes: contact.notes,
+        updatedAt: contact.updatedAt.toISOString(),
+      },
     })
   } catch (error) {
     if ((error as any)?.statusCode === 404) {

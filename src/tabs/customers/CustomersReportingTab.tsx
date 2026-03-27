@@ -150,7 +150,7 @@ export default function CustomersReportingTab() {
               <Th isNumeric>Month Actual</Th>
               <Th isNumeric>Month Target</Th>
               <Th isNumeric>% of Target</Th>
-              <Th isNumeric>DEFCON</Th>
+              <Th isNumeric>Health</Th>
             </Tr>
           </Thead>
           <Tbody>
