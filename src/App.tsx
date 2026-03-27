@@ -64,7 +64,7 @@ function App() {
   const legacyTabMap = useMemo(() => {
     return {
       accounts: { tab: 'customers-home' as const, view: 'accounts' satisfies CustomersViewId },
-      contacts: { tab: 'customers-home' as const, view: 'contacts' satisfies CustomersViewId },
+      contacts: { tab: 'customers-home' as const, view: 'accounts' satisfies CustomersViewId },
       inbox: { tab: 'marketing-home' as const, view: 'inbox' satisfies OpenDoorsViewId },
       reports: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
       reporting: { tab: 'marketing-home' as const, view: 'reports' satisfies OpenDoorsViewId },
