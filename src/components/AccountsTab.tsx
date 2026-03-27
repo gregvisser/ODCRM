@@ -349,28 +349,28 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
 })
 
 const DEFCON_OPTIONS = [
-  { value: '1', label: '1 - Very Dissatisfied' },
-  { value: '2', label: '2 - Dissatisfied' },
-  { value: '3', label: '3 - Neutral' },
-  { value: '4', label: '4 - Satisfied' },
-  { value: '5', label: '5 - Very Satisfied' },
-  { value: '6', label: '6 - Exceptional' },
+  { value: '1', label: '1 - Stable' },
+  { value: '2', label: '2 - Healthy' },
+  { value: '3', label: '3 - Watch' },
+  { value: '4', label: '4 - At Risk' },
+  { value: '5', label: '5 - Critical' },
+  { value: '6', label: '6 - Emergency' },
 ]
 
 function formatDefconLabel(defcon: number): string {
   switch (defcon) {
     case 1:
-      return '1 - Very Dissatisfied'
+      return '1 - Stable'
     case 2:
-      return '2 - Dissatisfied'
+      return '2 - Healthy'
     case 3:
-      return '3 - Neutral'
+      return '3 - Watch'
     case 4:
-      return '4 - Satisfied'
+      return '4 - At Risk'
     case 5:
-      return '5 - Very Satisfied'
+      return '5 - Critical'
     case 6:
-      return '6 - Exceptional'
+      return '6 - Emergency'
     default:
       return 'Not set'
   }
@@ -2183,7 +2183,7 @@ function getFieldConfig(
   },
   {
     label: 'DEFCON',
-    render: (account) => `${account.defcon} - ${account.defcon === 1 ? 'Very Dissatisfied' : account.defcon === 2 ? 'Dissatisfied' : account.defcon === 3 ? 'Neutral' : account.defcon === 4 ? 'Satisfied' : 'Very Satisfied'}`,
+    render: (account) => formatDefconLabel(account.defcon),
   },
   {
     label: 'Contract Start',
@@ -4825,7 +4825,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                   onCancel={() => stopEditing(accountName, 'drawer.details.defcon')}
                                   onSave={async (v) => {
                                     if (!customerId) return
-                                    const next = Math.max(1, Math.min(5, Number.parseInt(String(v || ''), 10) || 3))
+                                    const next = Math.max(1, Math.min(6, Number.parseInt(String(v || ''), 10) || 3))
                                     await applyCustomerPatchAndRefresh({
                                       customerId,
                                       patch: { defcon: next },
@@ -5798,7 +5798,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           onChange={async (e) => {
                             const customerId = selectedCustomerId
                             if (!customerId) return
-                            const next = Math.max(1, Math.min(5, Number.parseInt(e.target.value, 10) || 3))
+                            const next = Math.max(1, Math.min(6, Number.parseInt(e.target.value, 10) || 3))
                             await applyCustomerPatchAndRefresh({
                               customerId,
                               patch: { defcon: next },
