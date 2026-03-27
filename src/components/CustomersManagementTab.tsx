@@ -438,7 +438,7 @@ export default function CustomersManagementTab() {
               <Th>Domain</Th>
               <Th>Status</Th>
               <Th>Sector</Th>
-              <Th>DEFCON</Th>
+              <Th>Health</Th>
               <Th>Contacts</Th>
               {showArchived && <Th>Archived</Th>}
               <Th>Actions</Th>
@@ -758,15 +758,15 @@ export default function CustomersManagementTab() {
                   />
                 </FormControl>
                 <FormControl>
-                  <FormLabel fontSize="sm">DEFCON Level (1-6)</FormLabel>
+                  <FormLabel fontSize="sm">Account health (1–6)</FormLabel>
                   <Select value={form.defcon} onChange={(e) => setForm({ ...form, defcon: e.target.value })}>
                     <option value="">Not Set</option>
-                    <option value="1">1 - Very Dissatisfied</option>
-                    <option value="2">2 - Dissatisfied</option>
-                    <option value="3">3 - Neutral</option>
-                    <option value="4">4 - Satisfied</option>
-                    <option value="5">5 - Very Satisfied</option>
-                    <option value="6">6 - Extremely Satisfied</option>
+                    <option value="1">1 — Foundational</option>
+                    <option value="2">2 — Developing</option>
+                    <option value="3">3 — Progressing</option>
+                    <option value="4">4 — Strong</option>
+                    <option value="5">5 — Advanced</option>
+                    <option value="6">6 — Excellent</option>
                   </Select>
                 </FormControl>
                 <FormControl>

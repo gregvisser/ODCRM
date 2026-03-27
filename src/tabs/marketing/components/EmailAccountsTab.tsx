@@ -717,6 +717,17 @@ const EmailAccountsTab: React.FC = () => {
         </Alert>
       )}
 
+      <Alert status="info" mb={4} variant="subtle">
+        <AlertIcon />
+        <AlertDescription fontSize="sm">
+          New mailboxes or domains may route to Junk until SPF, DKIM, DMARC, and sender reputation are established. See{' '}
+          <Text as="span" fontWeight="medium">
+            docs/ops/MAILBOX_DELIVERABILITY_CHECKLIST.md
+          </Text>{' '}
+          for external verification steps.
+        </AlertDescription>
+      </Alert>
+
       <Flex gap={4} mb={6} align="center">
         <InputGroup maxW="300px">
           <InputLeftElement>

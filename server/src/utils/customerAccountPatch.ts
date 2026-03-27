@@ -48,6 +48,7 @@ export const ACCOUNT_EDITABLE_ACCOUNTDATA_PATHS = [
   'clientProfile.targetJobSectorIds',
   'clientProfile.targetJobRoleIds',
   'targetGeographicalAreas',
+  'logoUrl',
 ] as const
 
 export type AccountEditableAccountDataPath = (typeof ACCOUNT_EDITABLE_ACCOUNTDATA_PATHS)[number]
@@ -118,6 +119,7 @@ export const patchCustomerAccountSchema = z
       .object({
         accountDetails: accountDetailsPatchSchema.optional(),
         monthlySpendGBP: z.number().min(0).optional().nullable(),
+        logoUrl: z.string().optional().nullable(),
         clientProfile: clientProfilePatchSchema.optional(),
         targetGeographicalAreas: z.array(targetGeographicalAreaSchema).optional().nullable(),
       })
@@ -344,6 +346,19 @@ export function computeCustomerAccountPatch(params: {
     incomingAccountData = setDeep(incomingAccountData, 'monthlySpendGBP', nextMonthlySpend)
   }
 
+  if (patch.accountData?.logoUrl !== undefined) {
+    const old = getDeep(existingAccountData, 'logoUrl')
+    const next = normalizeStringTrimKeepEmpty(patch.accountData.logoUrl)
+    if (String(old ?? '') !== String(next ?? '')) {
+      changes.push({
+        field: 'accountData.logoUrl',
+        oldValue: old ?? '',
+        newValue: next,
+      })
+    }
+    incomingAccountData = setDeep(incomingAccountData, 'logoUrl', next || null)
+  }
+
   // ---------------------------------------------------------------------------
   // Client Profile + targeting (accountData.clientProfile + accountData.targetGeographicalAreas)
   // ---------------------------------------------------------------------------
@@ -451,6 +466,7 @@ export function computeCustomerAccountPatch(params: {
     'accountDetails.daysPerWeek',
     'accountDetails.emailAccounts',
     'monthlySpendGBP',
+    'logoUrl',
   ])
   const nextAccountData =
     Object.keys(incomingAccountData || {}).length > 0

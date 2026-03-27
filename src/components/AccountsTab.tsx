@@ -51,6 +51,8 @@ import {
   useDisclosure,
   Icon,
   Tooltip,
+  FormControl,
+  FormLabel,
   Tabs,
   TabList,
   TabPanels,
@@ -71,6 +73,8 @@ import FieldRow from './accounts/FieldRow'
 import NotesSection from './accounts/NotesSection'
 import TargetLocationMultiSelect from './accounts/TargetLocationMultiSelect'
 import UpcomingEventsSection from './accounts/UpcomingEventsSection'
+import { ACCOUNT_HEALTH_LABELS, ACCOUNT_HEALTH_SELECT_OPTIONS, formatAccountHealthLabel } from '../constants/accountHealthDefcon'
+import { accountLogoUrlForDisplay, isLikelyFaviconUrl } from '../utils/accountLogo'
 
 type Contact = {
   name: string
@@ -348,42 +352,10 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 })
 
-const DEFCON_OPTIONS = [
-  { value: '1', label: '1 - Stable' },
-  { value: '2', label: '2 - Healthy' },
-  { value: '3', label: '3 - Watch' },
-  { value: '4', label: '4 - At Risk' },
-  { value: '5', label: '5 - Critical' },
-  { value: '6', label: '6 - Emergency' },
-]
-
-function formatDefconLabel(defcon: number): string {
-  switch (defcon) {
-    case 1:
-      return '1 - Stable'
-    case 2:
-      return '2 - Healthy'
-    case 3:
-      return '3 - Watch'
-    case 4:
-      return '4 - At Risk'
-    case 5:
-      return '5 - Critical'
-    case 6:
-      return '6 - Emergency'
-    default:
-      return 'Not set'
-  }
-}
-
+/** @deprecated Use accountLogoUrlForDisplay — favicon URLs must never be shown as the company logo. */
 function deriveLogoCandidate(account: { logoUrl?: string; website?: string }): string {
-  const persisted = typeof account.logoUrl === 'string' ? account.logoUrl.trim() : ''
-  if (persisted) return persisted
-
-  const website = typeof account.website === 'string' ? account.website.trim() : ''
-  if (!website) return ''
-  const withScheme = /^https?:\/\//i.test(website) ? website : `https://${website}`
-  return `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(withScheme)}`
+  void account.website
+  return accountLogoUrlForDisplay(account)
 }
 
 // storage keys (kept as locals to minimize churn across this large file)
@@ -1181,7 +1153,13 @@ async function populateAccountData(account: Account): Promise<Account> {
       foundingYear: companyData.foundingYear || '',
     },
     socialMedia: companyData.socialMedia && companyData.socialMedia.length > 0 ? companyData.socialMedia : [],
-    logoUrl: companyData.logoUrl || account.logoUrl,
+    logoUrl: (() => {
+      const existing = typeof account.logoUrl === 'string' ? account.logoUrl.trim() : ''
+      const suggested = companyData.logoUrl && typeof companyData.logoUrl === 'string' ? companyData.logoUrl.trim() : ''
+      if (existing && !isLikelyFaviconUrl(existing)) return existing
+      if (suggested && !isLikelyFaviconUrl(suggested)) return suggested
+      return existing || undefined
+    })(),
     aboutSource: companyData.source || 'web',
     aboutLocked: true,
   }
@@ -2182,8 +2160,9 @@ function getFieldConfig(
         : 'No agreements attached',
   },
   {
-    label: 'DEFCON',
-    render: (account) => formatDefconLabel(account.defcon),
+    label: 'Health',
+    render: (account) =>
+      typeof account.defcon === 'number' ? formatAccountHealthLabel(account.defcon) : 'Not set',
   },
   {
     label: 'Contract Start',
@@ -2693,6 +2672,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     phone: '',
   })
 
+  const [contactEditDraft, setContactEditDraft] = useState<{
+    name: string
+    title: string
+    email: string
+    phone: string
+  } | null>(null)
+  const [isSavingContactEdit, setIsSavingContactEdit] = useState(false)
+
   // Taxonomy labels for Client Profile display (ids → labels)
   const [jobSectorsById, setJobSectorsById] = useState<Record<string, string>>({})
   const [jobRolesById, setJobRolesById] = useState<Record<string, string>>({})
@@ -3151,6 +3138,62 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     },
     [buildCustomerScopedRequest, refetchCustomers, selectedCustomerId, toast],
   )
+
+  useEffect(() => {
+    if (!selectedCustomerContact) {
+      setContactEditDraft(null)
+      return
+    }
+    setContactEditDraft({
+      name: selectedCustomerContact.name || '',
+      title: selectedCustomerContact.title || '',
+      email: selectedCustomerContact.email || '',
+      phone: selectedCustomerContact.phone || '',
+    })
+  }, [selectedCustomerContact])
+
+  const handleSaveContactEdit = useCallback(async () => {
+    if (!selectedCustomerId || !selectedCustomerContact || !contactEditDraft) return
+    if (!contactEditDraft.name.trim()) {
+      toast({ title: 'Name required', status: 'warning', duration: 2500 })
+      return
+    }
+    if (!contactEditDraft.email.trim() && !contactEditDraft.phone.trim()) {
+      toast({ title: 'Email or phone required', status: 'warning', duration: 2500 })
+      return
+    }
+    setIsSavingContactEdit(true)
+    const { error } = await api.put(`/api/customers/${selectedCustomerId}/contacts/${selectedCustomerContact.id}`, {
+      name: contactEditDraft.name.trim(),
+      title: contactEditDraft.title.trim() || null,
+      email: contactEditDraft.email.trim() ? contactEditDraft.email.trim() : null,
+      phone: contactEditDraft.phone.trim() || null,
+      isPrimary: selectedCustomerContact.isPrimary,
+      notes: selectedCustomerContact.notes ?? null,
+    })
+    setIsSavingContactEdit(false)
+    if (error) {
+      toast({ title: 'Failed to update contact', description: error, status: 'error', duration: 5000, isClosable: true })
+      return
+    }
+    const refreshed = await api.get<CustomerDetailApi>(
+      `/api/customers/${selectedCustomerId}`,
+      buildCustomerScopedRequest(selectedCustomerId),
+    )
+    if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+    await refetchCustomers?.({ background: true })
+    emit('customerUpdated', { id: selectedCustomerId })
+    const nextRow = refreshed.data?.customerContacts?.find((c) => c.id === selectedCustomerContact.id)
+    if (nextRow) setSelectedCustomerContact(nextRow)
+    toast({ title: 'Contact updated', status: 'success', duration: 2000 })
+  }, [
+    buildCustomerScopedRequest,
+    contactEditDraft,
+    refetchCustomers,
+    selectedCustomerContact,
+    selectedCustomerId,
+    toast,
+  ])
 
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
@@ -4313,7 +4356,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 _hover={{ bg: 'bg.subtle' }}
               >
                 <HStack spacing={1} justify="flex-end">
-                  <Text>DEFCON</Text>
+                  <Text>Health</Text>
                   {renderSortIndicator('defcon')}
                 </HStack>
                 <Box
@@ -4523,14 +4566,21 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         />
                       </HStack>
                     ) : (
-                      <Badge 
-                        variant="subtle" 
+                      <Badge
+                        variant="subtle"
                         colorScheme="gray"
                         cursor="pointer"
                         _hover={{ opacity: 0.8 }}
                         onClick={() => handleCellEdit(account.name, 'defcon', account.defcon || 3)}
+                        fontSize="xs"
+                        maxW="140px"
+                        whiteSpace="normal"
                       >
-                        {account.defcon}
+                        {(() => {
+                          const n = account.defcon || 3
+                          const word = ACCOUNT_HEALTH_LABELS[n]
+                          return word ? `${n} · ${word}` : String(n)
+                        })()}
                       </Badge>
                     )}
                   </Td>
@@ -4594,7 +4644,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                         </Badge>
                         {(selectedCustomerDetail?.defcon ?? selectedAccount.defcon) && (
                           <Badge colorScheme="gray" variant="outline" px={3} py={1} fontSize="sm">
-                            DEFCON {selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
+                            Health{' '}
+                            {formatAccountHealthLabel(
+                              Number(selectedCustomerDetail?.defcon ?? selectedAccount.defcon) || 0,
+                            )}
                           </Badge>
                         )}
                       </HStack>
@@ -4816,10 +4869,10 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                 />
 
                                 <EditableField
-                                  label="DEFCON"
+                                  label="Health (1–6)"
                                   value={String(defconValue)}
                                   type="select"
-                                  options={DEFCON_OPTIONS}
+                                  options={ACCOUNT_HEALTH_SELECT_OPTIONS}
                                   isEditing={isFieldEditing(accountName, 'drawer.details.defcon')}
                                   onEdit={() => startEditing(accountName, 'drawer.details.defcon')}
                                   onCancel={() => stopEditing(accountName, 'drawer.details.defcon')}
@@ -4835,7 +4888,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                   }}
                                   renderDisplay={(val) => (
                                     <Text color="gray.800" fontWeight="medium">
-                                      {formatDefconLabel(Number.parseInt(String(val || ''), 10))}
+                                      {formatAccountHealthLabel(Number.parseInt(String(val || ''), 10) || 0)}
                                     </Text>
                                   )}
                                 />
@@ -4864,6 +4917,45 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                                     )
                                   }}
                                   placeholder="Not set"
+                                />
+
+                                <EditableField
+                                  label="Company logo URL"
+                                  value={
+                                    typeof ad?.logoUrl === 'string'
+                                      ? ad.logoUrl
+                                      : typeof selectedAccount.logoUrl === 'string'
+                                        ? selectedAccount.logoUrl
+                                        : ''
+                                  }
+                                  type="url"
+                                  isEditing={isFieldEditing(accountName, 'drawer.details.logoUrl')}
+                                  onEdit={() => startEditing(accountName, 'drawer.details.logoUrl')}
+                                  onCancel={() => stopEditing(accountName, 'drawer.details.logoUrl')}
+                                  onSave={async (v) => {
+                                    if (!customerId) return
+                                    const next = String(v || '').trim()
+                                    await applyCustomerPatchAndRefresh({
+                                      customerId,
+                                      patch: { accountData: { logoUrl: next ? next : null } },
+                                      localAccountUpdates: { logoUrl: next || undefined },
+                                    })
+                                    stopEditing(accountName, 'drawer.details.logoUrl')
+                                  }}
+                                  placeholder="https://… (HTTPS image URL; leave empty for initials)"
+                                  renderDisplay={(val) => {
+                                    const url = String(val || '').trim()
+                                    return url ? (
+                                      <HStack spacing={2}>
+                                        <Avatar size="sm" name={selectedAccount.name} src={accountLogoUrlForDisplay({ logoUrl: url })} />
+                                        <Link href={url} isExternal color="blue.600" fontSize="sm" rel="noopener noreferrer">
+                                          {url}
+                                        </Link>
+                                      </HStack>
+                                    ) : (
+                                      <Text color="gray.500">Not set (initials used in the accounts list)</Text>
+                                    )
+                                  }}
                                 />
 
                                 <EditableField
@@ -5710,34 +5802,39 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     <ModalHeader>Contact Details</ModalHeader>
                     <ModalCloseButton />
                     <ModalBody>
-                      {selectedCustomerContact ? (
+                      {selectedCustomerContact && contactEditDraft ? (
                         <Stack spacing={3}>
-                          <FieldRow label="Name">
-                            <Text fontWeight="medium">{selectedCustomerContact.name}</Text>
-                          </FieldRow>
-                          <FieldRow label="Title">
-                            <Text color={selectedCustomerContact.title ? 'gray.800' : 'gray.500'}>
-                              {selectedCustomerContact.title || 'Not set'}
-                            </Text>
-                          </FieldRow>
-                          <FieldRow label="Email">
-                            {selectedCustomerContact.email ? (
-                              <Link href={`mailto:${selectedCustomerContact.email}`} color="blue.600">
-                                {selectedCustomerContact.email}
-                              </Link>
-                            ) : (
-                              <Text color="gray.500">Not set</Text>
-                            )}
-                          </FieldRow>
-                          <FieldRow label="Phone">
-                            {selectedCustomerContact.phone ? (
-                              <Link href={`tel:${selectedCustomerContact.phone}`} color="blue.600">
-                                {selectedCustomerContact.phone}
-                              </Link>
-                            ) : (
-                              <Text color="gray.500">Not set</Text>
-                            )}
-                          </FieldRow>
+                          <FormControl>
+                            <FormLabel fontSize="sm">Name</FormLabel>
+                            <Input
+                              value={contactEditDraft.name}
+                              onChange={(e) => setContactEditDraft((p) => (p ? { ...p, name: e.target.value } : p))}
+                            />
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel fontSize="sm">Role at company</FormLabel>
+                            <Input
+                              value={contactEditDraft.title}
+                              onChange={(e) => setContactEditDraft((p) => (p ? { ...p, title: e.target.value } : p))}
+                              placeholder="Job title"
+                            />
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel fontSize="sm">Email</FormLabel>
+                            <Input
+                              type="email"
+                              value={contactEditDraft.email}
+                              onChange={(e) => setContactEditDraft((p) => (p ? { ...p, email: e.target.value } : p))}
+                            />
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel fontSize="sm">Phone</FormLabel>
+                            <Input
+                              value={contactEditDraft.phone}
+                              onChange={(e) => setContactEditDraft((p) => (p ? { ...p, phone: e.target.value } : p))}
+                              placeholder="Contact number"
+                            />
+                          </FormControl>
                           <FieldRow label="Primary">
                             {selectedCustomerContact.isPrimary ? <Badge colorScheme="green">Primary</Badge> : <Text color="gray.500">No</Text>}
                           </FieldRow>
@@ -5750,8 +5847,16 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       ) : null}
                     </ModalBody>
                     <ModalFooter>
-                      <Button variant="outline" onClick={() => setSelectedCustomerContact(null)}>
+                      <Button variant="outline" mr={3} onClick={() => setSelectedCustomerContact(null)}>
                         Close
+                      </Button>
+                      <Button
+                        colorScheme="teal"
+                        onClick={() => void handleSaveContactEdit()}
+                        isLoading={isSavingContactEdit}
+                        isDisabled={!contactEditDraft}
+                      >
+                        Save changes
                       </Button>
                     </ModalFooter>
                   </ModalContent>
@@ -5792,7 +5897,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           </Text>
                         )}
                       />
-                      <FieldRow label="DEFCON Level">
+                      <FieldRow label="Health (1–6)">
                         <Select
                           value={selectedCustomerDetail?.defcon ?? selectedAccount.defcon}
                           onChange={async (e) => {
@@ -5808,7 +5913,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           size="md"
                           isDisabled={!selectedCustomerId}
                         >
-                          {DEFCON_OPTIONS.map((option) => (
+                          {ACCOUNT_HEALTH_SELECT_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
                             </option>
@@ -6633,7 +6738,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                     {fieldConfig
                       .filter(
                         (field) =>
-                          !['Sector', 'Target Location', 'Target Title', 'Monthly Spent Pounds', 'Agreements', 'Client Leads', 'DEFCON', 'Contract Start', 'Contract End', 'Days'].includes(
+                          !['Sector', 'Target Location', 'Target Title', 'Monthly Spent Pounds', 'Agreements', 'Client Leads', 'Health', 'Contract Start', 'Contract End', 'Days'].includes(
                             field.label,
                           ),
                       )
