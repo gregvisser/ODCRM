@@ -1,19 +1,16 @@
 import { useMemo } from 'react'
 import { Badge, Box, Button, HStack, Text } from '@chakra-ui/react'
-import { EmailIcon, ViewIcon } from '@chakra-ui/icons'
-import { MdAssessment } from 'react-icons/md'
+import { ViewIcon } from '@chakra-ui/icons'
 import { SubNavigation, type SubNavItem } from '../../design-system'
 import { useUserPreferencesContext } from '../../contexts/UserPreferencesContext'
 import AccountsTabDatabase from '../../components/AccountsTabDatabase'
-import ContactsTab from '../../components/ContactsTab'
-import LeadsTab from '../../components/LeadsTab'
 import { useEffectiveCustomerId } from '../../hooks/useCustomerScope'
 import { useClientReadinessState } from '../../hooks/useClientReadinessState'
 import { getClientReadinessColorScheme } from '../../utils/clientReadinessState'
-export type CustomersViewId = 'accounts' | 'contacts' | 'leads-reporting'
+export type CustomersViewId = 'accounts'
 
 function coerceCustomersViewId(view?: string): CustomersViewId {
-  if (view === 'accounts' || view === 'contacts' || view === 'leads-reporting') return view
+  if (view === 'accounts') return view
   return 'accounts'
 }
 
@@ -67,19 +64,7 @@ export default function CustomersHomePage({
       icon: ViewIcon,
       content: <AccountsTabDatabase focusAccountName={focusAccountName} />,
     },
-    {
-      id: 'contacts',
-      label: 'Contacts',
-      icon: EmailIcon,
-      content: <ContactsTab />,
-    },
-    {
-      id: 'leads-reporting',
-      label: 'Leads',
-      icon: MdAssessment,
-      content: activeView === 'leads-reporting' ? <LeadsTab /> : null,
-    },
-  ], [activeView, focusAccountName])
+  ], [focusAccountName])
 
   // Apply saved tab order from database (per-user)
   const navItems = useMemo(() => {
@@ -124,7 +109,7 @@ export default function CustomersHomePage({
         data-testid="customers-marketing-bridge"
       >
         <Text fontSize="sm" color="gray.800" fontWeight="semibold" data-testid="customers-role-framing">
-          OpensDoors Clients is the live workspace for accounts, contacts, and leads.
+          OpensDoors Clients is the live workspace for account operations.
         </Text>
         <HStack mt={2} spacing={2}>
           <Badge colorScheme={getClientReadinessColorScheme(readiness.state)} data-testid="customers-client-readiness-state">

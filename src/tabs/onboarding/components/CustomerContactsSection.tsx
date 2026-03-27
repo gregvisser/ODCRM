@@ -29,9 +29,11 @@ interface CustomerContact {
 interface CustomerContactsSectionProps {
   contacts: CustomerContact[]
   onChange: (next: CustomerContact[]) => void
+  onCreateContact?: (contact: Omit<CustomerContact, 'id' | 'isPrimary' | 'notes'>) => Promise<boolean>
+  onDeleteContact?: (contactId: string) => Promise<boolean>
 }
 
-export function CustomerContactsSection({ contacts, onChange }: CustomerContactsSectionProps) {
+export function CustomerContactsSection({ contacts, onChange, onCreateContact, onDeleteContact }: CustomerContactsSectionProps) {
   const [isAdding, setIsAdding] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
   
@@ -74,17 +76,25 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
 
     setIsAdding(true)
     try {
-      const next: CustomerContact = {
-        id: `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      const draft = {
         name: newContact.name.trim(),
         email: newContact.email.trim() || null,
         phone: newContact.phone.trim() || null,
         title: newContact.title.trim() || null,
-        isPrimary: false,
-        notes: null,
       }
 
-      onChange([...(Array.isArray(contacts) ? contacts : []), next])
+      if (onCreateContact) {
+        const saved = await onCreateContact(draft)
+        if (!saved) return
+      } else {
+        const next: CustomerContact = {
+          id: `contact_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          ...draft,
+          isPrimary: false,
+          notes: null,
+        }
+        onChange([...(Array.isArray(contacts) ? contacts : []), next])
+      }
 
       // Reset form
       setNewContact({ name: '', email: '', phone: '', title: '' })
@@ -101,7 +111,12 @@ export function CustomerContactsSection({ contacts, onChange }: CustomerContacts
     if (!confirm('Delete contact?')) return
 
     try {
-      onChange((Array.isArray(contacts) ? contacts : []).filter((c) => c.id !== contactId))
+      if (onDeleteContact) {
+        const removed = await onDeleteContact(contactId)
+        if (!removed) return
+      } else {
+        onChange((Array.isArray(contacts) ? contacts : []).filter((c) => c.id !== contactId))
+      }
     } catch (err) {
       console.error('Error deleting contact:', err)
     }

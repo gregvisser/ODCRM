@@ -1602,6 +1602,54 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
     weeklyLeadTarget,
   ])
 
+  const handleCreateAdditionalContact = useCallback(
+    async (contact: { name: string; email?: string | null; phone?: string | null; title?: string | null }) => {
+      if (!customerId) return false
+      const { error } = await api.post(`/api/customers/${customerId}/contacts`, {
+        name: String(contact.name || '').trim(),
+        email: typeof contact.email === 'string' ? contact.email.trim() || null : null,
+        phone: typeof contact.phone === 'string' ? contact.phone.trim() || null : null,
+        title: typeof contact.title === 'string' ? contact.title.trim() || null : null,
+        isPrimary: false,
+      })
+      if (error) {
+        toast({
+          title: 'Failed to add contact',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return false
+      }
+      emit('customerUpdated', { id: customerId })
+      await fetchCustomer({ background: true })
+      return true
+    },
+    [customerId, fetchCustomer, toast],
+  )
+
+  const handleDeleteAdditionalContact = useCallback(
+    async (contactId: string) => {
+      if (!customerId) return false
+      const { error } = await api.delete(`/api/customers/${customerId}/contacts/${contactId}`)
+      if (error) {
+        toast({
+          title: 'Failed to delete contact',
+          description: error,
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+        return false
+      }
+      emit('customerUpdated', { id: customerId })
+      await fetchCustomer({ background: true })
+      return true
+    },
+    [customerId, fetchCustomer, toast],
+  )
+
   useEffect(() => {
     if (!customer || isLoading || isSaving || !isDirty) return
     const handle = window.setTimeout(() => {
@@ -2228,6 +2276,8 @@ export default function CustomerOnboardingTab({ customerId }: CustomerOnboarding
             setAdditionalContacts(next as any)
             markDirty()
           }}
+          onCreateContact={handleCreateAdditionalContact}
+          onDeleteContact={handleDeleteAdditionalContact}
         />
       </Box>
 

@@ -354,6 +354,7 @@ const DEFCON_OPTIONS = [
   { value: '3', label: '3 - Neutral' },
   { value: '4', label: '4 - Satisfied' },
   { value: '5', label: '5 - Very Satisfied' },
+  { value: '6', label: '6 - Exceptional' },
 ]
 
 function formatDefconLabel(defcon: number): string {
@@ -368,9 +369,21 @@ function formatDefconLabel(defcon: number): string {
       return '4 - Satisfied'
     case 5:
       return '5 - Very Satisfied'
+    case 6:
+      return '6 - Exceptional'
     default:
       return 'Not set'
   }
+}
+
+function deriveLogoCandidate(account: { logoUrl?: string; website?: string }): string {
+  const persisted = typeof account.logoUrl === 'string' ? account.logoUrl.trim() : ''
+  if (persisted) return persisted
+
+  const website = typeof account.website === 'string' ? account.website.trim() : ''
+  if (!website) return ''
+  const withScheme = /^https?:\/\//i.test(website) ? website : `https://${website}`
+  return `https://www.google.com/s2/favicons?sz=64&domain_url=${encodeURIComponent(withScheme)}`
 }
 
 // storage keys (kept as locals to minimize churn across this large file)
@@ -2672,6 +2685,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
   // Customer-contacts detail modal (customer_contacts table)
   const [selectedCustomerContact, setSelectedCustomerContact] = useState<CustomerContactApi | null>(null)
+  const [isSavingDrawerContact, setIsSavingDrawerContact] = useState(false)
+  const [newDrawerContact, setNewDrawerContact] = useState({
+    name: '',
+    title: '',
+    email: '',
+    phone: '',
+  })
 
   // Taxonomy labels for Client Profile display (ids → labels)
   const [jobSectorsById, setJobSectorsById] = useState<Record<string, string>>({})
@@ -2776,6 +2796,21 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       cancelled = true
     }
   }, [buildCustomerScopedRequest, selectedCustomerId, isDrawerOpen])
+
+  useEffect(() => {
+    if (!selectedCustomerId) return undefined
+    const off = on<{ id?: string }>('customerUpdated', (detail) => {
+      if (!detail?.id || detail.id !== selectedCustomerId) return
+      void (async () => {
+        const refreshed = await api.get<CustomerDetailApi>(
+          `/api/customers/${selectedCustomerId}`,
+          buildCustomerScopedRequest(selectedCustomerId),
+        )
+        if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+      })()
+    })
+    return () => off()
+  }, [buildCustomerScopedRequest, selectedCustomerId])
 
   // Sync contact counts when contactsData changes (initial load and updates)
   // Note: contactsData already excludes deleted contacts since loadContactsFromStorage filters them
@@ -3065,6 +3100,58 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
     window.location.href = `${apiUrl}/api/outlook/auth?customerId=${selectedCustomerId}`
   }, [selectedAccount, selectedCustomerId, toast])
 
+  const handleCreateDrawerContact = useCallback(async () => {
+    if (!selectedCustomerId) return
+    if (!newDrawerContact.name.trim()) {
+      toast({ title: 'Name required', status: 'warning', duration: 2500 })
+      return
+    }
+    if (!newDrawerContact.email.trim() && !newDrawerContact.phone.trim()) {
+      toast({ title: 'Email or phone required', status: 'warning', duration: 2500 })
+      return
+    }
+    setIsSavingDrawerContact(true)
+    const { error } = await api.post(`/api/customers/${selectedCustomerId}/contacts`, {
+      name: newDrawerContact.name.trim(),
+      title: newDrawerContact.title.trim() || null,
+      email: newDrawerContact.email.trim() || null,
+      phone: newDrawerContact.phone.trim() || null,
+      isPrimary: false,
+    })
+    setIsSavingDrawerContact(false)
+    if (error) {
+      toast({ title: 'Failed to add contact', description: error, status: 'error', duration: 5000, isClosable: true })
+      return
+    }
+    const refreshed = await api.get<CustomerDetailApi>(
+      `/api/customers/${selectedCustomerId}`,
+      buildCustomerScopedRequest(selectedCustomerId),
+    )
+    if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+    await refetchCustomers?.({ background: true })
+    emit('customerUpdated', { id: selectedCustomerId })
+    setNewDrawerContact({ name: '', title: '', email: '', phone: '' })
+  }, [buildCustomerScopedRequest, newDrawerContact, refetchCustomers, selectedCustomerId, toast])
+
+  const handleDeleteDrawerContact = useCallback(
+    async (contactId: string) => {
+      if (!selectedCustomerId) return
+      const { error } = await api.delete(`/api/customers/${selectedCustomerId}/contacts/${contactId}`)
+      if (error) {
+        toast({ title: 'Failed to delete contact', description: error, status: 'error', duration: 5000, isClosable: true })
+        return
+      }
+      const refreshed = await api.get<CustomerDetailApi>(
+        `/api/customers/${selectedCustomerId}`,
+        buildCustomerScopedRequest(selectedCustomerId),
+      )
+      if (refreshed.data) setSelectedCustomerDetail(refreshed.data)
+      await refetchCustomers?.({ background: true })
+      emit('customerUpdated', { id: selectedCustomerId })
+    },
+    [buildCustomerScopedRequest, refetchCustomers, selectedCustomerId, toast],
+  )
+
   const updateAccount = useCallback((accountName: string, updates: Partial<Account>) => {
     setAccountsData((prev) => {
       const updated = prev.map((acc) => (acc.name === accountName ? { ...acc, ...updates } : acc))
@@ -3234,7 +3321,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
       updates.monthlyTarget = numValue
       patch.monthlyLeadTarget = numValue
     } else if (editingCell.field === 'defcon') {
-      updates.defcon = Math.max(1, Math.min(5, Math.round(numValue))) // Clamp between 1 and 5
+      updates.defcon = Math.max(1, Math.min(6, Math.round(numValue))) // Clamp between 1 and 6
       patch.defcon = updates.defcon
     }
 
@@ -3483,11 +3570,9 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   // Handle column sort
   const numericSortColumns = new Set([
     'spend',
-    'weeklyLeads',
+    'days',
     'weeklyTarget',
-    'monthlyLeads',
     'monthlyTarget',
-    'percentToTarget',
     'defcon',
   ])
 
@@ -3516,16 +3601,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
           return a.name.toLowerCase()
         case 'spend':
           return a.monthlySpendGBP || 0
-        case 'weeklyLeads':
-          return a.weeklyActual || 0
+        case 'days':
+          return a.days || 0
         case 'weeklyTarget':
           return a.weeklyTarget || 0
-        case 'monthlyLeads':
-          return a.monthlyActual || 0
         case 'monthlyTarget':
           return a.monthlyTarget || 0
-        case 'percentToTarget':
-          return a.monthlyTarget ? (a.monthlyActual || 0) / a.monthlyTarget : 0
         case 'defcon':
           return a.defcon || 0
         default:
@@ -3538,16 +3619,12 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
           return b.name.toLowerCase()
         case 'spend':
           return b.monthlySpendGBP || 0
-        case 'weeklyLeads':
-          return b.weeklyActual || 0
+        case 'days':
+          return b.days || 0
         case 'weeklyTarget':
           return b.weeklyTarget || 0
-        case 'monthlyLeads':
-          return b.monthlyActual || 0
         case 'monthlyTarget':
           return b.monthlyTarget || 0
-        case 'percentToTarget':
-          return b.monthlyTarget ? (b.monthlyActual || 0) / b.monthlyTarget : 0
         case 'defcon':
           return b.defcon || 0
         default:
@@ -3568,63 +3645,8 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
   const totals = filteredAndSortedAccounts.reduce((acc, account) => {
     return {
       spend: acc.spend + (account.monthlySpendGBP || 0),
-      weeklyLeads: acc.weeklyLeads + (account.weeklyActual || 0),
-      monthlyLeads: acc.monthlyLeads + (account.monthlyActual || 0),
-      weeklyTarget: acc.weeklyTarget + (account.weeklyTarget || 0),
-      monthlyTarget: acc.monthlyTarget + (account.monthlyTarget || 0),
     }
-  }, { spend: 0, weeklyLeads: 0, monthlyLeads: 0, weeklyTarget: 0, monthlyTarget: 0 })
-  const totalsHaveUnavailableLeadMetrics = filteredAndSortedAccounts.some((account) => Boolean(account.sheetMetricsUnavailable))
-  const accountsWithLeadMetricWarnings = filteredAndSortedAccounts.filter(
-    (account) => !account.sheetMetricsUnavailable && Boolean(account.sheetMetricsWarning?.trim()),
-  )
-  const describeUnavailableLeadMetric = (account: { name: string; errorCode?: string; warning?: string }) => {
-    if (account.warning?.trim()) {
-      return `${account.name}: ${account.warning.trim()}`
-    }
-    switch (account.errorCode) {
-      case 'missing_sheet_url':
-        return `${account.name}: no leads reporting sheet is configured`
-      case 'zero_rows_imported':
-        return `${account.name}: the linked sheet is connected and currently empty`
-      case 'stale_sync':
-        return `${account.name}: showing the last successful lead snapshot because live refresh is overdue`
-      case 'stale_last_good':
-        return `${account.name}: showing the last successful lead snapshot because live refresh is overdue`
-      case 'unreadable_sheet':
-        return `${account.name}: the linked sheet is not readable`
-      case 'sync_failed':
-        return `${account.name}: the most recent sheet sync failed`
-      case 'never_synced':
-        return `${account.name}: the first sheet sync has not completed yet`
-      default:
-        return `${account.name}: live sheet metrics are unavailable`
-    }
-  }
-  const unavailableLeadDiagnostics = filteredAndSortedAccounts
-    .filter((account) => Boolean(account.sheetMetricsUnavailable))
-    .map((account) => ({
-      name: account.name,
-      errorCode: account.sheetMetricsErrorCode || 'metrics_unavailable',
-      warning: account.sheetMetricsWarning,
-      summary: describeUnavailableLeadMetric({
-        name: account.name,
-        errorCode: account.sheetMetricsErrorCode || 'metrics_unavailable',
-        warning: account.sheetMetricsWarning,
-      }),
-    }))
-  const leadMetricWarnings = accountsWithLeadMetricWarnings.map((account) => ({
-    name: account.name,
-    summary: describeUnavailableLeadMetric({
-      name: account.name,
-      errorCode: account.sheetMetricsErrorCode || 'metrics_warning',
-      warning: account.sheetMetricsWarning,
-    }),
-  }))
-  
-  const totalPercentToTarget = !totalsHaveUnavailableLeadMetrics && totals.monthlyTarget > 0 
-    ? (totals.monthlyLeads / totals.monthlyTarget * 100).toFixed(1)
-    : '0.0'
+  }, { spend: 0 })
 
   const clientProfileSummary = selectedAccount
     ? normalizeClientProfile(selectedAccount.clientProfile)
@@ -4112,36 +4134,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
         </HStack>
       </HStack>
 
-      {accountsData.some((account) => Boolean(account?.sheetMetricsUnavailable)) && (
-        <Alert status="warning" borderRadius="md" mb={4}>
-          <AlertIcon />
-          <Box>
-            <AlertDescription fontSize="sm">
-              Live sheet-backed lead metrics are currently unavailable for one or more accounts. Values are shown as `—` until live sync succeeds.
-            </AlertDescription>
-            {unavailableLeadDiagnostics.length > 0 && (
-              <Text fontSize="xs" color="orange.800" mt={1}>
-                {unavailableLeadDiagnostics.map((account) => account.summary).join(' • ')}
-              </Text>
-            )}
-          </Box>
-        </Alert>
-      )}
-      {leadMetricWarnings.length > 0 && (
-        <Alert status="warning" borderRadius="md" mb={4}>
-          <AlertIcon />
-          <Box>
-            <AlertDescription fontSize="sm">
-              Showing the last successful sheet-backed lead snapshot for one or more accounts while live refresh catches up.
-            </AlertDescription>
-            <Text fontSize="xs" color="orange.800" mt={1}>
-              {leadMetricWarnings.map((account) => account.summary).join(' • ')}
-            </Text>
-          </Box>
-        </Alert>
-      )}
-
-
       {!hasStoredAccounts && (
         <Box mb={6} p={4} bg="bg.surface" borderRadius="lg" border="1px solid" borderColor="border.subtle">
           <Alert status="info" borderRadius="md">
@@ -4186,7 +4178,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                 _hover={{ bg: 'bg.subtle' }}
               >
                 <HStack spacing={1} justify="flex-start">
-                  <Text>Account</Text>
+                  <Text>Logo / Account</Text>
                   {renderSortIndicator('account')}
                 </HStack>
                 <Box
@@ -4234,14 +4226,14 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
               <Th
                 isNumeric
                 position="relative"
-                style={{ width: columnWidths.weeklyLeads || 100, minWidth: 80 }}
+                style={{ width: columnWidths.days || 90, minWidth: 80 }}
                 cursor="pointer"
-                onClick={() => handleSort('weeklyLeads')}
+                onClick={() => handleSort('days')}
                 _hover={{ bg: 'bg.subtle' }}
               >
                 <HStack spacing={1} justify="flex-end">
-                  <Text>Weekly Leads</Text>
-                  {renderSortIndicator('weeklyLeads')}
+                  <Text>Days</Text>
+                  {renderSortIndicator('days')}
                 </HStack>
                 <Box
                   position="absolute"
@@ -4254,7 +4246,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   _hover={{ bg: 'brand.400' }}
                   onMouseDown={(e) => {
                     e.stopPropagation()
-                    handleResizeStart('weeklyLeads', e.clientX)
+                    handleResizeStart('days', e.clientX)
                   }}
                 />
               </Th>
@@ -4288,33 +4280,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
               <Th
                 isNumeric
                 position="relative"
-                style={{ width: columnWidths.monthlyLeads || 100, minWidth: 80 }}
-                cursor="pointer"
-                onClick={() => handleSort('monthlyLeads')}
-                _hover={{ bg: 'bg.subtle' }}
-              >
-                <HStack spacing={1} justify="flex-end">
-                  <Text>Monthly Leads</Text>
-                  {renderSortIndicator('monthlyLeads')}
-                </HStack>
-                <Box
-                  position="absolute"
-                  right={0}
-                  top={0}
-                  bottom={0}
-                  w="4px"
-                  cursor="col-resize"
-                  bg="transparent"
-                  _hover={{ bg: 'brand.400' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    handleResizeStart('monthlyLeads', e.clientX)
-                  }}
-                />
-              </Th>
-              <Th
-                isNumeric
-                position="relative"
                 style={{ width: columnWidths.monthlyTarget || 120, minWidth: 100 }}
                 cursor="pointer"
                 onClick={() => handleSort('monthlyTarget')}
@@ -4336,33 +4301,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   onMouseDown={(e) => {
                     e.stopPropagation()
                     handleResizeStart('monthlyTarget', e.clientX)
-                  }}
-                />
-              </Th>
-              <Th
-                isNumeric
-                position="relative"
-                style={{ width: columnWidths.percentToTarget || 120, minWidth: 100 }}
-                cursor="pointer"
-                onClick={() => handleSort('percentToTarget')}
-                _hover={{ bg: 'bg.subtle' }}
-              >
-                <HStack spacing={1} justify="flex-end">
-                  <Text>% of Monthly Target</Text>
-                  {renderSortIndicator('percentToTarget')}
-                </HStack>
-                <Box
-                  position="absolute"
-                  right={0}
-                  top={0}
-                  bottom={0}
-                  w="4px"
-                  cursor="col-resize"
-                  bg="transparent"
-                  _hover={{ bg: 'brand.400' }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation()
-                    handleResizeStart('percentToTarget', e.clientX)
                   }}
                 />
               </Th>
@@ -4405,9 +4343,18 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   onClick={(e) => handleAccountClick(account.name, e)}
                 >
                   <Td>
-                    <Text fontWeight="semibold" color="text.primary">
-                      {account.name}
-                    </Text>
+                    <HStack spacing={3}>
+                      <Avatar
+                        size="sm"
+                        name={account.name}
+                        src={deriveLogoCandidate(account) || undefined}
+                        bg="gray.100"
+                        color="gray.700"
+                      />
+                      <Text fontWeight="semibold" color="text.primary">
+                        {account.name}
+                      </Text>
+                    </HStack>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
                     {editingCell?.accountName === account.name && editingCell?.field === 'spend' ? (
@@ -4454,7 +4401,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                   </Td>
                   <Td isNumeric>
                     <Text fontSize="sm" color="text.primary">
-                      {account.sheetMetricsUnavailable ? '—' : (account.weeklyActual || 0)}
+                      {account.days || 0}
                     </Text>
                   </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
@@ -4500,11 +4447,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       </Text>
                     )}
                   </Td>
-                  <Td isNumeric>
-                    <Text fontSize="sm" color="text.primary">
-                      {account.sheetMetricsUnavailable ? '—' : (account.monthlyActual || 0)}
-                    </Text>
-                  </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
                     {editingCell?.accountName === account.name && editingCell?.field === 'monthlyTarget' ? (
                       <HStack spacing={1}>
@@ -4548,15 +4490,6 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       </Text>
                     )}
                   </Td>
-                  <Td isNumeric>
-                    <Text fontSize="sm" color="text.primary">
-                      {account.sheetMetricsUnavailable
-                        ? '—'
-                        : account.monthlyTarget > 0 
-                        ? `${((account.monthlyActual || 0) / account.monthlyTarget * 100).toFixed(1)}%`
-                        : '0%'}
-                    </Text>
-                  </Td>
                   <Td isNumeric onClick={(e) => e.stopPropagation()}>
                     {editingCell?.accountName === account.name && editingCell?.field === 'defcon' ? (
                       <HStack spacing={1}>
@@ -4565,7 +4498,7 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                           value={editValue}
                           onChange={setEditValue}
                           min={1}
-                          max={5}
+                          max={6}
                           precision={0}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') void handleCellSave()
@@ -4607,53 +4540,13 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
 
             {filteredAndSortedAccounts.length === 0 ? (
               <Tr>
-                <Td colSpan={8}>
+                <Td colSpan={6}>
                   <Box p={6} color="text.muted" textAlign="center" fontSize="sm">
                     No accounts match the selected filters
                   </Box>
                 </Td>
               </Tr>
             ) : null}
-            {filteredAndSortedAccounts.length > 0 && (
-              <Tr bg="bg.subtle" fontWeight="bold">
-                <Td colSpan={1}>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    Totals ({filteredAndSortedAccounts.length} accounts)
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {currencyFormatter.format(totals.spend)}
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totalsHaveUnavailableLeadMetrics ? '—' : totals.weeklyLeads}
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totals.weeklyTarget}
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totalsHaveUnavailableLeadMetrics ? '—' : totals.monthlyLeads}
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totals.monthlyTarget}
-                  </Text>
-                </Td>
-                <Td isNumeric>
-                  <Text fontSize="sm" fontWeight="bold" color="text.primary">
-                    {totalsHaveUnavailableLeadMetrics ? '—' : `${totalPercentToTarget}%`}
-                  </Text>
-                </Td>
-                <Td></Td>
-              </Tr>
-            )}
           </Tbody>
         </Table>
       </TableContainer>
@@ -5553,33 +5446,84 @@ function AccountsTab({ focusAccountName, dbAccounts, dbCustomers, dataSource = '
                       <TabPanel p={6}>
                         {(() => {
                           const contacts = selectedCustomerDetail?.customerContacts || []
-                          if (!contacts.length) return <Text color="gray.500">No contacts added yet.</Text>
-
                           return (
-                            <TableContainer border="1px solid" borderColor="gray.200" borderRadius="lg">
-                              <Table size="sm">
-                                <Thead bg="gray.50">
-                                  <Tr>
-                                    <Th>Name</Th>
-                                    <Th>Title</Th>
-                                    <Th>Email</Th>
-                                    <Th>Phone</Th>
-                                    <Th>Primary</Th>
-                                  </Tr>
-                                </Thead>
-                                <Tbody>
-                                  {contacts.map((c) => (
-                                    <Tr key={c.id} _hover={{ bg: 'gray.50', cursor: 'pointer' }} onClick={() => setSelectedCustomerContact(c)}>
-                                      <Td fontWeight="medium">{c.name}</Td>
-                                      <Td>{c.title || <Text color="gray.500">Not set</Text>}</Td>
-                                      <Td>{c.email || <Text color="gray.500">Not set</Text>}</Td>
-                                      <Td>{c.phone || <Text color="gray.500">Not set</Text>}</Td>
-                                      <Td>{c.isPrimary ? <Badge colorScheme="green">Primary</Badge> : <Text color="gray.500">—</Text>}</Td>
-                                    </Tr>
-                                  ))}
-                                </Tbody>
-                              </Table>
-                            </TableContainer>
+                            <Stack spacing={4}>
+                              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+                                <Input
+                                  placeholder="Contact name"
+                                  value={newDrawerContact.name}
+                                  onChange={(e) => setNewDrawerContact((p) => ({ ...p, name: e.target.value }))}
+                                />
+                                <Input
+                                  placeholder="Job title"
+                                  value={newDrawerContact.title}
+                                  onChange={(e) => setNewDrawerContact((p) => ({ ...p, title: e.target.value }))}
+                                />
+                                <Input
+                                  type="email"
+                                  placeholder="Email"
+                                  value={newDrawerContact.email}
+                                  onChange={(e) => setNewDrawerContact((p) => ({ ...p, email: e.target.value }))}
+                                />
+                                <Input
+                                  placeholder="Phone"
+                                  value={newDrawerContact.phone}
+                                  onChange={(e) => setNewDrawerContact((p) => ({ ...p, phone: e.target.value }))}
+                                />
+                              </SimpleGrid>
+                              <HStack justify="flex-end">
+                                <Button
+                                  size="sm"
+                                  colorScheme="teal"
+                                  onClick={() => void handleCreateDrawerContact()}
+                                  isLoading={isSavingDrawerContact}
+                                >
+                                  Add Contact
+                                </Button>
+                              </HStack>
+
+                              {!contacts.length ? (
+                                <Text color="gray.500">No contacts added yet.</Text>
+                              ) : (
+                                <TableContainer border="1px solid" borderColor="gray.200" borderRadius="lg">
+                                  <Table size="sm">
+                                    <Thead bg="gray.50">
+                                      <Tr>
+                                        <Th>Name</Th>
+                                        <Th>Title</Th>
+                                        <Th>Email</Th>
+                                        <Th>Phone</Th>
+                                        <Th>Primary</Th>
+                                        <Th></Th>
+                                      </Tr>
+                                    </Thead>
+                                    <Tbody>
+                                      {contacts.map((c) => (
+                                        <Tr key={c.id} _hover={{ bg: 'gray.50' }}>
+                                          <Td fontWeight="medium" cursor="pointer" onClick={() => setSelectedCustomerContact(c)}>{c.name}</Td>
+                                          <Td>{c.title || <Text color="gray.500">Not set</Text>}</Td>
+                                          <Td>{c.email || <Text color="gray.500">Not set</Text>}</Td>
+                                          <Td>{c.phone || <Text color="gray.500">Not set</Text>}</Td>
+                                          <Td>{c.isPrimary ? <Badge colorScheme="green">Primary</Badge> : <Text color="gray.500">—</Text>}</Td>
+                                          <Td textAlign="right">
+                                            {!c.isPrimary ? (
+                                              <IconButton
+                                                aria-label="Delete contact"
+                                                icon={<DeleteIcon />}
+                                                size="xs"
+                                                variant="ghost"
+                                                colorScheme="red"
+                                                onClick={() => void handleDeleteDrawerContact(c.id)}
+                                              />
+                                            ) : null}
+                                          </Td>
+                                        </Tr>
+                                      ))}
+                                    </Tbody>
+                                  </Table>
+                                </TableContainer>
+                              )}
+                            </Stack>
                           )
                         })()}
                       </TabPanel>
