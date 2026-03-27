@@ -502,7 +502,17 @@ export default function CustomersManagementTab() {
                     <Td fontSize="sm">{customer.sector || '-'}</Td>
                     <Td>
                       {customer.defcon ? (
-                        <Badge colorScheme={customer.defcon <= 2 ? 'red' : customer.defcon <= 4 ? 'yellow' : 'green'}>
+                        <Badge
+                          colorScheme={
+                            customer.defcon <= 2
+                              ? 'green'
+                              : customer.defcon === 3
+                                ? 'yellow'
+                                : customer.defcon <= 5
+                                  ? 'orange'
+                                  : 'red'
+                          }
+                        >
                           {customer.defcon}
                         </Badge>
                       ) : (
@@ -761,12 +771,12 @@ export default function CustomersManagementTab() {
                   <FormLabel fontSize="sm">Account health (1–6)</FormLabel>
                   <Select value={form.defcon} onChange={(e) => setForm({ ...form, defcon: e.target.value })}>
                     <option value="">Not Set</option>
-                    <option value="1">1 — Foundational</option>
-                    <option value="2">2 — Developing</option>
-                    <option value="3">3 — Progressing</option>
-                    <option value="4">4 — Strong</option>
-                    <option value="5">5 — Advanced</option>
-                    <option value="6">6 — Excellent</option>
+                    <option value="1">1 — Stable</option>
+                    <option value="2">2 — Healthy</option>
+                    <option value="3">3 — Watch</option>
+                    <option value="4">4 — At Risk</option>
+                    <option value="5">5 — Critical</option>
+                    <option value="6">6 — Emergency</option>
                   </Select>
                 </FormControl>
                 <FormControl>

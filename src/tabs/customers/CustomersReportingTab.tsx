@@ -30,12 +30,14 @@ const numberFormatter = new Intl.NumberFormat('en-GB', {
   maximumFractionDigits: 0,
 })
 
+/** 1–2 best (Stable, Healthy); 6 worst (Emergency). */
 function getDefconColor(defcon: number): string {
-  if (defcon >= 5) return 'green'
-  if (defcon === 4) return 'teal'
+  if (defcon >= 6) return 'red'
+  if (defcon === 5) return 'orange'
+  if (defcon === 4) return 'orange'
   if (defcon === 3) return 'yellow'
-  if (defcon === 2) return 'orange'
-  return 'red'
+  if (defcon >= 1) return 'green'
+  return 'gray'
 }
 
 export default function CustomersReportingTab() {

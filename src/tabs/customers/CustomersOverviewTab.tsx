@@ -75,8 +75,8 @@ export default function CustomersOverviewTab() {
   const sortedByPercent = [...rows].sort((a, b) => b.percentToTarget - a.percentToTarget)
   const topPerformers = sortedByPercent.slice(0, 4)
   const watchlist = rows
-    .filter((row) => row.account.defcon <= 2 || row.percentToTarget < 0.25)
-    .sort((a, b) => a.account.defcon - b.account.defcon || a.percentToTarget - b.percentToTarget)
+    .filter((row) => row.account.defcon >= 4 || row.percentToTarget < 0.25)
+    .sort((a, b) => b.account.defcon - a.account.defcon || a.percentToTarget - b.percentToTarget)
     .slice(0, 4)
 
   const avgPercent = totals.monthlyTarget > 0 ? totals.monthlyActual / totals.monthlyTarget : 0

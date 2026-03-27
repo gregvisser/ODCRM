@@ -1,15 +1,15 @@
 /**
- * Account health scale (DB field `defcon`, 1–6).
- * 1 = lowest maturity, 6 = strongest health — positive wording only.
+ * Account health / DEFCON-style scale (DB field `defcon`, 1–6).
+ * Business contract: 1 = Stable … 6 = Emergency (higher = more severe).
  */
 /** Short labels for compact table cells (1–6). */
 export const ACCOUNT_HEALTH_LABELS: Record<number, string> = {
-  1: 'Foundational',
-  2: 'Developing',
-  3: 'Progressing',
-  4: 'Strong',
-  5: 'Advanced',
-  6: 'Excellent',
+  1: 'Stable',
+  2: 'Healthy',
+  3: 'Watch',
+  4: 'At Risk',
+  5: 'Critical',
+  6: 'Emergency',
 }
 
 export function formatAccountHealthLabel(defcon: number): string {
