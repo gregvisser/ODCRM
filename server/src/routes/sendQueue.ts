@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { validateAdminSecret } from './admin.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { applyTemplatePlaceholders, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 import { processOne } from '../workers/sendQueueWorker.js'
@@ -319,23 +320,27 @@ router.get('/items/:itemId/render', async (req: Request, res: Response) => {
         select: { firstName: true, lastName: true, company: true, email: true },
       })
       const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(item.enrollmentId, recipientEmail.toLowerCase())
-      const vars = {
-        firstName: recipientRow?.firstName ?? '',
-        lastName: recipientRow?.lastName ?? '',
-        company: recipientRow?.company ?? '',
-        companyName: recipientRow?.company ?? '',
-        accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
-        email: recipientEmail,
-        role: '',
-        jobTitle: '',
-        title: '',
-        phone: '',
-        website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
-        senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-        senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+      const vars = buildTemplateVariablesForSend({
+        recipientEmail,
+        target: {
+          firstName: recipientRow?.firstName,
+          lastName: recipientRow?.lastName,
+          companyName: recipientRow?.company,
+          jobTitle: null,
+          website: null,
+        },
+        senderCustomer: {
+          name: enrollment.customer?.name ?? '',
+          website: enrollment.customer?.website,
+          domain: enrollment.customer?.domain,
+        },
+        senderIdentity: {
+          displayName: enrollment.sequence?.senderIdentity?.displayName,
+          emailAddress: enrollment.sequence?.senderIdentity?.emailAddress,
+          signatureHtml: enrollment.sequence?.senderIdentity?.signatureHtml,
+        },
         unsubscribeLink: unsubscribeUrl,
-        emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
-      }
+      })
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       const renderedHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
       bodyHtml = enforceUnsubscribeFooter(

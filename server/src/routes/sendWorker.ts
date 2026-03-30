@@ -19,6 +19,7 @@ import {
 import { assertLiveSendAllowed, getLiveSendCap } from '../utils/liveSendGate.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { processOne } from '../workers/sendQueueWorker.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
@@ -230,19 +231,30 @@ function deriveQueueReason(status: OutboundSendQueueStatus, scheduledFor: Date |
 function buildLaunchSubjectPreview(
   subjectTemplate: string | null | undefined,
   recipientEmail: string,
-  recipientRow?: { firstName: string | null; lastName: string | null; company: string | null; email: string | null } | null
+  recipientRow: { firstName: string | null; lastName: string | null; company: string | null; email: string | null } | null | undefined,
+  ctx: {
+    senderCustomerName: string
+    senderIdentity: { displayName: string | null; emailAddress: string | null }
+  }
 ): string | null {
   if (!subjectTemplate || !subjectTemplate.trim()) return null
-  const vars = {
-    firstName: recipientRow?.firstName ?? '',
-    lastName: recipientRow?.lastName ?? '',
-    company: recipientRow?.company ?? '',
-    companyName: recipientRow?.company ?? '',
-    email: recipientRow?.email ?? recipientEmail,
-    jobTitle: '',
-    title: '',
-    phone: '',
-  }
+  const vars = buildTemplateVariablesForSend({
+    recipientEmail,
+    target: {
+      firstName: recipientRow?.firstName,
+      lastName: recipientRow?.lastName,
+      companyName: recipientRow?.company,
+      jobTitle: null,
+      website: null,
+    },
+    senderCustomer: { name: ctx.senderCustomerName },
+    senderIdentity: {
+      displayName: ctx.senderIdentity.displayName,
+      emailAddress: ctx.senderIdentity.emailAddress,
+      signatureHtml: null,
+    },
+    unsubscribeLink: null,
+  })
   const subject = applyTemplatePlaceholders(subjectTemplate, vars).trim()
   return subject || null
 }
@@ -1699,6 +1711,11 @@ router.get('/launch-preview', async (req: Request, res: Response) => {
       return
     }
 
+    const customerRecord = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true },
+    })
+
     const [readiness, gateData, manualLiveGate, enrollmentRows] = await Promise.all([
       getSequenceReadinessSnapshot(customerId, sequenceId, sinceHours),
       getLiveGatesSnapshot(customerId, sinceHours),
@@ -1775,7 +1792,7 @@ router.get('/launch-preview', async (req: Request, res: Response) => {
     const senderIdentity = sequence.senderIdentityId
       ? await prisma.emailIdentity.findFirst({
           where: { id: sequence.senderIdentityId, customerId },
-          select: { id: true, emailAddress: true },
+          select: { id: true, emailAddress: true, displayName: true },
         })
       : null
     const stepRows = await prisma.emailSequenceStep.findMany({
@@ -1802,7 +1819,13 @@ router.get('/launch-preview', async (req: Request, res: Response) => {
       const recipientKey = `${row.enrollmentId}::${row.recipientEmail}`
       const recipient = recipientByKey.get(recipientKey)
       const stepOrder = row.stepIndex + 1
-      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient)
+      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient, {
+        senderCustomerName: customerRecord?.name ?? '',
+        senderIdentity: {
+          displayName: senderIdentity?.displayName ?? null,
+          emailAddress: senderIdentity?.emailAddress ?? null,
+        },
+      })
       const enrollment = enrollmentById.get(row.enrollmentId)
       return {
         queueItemId: row.id,
@@ -2142,6 +2165,11 @@ router.get('/preview-vs-outcome', async (req: Request, res: Response) => {
       return
     }
 
+    const customerRecord = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true },
+    })
+
     const [enrollmentRows, senderIdentity, stepRows] = await Promise.all([
       prisma.enrollment.findMany({
         where: { customerId, sequenceId },
@@ -2233,7 +2261,13 @@ router.get('/preview-vs-outcome', async (req: Request, res: Response) => {
       const recipientKey = `${row.enrollmentId}::${row.recipientEmail}`
       const recipient = recipientByKey.get(recipientKey)
       const stepOrder = row.stepIndex + 1
-      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient)
+      const subjectPreview = buildLaunchSubjectPreview(stepSubjectByOrder.get(stepOrder), row.recipientEmail, recipient, {
+        senderCustomerName: customerRecord?.name ?? '',
+        senderIdentity: {
+          displayName: senderIdentity?.displayName ?? null,
+          emailAddress: senderIdentity?.emailAddress ?? null,
+        },
+      })
       const enrollment = enrollmentById.get(row.enrollmentId)
       return {
         queueItemId: row.id,
