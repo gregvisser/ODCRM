@@ -33,6 +33,11 @@ export type TemplateVariables = {
   email_signature?: string | null;
   senderSignature?: string | null;
   sender_signature?: string | null;
+  /** Sending tenant / client org (not the recipient's company) */
+  sender_company_name?: string | null;
+  senderCompanyName?: string | null;
+  client_name?: string | null;
+  clientName?: string | null;
 };
 
 const PREVIEW_TEMPLATE_DEFAULTS: TemplateVariables = {
@@ -46,6 +51,7 @@ const PREVIEW_TEMPLATE_DEFAULTS: TemplateVariables = {
   website: 'https://acme.example',
   sender_name: 'Jordan Reed',
   sender_email: 'jordan@opendoors.example',
+  sender_company_name: 'Sample Client Ltd',
   unsubscribe_link: 'https://example.com/unsubscribe',
   email_signature:
     '<div><strong>{{sender_name}}</strong><br/><a href="mailto:{{sender_email}}">{{sender_email}}</a><br/><a href="{{unsubscribe_link}}">Unsubscribe</a></div>',
@@ -62,6 +68,10 @@ const SUPPORTED_PLACEHOLDER_KEYS = [
   'website',
   'sender_name',
   'sender_email',
+  'sender_company_name',
+  'senderCompanyName',
+  'client_name',
+  'clientName',
   'unsubscribe_link',
   'email_signature',
   'email',
@@ -123,6 +133,12 @@ function getCanonicalPlaceholderValue(key: SupportedPlaceholderKey, vars: Templa
   const role = getFirstNonEmpty(vars.role, vars.jobTitle, vars.title);
   const senderEmail = getFirstNonEmpty(vars.sender_email, vars.senderEmail);
   const senderName = getFirstNonEmpty(vars.sender_name, vars.senderName, senderEmail);
+  const senderCompanyName = getFirstNonEmpty(
+    vars.sender_company_name,
+    vars.senderCompanyName,
+    vars.client_name,
+    vars.clientName
+  );
   const unsubscribeLink = getFirstNonEmpty(vars.unsubscribe_link, vars.unsubscribeLink);
   const emailSignature = renderSignatureHtml(vars);
 
@@ -154,6 +170,11 @@ function getCanonicalPlaceholderValue(key: SupportedPlaceholderKey, vars: Templa
     case 'sender_email':
     case 'senderEmail':
       return senderEmail;
+    case 'sender_company_name':
+    case 'senderCompanyName':
+    case 'client_name':
+    case 'clientName':
+      return senderCompanyName;
     case 'unsubscribe_link':
     case 'unsubscribeLink':
       return unsubscribeLink;
@@ -184,6 +205,8 @@ const NORMALIZED_PLACEHOLDER_ALIASES: Record<string, SupportedPlaceholderKey> = 
   website: 'website',
   sendername: 'sender_name',
   senderemail: 'sender_email',
+  sendercompanyname: 'sender_company_name',
+  clientname: 'sender_company_name',
   unsubscribelink: 'unsubscribe_link',
   emailsignature: 'email_signature',
   sendersignature: 'email_signature',
@@ -238,7 +261,9 @@ export function applyTemplatePlaceholders(
 function renderHtmlUnsubscribePlaceholder(template: string, rendered: string, unsubscribeUrl: string): string {
   const marker = '__ODCRM_UNSUBSCRIBE_LINK__'
   const normalizedTemplate = String(template || '')
-  if (!/\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}/.test(normalizedTemplate)) {
+  const hadUnsubscribePlaceholder =
+    /\{\{\s*(unsubscribeLink|unsubscribe_link)\s*\}\}/.test(normalizedTemplate) || normalizedTemplate.includes(marker)
+  if (!hadUnsubscribePlaceholder) {
     return rendered
   }
 

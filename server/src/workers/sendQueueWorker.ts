@@ -10,6 +10,7 @@ import os from 'node:os'
 import { EnrollmentStatus, OutboundSendAttemptDecision, OutboundSendQueueStatus, PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { assertLiveSendAllowed } from '../utils/liveSendGate.js'
@@ -616,23 +617,27 @@ export async function processOne(
       select: { firstName: true, lastName: true, company: true, email: true },
     })
     const unsubscribeUrl = buildEnrollmentUnsubscribeUrl(enrollmentId, recipientEmailNorm)
-    const vars = {
-      firstName: recipientRow?.firstName ?? '',
-      lastName: recipientRow?.lastName ?? '',
-      companyName: recipientRow?.company ?? '',
-      company: recipientRow?.company ?? '',
-      accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
-      email: recipientEmail,
-      role: '',
-      jobTitle: '',
-      title: '',
-      phone: '',
-      website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
-      senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-      senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
+    const vars = buildTemplateVariablesForSend({
+      recipientEmail,
+      target: {
+        firstName: recipientRow?.firstName,
+        lastName: recipientRow?.lastName,
+        companyName: recipientRow?.company,
+        jobTitle: null,
+        website: null,
+      },
+      senderCustomer: {
+        name: enrollment.customer?.name ?? '',
+        website: enrollment.customer?.website,
+        domain: enrollment.customer?.domain,
+      },
+      senderIdentity: {
+        displayName: enrollment.sequence?.senderIdentity?.displayName,
+        emailAddress: enrollment.sequence?.senderIdentity?.emailAddress,
+        signatureHtml: enrollment.sequence?.senderIdentity?.signatureHtml,
+      },
       unsubscribeLink: unsubscribeUrl,
-      emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
-    }
+    })
     const textVars = { ...vars, emailSignature: '', senderSignature: '' }
     subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
     htmlBody = applyTemplatePlaceholdersHtml(step.bodyTemplateHtml, vars)

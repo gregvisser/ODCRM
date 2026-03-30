@@ -18,6 +18,7 @@ import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { EnrollmentStatus, OutboundSendQueueStatus, Prisma } from '@prisma/client'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 
@@ -850,22 +851,27 @@ router.get('/:enrollmentId/steps/:stepIndex/render', async (req: Request, res: R
             select: { firstName: true, lastName: true, company: true, email: true },
           })
         : null
-      const vars = {
-        firstName: recipientRow?.firstName ?? '',
-        lastName: recipientRow?.lastName ?? '',
-        company: recipientRow?.company ?? '',
-        companyName: recipientRow?.company ?? '',
-        accountName: recipientRow?.company ?? enrollment.customer?.name ?? '',
-        email: recipientEmail,
-        role: '',
-        jobTitle: '',
-        title: '',
-        phone: '',
-        website: enrollment.customer?.website ?? enrollment.customer?.domain ?? '',
-        senderName: enrollment.sequence?.senderIdentity?.displayName ?? enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-        senderEmail: enrollment.sequence?.senderIdentity?.emailAddress ?? '',
-        emailSignature: enrollment.sequence?.senderIdentity?.signatureHtml ?? '',
-      }
+      const vars = buildTemplateVariablesForSend({
+        recipientEmail,
+        target: {
+          firstName: recipientRow?.firstName,
+          lastName: recipientRow?.lastName,
+          companyName: recipientRow?.company,
+          jobTitle: null,
+          website: null,
+        },
+        senderCustomer: {
+          name: enrollment.customer?.name ?? '',
+          website: enrollment.customer?.website,
+          domain: enrollment.customer?.domain,
+        },
+        senderIdentity: {
+          displayName: enrollment.sequence?.senderIdentity?.displayName,
+          emailAddress: enrollment.sequence?.senderIdentity?.emailAddress,
+          signatureHtml: enrollment.sequence?.senderIdentity?.signatureHtml,
+        },
+        unsubscribeLink: null,
+      })
       subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
       bodyHtml = applyTemplatePlaceholders(step.bodyTemplateHtml, vars)
     }

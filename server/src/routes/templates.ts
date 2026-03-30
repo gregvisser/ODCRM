@@ -17,6 +17,7 @@ import {
   previewTemplate,
   type TemplateVariables,
 } from '../services/templateRenderer.js';
+import { resolvePreviewTemplateVariables } from '../services/templatePlaceholderContext.js';
 import { tweakEmailWithAI, analyzeEmailTemplate, generateEmailVariations } from '../services/aiEmailService.js';
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js';
 
@@ -163,9 +164,9 @@ router.post('/preview', async (req, res) => {
     let previewVariables: TemplateVariables | null = null
 
     if (variables || customerId) {
-      const requestedVariables =
+      const requestedVariables: Record<string, unknown> =
         variables && typeof variables === 'object' && !Array.isArray(variables)
-          ? variables
+          ? (variables as Record<string, unknown>)
           : {}
 
       const [customer, identities] = await Promise.all([
@@ -194,87 +195,20 @@ router.post('/preview', async (req, res) => {
         identities[0] ||
         null
 
-      const customerName = customer?.name || undefined
-      const customerWebsite = customer?.website || customer?.domain || undefined
       const senderName = previewIdentity
         ? previewIdentity.displayName || previewIdentity.emailAddress
         : undefined
       const senderEmail = previewIdentity?.emailAddress || undefined
       const signatureHtml = previewIdentity?.signatureHtml?.trim() || undefined
 
-      previewVariables = buildPreviewTemplateVariables({
-        ...requestedVariables,
-        first_name:
-          requestedVariables.first_name ||
-          requestedVariables.firstName ||
-          requestedVariables.full_name ||
-          requestedVariables.fullName ||
-          undefined,
-        last_name:
-          requestedVariables.last_name ||
-          requestedVariables.lastName ||
-          undefined,
-        full_name:
-          requestedVariables.full_name ||
-          requestedVariables.fullName ||
-          undefined,
-        company_name:
-          requestedVariables.company_name ||
-          requestedVariables.companyName ||
-          requestedVariables.company ||
-          requestedVariables.accountName ||
-          customerName,
-        companyName:
-          requestedVariables.companyName ||
-          requestedVariables.company_name ||
-          requestedVariables.company ||
-          requestedVariables.accountName ||
-          customerName,
-        company:
-          requestedVariables.company ||
-          requestedVariables.companyName ||
-          requestedVariables.company_name ||
-          requestedVariables.accountName ||
-          customerName,
-        accountName:
-          requestedVariables.accountName ||
-          requestedVariables.company ||
-          requestedVariables.companyName ||
-          requestedVariables.company_name ||
-          customerName,
-        website: requestedVariables.website || customerWebsite,
-        sender_name: senderName || requestedVariables.sender_name || requestedVariables.senderName || undefined,
-        senderName: senderName || requestedVariables.senderName || requestedVariables.sender_name || undefined,
-        sender_email: senderEmail || requestedVariables.sender_email || requestedVariables.senderEmail || undefined,
-        senderEmail: senderEmail || requestedVariables.senderEmail || requestedVariables.sender_email || undefined,
-        email_signature:
-          signatureHtml ||
-          requestedVariables.email_signature ||
-          requestedVariables.emailSignature ||
-          requestedVariables.sender_signature ||
-          requestedVariables.senderSignature ||
-          undefined,
-        emailSignature:
-          signatureHtml ||
-          requestedVariables.emailSignature ||
-          requestedVariables.email_signature ||
-          requestedVariables.senderSignature ||
-          requestedVariables.sender_signature ||
-          undefined,
-        sender_signature:
-          signatureHtml ||
-          requestedVariables.sender_signature ||
-          requestedVariables.senderSignature ||
-          requestedVariables.email_signature ||
-          requestedVariables.emailSignature ||
-          undefined,
-        senderSignature:
-          signatureHtml ||
-          requestedVariables.senderSignature ||
-          requestedVariables.sender_signature ||
-          requestedVariables.emailSignature ||
-          requestedVariables.email_signature ||
-          undefined,
+      previewVariables = resolvePreviewTemplateVariables({
+        requestedVariables,
+        senderCustomer: customer
+          ? { name: customer.name, website: customer.website, domain: customer.domain }
+          : null,
+        senderName: senderName ?? undefined,
+        senderEmail: senderEmail ?? undefined,
+        signatureHtml: signatureHtml ?? undefined,
       })
     }
 

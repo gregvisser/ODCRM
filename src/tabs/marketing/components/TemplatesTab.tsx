@@ -84,16 +84,22 @@ type Customer = {
   name: string
 }
 
-const TEMPLATE_PLACEHOLDER_HELP = [
-  'email_signature',
+const TEMPLATE_PLACEHOLDER_TARGET = [
   'first_name',
   'last_name',
   'full_name',
   'company_name',
   'role',
   'website',
+  'email',
+  'phone',
+] as const
+
+const TEMPLATE_PLACEHOLDER_SENDER = [
   'sender_name',
   'sender_email',
+  'sender_company_name',
+  'email_signature',
   'unsubscribe_link',
 ] as const
 
@@ -389,6 +395,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         subject: template.subject,
         body: toHtmlBody(template.content),
         variables: {
+          email: 'alex.taylor@acme.example',
           first_name: 'Alex',
           last_name: 'Taylor',
           full_name: 'Alex Taylor',
@@ -1059,15 +1066,27 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
 
                     <Box border="1px solid" borderColor="gray.200" borderRadius="md" bg="white" p={3}>
                       <Text fontSize="sm" fontWeight="semibold">Supported placeholders</Text>
-                      <Flex mt={2} gap={2} wrap="wrap">
-                        {TEMPLATE_PLACEHOLDER_HELP.map((token) => (
+                      <Text mt={1} fontSize="xs" color="gray.600">
+                        Recipient and company fields resolve from the target contact or company. Sender fields resolve from the sending mailbox and client. Manual test recipients without a saved contact use values derived from the test email address.
+                      </Text>
+                      <Text mt={2} fontSize="xs" fontWeight="semibold" color="gray.700">Target recipient / company</Text>
+                      <Flex mt={1} gap={2} wrap="wrap">
+                        {TEMPLATE_PLACEHOLDER_TARGET.map((token) => (
                           <Tag key={token} size="sm" variant="subtle" colorScheme="blue">
                             <TagLabel>{`{{${token}}}`}</TagLabel>
                           </Tag>
                         ))}
                       </Flex>
+                      <Text mt={2} fontSize="xs" fontWeight="semibold" color="gray.700">Sender / client</Text>
+                      <Flex mt={1} gap={2} wrap="wrap">
+                        {TEMPLATE_PLACEHOLDER_SENDER.map((token) => (
+                          <Tag key={token} size="sm" variant="subtle" colorScheme="purple">
+                            <TagLabel>{`{{${token}}}`}</TagLabel>
+                          </Tag>
+                        ))}
+                      </Flex>
                       <Text mt={2} fontSize="xs" color="gray.600">
-                        Use {`{{email_signature}}`} to insert the sending signature. Existing camelCase placeholders still work.
+                        {`{{sender_company_name}}`} is the sending client organization. {`{{company_name}}`} is the target company — not your client name. CamelCase aliases (e.g. firstName) still work.
                       </Text>
                     </Box>
                   </VStack>

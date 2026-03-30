@@ -2,6 +2,7 @@ import cron from 'node-cron'
 import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
 // Unique instance ID for multi-instance environments (Azure, scaling)
@@ -525,24 +526,29 @@ async function sendCampaignEmail(
     }
 
     // Render template
-    const variables = {
-      firstName: prospect.contact.firstName,
-      lastName: prospect.contact.lastName,
-      fullName: `${prospect.contact.firstName || ''} ${prospect.contact.lastName || ''}`.trim(),
-      company: prospect.contact.companyName,
-      companyName: prospect.contact.companyName,
-      accountName: prospect.contact.companyName || campaign.customer.name,
-      email: prospect.contact.email,
-      role: prospect.contact.jobTitle,
-      jobTitle: prospect.contact.jobTitle,
-      title: prospect.contact.jobTitle,
-      phone: prospect.contact.phone || '',
-      senderName: campaign.senderIdentity.displayName || campaign.senderIdentity.emailAddress,
-      senderEmail: campaign.senderIdentity.emailAddress,
-      website: campaign.customer.website || campaign.customer.domain || '',
+    const variables = buildTemplateVariablesForSend({
+      recipientEmail: prospect.contact.email,
+      target: {
+        firstName: prospect.contact.firstName,
+        lastName: prospect.contact.lastName,
+        fullName: `${prospect.contact.firstName || ''} ${prospect.contact.lastName || ''}`.trim(),
+        companyName: prospect.contact.companyName,
+        jobTitle: prospect.contact.jobTitle,
+        website: null,
+        phone: prospect.contact.phone,
+      },
+      senderCustomer: {
+        name: campaign.customer.name,
+        website: campaign.customer.website,
+        domain: campaign.customer.domain,
+      },
+      senderIdentity: {
+        displayName: campaign.senderIdentity.displayName,
+        emailAddress: campaign.senderIdentity.emailAddress,
+        signatureHtml: campaign.senderIdentity.signatureHtml,
+      },
       unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
-      emailSignature: campaign.senderIdentity.signatureHtml || '',
-    }
+    })
     const textVariables = { ...variables, emailSignature: '', senderSignature: '' }
     
     const renderedHtml = applyTemplatePlaceholdersHtml(template.bodyTemplateHtml, variables)

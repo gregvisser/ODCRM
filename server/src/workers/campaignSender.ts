@@ -12,6 +12,7 @@
 
 import { PrismaClient } from '@prisma/client'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { sendEmail as sendEmailForOutbound } from '../services/outlookEmailService.js'
 import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
 
@@ -334,63 +335,40 @@ export async function processSequenceBasedCampaigns(
           continue
         }
 
-        // Apply template placeholders
-        const subject = applyTemplatePlaceholders(step.subjectTemplate, {
-          firstName: contact.firstName,
-          lastName: contact.lastName,
-          fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-          company: contact.companyName,
-          companyName: contact.companyName,
-          accountName: contact.companyName || campaign.customer?.name || '',
-          email: contact.email,
-          role: contact.jobTitle || '',
-          jobTitle: contact.jobTitle || '',
-          title: contact.jobTitle || '',
-          phone: contact.phone || '',
-          website: campaign.customer?.website || campaign.customer?.domain || '',
-          senderName: identity.displayName || identity.emailAddress,
-          senderEmail: identity.emailAddress,
+        const vars = buildTemplateVariablesForSend({
+          recipientEmail: contact.email,
+          target: {
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+            companyName: contact.companyName,
+            jobTitle: contact.jobTitle,
+            website: null,
+            phone: contact.phone,
+          },
+          senderCustomer: {
+            name: campaign.customer?.name ?? '',
+            website: campaign.customer?.website,
+            domain: campaign.customer?.domain,
+          },
+          senderIdentity: {
+            displayName: identity.displayName,
+            emailAddress: identity.emailAddress,
+            signatureHtml: identity.signatureHtml,
+          },
           unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
-          emailSignature: identity.signatureHtml || '',
         })
 
-        const bodyHtml = applyTemplatePlaceholdersHtml(step.bodyTemplateHtml, {
-          firstName: contact.firstName,
-          lastName: contact.lastName,
-          fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-          company: contact.companyName,
-          companyName: contact.companyName,
-          accountName: contact.companyName || campaign.customer?.name || '',
-          email: contact.email,
-          role: contact.jobTitle || '',
-          jobTitle: contact.jobTitle || '',
-          title: contact.jobTitle || '',
-          phone: contact.phone || '',
-          website: campaign.customer?.website || campaign.customer?.domain || '',
-          senderName: identity.displayName || identity.emailAddress,
-          senderEmail: identity.emailAddress,
-          unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
-          emailSignature: identity.signatureHtml || '',
-        })
+        const subject = applyTemplatePlaceholders(step.subjectTemplate, vars)
+
+        const bodyHtml = applyTemplatePlaceholdersHtml(step.bodyTemplateHtml, vars)
 
         const bodyText = step.bodyTemplateText
           ? applyTemplatePlaceholders(step.bodyTemplateText, {
-              firstName: contact.firstName,
-              lastName: contact.lastName,
-              fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
-              company: contact.companyName,
-              companyName: contact.companyName,
-              accountName: contact.companyName || campaign.customer?.name || '',
-              email: contact.email,
-              role: contact.jobTitle || '',
-              jobTitle: contact.jobTitle || '',
-              title: contact.jobTitle || '',
-              phone: contact.phone || '',
-              website: campaign.customer?.website || campaign.customer?.domain || '',
-              senderName: identity.displayName || identity.emailAddress,
-              senderEmail: identity.emailAddress,
-              unsubscribeLink: buildCampaignUnsubscribeUrl(prospect.id),
+              ...vars,
               emailSignature: '',
+              senderSignature: '',
+              email_signature: '',
             })
           : undefined
         const enforced = enforceUnsubscribeFooter(bodyHtml, bodyText, buildCampaignUnsubscribeUrl(prospect.id))

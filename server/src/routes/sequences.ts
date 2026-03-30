@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
 import { buildSequenceDeleteBlockerDetails } from '../lib/sequenceDeleteBlockers.js'
 import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
+import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { requireCustomerId } from '../utils/tenantId.js'
 import { listEnrollmentsForSequence, createEnrollmentForSequence } from './enrollments.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
@@ -871,6 +872,11 @@ router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
       return res.status(400).json({ error: 'Sender identity does not belong to this customer' })
     }
 
+    const customerRecord = await prisma.customer.findUnique({
+      where: { id: customerId },
+      select: { name: true, website: true, domain: true },
+    })
+
     // 3. Verify sequence has at least one valid step
     if (!Array.isArray(sequence.steps) || sequence.steps.length === 0) {
       return res.status(400).json({ error: 'Sequence has no steps' })
@@ -972,21 +978,28 @@ router.post('/:id/dry-run', requireMarketingMutationAuth, async (req, res) => {
       }
 
       // Compute per-step schedule using cumulative delayDaysFromPrevious
-      const vars = {
-        firstName: contact.firstName,
-        lastName: contact.lastName,
-        company: contact.companyName,
-        companyName: contact.companyName,
-        accountName: contact.companyName,
-        email: contact.email,
-        role: contact.jobTitle,
-        jobTitle: contact.jobTitle,
-        title: contact.jobTitle,
-        phone: null,
-        senderName: identity.displayName ?? identity.emailAddress,
-        senderEmail: identity.emailAddress,
-        emailSignature: identity.signatureHtml ?? '',
-      }
+      const vars = buildTemplateVariablesForSend({
+        recipientEmail: contact.email,
+        target: {
+          firstName: contact.firstName,
+          lastName: contact.lastName,
+          fullName: `${contact.firstName || ''} ${contact.lastName || ''}`.trim(),
+          companyName: contact.companyName,
+          jobTitle: contact.jobTitle,
+          website: null,
+        },
+        senderCustomer: {
+          name: customerRecord?.name ?? '',
+          website: customerRecord?.website,
+          domain: customerRecord?.domain,
+        },
+        senderIdentity: {
+          displayName: identity.displayName,
+          emailAddress: identity.emailAddress,
+          signatureHtml: identity.signatureHtml,
+        },
+        unsubscribeLink: null,
+      })
 
       let cumulativeDays = 0
       const steps = sequence.steps.map(step => {
