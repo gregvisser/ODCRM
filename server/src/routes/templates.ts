@@ -19,6 +19,7 @@ import {
 } from '../services/templateRenderer.js';
 import { resolvePreviewTemplateVariables } from '../services/templatePlaceholderContext.js';
 import { tweakEmailWithAI, analyzeEmailTemplate, generateEmailVariations } from '../services/aiEmailService.js';
+import { aiTweakRequestSchema, templateByIdAiTweakSchema } from '../utils/templateAiTweak.js';
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js';
 
 const router = Router();
@@ -234,18 +235,6 @@ router.post('/preview', async (req, res) => {
 
 // ==================== AI EMAIL TWEAKING ENDPOINTS ====================
 
-const aiTweakSchema = z.object({
-  templateBody: z.string().min(1, 'Template body is required'),
-  templateSubject: z.string().optional(),
-  contactName: z.string().optional(),
-  contactCompany: z.string().optional(),
-  contactTitle: z.string().optional(),
-  contactIndustry: z.string().optional(),
-  tone: z.enum(['professional', 'friendly', 'casual', 'formal', 'persuasive']).default('professional'),
-  instruction: z.string().optional(),
-  preservePlaceholders: z.boolean().default(true),
-})
-
 /**
  * POST /api/templates/ai/tweak
  * Tweak an email template using Gemini AI
@@ -257,13 +246,13 @@ const aiTweakSchema = z.object({
  * - contactCompany (optional): Recipient's company
  * - contactTitle (optional): Recipient's job title
  * - contactIndustry (optional): Recipient's industry
- * - tone (optional): professional | friendly | casual | formal | persuasive
+ * - tone (optional): professional | friendly | casual | formal | persuasive | human_outreach | concise_outreach
  * - instruction (optional): Custom instructions for the AI
  * - preservePlaceholders (optional): Keep {{placeholders}} intact (default: true)
  */
 router.post('/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
   try {
-    const data = aiTweakSchema.parse(req.body)
+    const data = aiTweakRequestSchema.parse(req.body)
     
     const result = await tweakEmailWithAI({
       templateBody: data.templateBody,
@@ -410,8 +399,9 @@ router.post('/:id/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
   try {
     const customerId = getCustomerId(req)
     const { id } = req.params
-    const { saveResult = false, ...tweakOptions } = req.body
-    
+    const parsed = templateByIdAiTweakSchema.parse(req.body ?? {})
+    const saveResult = parsed.saveResult ?? false
+
     // Fetch the template
     const template = await prisma.emailTemplate.findUnique({ where: { id } })
     
@@ -423,11 +413,17 @@ router.post('/:id/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
       return res.status(404).json({ success: false, error: 'Template not found' })
     }
     
-    // Tweak the template
+    // Tweak the template (no req.body spread; explicit fields only)
     const result = await tweakEmailWithAI({
       templateBody: template.bodyTemplateHtml,
       templateSubject: template.subjectTemplate,
-      ...tweakOptions
+      contactName: parsed.contactName,
+      contactCompany: parsed.contactCompany,
+      contactTitle: parsed.contactTitle,
+      contactIndustry: parsed.contactIndustry,
+      tone: parsed.tone ?? 'professional',
+      instruction: parsed.instruction,
+      preservePlaceholders: parsed.preservePlaceholders ?? true,
     })
     
     // Optionally save the result
@@ -459,6 +455,9 @@ router.post('/:id/ai/tweak', requireMarketingMutationAuth, async (req, res) => {
     })
   } catch (error: any) {
     console.error('[AI Tweak Template] Error:', error)
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ success: false, error: 'Validation error', details: error.errors })
+    }
     return res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to tweak template' 

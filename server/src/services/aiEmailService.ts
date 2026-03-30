@@ -7,6 +7,7 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { extractPlaceholders } from './templateRenderer.js'
+import { buildTemplateAiTweakPromptSuffix, type TemplateAiTone } from '../utils/templateAiTweak.js'
 
 export interface AITweakRequest {
   templateBody: string
@@ -15,7 +16,7 @@ export interface AITweakRequest {
   contactCompany?: string
   contactTitle?: string
   contactIndustry?: string
-  tone?: 'professional' | 'friendly' | 'casual' | 'formal' | 'persuasive'
+  tone?: TemplateAiTone
   instruction?: string
   preservePlaceholders?: boolean
 }
@@ -53,7 +54,7 @@ type ProtectedPlaceholderContent = {
   placeholders: string[]
 }
 
-function protectPlaceholders(input: string | undefined): ProtectedPlaceholderContent | null {
+export function protectPlaceholders(input: string | undefined): ProtectedPlaceholderContent | null {
   if (!input) return null
   const placeholders = extractPlaceholders(input)
   if (placeholders.length === 0) {
@@ -70,14 +71,14 @@ function protectPlaceholders(input: string | undefined): ProtectedPlaceholderCon
   return { text: protectedText, original: input, placeholders }
 }
 
-function restorePlaceholders(input: string, placeholders: string[]): string {
+export function restorePlaceholders(input: string, placeholders: string[]): string {
   return placeholders.reduce((output, placeholder, index) => {
     const marker = new RegExp(`\\[\\[ODCRM_TOKEN_${index}\\]\\]`, 'g')
     return output.replace(marker, `{{${placeholder}}}`)
   }, input)
 }
 
-function preservedPlaceholdersMatch(restored: string, expected: string[]): boolean {
+export function preservedPlaceholdersMatch(restored: string, expected: string[]): boolean {
   return expected.every((placeholder) => restored.includes(`{{${placeholder}}}`))
 }
 
@@ -242,7 +243,7 @@ export async function tweakEmailWithAI(request: AITweakRequest): Promise<AITweak
     ? `\n\nRecipient Context:\n${contextParts.join('\n')}`
     : ''
 
-  const toneInstruction = `\nDesired Tone: ${tone}`
+  const toneInstruction = buildTemplateAiTweakPromptSuffix(tone)
   const customInstruction = instruction ? `\n\nSpecial Instructions: ${instruction}` : ''
   const placeholderNote = preservePlaceholders
     ? '\n\nIMPORTANT: Preserve any placeholder markers like [[ODCRM_TOKEN_0]] exactly as they appear.'
@@ -335,8 +336,7 @@ export async function generateEmailVariations(
   templateSubject: string,
   count: number = 3
 ): Promise<Array<{ subject: string; body: string; variant: string }>> {
-  const tones: Array<'professional' | 'friendly' | 'casual' | 'formal' | 'persuasive'> =
-    ['professional', 'friendly', 'persuasive']
+  const tones: TemplateAiTone[] = ['professional', 'friendly', 'persuasive']
 
   const variations = await Promise.all(
     tones.slice(0, count).map(async (tone, index) => {
