@@ -43,6 +43,11 @@ type SenderIdentity = {
   sendWindowHoursStart?: number | null
   sendWindowHoursEnd?: number | null
   sendWindowTimeZone?: string | null
+  warmup?: {
+    effectiveDailySendCap: number
+    warmupStatus: 'paused' | 'active' | 'complete'
+    warmupLimitReason: string | null
+  } | null
 }
 
 type CampaignSchedule = {
@@ -823,6 +828,24 @@ const SchedulesTab: React.FC = () => {
                     <SimpleGrid columns={{ base: 2, md: 2 }} spacing={3}>
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Status</StatLabel><StatNumber fontSize="sm">{selectedOperatorStatus?.label || humanizeStatus(selectedSchedule.status)}</StatNumber></Stat></CardBody></Card>
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Mailbox</StatLabel><StatNumber fontSize="sm">{selectedSchedule.senderIdentity?.emailAddress || 'Not connected'}</StatNumber></Stat></CardBody></Card>
+                      <Card variant="outline">
+                        <CardBody py={3}>
+                          <Stat>
+                            <StatLabel>Effective daily cap</StatLabel>
+                            <StatNumber fontSize="sm">
+                              {selectedSchedule.senderIdentity?.warmup?.effectiveDailySendCap ??
+                                selectedSchedule.senderIdentity?.dailySendLimit ??
+                                '—'}
+                              /day
+                            </StatNumber>
+                          </Stat>
+                          {selectedSchedule.senderIdentity?.warmup?.warmupStatus === 'active' && (
+                            <Text fontSize="xs" color="gray.600" mt={2}>
+                              Warm-up is capping daily volume. Unsubscribe and compliance behavior are unchanged.
+                            </Text>
+                          )}
+                        </CardBody>
+                      </Card>
                       <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Linked sequence</StatLabel><StatNumber fontSize="sm">{selectedSchedule.sequenceName || 'Not linked'}</StatNumber></Stat></CardBody></Card>
                       {selectedSchedule.listName ? (
                         <Card variant="outline"><CardBody py={3}><Stat><StatLabel>Audience</StatLabel><StatNumber fontSize="sm">{selectedSchedule.listName}</StatNumber></Stat></CardBody></Card>

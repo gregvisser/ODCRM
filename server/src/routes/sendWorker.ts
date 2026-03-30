@@ -22,7 +22,7 @@ import { applyTemplatePlaceholders } from '../services/templateRenderer.js'
 import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { processOne } from '../workers/sendQueueWorker.js'
-import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { resolveEffectiveDailySendCap } from '../utils/emailIdentityLimits.js'
 import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 
 const router = Router()
@@ -485,6 +485,8 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
         provider: true,
         isActive: true,
         dailySendLimit: true,
+        warmupEnabled: true,
+        warmupStartedAt: true,
         sendWindowTimeZone: true,
         sendWindowHoursStart: true,
         sendWindowHoursEnd: true,
@@ -623,7 +625,8 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
       state = state === 'unavailable' ? state : 'risky'
       reasons.push('recent_send_failures_detected')
     }
-    const enforcedDailyLimit = clampDailySendLimit(identity.dailySendLimit)
+    const cap = resolveEffectiveDailySendCap(identity)
+    const enforcedDailyLimit = cap.effectiveCap
     if (enforcedDailyLimit > 0 && stats.sent >= enforcedDailyLimit) {
       state = state === 'unavailable' ? state : 'risky'
       reasons.push('daily_limit_reached_in_window')
@@ -653,6 +656,10 @@ async function getIdentityCapacitySnapshot(customerId: string, sinceHours: numbe
       },
       guardrails: {
         dailySendLimit: enforcedDailyLimit,
+        configuredDailySendLimit: cap.configuredCap,
+        effectiveDailySendCap: cap.effectiveCap,
+        warmupStatus: cap.warmupPublicStatus,
+        warmupLimitReason: cap.warmupLimitReason,
         sendWindowTimeZone: identity.sendWindowTimeZone ?? null,
         sendWindowHoursStart: identity.sendWindowHoursStart ?? null,
         sendWindowHoursEnd: identity.sendWindowHoursEnd ?? null,

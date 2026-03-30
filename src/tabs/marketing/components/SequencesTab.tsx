@@ -694,6 +694,10 @@ const SequencesTab: React.FC = () => {
     }
     guardrails?: {
       dailySendLimit?: number | null
+      configuredDailySendLimit?: number | null
+      effectiveDailySendCap?: number | null
+      warmupStatus?: string | null
+      warmupLimitReason?: string | null
       sendWindowTimeZone?: string | null
       sendWindowHoursStart?: number | null
       sendWindowHoursEnd?: number | null
@@ -5710,7 +5714,13 @@ const SequencesTab: React.FC = () => {
                                         </Td>
                                         <Td fontSize="xs">queuedNow={row.queuePressure?.queuedNow ?? 0}</Td>
                                         <Td fontSize="xs">
-                                          {row.guardrails?.dailySendLimit ? `dailyCap=${row.guardrails.dailySendLimit}` : 'dailyCap=—'}
+                                          effectiveCap=
+                                          {row.guardrails?.effectiveDailySendCap ?? row.guardrails?.dailySendLimit ?? '—'}
+                                          {row.guardrails?.configuredDailySendLimit != null &&
+                                          row.guardrails.configuredDailySendLimit !== row.guardrails.effectiveDailySendCap
+                                            ? ` (configured ${row.guardrails.configuredDailySendCap})`
+                                            : ''}
+                                          {row.guardrails?.warmupStatus === 'active' ? ' · warm-up' : ''}
                                           <br />
                                           {row.guardrails?.sendWindowTimeZone ? `${row.guardrails.sendWindowTimeZone} ${row.guardrails.sendWindowHoursStart ?? '—'}-${row.guardrails.sendWindowHoursEnd ?? '—'}` : 'window=—'}
                                         </Td>

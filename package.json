@@ -74,6 +74,7 @@
     "test:send-queue-drawer-reset": "node scripts/self-test-send-queue-drawer-reset.mjs",
     "test:send-queue-details-helper": "node scripts/self-test-send-queue-details-helper.mjs",
     "test:schedules-routes": "node scripts/self-test-schedules-routes.mjs",
+    "test:mailbox-warmup-cap": "cd server && npx tsx tests/mailbox-warmup-cap.test.ts",
     "test:inbox-routes": "node scripts/self-test-inbox-routes.mjs",
     "test:marketing-tab-operator-smoke": "node scripts/self-test-marketing-tab-operator-smoke.mjs",
     "test:marketing-runtime-smoke": "node scripts/self-test-marketing-runtime-smoke.mjs",

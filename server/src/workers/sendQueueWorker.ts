@@ -14,7 +14,7 @@ import { buildTemplateVariablesForSend } from '../services/templatePlaceholderCo
 import { requeueDryRun, requeueAfterSendFailure, DRY_RUN_DEFAULT_REASON, LIVE_SEND_CAP } from '../utils/sendQueue.js'
 import { runSendWorkerDryRunBatch } from '../utils/sendWorkerDryRun.js'
 import { assertLiveSendAllowed } from '../utils/liveSendGate.js'
-import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { resolveEffectiveDailySendCap } from '../utils/emailIdentityLimits.js'
 import { isLiveSendingEnabled, isSendQueueSendingEnabled } from '../utils/liveSendRuntime.js'
 
 const WORKER_ID = `sq-${os.hostname()}-${process.pid}`
@@ -355,6 +355,8 @@ export async function processOne(
               sendWindowHoursStart: true,
               sendWindowHoursEnd: true,
               dailySendLimit: true,
+              warmupEnabled: true,
+              warmupStartedAt: true,
             },
           },
         },
@@ -546,8 +548,24 @@ export async function processOne(
       return 'skipped'
     }
   }
-  // Respect mailbox throughput guardrails before attempting a live send.
-  const dailyLimit = clampDailySendLimit((enrollment.sequence?.senderIdentity as any)?.dailySendLimit)
+  // Respect mailbox throughput guardrails before attempting a live send (configured + platform + warm-up ramp).
+  const idRow = enrollment.sequence?.senderIdentity as
+    | {
+        id: string
+        dailySendLimit: number
+        warmupEnabled: boolean
+        warmupStartedAt: Date | null
+      }
+    | null
+    | undefined
+  const resolvedCap = idRow
+    ? resolveEffectiveDailySendCap({
+        dailySendLimit: idRow.dailySendLimit,
+        warmupEnabled: idRow.warmupEnabled,
+        warmupStartedAt: idRow.warmupStartedAt,
+      })
+    : null
+  const dailyLimit = resolvedCap?.effectiveCap ?? 0
   const nowUtc = now
   if (dailyLimit > 0) {
     const startOfUtcDay = new Date(Date.UTC(nowUtc.getUTCFullYear(), nowUtc.getUTCMonth(), nowUtc.getUTCDate(), 0, 0, 0, 0))
@@ -566,7 +584,16 @@ export async function processOne(
           recipientEmail,
           eventType: 'send_skipped',
           message: 'rate_limited',
-          meta: { reason: 'daily_cap_reached', stepIndex, identityId: identity.id, sentToday, dailyLimit },
+          meta: {
+            reason: 'daily_cap_reached',
+            stepIndex,
+            identityId: identity.id,
+            sentToday,
+            dailyLimit,
+            effectiveDailySendCap: dailyLimit,
+            warmupLimited: Boolean(resolvedCap?.warmupLimitReason),
+            warmupLimitReason: resolvedCap?.warmupLimitReason ?? null,
+          },
         },
       })
       await unlockItem(prisma, item.id, OutboundSendQueueStatus.QUEUED, 'daily_cap_reached')

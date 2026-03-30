@@ -2,7 +2,11 @@ import express from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
 import { z } from 'zod'
-import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
+import {
+  buildWarmupCapPayload,
+  clampDailySendLimit,
+  MAX_DAILY_SEND_LIMIT_PER_IDENTITY,
+} from '../utils/emailIdentityLimits.js'
 
 const router = express.Router()
 const CampaignStatusValues = ['draft', 'running', 'paused', 'completed'] as const
@@ -63,6 +67,8 @@ router.get('/', async (req, res, next) => {
             emailAddress: true,
             displayName: true,
             dailySendLimit: true,
+            warmupEnabled: true,
+            warmupStartedAt: true,
             sendWindowHoursStart: true,
             sendWindowHoursEnd: true,
             sendWindowTimeZone: true,
@@ -79,6 +85,8 @@ router.get('/', async (req, res, next) => {
                 emailAddress: true,
                 displayName: true,
                 dailySendLimit: true,
+                warmupEnabled: true,
+                warmupStartedAt: true,
               },
             },
           },
@@ -136,12 +144,14 @@ router.get('/', async (req, res, next) => {
         ? {
             ...campaign.senderIdentity,
             dailySendLimit: clampDailySendLimit(campaign.senderIdentity.dailySendLimit),
+            warmup: buildWarmupCapPayload(campaign.senderIdentity),
           }
         : null,
       sequenceSenderIdentity: campaign.sequence?.senderIdentity
         ? {
             ...campaign.sequence.senderIdentity,
             dailySendLimit: clampDailySendLimit(campaign.sequence.senderIdentity.dailySendLimit),
+            warmup: buildWarmupCapPayload(campaign.sequence.senderIdentity),
           }
         : null,
       mailboxMismatch:
@@ -303,6 +313,8 @@ router.get('/:id/stats', async (req, res, next) => {
             id: true,
             emailAddress: true,
             dailySendLimit: true,
+            warmupEnabled: true,
+            warmupStartedAt: true,
           },
         },
         _count: {
@@ -358,6 +370,7 @@ router.get('/:id/stats', async (req, res, next) => {
         })
       : 0
 
+    const warmup = campaign.senderIdentity ? buildWarmupCapPayload(campaign.senderIdentity) : null
     res.json({
       campaignId: id,
       status: campaign.status,
@@ -368,8 +381,14 @@ router.get('/:id/stats', async (req, res, next) => {
       nextScheduledAt,
       sentSends: sentCount,
       todaySent: todaySentCount,
-      dailyLimit: clampDailySendLimit(campaign.senderIdentity?.dailySendLimit),
-      senderIdentity: campaign.senderIdentity,
+      dailyLimit: warmup?.effectiveDailySendCap ?? clampDailySendLimit(campaign.senderIdentity?.dailySendLimit),
+      senderIdentity: campaign.senderIdentity
+        ? {
+            ...campaign.senderIdentity,
+            dailySendLimit: clampDailySendLimit(campaign.senderIdentity.dailySendLimit),
+            warmup,
+          }
+        : null,
     })
   } catch (error) {
     next(error)

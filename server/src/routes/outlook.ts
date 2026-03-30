@@ -2,7 +2,11 @@ import express from 'express'
 import { randomUUID } from 'crypto'
 import { prisma } from '../lib/prisma.js'
 import { requireMarketingMutationAuth } from '../middleware/marketingMutationAuth.js'
-import { clampDailySendLimit, MAX_DAILY_SEND_LIMIT_PER_IDENTITY } from '../utils/emailIdentityLimits.js'
+import {
+  buildWarmupCapPayload,
+  clampDailySendLimit,
+  MAX_DAILY_SEND_LIMIT_PER_IDENTITY,
+} from '../utils/emailIdentityLimits.js'
 import { testSmtpConnection, validateSmtpIdentityUpsertPayload } from '../services/smtpMailer.js'
 
 const router = express.Router()
@@ -624,7 +628,9 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
       smtpPassword,
       smtpSecure,
       dailySendLimit,
-      isActive
+      isActive,
+      warmupEnabled,
+      warmupStartedAt,
     } = req.body || {}
 
     const resolvedCustomerId = customerId || getCustomerId(req)
@@ -638,6 +644,28 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
 
     if (!smtpHost || !smtpUsername || !smtpPassword) {
       return res.status(400).json({ error: 'SMTP host, username, and password are required' })
+    }
+
+    let warmupPatch: { warmupEnabled?: boolean; warmupStartedAt?: Date | null } = {}
+    if (warmupEnabled !== undefined) {
+      if (warmupEnabled === true) {
+        let start: Date
+        if (warmupStartedAt != null) {
+          if (typeof warmupStartedAt !== 'string') {
+            return res.status(400).json({ error: 'warmupStartedAt must be an ISO date string or omitted' })
+          }
+          const d = new Date(warmupStartedAt)
+          if (Number.isNaN(d.getTime())) {
+            return res.status(400).json({ error: 'warmupStartedAt must be a valid ISO-8601 date' })
+          }
+          start = d
+        } else {
+          start = new Date()
+        }
+        warmupPatch = { warmupEnabled: true, warmupStartedAt: start }
+      } else {
+        warmupPatch = { warmupEnabled: false, warmupStartedAt: null }
+      }
     }
 
     const emailStr = String(emailAddress).trim()
@@ -686,7 +714,8 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
         smtpPassword,
         smtpSecure: smtpSecure ?? false,
         dailySendLimit: clampDailySendLimit(dailySendLimit),
-        isActive: isActive ?? true
+        isActive: isActive ?? true,
+        ...warmupPatch,
       },
       create: {
         id: randomUUID(),
@@ -700,12 +729,19 @@ router.post('/identities', requireMarketingMutationAuth, async (req, res, next) 
         smtpPassword,
         smtpSecure: smtpSecure ?? false,
         dailySendLimit: clampDailySendLimit(dailySendLimit),
-        isActive: isActive ?? true
+        isActive: isActive ?? true,
+        ...warmupPatch,
       }
     })
 
     res.setHeader('x-odcrm-customer-id', resolvedCustomerId)
-    res.json({ data: identity })
+    res.json({
+      data: {
+        ...identity,
+        dailySendLimit: clampDailySendLimit(identity.dailySendLimit),
+        warmup: buildWarmupCapPayload(identity),
+      },
+    })
   } catch (error) {
     next(error)
   }
@@ -753,6 +789,8 @@ router.get('/identities', async (req, res, next) => {
         sendWindowHoursEnd: true,
         sendWindowTimeZone: true,
         createdAt: true,
+        warmupEnabled: true,
+        warmupStartedAt: true,
         // Delegated OAuth health (do not return tokens; only booleans)
         refreshToken: true,
         tokenExpiresAt: true,
@@ -775,6 +813,7 @@ router.get('/identities', async (req, res, next) => {
         ...i,
         email,
         dailySendLimit: clampDailySendLimit(i.dailySendLimit),
+        warmup: buildWarmupCapPayload(i),
         delegatedReady,
         tokenExpired,
       }
@@ -795,6 +834,8 @@ const PATCH_IDENTITY_WHITELIST = [
   'sendWindowHoursEnd',
   'sendWindowTimeZone',
   'isActive',
+  'warmupEnabled',
+  'warmupStartedAt',
 ] as const
 
 router.patch('/identities/:id', requireMarketingMutationAuth, async (req, res, next) => {
@@ -811,20 +852,65 @@ router.patch('/identities/:id', requireMarketingMutationAuth, async (req, res, n
     }
 
     const identity = await prisma.emailIdentity.findFirst({
-      where: { id, customerId }
+      where: { id, customerId },
     })
 
     if (!identity) {
       return res.status(404).json({ error: 'Identity not found' })
     }
 
+    if (data.warmupStartedAt !== undefined) {
+      if (data.warmupStartedAt === null) {
+        if (body.warmupEnabled !== false) {
+          return res.status(400).json({
+            error: 'warmupStartedAt_invalid',
+            message: 'Clearing warm-up start requires warmupEnabled: false in the same request.',
+          })
+        }
+      } else if (typeof data.warmupStartedAt === 'string') {
+        const d = new Date(data.warmupStartedAt)
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({
+            error: 'warmupStartedAt_invalid',
+            message: 'warmupStartedAt must be a valid ISO-8601 date string',
+          })
+        }
+        data.warmupStartedAt = d
+      } else {
+        return res.status(400).json({ error: 'warmupStartedAt_invalid' })
+      }
+    }
+
+    if (data.warmupEnabled !== undefined) {
+      data.warmupEnabled = Boolean(data.warmupEnabled)
+    }
+
+    if (body.warmupEnabled === true && body.warmupStartedAt === null) {
+      return res.status(400).json({
+        error: 'warmupStartedAt_invalid',
+        message: 'Cannot clear warm-up start date while enabling warm-up. Omit warmupStartedAt to default the start to now.',
+      })
+    }
+
+    if (data.warmupEnabled === true && identity.warmupStartedAt == null && data.warmupStartedAt === undefined) {
+      data.warmupStartedAt = new Date()
+    }
+
     const updated = await prisma.emailIdentity.update({
       where: { id },
-      data: data as any
+      data: data as any,
     })
 
+    const email = String(updated.emailAddress || '').trim().toLowerCase()
     res.setHeader('x-odcrm-customer-id', customerId)
-    res.json({ data: updated })
+    res.json({
+      data: {
+        ...updated,
+        email,
+        dailySendLimit: clampDailySendLimit(updated.dailySendLimit),
+        warmup: buildWarmupCapPayload(updated),
+      },
+    })
   } catch (error) {
     next(error)
   }

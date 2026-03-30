@@ -50,6 +50,7 @@ import {
   Spinner,
   NumberInput,
   NumberInputField,
+  Switch,
 } from '@chakra-ui/react'
 import {
   AddIcon,
@@ -69,6 +70,19 @@ import RequireActiveClient from '../../../components/RequireActiveClient'
 import SmtpEmailIdentityModal from '../../../components/SmtpEmailIdentityModal'
 
 // Backend EmailIdentity shape from /api/outlook/identities
+type WarmupPayload = {
+  warmupEnabled: boolean
+  warmupStartedAt: string | null
+  warmupStatus: 'paused' | 'active' | 'complete'
+  daysSinceWarmupStart: number | null
+  configuredDailySendCap: number
+  effectiveDailySendCap: number
+  platformDailySendCap: number
+  warmupRampDailyCap: number | null
+  estimatedWarmupCompleteAt: string | null
+  warmupLimitReason: string | null
+}
+
 type EmailIdentity = {
   id: string
   emailAddress: string
@@ -80,6 +94,7 @@ type EmailIdentity = {
   sendWindowHoursEnd: number
   sendWindowTimeZone: string
   createdAt: string
+  warmup?: WarmupPayload | null
   delegatedReady?: boolean
   tokenExpired?: boolean
   smtpHost?: string | null
@@ -118,6 +133,10 @@ type IdentityCapacityRow = {
   }
   guardrails?: {
     dailySendLimit?: number | null
+    configuredDailySendLimit?: number | null
+    effectiveDailySendCap?: number | null
+    warmupStatus?: string | null
+    warmupLimitReason?: string | null
     sendWindowTimeZone?: string | null
     sendWindowHoursStart?: number | null
     sendWindowHoursEnd?: number | null
@@ -192,7 +211,9 @@ const EmailAccountsTab: React.FC = () => {
   const [error, setError] = useState<string | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const { isOpen: isSmtpOpen, onOpen: onSmtpOpen, onClose: onSmtpClose } = useDisclosure()
-  const [editingIdentity, setEditingIdentity] = useState<EmailIdentity | null>(null)
+  const [editingIdentity, setEditingIdentity] = useState<
+    (EmailIdentity & { warmupStartLocal?: string }) | null
+  >(null)
   const toast = useToast()
   const selectedCustomerIdRef = useRef(selectedCustomerId)
 
@@ -349,7 +370,12 @@ const EmailAccountsTab: React.FC = () => {
   }
 
   const handleEditIdentity = async (identity: EmailIdentity) => {
-    setEditingIdentity({ ...identity, signatureHtml: '' })
+    const start = identity.warmup?.warmupStartedAt
+    const warmupStartLocal =
+      start && !Number.isNaN(Date.parse(start))
+        ? new Date(start).toISOString().slice(0, 16)
+        : ''
+    setEditingIdentity({ ...identity, signatureHtml: '', warmupStartLocal })
     onOpen()
 
     if (!selectedCustomerId) return
@@ -387,15 +413,28 @@ const EmailAccountsTab: React.FC = () => {
       return
     }
 
+    const w = editingIdentity.warmup
+    const warmupEnabledNext = w?.warmupEnabled ?? false
+    const patchBody: Record<string, unknown> = {
+      displayName: editingIdentity.displayName,
+      dailySendLimit: editingIdentity.dailySendLimit,
+      sendWindowHoursStart: editingIdentity.sendWindowHoursStart,
+      sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
+      sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
+      isActive: editingIdentity.isActive,
+      warmupEnabled: warmupEnabledNext,
+    }
+    if (warmupEnabledNext) {
+      if (editingIdentity.warmupStartLocal?.trim()) {
+        const d = new Date(editingIdentity.warmupStartLocal)
+        if (!Number.isNaN(d.getTime())) {
+          patchBody.warmupStartedAt = d.toISOString()
+        }
+      }
+    }
+
     const [settingsResult, signatureResult] = await Promise.all([
-      api.patch(`/api/outlook/identities/${editingIdentity.id}`, {
-        displayName: editingIdentity.displayName,
-        dailySendLimit: editingIdentity.dailySendLimit,
-        sendWindowHoursStart: editingIdentity.sendWindowHoursStart,
-        sendWindowHoursEnd: editingIdentity.sendWindowHoursEnd,
-        sendWindowTimeZone: editingIdentity.sendWindowTimeZone,
-        isActive: editingIdentity.isActive,
-      }, { headers: customerHeaders }),
+      api.patch(`/api/outlook/identities/${editingIdentity.id}`, patchBody, { headers: customerHeaders }),
       api.put(
         `/api/outlook/identities/${editingIdentity.id}/signature`,
         { signatureHtml: editingIdentity.signatureHtml || null },
@@ -825,7 +864,20 @@ const EmailAccountsTab: React.FC = () => {
                         </Td>
                         <Td>
                           <VStack align="start" spacing={0}>
-                            <Text>{identity.dailySendLimit}/day</Text>
+                            <Text>
+                              Effective {identity.warmup?.effectiveDailySendCap ?? identity.dailySendLimit}/day
+                              {identity.warmup?.configuredDailySendCap != null &&
+                                identity.warmup.configuredDailySendCap !== identity.warmup.effectiveDailySendCap && (
+                                  <Text as="span" fontSize="xs" color="gray.600" ml={1}>
+                                    (configured {identity.warmup.configuredDailySendCap})
+                                  </Text>
+                                )}
+                            </Text>
+                            {identity.warmup?.warmupEnabled && identity.warmup.warmupStatus !== 'paused' && (
+                              <Badge size="sm" colorScheme="purple" variant="subtle">
+                                Warm-up: {identity.warmup.warmupStatus === 'complete' ? 'complete' : 'active'}
+                              </Badge>
+                            )}
                             <Text fontSize="xs" color="gray.600">
                               {identity.sendWindowHoursStart}:00 to {identity.sendWindowHoursEnd}:00 {identity.sendWindowTimeZone || 'UTC'}
                             </Text>
@@ -1027,15 +1079,85 @@ const EmailAccountsTab: React.FC = () => {
                   <FormLabel>Daily Send Limit</FormLabel>
                   <NumberInput
                     value={editingIdentity.dailySendLimit}
-                    onChange={(_, val) => setEditingIdentity({...editingIdentity, dailySendLimit: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, val || MAX_DAILY_SEND_LIMIT))})}
+                    onChange={(_, val) =>
+                      setEditingIdentity({
+                        ...editingIdentity,
+                        dailySendLimit: Math.min(MAX_DAILY_SEND_LIMIT, Math.max(1, val || MAX_DAILY_SEND_LIMIT)),
+                        warmup: editingIdentity.warmup
+                          ? {
+                              ...editingIdentity.warmup,
+                              configuredDailySendCap: Math.min(
+                                MAX_DAILY_SEND_LIMIT,
+                                Math.max(1, val || MAX_DAILY_SEND_LIMIT),
+                              ),
+                            }
+                          : editingIdentity.warmup,
+                      })}
                     min={1}
                     max={MAX_DAILY_SEND_LIMIT}
                   >
                     <NumberInputField />
                   </NumberInput>
                   <Text fontSize="xs" color="gray.500" mt={1}>
-                    Strict maximum: {MAX_DAILY_SEND_LIMIT} emails per day for each sending address.
+                    Strict maximum: {MAX_DAILY_SEND_LIMIT} emails per day for each sending address. Effective sends today
+                    may be lower during warm-up (see below).
                   </Text>
+                </FormControl>
+
+                <FormControl>
+                  <Flex align="center" justify="space-between">
+                    <FormLabel mb={0}>Mailbox warm-up (volume ramp)</FormLabel>
+                    <Switch
+                      isChecked={editingIdentity.warmup?.warmupEnabled ?? false}
+                      onChange={(e) => {
+                        const on = e.target.checked
+                        setEditingIdentity({
+                          ...editingIdentity,
+                          warmup: {
+                            warmupEnabled: on,
+                            warmupStartedAt: editingIdentity.warmup?.warmupStartedAt ?? null,
+                            warmupStatus: on ? 'active' : 'paused',
+                            daysSinceWarmupStart: editingIdentity.warmup?.daysSinceWarmupStart ?? null,
+                            configuredDailySendCap: editingIdentity.dailySendLimit,
+                            effectiveDailySendCap: editingIdentity.warmup?.effectiveDailySendCap ?? editingIdentity.dailySendLimit,
+                            platformDailySendCap: MAX_DAILY_SEND_LIMIT,
+                            warmupRampDailyCap: editingIdentity.warmup?.warmupRampDailyCap ?? null,
+                            estimatedWarmupCompleteAt: editingIdentity.warmup?.estimatedWarmupCompleteAt ?? null,
+                            warmupLimitReason: editingIdentity.warmup?.warmupLimitReason ?? null,
+                          },
+                          warmupStartLocal:
+                            on && !editingIdentity.warmupStartLocal
+                              ? new Date().toISOString().slice(0, 16)
+                              : editingIdentity.warmupStartLocal,
+                        })
+                      }}
+                    />
+                  </Flex>
+                  <Text fontSize="xs" color="gray.600" mt={2}>
+                    Gradually limits daily volume for a new mailbox. Does not simulate opens, clicks, or replies. Live
+                    outreach compliance and unsubscribe behavior stay the same.
+                  </Text>
+                  {(editingIdentity.warmup?.warmupEnabled ?? false) && (
+                    <VStack align="stretch" spacing={2} mt={3}>
+                      <FormLabel fontSize="sm">Warm-up start (local)</FormLabel>
+                      <Input
+                        type="datetime-local"
+                        value={editingIdentity.warmupStartLocal ?? ''}
+                        onChange={(ev) => setEditingIdentity({ ...editingIdentity, warmupStartLocal: ev.target.value })}
+                      />
+                      <Text fontSize="xs" color="gray.600">
+                        Status: {editingIdentity.warmup?.warmupStatus ?? '—'} · Effective cap today:{' '}
+                        {editingIdentity.warmup?.effectiveDailySendCap ?? '—'} · Expected max after ramp:{' '}
+                        {MAX_DAILY_SEND_LIMIT}/day (still capped by your configured limit if lower)
+                      </Text>
+                      {editingIdentity.warmup?.warmupLimitReason && (
+                        <Alert status="info" variant="subtle">
+                          <AlertIcon />
+                          <AlertDescription fontSize="xs">{editingIdentity.warmup.warmupLimitReason}</AlertDescription>
+                        </Alert>
+                      )}
+                    </VStack>
+                  )}
                 </FormControl>
 
                 <FormControl>
