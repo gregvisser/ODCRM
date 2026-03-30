@@ -73,6 +73,7 @@ export interface TroubleshootingReportDto {
   status: string
   internalNotes: string | null
   resolutionNotes: string | null
+  archivedAt: string | null
   createdAt: string
   updatedAt: string
   resolvedAt: string | null
@@ -126,6 +127,8 @@ export default function TroubleshootingTab() {
   const [submitting, setSubmitting] = useState(false)
   /** Admin-only: when false, list only own reports (?mine=1) so personal history is not buried under other users' newer items. */
   const [showAllUsersReports, setShowAllUsersReports] = useState(false)
+  /** When true, list archived items only (server-side filter). */
+  const [showArchivedReports, setShowArchivedReports] = useState(false)
 
   const [reportSearchQuery, setReportSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>(FILTER_ALL)
@@ -149,7 +152,10 @@ export default function TroubleshootingTab() {
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true)
-    const qs = isAdmin && !showAllUsersReports ? '?mine=1' : ''
+    const params = new URLSearchParams()
+    if (isAdmin && !showAllUsersReports) params.set('mine', '1')
+    if (showArchivedReports) params.set('archivedOnly', '1')
+    const qs = params.toString() ? `?${params.toString()}` : ''
     const { data, error } = await api.get<TroubleshootingReportDto[]>(
       `/api/settings/troubleshooting${qs}`
     )
@@ -160,7 +166,7 @@ export default function TroubleshootingTab() {
       return
     }
     setReports(Array.isArray(data) ? data : [])
-  }, [toast, isAdmin, showAllUsersReports])
+  }, [toast, isAdmin, showAllUsersReports, showArchivedReports])
 
   useEffect(() => {
     loadMe()
@@ -191,7 +197,7 @@ export default function TroubleshootingTab() {
 
   useEffect(() => {
     setVisibleReportRows(REPORT_HISTORY_PAGE_SIZE)
-  }, [reportSearchQuery, filterStatus, filterType, filterPriority, reports, showAllUsersReports])
+  }, [reportSearchQuery, filterStatus, filterType, filterPriority, reports, showAllUsersReports, showArchivedReports])
 
   const clearReportFilters = () => {
     setReportSearchQuery('')
@@ -347,6 +353,46 @@ export default function TroubleshootingTab() {
         return
       }
       toast({ title: 'Save', status: 'success' })
+      onDetailClose()
+      loadReports()
+    } finally {
+      setSavingAdmin(false)
+    }
+  }
+
+  const archiveSelected = async () => {
+    if (!selectedReport || !isAdmin) return
+    setSavingAdmin(true)
+    try {
+      const { error } = await api.patch<{ data: TroubleshootingReportDto }>(
+        `/api/settings/troubleshooting/${selectedReport.id}/archive`,
+        {}
+      )
+      if (error) {
+        toast({ title: 'Error', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Archived', status: 'success' })
+      onDetailClose()
+      loadReports()
+    } finally {
+      setSavingAdmin(false)
+    }
+  }
+
+  const unarchiveSelected = async () => {
+    if (!selectedReport || !isAdmin) return
+    setSavingAdmin(true)
+    try {
+      const { error } = await api.patch<{ data: TroubleshootingReportDto }>(
+        `/api/settings/troubleshooting/${selectedReport.id}/unarchive`,
+        {}
+      )
+      if (error) {
+        toast({ title: 'Error', description: error, status: 'error' })
+        return
+      }
+      toast({ title: 'Unarchived', status: 'success' })
       onDetailClose()
       loadReports()
     } finally {
@@ -513,17 +559,30 @@ export default function TroubleshootingTab() {
         {isAdmin && showAllUsersReports ? "All users' reports" : 'Your reports'}
       </Text>
       {isAdmin && (
-        <HStack spacing={3} mb={2} align="center">
-          <Switch
-            id="troubleshooting-show-all-users"
-            isChecked={showAllUsersReports}
-            onChange={(e) => setShowAllUsersReports(e.target.checked)}
-            size="sm"
-          />
-          <FormLabel htmlFor="troubleshooting-show-all-users" mb={0} fontSize="sm" cursor="pointer">
-            {'Show reports from all users'}
-          </FormLabel>
-        </HStack>
+        <VStack align="start" spacing={2} mb={2}>
+          <HStack spacing={3} align="center">
+            <Switch
+              id="troubleshooting-show-all-users"
+              isChecked={showAllUsersReports}
+              onChange={(e) => setShowAllUsersReports(e.target.checked)}
+              size="sm"
+            />
+            <FormLabel htmlFor="troubleshooting-show-all-users" mb={0} fontSize="sm" cursor="pointer">
+              {'Show reports from all users'}
+            </FormLabel>
+          </HStack>
+          <HStack spacing={3} align="center">
+            <Switch
+              id="troubleshooting-show-archived"
+              isChecked={showArchivedReports}
+              onChange={(e) => setShowArchivedReports(e.target.checked)}
+              size="sm"
+            />
+            <FormLabel htmlFor="troubleshooting-show-archived" mb={0} fontSize="sm" cursor="pointer">
+              {showArchivedReports ? 'Viewing archived reports' : 'Viewing active reports'}
+            </FormLabel>
+          </HStack>
+        </VStack>
       )}
       {reportsLoading ? (
         <HStack>
@@ -602,7 +661,7 @@ export default function TroubleshootingTab() {
               </Button>
             </HStack>
             <Text fontSize="xs" color="gray.600">
-              {`${reports.length} loaded from server · ${filteredReports.length} match filters · showing ${displayedReports.length} of ${filteredReports.length} matching · newest first`}
+              {`${reports.length} loaded from server · ${filteredReports.length} match filters · showing ${displayedReports.length} of ${filteredReports.length} matching · ${showArchivedReports ? 'archived only' : 'active only'} · newest first`}
             </Text>
           </VStack>
 
@@ -646,7 +705,14 @@ export default function TroubleshootingTab() {
                           </Badge>
                         </Td>
                         <Td>
-                          <Badge colorScheme={statusColor(r.status)}>{r.status}</Badge>
+                          <HStack spacing={2}>
+                            <Badge colorScheme={statusColor(r.status)}>{r.status}</Badge>
+                            {r.archivedAt && (
+                              <Badge colorScheme="gray" variant="subtle">
+                                {'Archived'}
+                              </Badge>
+                            )}
+                          </HStack>
                         </Td>
                         <Td maxW="180px" isTruncated>
                           {r.title}
@@ -699,6 +765,12 @@ export default function TroubleshootingTab() {
                 <Text fontSize="sm" color="gray.600">
                   {selectedReport.title} · {selectedReport.type} · {selectedReport.priority}
                 </Text>
+                {selectedReport.archivedAt && (
+                  <Alert status="info" borderRadius="md">
+                    <AlertIcon />
+                    <Text fontSize="sm">{'This report is archived and hidden from the active list.'}</Text>
+                  </Alert>
+                )}
                 <Text fontSize="sm" whiteSpace="pre-wrap">
                   {selectedReport.description}
                 </Text>
@@ -782,9 +854,28 @@ export default function TroubleshootingTab() {
               {'Close'}
             </Button>
             {isAdmin && (
-              <Button colorScheme="blue" onClick={saveAdminDetail} isLoading={savingAdmin}>
-                Save
-              </Button>
+              <HStack spacing={2}>
+                {selectedReport?.archivedAt ? (
+                  <Button
+                    variant="outline"
+                    onClick={unarchiveSelected}
+                    isLoading={savingAdmin}
+                  >
+                    {'Unarchive'}
+                  </Button>
+                ) : selectedReport?.status === 'Closed' ? (
+                  <Button
+                    variant="outline"
+                    onClick={archiveSelected}
+                    isLoading={savingAdmin}
+                  >
+                    {'Archive'}
+                  </Button>
+                ) : null}
+                <Button colorScheme="blue" onClick={saveAdminDetail} isLoading={savingAdmin}>
+                  Save
+                </Button>
+              </HStack>
             )}
           </ModalFooter>
         </ModalContent>

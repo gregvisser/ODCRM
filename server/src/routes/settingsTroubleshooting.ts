@@ -102,6 +102,7 @@ function toReportDto(r: {
   status: string
   internalNotes: string | null
   resolutionNotes: string | null
+  archivedAt: Date | null
   createdAt: Date
   updatedAt: Date
   resolvedAt: Date | null
@@ -127,6 +128,7 @@ function toReportDto(r: {
     status: r.status,
     internalNotes: r.internalNotes,
     resolutionNotes: r.resolutionNotes,
+    archivedAt: r.archivedAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     resolvedAt: r.resolvedAt?.toISOString() ?? null,
@@ -140,7 +142,7 @@ router.get('/troubleshooting', requireAuth, async (req: Request, res: Response) 
     const email = actor.email!
     const admin = isAdmin(email)
 
-    const { status, priority, type, mine, search } = req.query
+    const { status, priority, type, mine, search, includeArchived, archivedOnly } = req.query
     const where: any = {}
     if (!admin) {
       where.createdByEmail = { equals: email, mode: 'insensitive' }
@@ -150,8 +152,14 @@ router.get('/troubleshooting', requireAuth, async (req: Request, res: Response) 
     if (status && typeof status === 'string') where.status = status
     if (priority && typeof priority === 'string') where.priority = priority
     if (type && typeof type === 'string') where.type = type
+    const wantsIncludeArchived = includeArchived === '1' || includeArchived === 'true'
+    const wantsArchivedOnly = archivedOnly === '1' || archivedOnly === 'true'
+    if (wantsArchivedOnly) {
+      where.archivedAt = { not: null }
+    } else if (!wantsIncludeArchived) {
+      where.archivedAt = null
+    }
     if (search && typeof search === 'string' && search.trim()) {
-      const term = `%${search.trim()}%`
       where.OR = [
         { title: { contains: search.trim(), mode: 'insensitive' } },
         { description: { contains: search.trim(), mode: 'insensitive' } },
@@ -171,6 +179,51 @@ router.get('/troubleshooting', requireAuth, async (req: Request, res: Response) 
   } catch (err) {
     console.error('[settings/troubleshooting] list error:', err)
     return res.status(500).json({ error: 'Failed to list reports' })
+  }
+})
+
+// PATCH /api/settings/troubleshooting/:id/archive — admin only, Closed-only
+router.patch('/troubleshooting/:id/archive', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const existing = await prisma.troubleshootingReport.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ error: 'Report not found' })
+    }
+    if (existing.status !== 'Closed') {
+      return res.status(400).json({ error: 'Invalid status', message: 'Only Closed reports can be archived.' })
+    }
+    const updated = await prisma.troubleshootingReport.update({
+      where: { id },
+      data: {
+        archivedAt: existing.archivedAt ?? new Date(),
+      },
+    })
+    return res.json({ data: toReportDto(updated) })
+  } catch (err) {
+    console.error('[settings/troubleshooting] archive error:', err)
+    return res.status(500).json({ error: 'Failed to archive report' })
+  }
+})
+
+// PATCH /api/settings/troubleshooting/:id/unarchive — admin only
+router.patch('/troubleshooting/:id/unarchive', requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const existing = await prisma.troubleshootingReport.findUnique({ where: { id } })
+    if (!existing) {
+      return res.status(404).json({ error: 'Report not found' })
+    }
+    const updated = await prisma.troubleshootingReport.update({
+      where: { id },
+      data: {
+        archivedAt: null,
+      },
+    })
+    return res.json({ data: toReportDto(updated) })
+  } catch (err) {
+    console.error('[settings/troubleshooting] unarchive error:', err)
+    return res.status(500).json({ error: 'Failed to unarchive report' })
   }
 })
 

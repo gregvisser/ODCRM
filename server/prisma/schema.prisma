@@ -953,6 +953,7 @@ model TroubleshootingReport {
   status              String    // Open, In Review, Planned, Resolved, Closed
   internalNotes       String?   @db.Text
   resolutionNotes     String?   @db.Text
+  archivedAt          DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   resolvedAt          DateTime?
@@ -961,6 +962,7 @@ model TroubleshootingReport {
   @@index([createdByEmail])
   @@index([status])
   @@index([priority])
+  @@index([archivedAt])
   @@index([createdAt(sort: Desc)])
   @@map("troubleshooting_reports")
 }
