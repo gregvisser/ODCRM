@@ -125,7 +125,14 @@ type SequenceStep = {
   bodyTemplateText?: string
 }
 
-type AITone = 'professional' | 'friendly' | 'casual'
+type AITone =
+  | 'professional'
+  | 'friendly'
+  | 'casual'
+  | 'formal'
+  | 'persuasive'
+  | 'human_outreach'
+  | 'concise_outreach'
 type StepContentSnapshot = {
   subject: string
   content: string

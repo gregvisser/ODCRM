@@ -103,7 +103,14 @@ const TEMPLATE_PLACEHOLDER_SENDER = [
   'unsubscribe_link',
 ] as const
 
-type AITone = 'professional' | 'friendly' | 'casual'
+type AITone =
+  | 'professional'
+  | 'friendly'
+  | 'casual'
+  | 'formal'
+  | 'persuasive'
+  | 'human_outreach'
+  | 'concise_outreach'
 type TemplateEditorSnapshot = {
   subject: string
   content: string
@@ -428,6 +435,13 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
     setAiSuggestion(null)
 
     const headers = customerHeaders
+    const baseInstruction =
+      'Improve the wording for production outreach. Keep placeholders and unsubscribe tokens exactly as written.'
+    const instruction =
+      aiTone === 'human_outreach' || aiTone === 'concise_outreach'
+        ? `${baseInstruction} Follow the selected rewrite mode rules from the server.`
+        : baseInstruction
+
     const response = await api.post<{ tweakedBody?: string; tweakedSubject?: string }>(
       '/api/templates/ai/tweak',
       {
@@ -435,7 +449,7 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
         templateSubject: editingTemplate.subject || undefined,
         contactCompany: selectedCustomer?.name || undefined,
         tone: aiTone,
-        instruction: 'Improve the wording for production outreach. Keep placeholders and unsubscribe tokens exactly as written.',
+        instruction,
         preservePlaceholders: true,
       },
       { headers },
@@ -1005,7 +1019,9 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                       <Box>
                         <Text fontSize="sm" fontWeight="semibold">Writing help & placeholders</Text>
                         <Text fontSize="xs" color="gray.600">
-                          Secondary tools for AI rewrite help and placeholder reference while editing.
+                          Secondary tools for AI rewrite help and placeholder reference while editing. Human / 1:1
+                          Outreach rewrites for plainer, more natural-sounding business outreach while preserving
+                          placeholders and compliance content.
                         </Text>
                       </Box>
                       <HStack spacing={2}>
@@ -1018,11 +1034,15 @@ const handlePreviewTemplate = (template: EmailTemplate) => {
                           size="sm"
                           value={aiTone}
                           onChange={(e) => setAiTone(e.target.value as AITone)}
-                          w="160px"
+                          w="220px"
                         >
                           <option value="professional">Professional</option>
                           <option value="friendly">Friendly</option>
                           <option value="casual">Conversational</option>
+                          <option value="formal">Formal</option>
+                          <option value="persuasive">Persuasive</option>
+                          <option value="human_outreach">Human / 1:1 Outreach</option>
+                          <option value="concise_outreach">Concise Outreach</option>
                         </Select>
                         <Button
                           size="sm"
