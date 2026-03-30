@@ -14,7 +14,7 @@ import { PrismaClient } from '@prisma/client'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
 import { sendEmail as sendEmailForOutbound } from '../services/outlookEmailService.js'
-import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { resolveEffectiveDailySendCap } from '../utils/emailIdentityLimits.js'
 
 // Instance ID for logging - unique per process
 const INSTANCE_ID = `sender-${process.pid}-${Date.now().toString(36)}`
@@ -219,8 +219,8 @@ export async function processSequenceBasedCampaigns(
       continue
     }
 
-    // Use identity's dailySendLimit or config fallback
-    const dailyCap = clampDailySendLimit(identity.dailySendLimit, mailboxDailyCap)
+    const effective = resolveEffectiveDailySendCap(identity)
+    const dailyCap = Math.min(effective.effectiveCap, mailboxDailyCap)
 
     // Check daily cap for this identity
     const sentToday = await prisma.emailEvent.count({

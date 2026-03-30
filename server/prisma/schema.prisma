@@ -252,6 +252,10 @@ model EmailIdentity {
   isActive                 Boolean                    @default(true)
   lastCheckedAt            DateTime?
   signatureHtml            String?                    @db.Text
+  /// Operator-controlled ramp: when true and warmupStartedAt is set, effective daily cap is min(config, platform max, ramp tier).
+  warmupEnabled            Boolean                    @default(false)
+  /// UTC instant when warm-up ramp started; required for ramp math when warmupEnabled is true.
+  warmupStartedAt          DateTime?
   createdAt                DateTime                   @default(now())
   updatedAt                DateTime                   @updatedAt
   

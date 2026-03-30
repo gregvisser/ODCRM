@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client'
 import { sendEmail } from '../services/outlookEmailService.js'
 import { applyTemplatePlaceholders, applyTemplatePlaceholdersHtml, enforceUnsubscribeFooter } from '../services/templateRenderer.js'
 import { buildTemplateVariablesForSend } from '../services/templatePlaceholderContext.js'
-import { clampDailySendLimit } from '../utils/emailIdentityLimits.js'
+import { resolveEffectiveDailySendCap } from '../utils/emailIdentityLimits.js'
 
 // Unique instance ID for multi-instance environments (Azure, scaling)
 const SCHEDULER_INSTANCE_ID = `sched-${process.pid}-${Date.now().toString(36)}`
@@ -133,7 +133,7 @@ async function processScheduledEmails(prisma: PrismaClient): Promise<{ sent: num
       },
     })
 
-    const dailyLimit = clampDailySendLimit(senderIdentity.dailySendLimit)
+    const dailyLimit = resolveEffectiveDailySendCap(senderIdentity).effectiveCap
     if (emailsSentToday >= dailyLimit) {
       console.log(`[emailScheduler] ${SCHEDULER_INSTANCE_ID} - Daily limit reached for ${senderIdentity.emailAddress}: ${emailsSentToday}/${dailyLimit}`)
       continue
